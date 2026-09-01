@@ -7315,3 +7315,142 @@ decode (~12.1%). At the project's decode-oriented north star that trade is bad b
 wide margin and the default should flip. Not concluded yet — stated in advance so
 the decision rule is pre-registered rather than reverse-engineered from Arm B's
 number.
+
+### P14 Arm B RESULT — NOT-THIS-FLAG too. The 2x2 is a pure crossover (2026-08-31)
+
+**Arm B** (`EXO_DSV4_EXACT_TOPK_PREFILL=0`, `EXO_DSV4_QUERY_TILED_SDPA=1`).
+**Outcome: NOT-THIS-FLAG.** Median **32.06** tok/s, against the pre-registered
+NOT-THIS-FLAG band of <= 33.16. Recovery fraction R = (32.06 - 32.18) / 3.90 =
+**-0.03** — very slightly *below* the P12 anchor. Zero recovery.
+
+**Pre-flight.** Old PIDs 33861 / 34716 gone; new real `exo -v` PIDs **55062** (m4-1)
+/ **56386** (m4-2). `ps eww` on both real PIDs: `EXACT_TOPK_PREFILL=0`,
+`QUERY_TILED_SDPA=1`. Live-env diff vs P12: **exactly one differing var per node**
+(`EXACT_TOPK_PREFILL` 1->0). Vs Arm A: **exactly two** (both flags swap). 74 EXO_*
+vars each side. Capture: `tmp/p14-armB-20260831/preflight_node{1,2}_ps_eww.txt`.
+
+| rep | decode_tps | trustworthy | completion_tokens | finish_reason | prompt_tokens | prefill_tps |
+|---|---|---|---|---|---|---|
+| warmup (discarded) | 32.85 | true | 1200 | length | 113372 | 413.72 |
+| 1 | 32.06 | true | 1200 | length | 111127 | 413.93 |
+| 2 | 32.86 | true | 1200 | length | 111129 | 413.50 |
+| 3 | 31.68 | true | 1200 | length | 111130 | 413.25 |
+| **median** | **32.06** | true | 1200 | length | — | 413.50 |
+
+**Rep3 integrity was challenged mid-run and is CONFIRMED GENUINE.** A live observer
+flagged rep3 as a stall: its process showed 27+ min elapsed with zero stdout while
+node CPU sat at 0.4%, alongside a repeating HF-404 loop in both node logs. All three
+signals were false positives and the artifact survives forensics. (i) The process was
+a **zombie** — `ps` showed `Z/<defunct>`; `etime` on a defunct process reports
+time-since-*start*, not time-running. It had exited at ~22:30:34 after living 5m06s.
+(ii) The probe **block-buffers stdout**, flushing its JSON only at exit, so
+zero-stdout mid-run is expected. (iii) Decisive: the **server-side** log records
+`Prefill complete: 111129 tokens in 267.57s` at 22:29:56, matching rep3.json's
+`prefill_s=268.92` and `prompt_tokens=111130` (off-by-one is the chat-template
+boundary, present on all four runs), with the artifact written 22:30:34 =
+prefill + decode_s(37.88) + client overhead. Exactly **four** chat/completions POSTs
+occurred all evening — no hidden or hung extra invocation. File and generated-text
+sha256s all distinct, no collision with any P12/P13/Arm A artifact. Inter-artifact
+gaps 466/318/333 s match Arm A's 342/332/333 s cadence.
+
+**The HF-404 loop is unrelated and pre-dates the probes — but it is a real bug worth
+its own fix.** First occurrence **22:04:57** on both nodes, ~10 min before rep1 and
+~20 min before rep3, i.e. at boot, and it never interrupted a probe (all four
+prefills completed at a normal 413-415 tok/s while it looped). Root cause: the
+`DownloadCoordinator._emit_existing_download_progress` loop (`coordinator.py:484`,
+every 60 s) re-validates every catalog card's file list; the built-in card
+`mlx-community--GLM-4.7-8bit-gs32.toml` points at a repo that now 404s on HF, its
+cached file list is >24 h stale (`_FILE_LIST_CACHE_TTL_SECS`,
+`download_utils.py:87`), so each cycle re-fetches, 404s, burns 5 backoff retries
+(~1+2+4+8 s) and falls back to the stale list — 60 s + ~18 s = the observed ~77 s
+cadence. It **cannot block inference**: the fetch is `aiohttp` async with
+`asyncio.sleep` backoff (`download_utils.py:476,481,497-500`) and the only lock is a
+status-scoped `asyncio.Semaphore(8)`. Filed as a separate defect; it is log noise and
+wasted network, not a measurement confound. Root-cause fix = treat 4xx as terminal
+with a negative-cache marker rather than retryable, and skip HF re-validation for
+models already resolved complete on disk.
+
+**Positive control PASSES, and prefill decomposes cleanly.** Prefill 417.21 ->
+**413.50**, **-0.89%**. Small, but it is exactly what Arm A predicted: Arm A had
+already sized `EXACT_TOPK_PREFILL` at ~4.30 tok/s of prefill, and 417.21 - 4.30 =
+412.91 vs 413.50 observed. The flag reached the kernels.
+
+### The complete 2x2 — and why it does not yet support a mechanism hunt
+
+**Decode (median tok/s):**
+
+| | `EXACT_TOPK=1` | `EXACT_TOPK=0` |
+|---|---|---|
+| **`QUERY_TILED=1`** | 32.18 (P12) | 32.06 (Arm B) |
+| **`QUERY_TILED=0`** | 32.49 (Arm A) | **36.08** (P13) |
+
+**Prefill (median tok/s):**
+
+| | `EXACT_TOPK=1` | `EXACT_TOPK=0` |
+|---|---|---|
+| **`QUERY_TILED=1`** | 417.21 | 413.50 |
+| **`QUERY_TILED=0`** | 382.45 | 378.15 |
+
+**Decode is a pure crossover with no main effects.** Turning `EXACT_TOPK` off is
+worth **-0.12** when `QUERY_TILED` is on, but **+3.59** when it is off. Turning
+`QUERY_TILED` off is worth **+0.31** when `EXACT_TOPK` is on, but **+4.02** when it
+is off. Interaction contrast **3.71** both ways. Essentially the entire 3.90 effect
+lives in the interaction; neither flag alone moves decode at all.
+
+**Prefill, by contrast, is cleanly ADDITIVE.** `QUERY_TILED`-off costs -34.76 and
+-35.35 (two independent estimates); `EXACT_TOPK`-off costs -3.71 and -4.30. Predicted
+both-off = 417.21 - 34.76 - 3.71 = **378.74** vs observed **378.15** — error 0.59, no
+meaningful interaction. This also confirms both flags genuinely reached the kernels in
+all four arms.
+
+**That asymmetry is the problem.** The two flags compose additively on prefill — the
+axis they actually touch — yet would have to interact in a perfect crossover with
+zero main effects on decode, an axis where both are independently proven gated out of
+the executed code by two verbatim traces. A physical interaction that appears only
+where neither flag executes, and vanishes on the axis where both demonstrably do, is
+not a natural shape.
+
+**And there is a structural hole that has gone unstated until now: every cell is
+n=1 BOOT.** The three reps inside a cell measure *within-boot* noise only. No config
+in this campaign has ever been measured twice on two different boots, so between-boot
+variance is **completely confounded with config in all four cells**. Within-boot
+ranges are 1.18-2.02; the three "slow" cells cluster at 32.06 / 32.18 / 32.49 (spread
+0.43) while one cell sits alone at 36.08. A single anomalous boot in the (0,0) cell
+reproduces this entire 2x2 exactly as well as a real interaction does, and the data
+cannot currently distinguish them. The P13 pre-registration flagged the wide spread as
+a concern; this is that concern arriving.
+
+**So the next step is replication, NOT a mechanism hunt.** Hunting an allocator /
+shader-cache / accept-rate mechanism for an effect that rests on one un-replicated
+boot would be building on sand. Note the stakes: under the outlier reading, the
+headline **-6.13% "regression" was never real either**, and the campaign's actual
+finding becomes that boot-to-boot variance dominates this probe and was never
+characterized.
+
+### P15 pre-register — replicate both-flags-OFF on a fresh boot (written BEFORE the run)
+
+Same config as P13 (`EXO_DSV4_QUERY_TILED_SDPA=0`, `EXO_DSV4_EXACT_TOPK_PREFILL=0`),
+fresh cold relaunch, everything else identical. The single question: **does 36.08
+reproduce, or was it one lucky boot?** This is the first deliberate boot-level
+replication in the campaign.
+
+- Protocol unchanged: `ps eww` proof on real PIDs both nodes, 100K, `--max-tokens
+  1200`, warmup + n=3 sequential, `trustworthy=true` on all 3.
+- Judged on the same yardstick as P14, R = (median - 32.18) / 3.90:
+- **REPRODUCED:** median **>= 35.11** (R >= 0.75). The interaction is real and
+  boot-stable. Only then does a mechanism hunt become justified — starting with
+  speculative accept-rate counters, which are the cheapest of the three candidates
+  and the only one testable without new instrumentation.
+- **OUTLIER-BOOT:** median **<= 33.16** (R <= 0.25). P13 was an anomalous boot; both
+  flags are exonerated for decode; the static traces are vindicated in full; and the
+  -6.13% regression is retired as boot variance rather than a code defect. The
+  campaign then pivots to characterizing between-boot variance, which becomes the
+  dominant unmeasured term in every number in this document.
+- **AMBIGUOUS:** 33.16-35.11 → a third boot of the same config before concluding
+  anything. Do not rationalize a middle landing in either direction.
+- Prefill is the free positive control again: both flags off must put prefill at
+  ~378, not ~417. If prefill lands near 417 the arm is invalid regardless of decode.
+- **Stated in advance:** if P15 lands OUTLIER-BOOT, the correct follow-up is *not* to
+  re-litigate the flags but to run the same config 3+ times to size the between-boot
+  standard deviation, and then re-evaluate which — if any — of this document's
+  historical deltas survive that error bar.
