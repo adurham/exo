@@ -7257,3 +7257,61 @@ P13 CONFIG-IMPLICATED branch.
 - Prefill is a free positive control on every arm: whichever flag is set to 0 should
   move prefill off the 416.9-418.4 band. If prefill does NOT move on an arm where a
   prefill flag was turned off, that arm is invalid regardless of its decode number.
+### P14 Arm A RESULT — NOT-THIS-FLAG. QUERY_TILED_SDPA is exonerated for decode (2026-08-31)
+
+**Arm A** (`EXO_DSV4_QUERY_TILED_SDPA=0`, `EXO_DSV4_EXACT_TOPK_PREFILL=1`).
+**Outcome: NOT-THIS-FLAG.** Median **32.49** tok/s. The pre-registered NOT-THIS-FLAG
+band is median <= 33.16; 32.49 clears it with room. Recovery fraction
+R = (32.49 - 32.18) / 3.90 = **0.079** — under 8% of the P12->P13 gap. Turning off
+the query-tiled SDPA flag alone buys back essentially nothing.
+
+**Pre-flight.** Cold relaunch; old PIDs 7728 / 7776 confirmed gone; new real `exo -v`
+PIDs **33861** (m4-1) / **34716** (m4-2). `ps eww` on both real PIDs on both nodes:
+`QUERY_TILED_SDPA=0`, `EXACT_TOPK_PREFILL=1`. Live-env diff vs the P13 arm:
+**exactly one differing var per node** (`EXACT_TOPK_PREFILL` 0->1). Live-env diff vs
+the P12 arm: **exactly one differing var per node** (`QUERY_TILED_SDPA` 1->0).
+74 EXO_* vars each side, no other drift. This is a clean one-variable move from
+*both* anchors, which is the strongest form this split can take. Capture:
+`tmp/p14-armA-20260831/preflight_node{1,2}_ps_eww.txt`.
+
+| rep | decode_tps | trustworthy | completion_tokens | finish_reason | prompt_tokens | prefill_tps |
+|---|---|---|---|---|---|---|
+| warmup (discarded) | 33.24 | true | 1200 | length | 110008 | 382.98 |
+| 1 | 33.34 | true | 1200 | length | 114490 | 382.45 |
+| 2 | 31.89 | true | 1200 | length | 111129 | 381.19 |
+| 3 | 32.49 | true | 1200 | length | 107767 | 384.35 |
+| **median** | **32.49** | true | 1200 | length | — | 382.45 |
+
+**Arm A behaves like P12, not like P13 — and the rep-level structure says so more
+clearly than the medians do.** Arm A reps span 31.89-33.34; P12 reps span
+31.36-32.89. Those overlap heavily — the two are indistinguishable at n=3. Against
+P13 (34.18-36.20) there is **complete separation**: Arm A's best rep (33.34) sits
+below P13's worst (34.18). So Arm A is firmly in the slow regime. This conclusion
+does not rest on the median choice, which matters given the wide spreads.
+
+**Positive control PASSES, so the null is a real null and not a dead knob.** The
+pre-registration required that an arm turning off a prefill flag must move prefill
+off the 416.9-418.4 band, else the arm is invalid regardless of its decode number.
+Prefill went 417.21 -> **382.45**, **-8.33%**. The flag unambiguously reached the
+kernels; it simply did not move decode.
+
+**Bonus decomposition of the prefill effect — free from this arm.** Prefill:
+P12 (both ON) 417.21; Arm A (only QUERY_TILED off) 382.45; P13 (both off) 378.15.
+So `QUERY_TILED_SDPA` is worth **34.76** tok/s of prefill (89.0% of the combined
+39.06), and `EXACT_TOPK_PREFILL` only about **4.30** (11.0%). The two flags are
+very unequal contributors on the axis they were actually designed for.
+
+**Which sets up Arm B as the decisive run, with a sharp prediction.** By
+elimination, if the P12->P13 decode gap is a single-flag effect it must be
+`EXACT_TOPK_PREFILL`, and Arm B should land DOMINANT (>= 35.11). If Arm B instead
+lands NOT-THIS-FLAG, then neither flag alone reproduces the effect and it is a
+genuine interaction requiring both — which would point at a shared resource
+(allocator/pool state, Metal shader-cache or `@mx.compile` graph residency) rather
+than either flag's own code path, per the mechanism list in §P13 RESULT.
+
+**Note the emerging cost asymmetry, if Arm B lands DOMINANT.** `EXACT_TOPK_PREFILL`
+would then be buying ~4.30 tok/s of prefill (~1.0%) while costing ~3.90 tok/s of
+decode (~12.1%). At the project's decode-oriented north star that trade is bad by a
+wide margin and the default should flip. Not concluded yet — stated in advance so
+the decision rule is pre-registered rather than reverse-engineered from Arm B's
+number.
