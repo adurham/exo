@@ -7454,3 +7454,159 @@ replication in the campaign.
   re-litigate the flags but to run the same config 3+ times to size the between-boot
   standard deviation, and then re-evaluate which — if any — of this document's
   historical deltas survive that error bar.
+
+### P15 RESULT — OUTLIER-BOOT. The decode "regression" is retired as boot variance (2026-08-31)
+
+**Outcome: OUTLIER-BOOT, decisively.** Median **30.06** tok/s against the
+pre-registered OUTLIER-BOOT gate of <= 33.16. R = (30.06 - 32.18) / 3.90 = **-0.54**.
+P13's 36.08 did not reproduce; it did not even come close. The replication landed
+**below P12's "broken" 32.18**.
+
+**The environment was byte-identical to P13 — this is the whole point.** Live-env
+diff vs the P13 arm, normalized sorted `EXO_*` assignments, both nodes:
+**ZERO differing vars.** Not "only the intended two" — zero. Same config, same code,
+same commit, fresh boot. Old PIDs 55062 / 56386 gone; new `exo -v` mains **81596**
+(m4-1) / **83149** (m4-2), both flags confirmed `=0` via `ps eww` on the real PIDs.
+
+| rep | decode_tps | trustworthy | completion_tokens | finish_reason | prompt_tokens | prefill_tps |
+|---|---|---|---|---|---|---|
+| warmup (discarded) | 12.00 | true | 1200 | length | 108887 | 376.73 |
+| 1 | 34.71 | true | 1200 | length | 110007 | 377.85 |
+| 2 | 30.06 | true | 1200 | length | 111129 | 378.08 |
+| 3 | 29.83 | true | 1200 | length | 112248 | 379.40 |
+| **median** | **30.06** | true | 1200 | length | — | 378.08 |
+
+**THE DECISIVE DATAPOINT: prefill replicated to 0.02%, decode swung 16.8%.**
+Same config, two boots:
+
+| | P13 boot | P15 boot | delta |
+|---|---|---|---|
+| prefill median | 378.15 | 378.08 | **-0.02%** |
+| decode median | 36.08 | 30.06 | **-16.68%** |
+
+Prefill is boot-stable to two decimal places on identical config, which proves the
+config really was identical and the flags really did reach the kernels. On the very
+same runs, decode moved 6.02 tok/s. **Decode on this cluster carries a large,
+uncharacterized boot-to-boot term that prefill does not.** That single contrast
+explains the entire campaign more economically than any code mechanism.
+
+**So the 2x2 collapses.** The "pure crossover interaction" required exactly one cell
+(0,0) to be fast. That cell has now been measured twice on identical config: 36.08
+and 30.06. The full observed range for the SAME both-flags-off config is 6.02 tok/s
+— **larger than the entire 3.90 "effect"** the campaign was chasing. Every cell in
+the 2x2 was n=1 boot, so every number in it is one draw from a distribution this wide.
+The interaction was an artifact of one lucky boot.
+
+**Consequences, stated plainly rather than softened:**
+1. **The -6.13% decode regression is RETIRED.** It was never code. P06's 34.28 and
+   P12's 32.18 are two draws from a distribution whose observed spread is at least
+   6.02 tok/s. The gap between them is well inside that.
+2. **The two flags are fully exonerated for decode**, which is exactly what the two
+   independent static traces said in §P12-addendum. The traces were right the whole
+   time. The empirical "tension" that motivated P13-P15 was measurement noise
+   masquerading as a code effect.
+3. **No mechanism hunt is warranted.** Allocator state, shader-cache residency and
+   accept-rate drift were the three candidates for the "interaction." There is no
+   interaction to explain.
+4. **Every historical single-boot delta in this document is now suspect** — anything
+   smaller than ~6 tok/s of decode measured as one-boot-vs-one-boot is not
+   distinguishable from boot variance. This does not invalidate multi-boot or
+   within-boot A/B results, but it does invalidate the reasoning pattern
+   "relaunched, measured once, therefore the change did it."
+5. The **prefill** decomposition from P14 SURVIVES, because prefill is boot-stable:
+   `QUERY_TILED_SDPA` is worth ~34.8 tok/s of prefill and `EXACT_TOPK_PREFILL` ~4.3,
+   additively. Both flags should STAY ON — they are real prefill wins with no
+   demonstrated decode cost.
+
+**Integrity note — a runner CRASH occurred during this run and was investigated, not
+absorbed.** A first rep1 attempt returned `trustworthy=false` with zero tokens. The
+cause was a genuine runner crash at 23:23:46.6 on **both** nodes:
+`ValueError: [reshape] Cannot reshape array of size 1 into shape (2,1,1,1)`.
+Auto-restart CONFIRMED by PID+lstart, not by "a process is running": masters 81596 /
+83149 started 22:54:03/04, while the runner children **95798 / 97433 started
+23:23:50** — 3 s after the crash, 47 min after their parents. Restart sequence
+completed 23:24:32.7. **All three scoring reps ran entirely after that** (first
+scoring prefill completed 23:30:22), verified against server-side `Prefill complete`
+lines matching each artifact's `prompt_tokens` within one token. The invalid attempt
+is the only thing that straddled the restart and it is not in the scored set.
+
+**Honest caveat on P15's own number.** Because the crash preceded all three scoring
+reps, P15's 30.06 was measured on a *restarted* runner rather than a cleanly-booted
+one. So P15's low value has two candidate explanations — ordinary boot variance, or
+post-restart state — and this run cannot separate them. **Both readings refute the
+interaction equally**, and the prefill-stable/decode-unstable contrast holds either
+way, so the conclusions above stand. But P15 should not be cited as a clean estimate
+of the both-flags-off mean; it is one more draw, taken under a known perturbation.
+
+### DEFECT — BatchPoolingCache overlap-carry lists are not resized on batch-width change
+
+Root-caused during P15. **Pre-existing, NOT from the P08/P09 window, NOT masked by
+either flag** — all three were checked explicitly rather than assumed.
+
+**Mechanism.** `mlx_lm/models/cache.py:2050`, in
+`BatchPoolingCache.fetch_overlap_carry`:
+`valid = mx.array(self._overlap_carry_valid).reshape(batch_size, 1, 1, 1)`.
+`_overlap_carry_valid` is a plain Python list sized `[False] * batch_size` at cache
+construction (`cache.py:2029`). `batch_size` here is the *current decode batch width*
+passed down from the compressor (`deepseek_v4.py:3262`). `BatchPoolingCache.extend()`
+(`cache.py:2642`) and `filter()` (`cache.py:2619`) resize
+`remainder / _pool_lengths / _lengths / _processed / _pending_bumps` on mid-decode
+stream admission or removal — but they **never touch `_overlap_carry_valid`,
+`_overlap_kv_carry`, `_overlap_gate_carry`, or `_overlap_windows_this_call`**. Once
+the batch grows past the list length, the next overlap-carry fetch that has a stored
+carry crashes. The leading `2` is the stream count, not the TP world size.
+
+**Provenance: PRE-EXISTING.** The crashing line came from `5e88545` (2026-08-20), and
+`git merge-base --is-ancestor 5e88545 a6eb893` confirms it predates the window start.
+The window `a6eb893..2e2d17d` touches only `deepseek_v4.py` and `utils.py` —
+`git log a6eb893..2e2d17d -- cache.py` is empty. The deployed `mlx_lm` in `.venv` is
+byte-identical to the submodule for `cache.py`, so the git analysis maps to what ran.
+
+**Not flag-related.** The compressor overlap path runs on every forward as a sibling
+sub-op (`deepseek_v4.py:4757-4763`); the query-tiled flag gates only the compressed-
+SDPA output path (`:4481-4505`) and the exact-topk flag only prefill top-k
+(`:4123-4127`). Neither routes into or around `fetch_overlap_carry`. Both-flags-off
+was coincidental to this crash.
+
+**Trigger (medium-high confidence): a mid-decode batch-width change with a persisted
+carry.** Logs show five concurrent command_ids active at crash time, one admitted at
+23:16:24, while `_overlap_carry_valid` was still length 1. P13 never hit it because
+its reps were strictly single-stream, so the batch width never changed. First
+occurrence in all available log history on both nodes — latent, not long-standing-
+silent. Decisive confirmation would be two concurrent 100K requests with one joining
+mid-decode.
+
+**Root-cause fix (dispatched separately):** derive the mask length from the
+authoritative batch state at fetch time rather than trusting a separately-maintained
+list, and resize all four `_overlap_*` structures together in `extend()`/`filter()`.
+A guard that silently returns "sequence start" on mismatch would prevent the kill but
+drop a real per-stream carry — that is a mitigation with a correctness cost, not a fix.
+
+### P16 pre-register — characterize between-boot variance (written BEFORE the run)
+
+The campaign's real open question is no longer which flag is guilty. It is: **how
+wide is the decode boot distribution?** Until that is known, no single-boot delta in
+this document can be trusted, including the ones that look clean.
+
+- **Design:** the SHIPPED default config (both flags ON — do not run this on a
+  reverted config; the production default is what needs an error bar), N >= 4
+  independent cold boots, n=3 reps each, nothing else varied. Every boot gets the
+  standard `ps eww` proof on real PIDs.
+- **Primary output:** the between-boot standard deviation of the per-boot decode
+  median, and the within-boot SD for comparison. Report both, plus the ratio.
+- **Pre-registered interpretation:**
+  - between-boot SD **>= 1.5** tok/s → confirms boot variance dominates; every
+    single-boot delta in this document under ~3 tok/s must be re-labelled as
+    unresolved, and all future A/Bs require >= 3 boots per arm.
+  - between-boot SD **< 0.5** tok/s → boot variance is small after all, and the
+    P13-vs-P15 6.02 swing was driven by something specific (most likely the crash/
+    restart state) that must then be identified.
+  - in between → report the number and set the per-arm boot requirement from it
+    directly, rather than picking a story.
+- **Do not re-run any flag A/B until this number exists.** Running more arms at n=1
+  boot would produce more of exactly the artifact that P13-P15 just cost four cluster
+  hours to discover.
+- **Also record per boot:** prefill median (expected stable near 417 on the shipped
+  config — it is the control), whether any runner crash/restart occurred, and the
+  warmup rep's value. P15's warmup came in at 12.00 tok/s, far off every other
+  warmup; warmup behaviour may itself be a boot-state signal worth tracking.
