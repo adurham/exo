@@ -7752,3 +7752,12 @@ KILLED WITH EVIDENCE:
 - Indexer window: indexer is 4.0% of prefill wall, already scored CLOSED; EXO_DSV4_INDEXER_WINDOW has zero code readers.
 
 FLAGS: (1) fable's ranking inherited the unsourced 390ms number — direct feedback written (§7); (2) the 2.029x SDPA attribution was ms/token at 12K ctx (steeper than modeled) — kill didn't depend on it, flagged as a crack; (3) biggest promoted-workstream risk is position-alignment, not tokenization.
+
+### PREFILL ROUND 2 (consult loop) — LCP probe FAILS on p10; SDPA closure invalid; decode arms would hang (2026-09-02)
+
+Artifacts: tmp/prefill-round2-20260902/REPORT.md + 6 findings files.
+
+**LCP-COVERAGE PROBE: FAIL** (fable's bands applied verbatim). median 1.000 but p10 = 0.0 < 20% fires FAIL on the OR. Bimodal: 47 pairs @1.000, 7 @0.000, nothing between. ROOT CAUSE: Hermes client injects single-space reasoning_content pad on no-reasoning turns (chat_completion_helpers.py:2282 + message_sanitization.py:951-1032); pad lands at position 0 of re-fed region -> LCP=0 despite 1,562 identical tokens. 7/7 padded -> 0.000, 2/2 unpadded -> 1.000. Real production behavior. Fable risk #1 (thinking-strip) RETIRED: no-op 54/54; retokenization 96.2% token-weighted. Pad is LOAD-BEARING for other providers (DeepSeek Pro rejects "" #17341; strict providers reject key #45655; cross-provider poisoning #15748) -> provider-scoped only.
+Survivorship: 21.9% reproduces but LENGTH-dependent (2.1% @2 turns -> 21.9% @55); n=1 session — hypothesis, not calibrated (do not use in go/no-go).
+SDPA: closure INVALID — 2.029x was ms/token, per-call = 2x = 4.06x (identity verified); linear scaling predicts 1.0x. Fable same-phenomenon hypothesis refuted: depth slope ~86% explained by O(P); O(P) ~2.2% of 12K cost. Open: is the 4.06x per-call constant real and does it matter at 250K? Needs direct per-call timing at 2 lengths, no sweep.
+DECODE: 2 of 4 ablation arms would HANG the cluster (agree_on_tasks is the only path filling _queue). Direct-timestamp instrumentation preferred over sampled ablation. Pitfalls to dodge: lazy-eval (need mx.eval/sync before end timestamp), cross-rank clock skew (within-rank durations only), first-call warmup bucketing, disjoint timer placement.

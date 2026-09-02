@@ -1,0 +1,56 @@
+{
+  "generated": "2026-09-02",
+  "data": "tmp/real-usage-capture-20260902/phase1/requests.jsonl",
+  "scope": "ONE contiguous session (instance 339f04f8; 55 main turns + 2 aux). Cross-session distribution NOT establishable from n=1 session.",
+  "pooled": {
+    "total_prompt_presented": 7883591,
+    "served_from_cache": 7694581,
+    "uncached_prefill": 189010,
+    "bucket_A_cold_start": 92594,
+    "bucket_B_own_completions": 41414,
+    "bucket_C_genuinely_new": 55002,
+    "bucket_B_share_pct": 21.911,
+    "turn_pairs": 54,
+    "residuals_all_positive": true,
+    "residual_median": 447,
+    "reproduced_exact": true
+  },
+  "incremental": {
+    "warm_only_uncached": 96416,
+    "bucket_B_share_of_warm_only_pct": 42.95
+  },
+  "length_dependence_bshare_pct": {
+    "L2": 2.09,
+    "L3": 3.11,
+    "L4": 3.43,
+    "L6": 4.23,
+    "L11": 5.61,
+    "L21": 7.53,
+    "L31": 12.25,
+    "L41": 16.99,
+    "L51": 21.58,
+    "L55": 21.91
+  },
+  "warm_pairs_to_threshold": {
+    "5pct": 7,
+    "10pct": 25,
+    "15pct": 39,
+    "20pct": 50,
+    "21.9pct": 54
+  },
+  "turn_position_split": {
+    "first_27_pairs_B": 16641,
+    "last_27_pairs_B": 24773,
+    "first_27_full_session_share_pct": 11.40,
+    "last_27_full_session_share_pct": 18.26,
+    "first_27_warm_only_share_pct": 31.18,
+    "last_27_warm_only_share_pct": 57.56
+  },
+  "verdict": {
+    "reproduction": "pooled 21.9% reproduces exactly; not an arithmetic overstatement",
+    "survivorship": "VALID in direction via session LENGTH, not cross-session pooling (n=1 session). B-share rises monotonically 2.1% (L2) to 21.9% (L55).",
+    "per_session_expectation_state": "UNDETERMINED; direction depends on true session-length distribution",
+    "fix_B_quote": "treat 21.9% as this one long session's figure, length-dependent; fleet value requires length-weighted avg over N>=20-30 sessions"
+  },
+  "would_settle": "N>=20-30 full sessions each with seq_client_call, instance_id, prompt_tokens, cached_tokens, completion_tokens, prefix_cache_hit; report both unweighted and uncached-token-weighted B-share; also record relaunch frequency."
+}
