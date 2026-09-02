@@ -7661,3 +7661,13 @@ Three root-cause fixes from the RESEARCH ROUND findings, committed bbb0e9341 (pu
 3. **Stale comments** (dsv4_mtp.py): corrected false "O(1) reference snapshot" claim (both rings AND pools copy; cache.py:783-784) and stale "41 pools" -> 62.
 
 Checks: ruff 18 pre-existing (I001 at HEAD), basedpyright 734 baseline no new errors (measured via detached worktree). nix fmt not run (nix not installed on this machine); CI flake gate pending. Note: second live session ran the identical task concurrently; main chain verified clean, no conflicts.
+
+### ENTROPY A/B — baseline NOT inflated by prompt entropy (2026-09-02)
+
+Pre-registered matched-depth A/B (89.4K tokens, 0.125% depth spread, 4 arms, 21 scored requests, PIDs verified unchanged across all arms, 0 non-benign errors). Tests whether the benchmark's 23-distinct-word repetitive prompt inflated decode via speculative acceptance.
+
+Verdict: **hypothesis REFUTED.** Natural high-entropy prose = 33.58 t/s, statistically identical to pooled repetitive 33.58 t/s (Welch t -0.00). Random letter-strings = 28.66 t/s (-12.6% real but modest effect; accounts for ~35% of the 14 t/s gap; adversarial, not real traffic). Natural accounts for 0%.
+
+**The ~20 t/s real-usage vs 34 t/s benchmark gap at MATCHED depth remains unexplained.** Context depth ruled out (verify ~92-97% fixed cost; index_topk=512 makes SDPA O(512)). Prompt entropy now ruled out. Remaining suspects (from the decomposition study): (1) 11-16% of decode wall sits outside all profiled phases (independent second suspect); (2) real-usage differences benchmarks don't capture: streaming, tool-call generation, prefix-cache-hit turns, multi-turn KV state, conversation shape at 150K+.
+
+Artifacts: tmp/verify-decomposition-20260901/entropy/ (RESULTS.md, PREREGISTRATION_ENTROPY.md, raw/). Note: 250K arm of the depth scan was contaminated by a user-cancelled request (flagged in that report; verdict not dependent on it). The 6.9 t/s 250K warmup artifact remains unexplained.

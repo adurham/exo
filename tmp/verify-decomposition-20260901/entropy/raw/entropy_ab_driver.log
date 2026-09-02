@@ -1,0 +1,46 @@
+[08:24:41] ########## ENTROPY A/B START ##########
+[08:24:41] === ARM repetitive (mode=repetitive words=75000 iterations=5) ===
+[08:24:41] idle OK (n1=0.03167102858424187 n2=0.02683313563466072)
+[08:24:42] pids before n1=       4 n2=       4
+[08:24:43] log offsets before n1=125038772 n2=147150065
+[08:46:34] probe rc=0 for repetitive
+[08:46:34] log offsets after n1=129867179 n2=152805757
+[08:46:35] pids after n1=       4 n2=       4
+[08:46:36] prof lines n1=     156 n2=     156
+[08:46:37] err lines n1=      68 n2=      68
+[08:46:42] anchor lines n1=       0 n2=       0
+[08:46:42] ########## ARM repetitive COMPLETE ##########
+[08:46:42] === ARM natural (mode=natural words=65646 iterations=5) ===
+[08:46:42] idle OK (n1=0.027119044214487076 n2=0.02408534474670887)
+[08:46:42] pids before n1=       4 n2=       4
+[08:46:43] log offsets before n1=129874814 n2=152816502
+[09:08:20] probe rc=0 for natural
+[09:08:21] log offsets after n1=134905480 n2=158663102
+[09:08:21] pids after n1=       4 n2=       4
+[09:08:22] prof lines n1=     169 n2=     169
+[09:08:24] err lines n1=      68 n2=      64
+[09:08:29] anchor lines n1=      26 n2=      26
+[09:08:29] ########## ARM natural COMPLETE ##########
+[09:08:29] === ARM random (mode=random words=23525 iterations=5) ===
+[09:08:29] idle OK (n1=0.031581975519657135 n2=0.02600875124335289)
+[09:08:30] pids before n1=       4 n2=       4
+[09:08:30] log offsets before n1=134912708 n2=158672824
+[09:30:15] probe rc=0 for random
+[09:30:16] log offsets after n1=137627559 n2=162203351
+[09:30:17] pids after n1=       4 n2=       4
+[09:30:18] prof lines n1=     195 n2=     195
+[09:30:19] err lines n1=      68 n2=      68
+[09:30:23] anchor lines n1=      26 n2=      26
+[09:30:23] ########## ARM random COMPLETE ##########
+[09:30:23] === ARM repetitive_recheck (mode=repetitive words=75000 iterations=2) ===
+[09:30:23] idle OK (n1=0.02665235847234726 n2=0.026851940900087357)
+[09:30:24] pids before n1=       4 n2=       4
+[09:30:24] log offsets before n1=137633135 n2=162211311
+[09:41:19] probe rc=0 for repetitive_recheck
+[09:41:19] log offsets after n1=140040750 n2=165041796
+[09:41:20] pids after n1=       4 n2=       4
+[09:41:21] prof lines n1=      78 n2=      78
+[09:41:22] err lines n1=      32 n2=      36
+[09:41:26] anchor lines n1=      26 n2=      26
+[09:41:26] ########## ARM repetitive_recheck COMPLETE ##########
+[09:41:26] ########## ENTROPY A/B COMPLETE ##########

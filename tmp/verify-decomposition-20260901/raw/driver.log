@@ -1,0 +1,23 @@
+[21:39:38] ########## SCAN START ##########
+[21:39:38] === DEPTH 089k : --prompt-words 75000 ===
+[21:39:38] idle OK (n1=0.028206506744027138 n2=0.028307262808084488)
+[21:39:39] log offsets before: n1=66301678 n2=75402823
+[22:01:29] bench rc=0 for 089k
+[22:01:30] log offsets after: n1=71114193 n2=81045576
+[22:01:31] harvested prof lines: n1=     156 n2=     156
+[22:01:31] === DEPTH 089k COMPLETE ===
+[22:01:31] === DEPTH 150k : --prompt-words 125828 ===
+[22:01:31] idle OK (n1=0.029233671724796295 n2=0.025719771161675453)
+[22:01:32] log offsets before: n1=71124523 n2=81046784
+[22:38:16] bench rc=0 for 150k
+[22:38:17] log offsets after: n1=79016146 n2=90085521
+[22:38:18] harvested prof lines: n1=     169 n2=     169
+[22:38:18] === DEPTH 150k COMPLETE ===
+[22:38:18] === DEPTH 250k : --prompt-words 209713 ===
+[22:38:18] idle OK (n1=0.02549736015498638 n2=0.02940850704908371)
+[22:38:19] log offsets before: n1=79018786 n2=90088343
+[23:41:14] bench rc=0 for 250k
+[23:41:14] log offsets after: n1=95463076 n2=108246904
+[23:41:16] harvested prof lines: n1=     163 n2=     163
+[23:41:16] === DEPTH 250k COMPLETE ===
+[23:41:16] ########## SCAN COMPLETE ##########

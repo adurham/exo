@@ -1,0 +1,127 @@
+[
+ {
+  "tag": "089k",
+  "prompt_tokens": 89408,
+  "decode_tps_mean": 33.73402260807797,
+  "decode_tps_median": 33.59779126049741,
+  "decode_tps_min": 31.523750536871297,
+  "decode_tps_max": 36.08487642353087,
+  "prefill_tps_mean": 426.0314666948393,
+  "wall_mean_s": 218.25696917500028,
+  "gen_tokens_all_iters": 1502,
+  "n_scored": 5,
+  "bad_rate": 0.0,
+  "nodes": {
+   "n1": {
+    "draft": {
+     "ms": 9.131,
+     "cycles": 550
+    },
+    "verify": {
+     "ms": 55.755,
+     "cycles": 550
+    },
+    "accept": {
+     "ms": 2.81,
+     "cycles": 550
+    },
+    "rollback": {
+     "ms": 0.8,
+     "cycles": 550
+    },
+    "total": {
+     "ms": 68.333,
+     "cycles": 550
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 259
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 259
+    },
+    "rb_pool": {
+     "ms": 0.31,
+     "cycles": 259
+    },
+    "rb_pool_restores": {
+     "ms": 18.319,
+     "cycles": 259
+    },
+    "rb_ring": {
+     "ms": 0.56,
+     "cycles": 259
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 550
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 259
+    }
+   },
+   "n2": {
+    "draft": {
+     "ms": 9.141,
+     "cycles": 550
+    },
+    "verify": {
+     "ms": 55.462,
+     "cycles": 550
+    },
+    "accept": {
+     "ms": 2.97,
+     "cycles": 550
+    },
+    "rollback": {
+     "ms": 0.626,
+     "cycles": 550
+    },
+    "total": {
+     "ms": 68.363,
+     "cycles": 550
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 259
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 259
+    },
+    "rb_pool": {
+     "ms": 0.31,
+     "cycles": 259
+    },
+    "rb_pool_restores": {
+     "ms": 18.319,
+     "cycles": 259
+    },
+    "rb_ring": {
+     "ms": 0.74,
+     "cycles": 259
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 550
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 259
+    }
+   }
+  },
+  "cycles_in_window": 550,
+  "tokens_per_cycle": 2.7309,
+  "derived_acceptance": 1.7309,
+  "implied_tps_from_profile": 39.96
+ }
+]
+
+============================================================================================================
+  depth  prompt_tok  decode t/s  prefill t/s  verify ms   draft  accept     rb  total ms    acc
+------------------------------------------------------------------------------------------------------------
+   089k       89408       33.73        426.0      55.76    9.13    2.81   0.80     68.33   1.73
+============================================================================================================

@@ -1,0 +1,63 @@
+{
+  "config": {
+    "host": "192.168.86.201",
+    "port": 52415,
+    "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "mode": "natural",
+    "target_tokens": 89408,
+    "iterations": 5,
+    "warmup": 1,
+    "max_tokens": 256,
+    "timeout": 3600.0,
+    "seed": 1234,
+    "json_out": "/Users/adam.durham/repos/exo/tmp/verify-decomposition-20260901/entropy/raw/entropy_natural.json",
+    "fixed_words": 65646
+  },
+  "achieved_prompt_tokens": 89298,
+  "iterations": [
+    {
+      "iteration": 0,
+      "generation_tps": 32.83158822016501,
+      "prompt_tps": 429.99581839699385,
+      "prompt_tokens": 89298,
+      "generation_tokens": 256
+    },
+    {
+      "iteration": 1,
+      "generation_tps": 38.89805704524191,
+      "prompt_tps": 430.74401708044354,
+      "prompt_tokens": 89298,
+      "generation_tokens": 256
+    },
+    {
+      "iteration": 2,
+      "generation_tps": 30.953325703754246,
+      "prompt_tps": 430.1988784245755,
+      "prompt_tokens": 89298,
+      "generation_tokens": 256
+    },
+    {
+      "iteration": 3,
+      "generation_tps": 32.16796502903538,
+      "prompt_tps": 432.02361068519656,
+      "prompt_tokens": 89298,
+      "generation_tokens": 256
+    },
+    {
+      "iteration": 4,
+      "generation_tps": 33.06899968214787,
+      "prompt_tps": 430.0577446714806,
+      "prompt_tokens": 89298,
+      "generation_tokens": 256
+    }
+  ],
+  "summary": {
+    "mode": "natural",
+    "achieved_prompt_tokens": 89298,
+    "generation_tps_mean": 33.583987136068885,
+    "generation_tps_median": 32.83158822016501,
+    "generation_tps_min": 30.953325703754246,
+    "generation_tps_max": 38.89805704524191,
+    "prompt_tps_mean": 430.604013851738
+  }
+}

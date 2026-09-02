@@ -1,0 +1,68 @@
+[ 2026-09-02 08:25:48.837 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:27:06.297 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:28:23.074 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:29:41.049 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:30:58.734 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:32:16.800 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:33:34.308 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:34:52.151 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:36:09.942 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:37:28.274 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:38:46.436 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:40:04.059 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:41:21.903 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:42:39.462 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:43:56.645 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:45:13.775 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m
+[ 2026-09-02 08:46:31.435 | [33m[1mWARNING [0m | exo.download.download_utils:fetch_file_list_with_cache:431 ] [33m[1mRan into exception when fetching file list from HF.[0m
+[33m[1mTraceback (most recent call last):[0m
+    [35m[1mraise[0m [1mException[0m[1m([0m[36mf"[0m[36mFailed to fetch file list: [0m[1m{[0m[1mresponse[0m[35m[1m.[0m[1mstatus[0m[1m}[0m[36m"[0m[1m)[0m
+[31m[1mException[0m:[1m Failed to fetch file list: 404[0m

@@ -1,0 +1,367 @@
+[
+ {
+  "tag": "089k",
+  "prompt_tokens": 89408,
+  "decode_tps_mean": 33.73402260807797,
+  "decode_tps_median": 33.59779126049741,
+  "decode_tps_min": 31.523750536871297,
+  "decode_tps_max": 36.08487642353087,
+  "prefill_tps_mean": 426.0314666948393,
+  "wall_mean_s": 218.25696917500028,
+  "gen_tokens_all_iters": 1502,
+  "n_scored": 5,
+  "bad_rate": 0.0,
+  "nodes": {
+   "n1": {
+    "draft": {
+     "ms": 9.131,
+     "cycles": 550
+    },
+    "verify": {
+     "ms": 55.755,
+     "cycles": 550
+    },
+    "accept": {
+     "ms": 2.81,
+     "cycles": 550
+    },
+    "rollback": {
+     "ms": 0.8,
+     "cycles": 550
+    },
+    "total": {
+     "ms": 68.333,
+     "cycles": 550
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 259
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 259
+    },
+    "rb_pool": {
+     "ms": 0.31,
+     "cycles": 259
+    },
+    "rb_pool_restores": {
+     "ms": 18.319,
+     "cycles": 259
+    },
+    "rb_ring": {
+     "ms": 0.56,
+     "cycles": 259
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 550
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 259
+    }
+   },
+   "n2": {
+    "draft": {
+     "ms": 9.141,
+     "cycles": 550
+    },
+    "verify": {
+     "ms": 55.462,
+     "cycles": 550
+    },
+    "accept": {
+     "ms": 2.97,
+     "cycles": 550
+    },
+    "rollback": {
+     "ms": 0.626,
+     "cycles": 550
+    },
+    "total": {
+     "ms": 68.363,
+     "cycles": 550
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 259
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 259
+    },
+    "rb_pool": {
+     "ms": 0.31,
+     "cycles": 259
+    },
+    "rb_pool_restores": {
+     "ms": 18.319,
+     "cycles": 259
+    },
+    "rb_ring": {
+     "ms": 0.74,
+     "cycles": 259
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 550
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 259
+    }
+   }
+  },
+  "cycles_in_window": 550,
+  "tokens_per_cycle": 2.7309,
+  "derived_acceptance": 1.7309,
+  "implied_tps_from_profile": 39.96
+ },
+ {
+  "tag": "150k",
+  "prompt_tokens": 150013,
+  "decode_tps_mean": 31.836967977154014,
+  "decode_tps_median": 31.325392499070478,
+  "decode_tps_min": 30.90021717597464,
+  "decode_tps_max": 33.48220343625333,
+  "prefill_tps_mean": 418.6021551812258,
+  "wall_mean_s": 367.2926925915992,
+  "gen_tokens_all_iters": 1536,
+  "n_scored": 5,
+  "bad_rate": 0.0,
+  "nodes": {
+   "n1": {
+    "draft": {
+     "ms": 8.98,
+     "cycles": 600
+    },
+    "verify": {
+     "ms": 58.89,
+     "cycles": 600
+    },
+    "accept": {
+     "ms": 2.81,
+     "cycles": 600
+    },
+    "rollback": {
+     "ms": 0.63,
+     "cycles": 600
+    },
+    "total": {
+     "ms": 71.48,
+     "cycles": 600
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 284
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 284
+    },
+    "rb_pool": {
+     "ms": 0.126,
+     "cycles": 284
+    },
+    "rb_pool_restores": {
+     "ms": 16.639,
+     "cycles": 284
+    },
+    "rb_ring": {
+     "ms": 0.56,
+     "cycles": 284
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 600
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 284
+    }
+   },
+   "n2": {
+    "draft": {
+     "ms": 8.99,
+     "cycles": 600
+    },
+    "verify": {
+     "ms": 58.76,
+     "cycles": 600
+    },
+    "accept": {
+     "ms": 2.97,
+     "cycles": 600
+    },
+    "rollback": {
+     "ms": 0.79,
+     "cycles": 600
+    },
+    "total": {
+     "ms": 71.35,
+     "cycles": 600
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 284
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 284
+    },
+    "rb_pool": {
+     "ms": 0.126,
+     "cycles": 284
+    },
+    "rb_pool_restores": {
+     "ms": 16.639,
+     "cycles": 284
+    },
+    "rb_ring": {
+     "ms": 0.56,
+     "cycles": 284
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 600
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 284
+    }
+   }
+  },
+  "cycles_in_window": 600,
+  "tokens_per_cycle": 2.56,
+  "derived_acceptance": 1.56,
+  "implied_tps_from_profile": 35.81
+ },
+ {
+  "tag": "250k",
+  "prompt_tokens": 250019,
+  "decode_tps_mean": 30.161644266335706,
+  "decode_tps_median": 29.98724473431797,
+  "decode_tps_min": 28.625724529251386,
+  "decode_tps_max": 31.835197143277988,
+  "prefill_tps_mean": 406.5766833752624,
+  "wall_mean_s": 624.3899740166001,
+  "gen_tokens_all_iters": 1536,
+  "n_scored": 5,
+  "bad_rate": 0.0,
+  "nodes": {
+   "n1": {
+    "draft": {
+     "ms": 9.11,
+     "cycles": 500
+    },
+    "verify": {
+     "ms": 59.245,
+     "cycles": 500
+    },
+    "accept": {
+     "ms": 2.81,
+     "cycles": 500
+    },
+    "rollback": {
+     "ms": 0.79,
+     "cycles": 500
+    },
+    "total": {
+     "ms": 71.955,
+     "cycles": 500
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 254
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 254
+    },
+    "rb_pool": {
+     "ms": 0.093,
+     "cycles": 254
+    },
+    "rb_pool_restores": {
+     "ms": 16.424,
+     "cycles": 254
+    },
+    "rb_ring": {
+     "ms": 0.56,
+     "cycles": 254
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 500
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 254
+    }
+   },
+   "n2": {
+    "draft": {
+     "ms": 9.12,
+     "cycles": 500
+    },
+    "verify": {
+     "ms": 59.115,
+     "cycles": 500
+    },
+    "accept": {
+     "ms": 2.755,
+     "cycles": 500
+    },
+    "rollback": {
+     "ms": 0.79,
+     "cycles": 500
+    },
+    "total": {
+     "ms": 71.78,
+     "cycles": 500
+    },
+    "rb_drain": {
+     "ms": 0.03,
+     "cycles": 254
+    },
+    "rb_gate": {
+     "ms": 0.06,
+     "cycles": 254
+    },
+    "rb_pool": {
+     "ms": 0.3,
+     "cycles": 254
+    },
+    "rb_pool_restores": {
+     "ms": 16.424,
+     "cycles": 254
+    },
+    "rb_ring": {
+     "ms": 0.56,
+     "cycles": 254
+    },
+    "rb_snap": {
+     "ms": 0.16,
+     "cycles": 500
+    },
+    "rb_tail": {
+     "ms": 0.02,
+     "cycles": 254
+    }
+   }
+  },
+  "cycles_in_window": 500,
+  "tokens_per_cycle": 3.072,
+  "derived_acceptance": 2.072,
+  "implied_tps_from_profile": 42.69
+ }
+]
+
+============================================================================================================
+  depth  prompt_tok  decode t/s  prefill t/s  verify ms   draft  accept     rb  total ms    acc
+------------------------------------------------------------------------------------------------------------
+   089k       89408       33.73        426.0      55.76    9.13    2.81   0.80     68.33   1.73
+   150k      150013       31.84        418.6      58.89    8.98    2.81   0.63     71.48   1.56
+   250k      250019       30.16        406.6      59.24    9.11    2.81   0.79     71.95   2.07
+============================================================================================================

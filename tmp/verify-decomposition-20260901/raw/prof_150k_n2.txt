@@ -1,0 +1,169 @@
+[ 2026-09-01 22:07:32.534 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9600 B=1:9600[0m
+[ 2026-09-01 22:07:32.534 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.65ms min=  7.82ms max= 90.91ms n=9600[0m
+[ 2026-09-01 22:07:32.535 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.65ms min= 39.29ms max=110.48ms n=9600[0m
+[ 2026-09-01 22:07:32.535 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.87ms max= 13.84ms n=9600[0m
+[ 2026-09-01 22:07:32.535 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9600[0m
+[ 2026-09-01 22:07:32.536 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 74.07ms min= 49.93ms max=168.40ms n=9600[0m
+[ 2026-09-01 22:07:32.536 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=4950[0m
+[ 2026-09-01 22:07:32.537 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=4950[0m
+[ 2026-09-01 22:07:32.538 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=4950[0m
+[ 2026-09-01 22:07:32.538 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.56ms min=  0.00ms max= 62.00ms n=4950[0m
+[ 2026-09-01 22:07:32.539 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=4950[0m
+[ 2026-09-01 22:07:32.540 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9600[0m
+[ 2026-09-01 22:07:32.541 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=4950[0m
+[ 2026-09-01 22:07:36.266 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9650 B=1:9650[0m
+[ 2026-09-01 22:07:36.266 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.65ms min=  7.82ms max= 90.91ms n=9650[0m
+[ 2026-09-01 22:07:36.267 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.64ms min= 39.29ms max=110.48ms n=9650[0m
+[ 2026-09-01 22:07:36.267 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.87ms max= 13.84ms n=9650[0m
+[ 2026-09-01 22:07:36.267 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9650[0m
+[ 2026-09-01 22:07:36.267 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 74.05ms min= 49.93ms max=168.40ms n=9650[0m
+[ 2026-09-01 22:07:36.269 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=4977[0m
+[ 2026-09-01 22:07:36.270 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=4977[0m
+[ 2026-09-01 22:07:36.270 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=4977[0m
+[ 2026-09-01 22:07:36.270 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.57ms min=  0.00ms max= 62.00ms n=4977[0m
+[ 2026-09-01 22:07:36.270 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=4977[0m
+[ 2026-09-01 22:07:36.271 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9650[0m
+[ 2026-09-01 22:07:36.271 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=4977[0m
+[ 2026-09-01 22:07:39.828 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9700 B=1:9700[0m
+[ 2026-09-01 22:07:39.829 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.65ms min=  7.82ms max= 90.91ms n=9700[0m
+[ 2026-09-01 22:07:39.829 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.61ms min= 39.29ms max=110.48ms n=9700[0m
+[ 2026-09-01 22:07:39.829 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.87ms max= 13.84ms n=9700[0m
+[ 2026-09-01 22:07:39.829 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9700[0m
+[ 2026-09-01 22:07:39.830 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 74.02ms min= 49.93ms max=168.40ms n=9700[0m
+[ 2026-09-01 22:07:39.830 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5001[0m
+[ 2026-09-01 22:07:39.830 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5001[0m
+[ 2026-09-01 22:07:39.830 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5001[0m
+[ 2026-09-01 22:07:39.831 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.57ms min=  0.00ms max= 62.00ms n=5001[0m
+[ 2026-09-01 22:07:39.831 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5001[0m
+[ 2026-09-01 22:07:39.831 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9700[0m
+[ 2026-09-01 22:07:39.831 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5001[0m
+[ 2026-09-01 22:13:42.156 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9750 B=1:9750[0m
+[ 2026-09-01 22:13:42.156 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.66ms min=  7.82ms max= 90.91ms n=9750[0m
+[ 2026-09-01 22:13:42.157 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.60ms min= 39.29ms max=110.48ms n=9750[0m
+[ 2026-09-01 22:13:42.157 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.87ms max= 13.84ms n=9750[0m
+[ 2026-09-01 22:13:42.157 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9750[0m
+[ 2026-09-01 22:13:42.157 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 74.02ms min= 49.93ms max=168.40ms n=9750[0m
+[ 2026-09-01 22:13:42.158 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5030[0m
+[ 2026-09-01 22:13:42.158 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5030[0m
+[ 2026-09-01 22:13:42.158 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5030[0m
+[ 2026-09-01 22:13:42.159 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.54ms min=  0.00ms max= 62.00ms n=5030[0m
+[ 2026-09-01 22:13:42.161 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5030[0m
+[ 2026-09-01 22:13:42.162 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9750[0m
+[ 2026-09-01 22:13:42.162 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5030[0m
+[ 2026-09-01 22:13:45.768 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9800 B=1:9800[0m
+[ 2026-09-01 22:13:45.768 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.65ms min=  7.82ms max= 90.91ms n=9800[0m
+[ 2026-09-01 22:13:45.769 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.58ms min= 39.29ms max=110.48ms n=9800[0m
+[ 2026-09-01 22:13:45.769 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.87ms max= 13.84ms n=9800[0m
+[ 2026-09-01 22:13:45.769 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9800[0m
+[ 2026-09-01 22:13:45.769 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.99ms min= 49.93ms max=168.40ms n=9800[0m
+[ 2026-09-01 22:13:45.770 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5048[0m
+[ 2026-09-01 22:13:45.770 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5048[0m
+[ 2026-09-01 22:13:45.770 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5048[0m
+[ 2026-09-01 22:13:45.770 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.52ms min=  0.00ms max= 62.00ms n=5048[0m
+[ 2026-09-01 22:13:45.772 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5048[0m
+[ 2026-09-01 22:13:45.773 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9800[0m
+[ 2026-09-01 22:13:45.773 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5048[0m
+[ 2026-09-01 22:19:49.693 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9850 B=1:9850[0m
+[ 2026-09-01 22:19:49.693 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.66ms min=  7.82ms max= 90.91ms n=9850[0m
+[ 2026-09-01 22:19:49.693 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.59ms min= 39.29ms max=110.48ms n=9850[0m
+[ 2026-09-01 22:19:49.694 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=9850[0m
+[ 2026-09-01 22:19:49.694 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9850[0m
+[ 2026-09-01 22:19:49.694 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 74.01ms min= 49.93ms max=168.40ms n=9850[0m
+[ 2026-09-01 22:19:49.695 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5073[0m
+[ 2026-09-01 22:19:49.695 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5073[0m
+[ 2026-09-01 22:19:49.695 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5073[0m
+[ 2026-09-01 22:19:49.696 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.55ms min=  0.00ms max= 62.00ms n=5073[0m
+[ 2026-09-01 22:19:49.698 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5073[0m
+[ 2026-09-01 22:19:49.698 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9850[0m
+[ 2026-09-01 22:19:49.698 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5073[0m
+[ 2026-09-01 22:19:53.215 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9900 B=1:9900[0m
+[ 2026-09-01 22:19:53.215 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.66ms min=  7.82ms max= 90.91ms n=9900[0m
+[ 2026-09-01 22:19:53.216 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.56ms min= 39.29ms max=110.48ms n=9900[0m
+[ 2026-09-01 22:19:53.216 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=9900[0m
+[ 2026-09-01 22:19:53.216 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9900[0m
+[ 2026-09-01 22:19:53.216 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.97ms min= 49.93ms max=168.40ms n=9900[0m
+[ 2026-09-01 22:19:53.216 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5094[0m
+[ 2026-09-01 22:19:53.217 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5094[0m
+[ 2026-09-01 22:19:53.217 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5094[0m
+[ 2026-09-01 22:19:53.218 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.53ms min=  0.00ms max= 62.00ms n=5094[0m
+[ 2026-09-01 22:19:53.220 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5094[0m
+[ 2026-09-01 22:19:53.220 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9900[0m
+[ 2026-09-01 22:19:53.220 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5094[0m
+[ 2026-09-01 22:25:57.215 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=9950 B=1:9950[0m
+[ 2026-09-01 22:25:57.218 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.66ms min=  7.82ms max= 90.91ms n=9950[0m
+[ 2026-09-01 22:25:57.218 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.56ms min= 39.29ms max=110.48ms n=9950[0m
+[ 2026-09-01 22:25:57.219 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=9950[0m
+[ 2026-09-01 22:25:57.219 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=9950[0m
+[ 2026-09-01 22:25:57.220 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.99ms min= 49.93ms max=168.40ms n=9950[0m
+[ 2026-09-01 22:25:57.221 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5121[0m
+[ 2026-09-01 22:25:57.221 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5121[0m
+[ 2026-09-01 22:25:57.222 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5121[0m
+[ 2026-09-01 22:25:57.222 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.54ms min=  0.00ms max= 62.00ms n=5121[0m
+[ 2026-09-01 22:25:57.222 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5121[0m
+[ 2026-09-01 22:25:57.223 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=9950[0m
+[ 2026-09-01 22:25:57.224 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5121[0m
+[ 2026-09-01 22:26:00.808 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=10000 B=1:10000[0m
+[ 2026-09-01 22:26:00.808 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.66ms min=  7.82ms max= 90.91ms n=10000[0m
+[ 2026-09-01 22:26:00.808 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.54ms min= 39.29ms max=110.48ms n=10000[0m
+[ 2026-09-01 22:26:00.809 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=10000[0m
+[ 2026-09-01 22:26:00.809 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=10000[0m
+[ 2026-09-01 22:26:00.809 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.96ms min= 49.93ms max=168.40ms n=10000[0m
+[ 2026-09-01 22:26:00.810 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5143[0m
+[ 2026-09-01 22:26:00.810 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5143[0m
+[ 2026-09-01 22:26:00.810 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5143[0m
+[ 2026-09-01 22:26:00.811 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.54ms min=  0.00ms max= 62.00ms n=5143[0m
+[ 2026-09-01 22:26:00.813 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5143[0m
+[ 2026-09-01 22:26:00.814 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=10000[0m
+[ 2026-09-01 22:26:00.814 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5143[0m
+[ 2026-09-01 22:32:04.025 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=10050 B=1:10050[0m
+[ 2026-09-01 22:32:04.026 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.67ms min=  7.82ms max= 90.91ms n=10050[0m
+[ 2026-09-01 22:32:04.026 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.52ms min= 39.29ms max=110.48ms n=10050[0m
+[ 2026-09-01 22:32:04.026 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=10050[0m
+[ 2026-09-01 22:32:04.027 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=10050[0m
+[ 2026-09-01 22:32:04.027 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.95ms min= 49.93ms max=168.40ms n=10050[0m
+[ 2026-09-01 22:32:04.027 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5163[0m
+[ 2026-09-01 22:32:04.027 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5163[0m
+[ 2026-09-01 22:32:04.027 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.31ms min=  0.12ms max=  0.83ms n=5163[0m
+[ 2026-09-01 22:32:04.029 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.53ms min=  0.00ms max= 62.00ms n=5163[0m
+[ 2026-09-01 22:32:04.030 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5163[0m
+[ 2026-09-01 22:32:04.031 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=10050[0m
+[ 2026-09-01 22:32:04.031 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5163[0m
+[ 2026-09-01 22:32:07.603 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=10100 B=1:10100[0m
+[ 2026-09-01 22:32:07.604 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.67ms min=  7.82ms max= 90.91ms n=10100[0m
+[ 2026-09-01 22:32:07.604 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.50ms min= 39.29ms max=110.48ms n=10100[0m
+[ 2026-09-01 22:32:07.604 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=10100[0m
+[ 2026-09-01 22:32:07.604 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=10100[0m
+[ 2026-09-01 22:32:07.605 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.92ms min= 49.93ms max=168.40ms n=10100[0m
+[ 2026-09-01 22:32:07.605 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5184[0m
+[ 2026-09-01 22:32:07.605 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5184[0m
+[ 2026-09-01 22:32:07.606 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.30ms min=  0.12ms max=  0.83ms n=5184[0m
+[ 2026-09-01 22:32:07.607 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.51ms min=  0.00ms max= 62.00ms n=5184[0m
+[ 2026-09-01 22:32:07.607 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5184[0m
+[ 2026-09-01 22:32:07.607 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=10100[0m
+[ 2026-09-01 22:32:07.609 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5184[0m
+[ 2026-09-01 22:38:10.871 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=10150 B=1:10150[0m
+[ 2026-09-01 22:38:10.871 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.67ms min=  7.82ms max= 90.91ms n=10150[0m
+[ 2026-09-01 22:38:10.872 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.49ms min= 39.29ms max=110.48ms n=10150[0m
+[ 2026-09-01 22:38:10.872 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=10150[0m
+[ 2026-09-01 22:38:10.872 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=10150[0m
+[ 2026-09-01 22:38:10.873 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.92ms min= 49.93ms max=168.40ms n=10150[0m
+[ 2026-09-01 22:38:10.873 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5210[0m
+[ 2026-09-01 22:38:10.873 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5210[0m
+[ 2026-09-01 22:38:10.874 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.30ms min=  0.12ms max=  0.83ms n=5210[0m
+[ 2026-09-01 22:38:10.874 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.50ms min=  0.00ms max= 62.00ms n=5210[0m
+[ 2026-09-01 22:38:10.875 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5210[0m
+[ 2026-09-01 22:38:10.875 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=10150[0m
+[ 2026-09-01 22:38:10.875 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5210[0m
+[ 2026-09-01 22:38:14.687 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF] cycles=10200 B=1:10200[0m
+[ 2026-09-01 22:38:14.688 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 draft      mean=  8.67ms min=  7.82ms max= 90.91ms n=10200[0m
+[ 2026-09-01 22:38:14.688 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 verify     mean= 61.48ms min= 39.29ms max=110.48ms n=10200[0m
+[ 2026-09-01 22:38:14.689 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 accept     mean=  2.97ms min=  1.82ms max= 13.84ms n=10200[0m
+[ 2026-09-01 22:38:14.689 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rollback   mean=  0.79ms min=  0.20ms max=  2.85ms n=10200[0m
+[ 2026-09-01 22:38:14.689 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 total      mean= 73.91ms min= 49.93ms max=168.40ms n=10200[0m
+[ 2026-09-01 22:38:14.690 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_drain   mean=  0.03ms min=  0.02ms max=  0.10ms n=5234[0m
+[ 2026-09-01 22:38:14.691 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_gate    mean=  0.06ms min=  0.05ms max=  0.12ms n=5234[0m
+[ 2026-09-01 22:38:14.691 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool    mean=  0.30ms min=  0.12ms max=  0.83ms n=5234[0m
+[ 2026-09-01 22:38:14.691 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_pool_restores mean= 17.51ms min=  0.00ms max= 62.00ms n=5234[0m
+[ 2026-09-01 22:38:14.691 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_ring    mean=  0.56ms min=  0.33ms max=  1.27ms n=5234[0m
+[ 2026-09-01 22:38:14.691 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_snap    mean=  0.16ms min=  0.11ms max=  0.29ms n=10200[0m
+[ 2026-09-01 22:38:14.691 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:182 ] [33m[1mRunner stderr: [MTP-PROF]   B=1 rb_tail    mean=  0.02ms min=  0.02ms max=  0.04ms n=5234[0m

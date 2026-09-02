@@ -1,0 +1,10 @@
+2026-09-01 22:01:32.312 | INFO     | __main__:main:241 - Found 1 running instances of deepseek-ai/DeepSeek-V4-Flash-0731.
+2026-09-01 22:01:32.312 | INFO     | __main__:main:257 - === concurrency=1  iterations=5  warmup=1  max_tokens=256 ===
+2026-09-01 22:07:39.929 | INFO     | __main__:main:286 -   iter= 0 warmup  wall=367.62s  agg_tps=28.6  per_req=28.6  tail_ratio=1.00  max_wall=367.62s  errors=0
+2026-09-01 22:13:46.091 | INFO     | __main__:main:286 -   iter= 1         wall=366.16s  agg_tps=32.4  per_req=32.4  tail_ratio=1.00  max_wall=366.16s  errors=0
+2026-09-01 22:19:54.034 | INFO     | __main__:main:286 -   iter= 2         wall=367.94s  agg_tps=31.3  per_req=31.3  tail_ratio=1.00  max_wall=367.94s  errors=0
+2026-09-01 22:26:02.024 | INFO     | __main__:main:286 -   iter= 3         wall=367.99s  agg_tps=31.0  per_req=31.0  tail_ratio=1.00  max_wall=367.99s  errors=0
+2026-09-01 22:32:08.912 | INFO     | __main__:main:286 -   iter= 4         wall=366.89s  agg_tps=33.5  per_req=33.5  tail_ratio=1.00  max_wall=366.89s  errors=0
+2026-09-01 22:38:16.398 | INFO     | __main__:main:286 -   iter= 5         wall=367.49s  agg_tps=30.9  per_req=30.9  tail_ratio=1.00  max_wall=367.48s  errors=0
+2026-09-01 22:38:16.398 | INFO     | __main__:main:320 -   SUMMARY  agg_tps=31.8 (med 31.3, min 30.9, max 33.5)  per_req=31.8  tail_ratio_mean=1.00  bad_rate=0% (0/5)
+2026-09-01 22:38:16.401 | INFO     | __main__:main:341 - wrote results to /Users/adam.durham/repos/exo/tmp/verify-decomposition-20260901/raw/bench_150k.json

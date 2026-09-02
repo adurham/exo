@@ -1,0 +1,6 @@
+Using pre-calibrated word count for mode=random: 23525 words (offline-tokenizer calibrated).
+
+Mode: random
+PROMPT TOKENS: 89410
+Generation TPS: mean=28.66, median=27.77, min=27.51, max=30.19
+Prompt TPS: mean=429.65
