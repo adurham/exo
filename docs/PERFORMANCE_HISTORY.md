@@ -7736,3 +7736,19 @@ Candidates (gap flat with depth, doesn't track acceptance): A) two fenced coord 
 NOTE: report's "entropy A/B still to run" recommendation is STALE — that A/B completed 2026-09-02 09:41 (see ENTROPY A/B entry): natural prose NOT inflated, random -12.6%. True acceptance 1.411 (not 1.73) means the accounting changed, but the natural-text question is settled. Direct acceptance measurement from runner stderr [MTP] lines (untimestamped, anchor-aligned per V2 feasibility method) can confirm the inferred acceptance for the Sep 2 arm windows.
 
 Artifacts: tmp/wall-attribution-20260902/REPORT.md
+
+### PREFILL ROUND 1 (consult->PM loop) — fable suggestions audited, 4 of 6 killed on evidence (2026-09-02)
+
+PM audit of claude-fable-5's prefill-improvement ranking. Full artifacts: tmp/prefill-round1-20260902/REPORT.md, tmp/prefix-cache-dive-20260902/REPORT.md.
+
+SURVIVED (ready, no approval): offline LCP-coverage probe on 54 recorded turn pairs (zero cost, local CPU, existing artifacts) — unlocks or kills the decode-KV-retention fix (~22% prefill avoidance). Risk #1 pre-registered: thinking-marker stripping shifts RoPE positions if a completion re-enters the prompt non-identically, which could kill the recoverable share; probe must run the real production template path.
+
+NEEDS APPROVAL (all zero-or-optional GPU): A2 relaunch-frequency count from node logs (sets the 49% cold-start bucket's value); A3 file 2 dead-knob defects (repo write); A4 optional single 3072 arm @191K (not recommended).
+
+KILLED WITH EVIDENCE:
+- EXO_PREFILL_CLEAR_CACHE_INTERVAL: DEAD CODE on production path (prefill_batched clears unconditionally at generate.py:1527; only reader is eager fallback mlx-lm/generate.py:544; verified both). Already refuted live (+0.48% @180K).
+- 390ms/chunk fixed-overhead figure: NO SOURCE — 2026-06-21 prose comment, contradicted by 2026-08-21 instrumented measurement (<0.02% of wall). all_sum fusion gate unmeetable.
+- Chunk-size re-sweep: 8% regression already measured @191K at larger chunk; upside bounded by the <0.02% bracket.
+- Indexer window: indexer is 4.0% of prefill wall, already scored CLOSED; EXO_DSV4_INDEXER_WINDOW has zero code readers.
+
+FLAGS: (1) fable's ranking inherited the unsourced 390ms number — direct feedback written (§7); (2) the 2.029x SDPA attribution was ms/token at 12K ctx (steeper than modeled) — kill didn't depend on it, flagged as a crack; (3) biggest promoted-workstream risk is position-alignment, not tokenization.
