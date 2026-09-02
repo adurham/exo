@@ -7671,3 +7671,10 @@ Verdict: **hypothesis REFUTED.** Natural high-entropy prose = 33.58 t/s, statist
 **The ~20 t/s real-usage vs 34 t/s benchmark gap at MATCHED depth remains unexplained.** Context depth ruled out (verify ~92-97% fixed cost; index_topk=512 makes SDPA O(512)). Prompt entropy now ruled out. Remaining suspects (from the decomposition study): (1) 11-16% of decode wall sits outside all profiled phases (independent second suspect); (2) real-usage differences benchmarks don't capture: streaming, tool-call generation, prefix-cache-hit turns, multi-turn KV state, conversation shape at 150K+.
 
 Artifacts: tmp/verify-decomposition-20260901/entropy/ (RESULTS.md, PREREGISTRATION_ENTROPY.md, raw/). Note: 250K arm of the depth scan was contaminated by a user-cancelled request (flagged in that report; verdict not dependent on it). The 6.9 t/s 250K warmup artifact remains unexplained.
+
+### ENTROPY A/B ADDENDUM — temperature suspect + drift finding (2026-09-02)
+
+- New suspect surfaced by the PM in the final report: **sampling temperature was never controlled.** Bench ran temperature=0.8; real Hermes sessions send default (OpenAI-compat temp=1.0). Mechanism: higher temp -> more divergent samples -> lower MTP draft acceptance -> lower decode t/s with no cycle-time change (exactly the acceptance pathway confirmed by the random arm: lowest cycle time yet lowest throughput). Cheap, untested, directly actionable if confirmed.
+- **Session drift: 8.62% in the same condition 65 min apart** (repetitive pooled 32.77 -> recheck 35.60). Comparable in size to the random-arm effect (-12.6%). Cycle time moved with it, so not purely acceptance-side. Adds to the boot-variance story: within-boot drift is real and unexplained at hourly scales, not just across boots.
+- Latent harness bug found+fixed: old run_entropy.sh logged rc=$? from the wrong command (failed probe would log rc=0); new driver correct. Old file left untouched.
+- All error-grep matches across arms are benign (single recurring HF catalog-fetch 404, ~once/78s) — naive grep -i error on these logs is misleading.
