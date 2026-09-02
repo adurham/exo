@@ -1,0 +1,74 @@
+{
+ "instance_id": "339f04f8-82de-4976-8b97-ce067f35a7d3",
+ "n_requests_total_event_rows": 57,
+ "n_main_chat_requests": 55,
+ "n_aux_rows": 2,
+ "wall_seconds_client": {
+  "n": 55,
+  "mean": 35.073,
+  "median": 18.919,
+  "min": 6.789,
+  "max": 282.811
+ },
+ "prompt_tokens": {
+  "n": 57,
+  "mean": 138309.228,
+  "median": 144035,
+  "min": 17,
+  "max": 188902
+ },
+ "cached_tokens": {
+  "n": 57,
+  "mean": 134992.649,
+  "median": 143472,
+  "min": 0,
+  "max": 187223
+ },
+ "completion_tokens": {
+  "n": 57,
+  "mean": 739.596,
+  "median": 444,
+  "min": 16,
+  "max": 6480
+ },
+ "generation_tps_MEASURED_server": {
+  "n": 57,
+  "mean": 34.458,
+  "median": 33.828,
+  "min": 21.909,
+  "max": 46.512
+ },
+ "prompt_tps_MEASURED_server": {
+  "n": 57,
+  "mean": 215.574,
+  "median": 227.623,
+  "min": 12.7,
+  "max": 416.842
+ },
+ "full_wall_rate_DERIVED_client": {
+  "n": 55,
+  "mean": 20.38,
+  "median": 21.694,
+  "min": 6.032,
+  "max": 33.328
+ },
+ "sum_completion_tokens": 42157,
+ "sum_prompt_tokens": 7883626,
+ "finish_reason_dist": {
+  "tool_calls": 44,
+  "stop": 12,
+  "length": 1
+ },
+ "prefix_hit_dist": {
+  "none": 3,
+  "partial": 54
+ },
+ "session_window_client": {
+  "first_call_started": "2026-09-01 12:38:40.641",
+  "last_call_ended": "2026-09-01 16:09:40.229"
+ },
+ "server_window": {
+  "first_received": "2026-09-01 12:38:40.859",
+  "last_received": "2026-09-01 16:09:10.894"
+ }
+}

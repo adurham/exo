@@ -1,0 +1,58 @@
+{
+  "n_requests": 55,
+  "completion_tokens": 42091,
+  "wall_s": 1929.0,
+  "prefill_s": 600.2,
+  "decode_s": 1275.7,
+  "residual_s": 53.1,
+  "pct": {
+    "prefill": 31.1,
+    "decode": 66.1,
+    "residual": 2.8
+  },
+  "perceived_tps": 21.82,
+  "decode_only_tps": 33.0,
+  "gap_tps": 11.18,
+  "gap_attribution_pct": {
+    "prefill_ttft": 94.5,
+    "residual_stream_net": 5.5
+  },
+  "residual_per_request_s": {
+    "median": 0.94,
+    "min": 0.75,
+    "max": 1.32
+  },
+  "server_generation_tps": {
+    "mean": 34.78,
+    "median": 34.3
+  },
+  "real_decode_at_150k": {
+    "n": 16,
+    "mean": 34.06,
+    "bench_ref": 31.84
+  },
+  "cold_requests": 1,
+  "cold_prefill_s": 222.1,
+  "warm_prefill_avg_s": 7.0,
+  "counterfactual_no_cache_tps": 0.91,
+  "cache_saved_s": 44353.6,
+  "finish_reason": {
+    "tool_calls": 44,
+    "stop": 12,
+    "length": 1
+  },
+  "prefix_cache": {
+    "partial": 54,
+    "none": 3
+  },
+  "median_prompt_tokens": 145918,
+  "reasoning_tokens": 24662,
+  "visible_answer_tokens": 17429,
+  "perceived_tps_visible_only": 9.04,
+  "ladder": {
+    "bench_decode_only": 33.0,
+    "plus_ttft": 22.44,
+    "plus_residual_full_wall": 21.82,
+    "visible_answer_only": 9.04
+  }
+}

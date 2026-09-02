@@ -1,0 +1,70 @@
+# HELP exo_up 1 when the exo node process is serving metrics.
+# TYPE exo_up gauge
+exo_up{node_id="8a72dcea89175a23393803f857659b0a"} 1.0
+# HELP exo_is_master 1 if this node is the currently elected master.
+# TYPE exo_is_master gauge
+exo_is_master{node_id="8a72dcea89175a23393803f857659b0a"} 0.0
+# HELP exo_generation_requests_total Text-generation requests that reached a finish state.
+# TYPE exo_generation_requests_total counter
+# HELP exo_prompt_tokens_total Total prompt (prefill) tokens processed.
+# TYPE exo_prompt_tokens_total counter
+# HELP exo_generation_tokens_total Total tokens generated (decode output).
+# TYPE exo_generation_tokens_total counter
+# HELP exo_prompt_tps Prompt (prefill) tokens per second observed at completion.
+# TYPE exo_prompt_tps histogram
+# HELP exo_generation_tps Decode tokens per second observed at completion.
+# TYPE exo_generation_tps histogram
+# HELP exo_prefix_cache_hits_total Text-generation requests bucketed by prefix-cache outcome.
+# TYPE exo_prefix_cache_hits_total counter
+# HELP exo_mtp_cycles_total MTP self-speculative cycles processed (one verify forward + γ drafts).
+# TYPE exo_mtp_cycles_total counter
+# HELP exo_mtp_accepted_drafts_total Cumulative draft tokens accepted across MTP cycles. Divide by exo_mtp_cycles_total for mean acceptance per cycle.
+# TYPE exo_mtp_accepted_drafts_total counter
+# HELP exo_mtp_acceptance_bucket_total MTP cycles bucketed by accepted-draft count (0..γ).
+# TYPE exo_mtp_acceptance_bucket_total counter
+# HELP exo_peak_memory_bytes Peak memory reported at completion of the most recent request.
+# TYPE exo_peak_memory_bytes gauge
+# HELP exo_chunk_events_total Count of chunks observed at the master, bucketed by chunk kind.
+# TYPE exo_chunk_events_total counter
+# HELP exo_tool_call_parse_failures_total Tool-call generations that failed to parse (cleanly failed the turn for retry), bucketed by failure kind. Divide by the tool_calls + this to get the tool-call parse-failure rate. ``failure_kind`` is one of malformed / unterminated / sentinelless.
+# TYPE exo_tool_call_parse_failures_total counter
+# HELP exo_gpu_usage_ratio GPU usage fraction (0.0–1.0).
+# TYPE exo_gpu_usage_ratio gauge
+exo_gpu_usage_ratio{node_id="8a72dcea89175a23393803f857659b0a"} 0.02690899185836315
+# HELP exo_gpu_temp_celsius Average GPU temperature in Celsius.
+# TYPE exo_gpu_temp_celsius gauge
+exo_gpu_temp_celsius{node_id="8a72dcea89175a23393803f857659b0a"} 31.24193000793457
+# HELP exo_system_power_watts Total system power draw in watts.
+# TYPE exo_system_power_watts gauge
+exo_system_power_watts{node_id="8a72dcea89175a23393803f857659b0a"} 7.11379337310791
+# HELP exo_pcpu_usage_ratio Performance-core CPU usage fraction (0.0–1.0).
+# TYPE exo_pcpu_usage_ratio gauge
+exo_pcpu_usage_ratio{node_id="8a72dcea89175a23393803f857659b0a"} 0.0
+# HELP exo_ecpu_usage_ratio Efficiency-core CPU usage fraction (0.0–1.0).
+# TYPE exo_ecpu_usage_ratio gauge
+exo_ecpu_usage_ratio{node_id="8a72dcea89175a23393803f857659b0a"} 0.41500407457351685
+# HELP exo_memory_ram_used_bytes RAM bytes in use.
+# TYPE exo_memory_ram_used_bytes gauge
+exo_memory_ram_used_bytes{node_id="8a72dcea89175a23393803f857659b0a"} 1.03826931712e+011
+# HELP exo_memory_ram_total_bytes Total RAM bytes.
+# TYPE exo_memory_ram_total_bytes gauge
+exo_memory_ram_total_bytes{node_id="8a72dcea89175a23393803f857659b0a"} 1.37438953472e+011
+# HELP exo_memory_swap_used_bytes Swap bytes in use.
+# TYPE exo_memory_swap_used_bytes gauge
+exo_memory_swap_used_bytes{node_id="8a72dcea89175a23393803f857659b0a"} 7.3138176e+07
+# HELP exo_memory_swap_total_bytes Total swap bytes.
+# TYPE exo_memory_swap_total_bytes gauge
+exo_memory_swap_total_bytes{node_id="8a72dcea89175a23393803f857659b0a"} 1.073741824e+09
+# HELP exo_disk_available_bytes Available bytes on the models directory filesystem.
+# TYPE exo_disk_available_bytes gauge
+exo_disk_available_bytes{node_id="8a72dcea89175a23393803f857659b0a"} 1.20541167616e+011
+# HELP exo_disk_total_bytes Total bytes on the models directory filesystem.
+# TYPE exo_disk_total_bytes gauge
+exo_disk_total_bytes{node_id="8a72dcea89175a23393803f857659b0a"} 9.9466258432e+011
+# HELP exo_rdma_enabled 1 if rdma_ctl reports enabled on this node, 0 if disabled.
+# TYPE exo_rdma_enabled gauge
+exo_rdma_enabled{node_id="8a72dcea89175a23393803f857659b0a"} 1.0
+# HELP exo_instances Number of instances registered in the cluster, by model.
+# TYPE exo_instances gauge
+# HELP exo_runners Number of runners in the cluster, by status tag.
+# TYPE exo_runners gauge

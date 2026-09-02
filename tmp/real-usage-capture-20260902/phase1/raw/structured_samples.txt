@@ -1,0 +1,38 @@
+=== structured finish_reason= (equals sign) ===
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"content": "1|#!/bin/bash\n2|\n3|# Standardized Exo Cluster Startup Script\n4|# Usage: ./start_cluster.sh\n5|# Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.\n6|\n7|# ── Tunable defaults (overrid
+4. API: /v1/models responds; short generation works (e.g., small max_tokens completion), finish_reason=stop/length
+- API: /v1/models 200 (model listed); smoke completion HTTP 200 in 2.7s, finish_reason=stop, correct answer "43". (max_tokens=50 attempt hit length w/ empty content -- thinking budget; not a fault.)
+- API healthy: smoke completion returned correct answer ("43"), finish_reason=stop, 2.7s
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"output": "◎ 95.7% - I'm assuming that is cache efficency of some kind\nand ↑ 26 t/s I assume that is 26 tokens per second average for output right now<｜Assistant｜><think>The user is looking at the exo dashboard (adams-mac-studio-m4-1.local
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"content": "1|#!/bin/bash\n2|\n3|# Standardized Exo Cluster Startup Script\n4|# Usage: ./start_cluster.sh\n5|# Detects the current host and sets up the appropriate environment for the 3-node M4 cluster.\n6|\n7|# ── Tunable defaults (overrid
+
+=== how a TextGeneration task ENDS (statuses) ===
+grep: repetition-operator operand invalid
+
+=== generation_tps real lines ===
+- exo_generation_tps (decode) ← the "↑ 26 t/s" on the dashboard
+<｜DSML｜parameter name="command" string="true">curl -s --max-time 10 http://adams-mac-studio-m4-1.local:52415/metrics | grep -E "^exo_(generation_tps|prompt_tps|prefix_cache_hits_total|mtp_cycles_total|mtp_accepted_drafts_total|gpu_usage_ratio|gpu_temp_celsius|system_power_watts|memory_ram_used_bytes
+**Decode (generation_tps):** sum=1424.16 over count=40 → mean = 35.6 tok/s. Histogram: all 40 requests ≤40 tps, 34/40 ≤40... wait, buckets: le=20: 0, le=40: 34 — so 34 requests between 20-40 tps, 6 requests between 40-60 (le=60: 40 - le=40: 34 = 6). Mean 35.6.
+
+=== first token real lines ===
+So exo gets a full hour of patience while cloud providers keep their 30-minute budget. Takes effect on the next API call — no restart needed since the timeout config is read fresh per request. If you ever need more (e.g. 1M-context prefill at ~378 tps runs ~44 min before first token), bump the two v
+
+=== usage lines ===
+Context: last night there was a "route-clear step hangs silently without sudo -n" fix commit (1365cecc9 fix(deploy): route-clear step hangs silently without sudo -n) in the parent repo. And earlier session notes mention start_cluster.sh usage, config flags (EXO_DSV4_LMHEAD_MXFP8=1, EXO_DSV4_EXACT_TO
+1. grep start_cluster.sh for: LMHEAD_MXFP8 (P06 flag), submodule handling / venv reinstall, route-clear/sudo usage, and any hardcoded SHAs.
+<｜DSML｜parameter name="command" string="true">cd ~/repos/exo && echo "=== how script handles mlx-lm submodule ===" && grep -n "mlx-lm\|submodule\|git fetch\|git reset\|git pull\|\buv \|pip install" start_cluster.sh | grep -v "^[0-9]*: *#" | head -25 && echo "" && echo "=== sudo / route usage ===" &&
+- **Outbound telemetry / usage attribution without opt-in gating.** No new
+
+=== POST chat completions API lines ===
+[ 2026-09-01 16:29:37.344 | DEBUG    | exo.api.main:_log_requests:338 ] API request: POST /v1/chat/completions
+[ 2026-09-01 16:33:07.520 | DEBUG    | exo.api.main:_log_requests:338 ] API request: POST /v1/chat/completions
+[ 2026-09-01 16:33:07.520 | DEBUG    | exo.api.main:_log_requests:338 ] API request: POST /v1/chat/completions
+[ 2026-09-01 16:38:49.781 | DEBUG    | exo.api.main:_log_requests:338 ] API request: POST /v1/chat/completions
+- `POST /v1/chat/completions` ("What is 17+26?", max_tokens 200, temp 0) → **HTTP 200 in 2.7s, `finish_reason: stop`, content = `"43"`**, 16 completion tokens (50 of which reasoning) — correct answer, non-empty content.
+- `POST /v1/chat/completions` ("What is 17+26?", max_tokens 200, temp 0) → **HTTP 200 in 2.7s, `finish_reason: stop`, content = `"43"`**, 16 completion tokens (50 of which reasoning) — correct answer, non-empty content.
+
+=== PrefillProgress / chunk lines ===
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"output": "exo_prompt_tps_bucket{instance_id=\"339f04f8-82de-4976-8b97-ce067f35a7d3\",le=\"50.0\",model_id=\"deepseek-ai/DeepSeek-V4-Flash-0731\"} 3.0\nexo_prompt_tps_bucket{instance_id=\"33
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"output": "exo_prompt_tps_bucket{instance_id=\"339f04f8-82de-4976-8b97-ce067f35a7d3\",le=\"50.0\",model_id=\"deepseek-ai/DeepSeek-V4-Flash-0731\"} 3.0\nexo_prompt_tps_bucket{instance_id=\"33
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"output": "exo_prompt_tps_bucket{instance_id=\"339f04f8-82de-4976-8b97-ce067f35a7d3\",le=\"50.0\",model_id=\"deepseek-ai/DeepSeek-V4-Flash-0731\"} 3.0\nexo_prompt_tps_bucket{instance_id=\"33
+</｜DSML｜tool_calls><｜end▁of▁sentence｜><｜User｜><tool_result>{"output": "exo_prompt_tps_bucket{instance_id=\"339f04f8-82de-4976-8b97-ce067f35a7d3\",le=\"50.0\",model_id=\"deepseek-ai/DeepSeek-V4-Flash-0731\"} 3.0\nexo_prompt_tps_bucket{instance_id=\"33

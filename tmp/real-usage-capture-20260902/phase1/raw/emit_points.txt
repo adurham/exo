@@ -1,0 +1,47 @@
+=== all module:func emit points (whole file, count) ===
+384536 | exo.routing.router:_networking_recv:190 
+19562 | exo.api.main:_log_requests:338 
+3204 | exo.worker.engines.mlx.generator.generate:progress_callback:811 
+2415 | exo.utils.info_gatherer.net_profile:check_reachability:70 
+ 873 | exo.download.coordinator:_emit_existing_download_progress:357 
+ 872 | exo.download.download_utils:fetch_file_list_with_cache:436 
+ 872 | exo.download.download_utils:fetch_file_list_with_cache:431 
+ 871 | exo.download.coordinator:_emit_existing_download_progress:477 
+ 220 | exo.worker.engines.mlx.generator.batch_generate:step:4695 
+ 208 | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 
+  98 | exo.worker.main:plan_step:226 
+  92 | exo.worker.runner.supervisor:start_task:370 
+  90 | exo.routing.router:_networking_publish:226 
+  88 | exo.worker.engines.mlx.generator.generate:_log_cache_profile:280 
+  86 | exo.worker.engines.mlx.generator.generate:prefill:950 
+  86 | exo.worker.engines.mlx.generator.generate:prefill:944 
+  86 | exo.worker.engines.mlx.generator.generate:prefill:866 
+  86 | exo.worker.engines.mlx.generator.generate:prefill:865 
+  86 | exo.worker.engines.mlx.generator.generate:prefill:795 
+  84 | exo.worker.engines.mlx.generator.batch_generate:submit:2761 
+  84 | exo.worker.engines.mlx.generator.batch_generate:submit:2733 
+  84 | exo.shared.types.text_generation:with_card_sampling_defaults:219 
+  81 | exo.worker.runner.runner:handle_generation_tasks:858 
+  81 | exo.worker.runner.runner:handle_generation_tasks:853 
+  81 | exo.worker.runner.runner:handle_generation_tasks:565 
+  81 | exo.worker.runner.runner:handle_generation_tasks:563 
+  60 | exo.worker.engines.mlx.cache:make_kv_cache:2472 
+  28 | exo.worker.engines.mlx.generator.batch_generate:submit:2494 
+  28 | exo.worker.engines.mlx.cache:update_kv_cache:977 
+  28 | exo.worker.engines.mlx.cache:update_kv_cache:1000 
+  17 | exo.master.main:_index_apply_broadcast:670 
+   8 | exo.shared.election:_election_receiver:130 
+   6 | exo.routing.router:run:49 
+   6 | exo.routing.router:_networking_subscribe:180 
+   5 | exo.worker.main:_poll_connection_updates:457 
+   5 | exo.shared.election:_election_receiver:132 
+   4 | exo.worker.engines.mlx.utils_mlx:set_wired_limit_for_model:1742 
+   4 | exo.utils.disk_event_log:_rotate:177 
+   4 | exo.shared.models.model_cards:_load_cards_from_dir:85 
+   4 | exo.api.main:_choose_jit_placement_with_wait:1412 
+
+=== lines from generate.py / runner.py that are NOT apply_chat_template (samples) ===
+awk: syntax error at source line 1
+ context is
+	 >>> !seen[\ <<< zsh]++
+awk: bailing out at source line 1

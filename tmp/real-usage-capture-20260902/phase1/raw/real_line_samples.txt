@@ -1,0 +1,47 @@
+=== handle_generation_tasks:563/565 (receive) 1-line tail ===
+[ 2026-09-01 16:38:50.104 | INFO     | exo.worker.runner.runner:handle_generation_tasks:563 ] received chat request: TextGeneration(task_id='a0be8c52-340f-4f58-b7df-ccb4f51a5c49', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='3ed6023d-ca4e-415e-8e06-750bf2d75d11', command_id='192cd684-717c-4660-ae63-b61b808d143e', task_params=TextGenerationTaskParams(model='deepseek-ai/DeepSeek-V4-Flash-0731', input=[InputMessage(role='user', content=<InputMessageContent: testing that you are working
+[ 2026-09-01 16:47:13.035 | INFO     | exo.worker.runner.runner:handle_generation_tasks:563 ] received chat request: TextGeneration(task_id='314ee433-dc64-4ed5-9ad8-846af46083aa', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='3ed6023d-ca4e-415e-8e06-750bf2d75d11', command_id='f9501fbd-be03-4378-a7f9-0b19e8570e04', task_params=TextGenerationTaskParams(model='deepseek-ai/DeepSeek-V4-Flash-0731', input=[InputMessage(role='user', content=<InputMessageContent: testing that you are working
+
+=== handle_generation_tasks:853/858 (???) ===
+[ 2026-09-01 16:47:09.645 | INFO     | exo.worker.runner.runner:handle_generation_tasks:853 ] runner idle: reclaimed MLX allocator pool
+[ 2026-09-01 16:47:58.059 | INFO     | exo.worker.runner.runner:handle_generation_tasks:853 ] runner idle: reclaimed MLX allocator pool
+[ 2026-09-01 16:47:09.645 | INFO     | exo.worker.runner.runner:handle_generation_tasks:858 ] runner ready
+[ 2026-09-01 16:47:58.059 | INFO     | exo.worker.runner.runner:handle_generation_tasks:858 ] runner ready
+
+=== progress_callback:811 samples ===
+[ 2026-09-01 16:20:23.938 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 0/14 tokens (0.0 tok/s)
+[ 2026-09-01 16:20:28.784 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 13/14 tokens (2.7 tok/s)
+[ 2026-09-01 16:20:29.590 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 14/14 tokens (2.5 tok/s)
+[ 2026-09-01 16:38:50.573 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 0/189597 tokens (0.0 tok/s)
+[ 2026-09-02 10:22:40.124 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 89406/89407 tokens (428.2 tok/s)
+[ 2026-09-02 10:22:41.224 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 89407/89407 tokens (426.0 tok/s)
+
+=== prefill:795/865/866/944/950 samples ===
+[ 2026-09-01 16:20:23.897 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:795 ] Prefilling 14 tokens...
+[ 2026-09-01 16:38:50.507 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:795 ] Prefilling 189597 tokens...
+[ 2026-09-01 16:20:23.899 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:865 ] [MEM] before prefill (14 tokens): active=87.81 GB, peak=87.81 GB, cache=0.00 GB
+[ 2026-09-01 16:38:50.535 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:865 ] [MEM] before prefill (189597 tokens): active=87.81 GB, peak=87.85 GB, cache=0.00 GB
+[ 2026-09-01 16:20:23.899 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:866 ] Starting prefill
+[ 2026-09-01 16:38:50.535 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:866 ] Starting prefill
+[ 2026-09-01 16:20:29.642 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:950 ] [MEM] after prefill (14 tok): active=87.84 GB
+[ 2026-09-01 16:46:36.246 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:950 ] [MEM] after prefill (189597 tok): active=91.65 GB
+
+=== batch_generate:submit:2733/2761, step:4695 samples ===
+[ 2026-09-01 16:46:36.473 | INFO     | exo.worker.engines.mlx.generator.batch_generate:submit:2733 ] MTP cache prefilled (1180 positions)
+[ 2026-09-01 16:47:18.602 | INFO     | exo.worker.engines.mlx.generator.batch_generate:submit:2733 ] MTP cache prefilled (1212 positions)
+[ 2026-09-01 16:46:36.475 | INFO     | exo.worker.engines.mlx.generator.batch_generate:submit:2761 ] DSpark ctx warmed (1 positions)
+[ 2026-09-01 16:47:18.603 | INFO     | exo.worker.engines.mlx.generator.batch_generate:submit:2761 ] DSpark ctx warmed (1 positions)
+[ 2026-09-01 16:46:41.825 | DEBUG    | exo.worker.engines.mlx.generator.batch_generate:step:4695 ] step overhead: 0.09ms (next=88.74ms total=88.83ms)
+[ 2026-09-01 16:46:46.802 | DEBUG    | exo.worker.engines.mlx.generator.batch_generate:step:4695 ] step overhead: 0.18ms (next=83.99ms total=84.17ms)
+
+=== make_kv_cache:2472 + update_kv_cache:977/1000 samples ===
+[ 2026-09-01 16:20:23.897 | INFO     | exo.worker.engines.mlx.cache:make_kv_cache:2472 ] Using MLX LM's make cache
+[ 2026-09-01 16:38:50.507 | INFO     | exo.worker.engines.mlx.cache:make_kv_cache:2472 ] Using MLX LM's make cache
+[ 2026-09-01 16:47:18.374 | INFO     | exo.worker.engines.mlx.cache:update_kv_cache:977 ] [SNAPMEM] leaf 0: 2 snapshots total=2.46GB depths=[189596,190808]
+[ 2026-09-01 16:48:05.784 | INFO     | exo.worker.engines.mlx.cache:update_kv_cache:977 ] [SNAPMEM] leaf 0: 3 snapshots total=3.70GB depths=[189596,190808,192279]
+[ 2026-09-01 16:47:18.374 | INFO     | exo.worker.engines.mlx.cache:update_kv_cache:1000 ] KV cache extended (leaf 0): +1212 tokens (kept 189598 shared, total 190810)
+[ 2026-09-01 16:48:05.785 | INFO     | exo.worker.engines.mlx.cache:update_kv_cache:1000 ] KV cache extended (leaf 0): +1471 tokens (kept 190810 shared, total 192281)
+
+=== _log_cache_profile:280 sample ===
+[ 2026-09-01 16:20:29.642 | INFO     | exo.worker.engines.mlx.generator.generate:_log_cache_profile:280 ] [MEMPROF] after prefill (14 tok): total_cache=0.02GB | PoolingCache=0.01GB, RotatingKVCache=0.01GB
+[ 2026-09-01 16:20:29.643 | INFO     | exo.worker.engines.mlx.generator.generate:_log_cache_profile:280 ] [MEMPROF] after prefill (serial cache): total_cache=0.02GB | PoolingCache=0.01GB, RotatingKVCache=0.01GB

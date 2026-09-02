@@ -1,0 +1,28 @@
+=== counts of candidate patterns ===
+prompt_tokens             162
+completion_tokens         58
+finish_reason             1102
+cached_tokens             0
+PrefixCache               0
+prefix                    1997
+Prefill complete          376
+Prefilling                1188
+KV cache added            2
+KV cache evicted          0
+ChatCompletion            0
+generation_tps            398
+tokens/sec                232
+tokens per sec            232
+TTFT                      0
+first token               232
+tool_call                 10016
+instance_id               382
+request_id                0
+ChatCompletionRequest     0
+usage                     2590
+=== distinct INFO/WARNING module:func emit points (last 50k lines) ===
+grep: invalid option -- P
+usage: grep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]
+	[-e pattern] [-f file] [--binary-files=value] [--color=when]
+	[--context[=num]] [--directories=action] [--label] [--line-buffered]
+	[--null] [pattern] [file ...]

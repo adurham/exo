@@ -1,0 +1,35 @@
+=== lines STARTING with log prefix that contain usage/prompt_tokens/completion_tokens ===
+0
+
+=== lines with Usage( pydantic repr ===
+0
+
+=== completion of generation tasks: look for task_status=Completed ===
+
+=== TextGeneration finished / Completed task lines ===
+
+=== runner received chat request END of line shape ===
+ed chat request: TextGeneration(task_id='a0be8c52-340f-4f58-b7df-ccb4f51a5c49', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='3ed6023d-ca4e-415e-8e06-750bf2d75d11', command_id='192cd684-717c-4660-ae63-b61b808d143e', task_params=TextGenerationTaskParams(model='deepseek-ai/DeepSeek-V4-Flash-0731', input=[InputMessage(role='user', content=<InputMessageContent: testing that you are working
+ed chat request: TextGeneration(task_id='314ee433-dc64-4ed5-9ad8-846af46083aa', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='3ed6023d-ca4e-415e-8e06-750bf2d75d11', command_id='f9501fbd-be03-4378-a7f9-0b19e8570e04', task_params=TextGenerationTaskParams(model='deepseek-ai/DeepSeek-V4-Flash-0731', input=[InputMessage(role='user', content=<InputMessageContent: testing that you are working
+
+=== PrefillProgress real emit ===
+0
+
+=== Prefill complete real ===
+[ 2026-09-01 16:20:29.642 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:944 ] Prefill complete: 14 tokens in 5.74s (2.4 tok/s)
+[ 2026-09-01 16:46:36.246 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:944 ] Prefill complete: 189597 tokens in 465.74s (407.1 tok/s)
+[ 2026-09-01 16:47:18.368 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:944 ] Prefill complete: 1213 tokens in 4.89s (248.1 tok/s)
+[ 2026-09-01 16:48:05.779 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:944 ] Prefill complete: 1472 tokens in 6.75s (218.2 tok/s)
+[ 2026-09-01 16:48:20.766 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:944 ] Prefill complete: 724 tokens in 4.61s (157.1 tok/s)
+
+=== chunk / TokenChunk emits ===
+
+=== any INFO line with tps ===
+[ 2026-09-02 09:08:31.253 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 ] <｜begin▁of▁sentence｜><｜User｜>daczsbvwcd haazalut toecfwdaqp cvroct qsbi ujpl hugoqva akew vmfbcspfcr ealydq vjobn vzbfiej yobsm pksopbzp oxyqo idyfnny qdpm ugldwwz siexk xccmgbjzbh zwkj csicwngdmg qhzl
+[ 2026-09-02 09:12:08.366 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 ] <｜begin▁of▁sentence｜><｜User｜>daczsbvwcd haazalut toecfwdaqp cvroct qsbi ujpl hugoqva akew vmfbcspfcr ealydq vjobn vzbfiej yobsm pksopbzp oxyqo idyfnny qdpm ugldwwz siexk xccmgbjzbh zwkj csicwngdmg qhzl
+[ 2026-09-02 09:15:46.845 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 ] <｜begin▁of▁sentence｜><｜User｜>daczsbvwcd haazalut toecfwdaqp cvroct qsbi ujpl hugoqva akew vmfbcspfcr ealydq vjobn vzbfiej yobsm pksopbzp oxyqo idyfnny qdpm ugldwwz siexk xccmgbjzbh zwkj csicwngdmg qhzl
+[ 2026-09-02 09:19:25.405 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 ] <｜begin▁of▁sentence｜><｜User｜>daczsbvwcd haazalut toecfwdaqp cvroct qsbi ujpl hugoqva akew vmfbcspfcr ealydq vjobn vzbfiej yobsm pksopbzp oxyqo idyfnny qdpm ugldwwz siexk xccmgbjzbh zwkj csicwngdmg qhzl
+[ 2026-09-02 09:23:02.548 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 ] <｜begin▁of▁sentence｜><｜User｜>daczsbvwcd haazalut toecfwdaqp cvroct qsbi ujpl hugoqva akew vmfbcspfcr ealydq vjobn vzbfiej yobsm pksopbzp oxyqo idyfnny qdpm ugldwwz siexk xccmgbjzbh zwkj csicwngdmg qhzl
+[ 2026-09-02 09:26:40.517 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1597 ] <｜begin▁of▁sentence｜><｜User｜>daczsbvwcd haazalut toecfwdaqp cvroct qsbi ujpl hugoqva akew vmfbcspfcr ealydq vjobn vzbfiej yobsm pksopbzp oxyqo idyfnny qdpm ugldwwz siexk xccmgbjzbh zwkj csicwngdmg qhzl
+
+=== tool_calls finish real ===

@@ -7692,3 +7692,29 @@ Verdict: temperature does NOT explain the real-usage decode gap.
 **Remaining suspects by elimination:** (1) 11-16% of decode wall outside all profiled phases (now PRIMARY); (2) measurement-convention: bench reports server-side generation_tps; user experiences total_tokens/total_wall including TTFT on 150K+ prompts, thinking phases, tool-call round trips. Entropy and temperature both closed; neither touched the convention difference between what the bench reports and what the user feels.
 
 Artifacts: tmp/verify-decomposition-20260901/temperature/ (RESULTS.md, PREREGISTRATION_TEMPERATURE.md, raw/).
+
+### REAL-USAGE CAPTURE — the 20-vs-34 gap is a MEASUREMENT CONVENTION (2026-09-02)
+
+Mystery CLOSED. The perceived ~20 t/s vs benchmark 32-34 t/s gap is not decode loss — it is the difference between two honest conventions.
+
+**Decisive evidence:** real session decode @ matched depth (140-160K prompt tokens, n=16): 34.06 t/s mean — +2.22 t/s FASTER than the benchmark's 31.84 @150K. Real hardware decodes faster than the bench, not slower.
+
+**Convention ladder (same 55 real requests, 42,091 completion tokens, 1,929s wall):**
+- decode-only (benchmark convention): 33.00 t/s
+- + TTFT/prefill: 22.44 t/s
+- + residual (stream/net) = true full wall: 21.82 t/s <- matches perceived ~20
+- visible-answer tokens only (59% of tokens are reasoning): 9.04 t/s
+
+Gap attribution: 94.5% TTFT/prefill, 5.5% stream/network. Zero unexplained decode loss.
+
+**Reconciliation identity** wall = prefill_uncached + decode + residual holds on all 55 requests (residual band [0.75s, 1.32s]); client-server join verified (0.077-0.394s propagation, 55/55); proved prompt_tps applies to UNCACHED tokens (total assumption -> median residual -585s, impossible).
+
+**Findings beyond the brief:**
+1. The "38 requests" premise was wrong — it was a /metrics snapshot pasted into chat surviving inside exo.log. Real totals: 57 requests / 44 tool_calls / 12 stop / 1 length. Only trust lines with log timestamp prefix; real per-request data lives in msgpack event log ~/.exo/event_log/api/*.bin.zst, not exo.log.
+2. 59% of generated tokens were reasoning tokens (24,662/42,091). They decode at full speed but make visible-answer perception 9.04 t/s.
+
+**Client capture tool built** (phase2/passive_capture_proxy.py, 9/9 self-tests pass, not yet run live — user on cloud): start with python3 .../phase2/passive_capture_proxy.py and point providers.exo.base_url at http://127.0.0.1:52416/v1.
+
+Artifacts: tmp/real-usage-capture-20260902/ (REPORT.md, partition_verified.json, phase1/FINDINGS.md, phase2/, requests.jsonl).
+
+**Performance-campaign implication:** the cluster's decode engine is operating at or slightly above the benchmark baseline in real usage. The user's 30+ target is ALREADY MET by the decode engine (33-34 t/s); perceived ~20 is wall-clock reality dominated by TTFT on 145K+ prompts. If wall-perceived throughput is the goal, the lever is TTFT/prefill reduction (94.5% of the gap), NOT decode speed.

@@ -1,0 +1,79 @@
+# RAW LOG SCHEMA SAMPLES — exo cluster node adams-mac-studio-m4-1.local
+# Captured 2026-09-02 (READ-ONLY ssh: grep/tail/ls only). Every line below is verbatim output.
+#
+# == Log files on node (~/.exo/exo_log/) ==
+#   exo.2026-08-31_21-25-50_093140.log.zst   (2250 lines, zstd)
+#   exo.2026-08-31_22-04-39_248306.log.zst   (2534 lines, zstd)
+#   exo.2026-08-31_22-54-04_689174.log.zst   (3950 lines, zstd)
+#   exo.2026-09-01_00-09-25_523979.log.zst   (8123 lines, zstd)  <- covers era A of session
+#   exo.2026-09-01_12-37-19_195940.log.zst  (17440 lines, zstd)  <- covers era B (instance 339f04f8)
+#   exo.log                                 (745676 lines, live) <- era 3ed6023d (16:19 Sep 1 onward)
+#   runner_log/{stdout.log,stderr.log}
+#
+# == CRITICAL PARSING GOTCHA ==
+# Chat CONTENT is embedded verbatim in TextGeneration task lines and aux DEBUG lines, so
+# naive `grep prompt_tokens exo.log` matches benchmark MARKDOWN inside pasted documents
+# (e.g. "| warmup (discarded) | 12.00 | true | 1200 | length | 108887 | 376.73 |").
+# Only trust lines that START with the log prefix "[ YYYY-MM-DD HH:MM:SS.mmm | LEVEL | ".
+#
+# == Line format ==
+# [ 2026-09-01 16:38:50.104 | INFO     | exo.worker.runner.runner:handle_generation_tasks:563 ] received chat request: TextGeneration(task_id='a0be8c52-340f-4f58-b7df-ccb4f51a5c49', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='3ed6023d-ca4e-415e-8e06-750bf2d75d11', command_id='192cd684-717c-4660-ae63-b61b808d143e', task_params=TextGenerationTaskParams(model='deepseek-ai/DeepSeek-V4-Flash-0731', input=[InputMessage(role='user', content=<InputMessageContent: ...
+#
+# == Per-phase timing lines actually emitted by the serial prefill path (generate.py) ==
+[ 2026-09-01 16:38:50.507 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:795 ] Prefilling 189597 tokens...
+[ 2026-09-01 16:38:50.535 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:865 ] [MEM] before prefill (189597 tokens): active=87.81 GB, peak=87.85 GB, cache=0.00 GB
+[ 2026-09-01 16:38:50.535 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:866 ] Starting prefill
+[ 2026-09-01 16:38:50.573 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 0/189597 tokens (0.0 tok/s)
+[ 2026-09-01 16:20:28.784 | DEBUG    | exo.worker.engines.mlx.generator.generate:progress_callback:811 ] Prefill progress: 13/14 tokens (2.7 tok/s)
+[ 2026-09-01 16:46:36.246 | DEBUG    | exo.worker.engines.mlx.generator.generate:prefill:944 ] Prefill complete: 189597 tokens in 465.74s (407.1 tok/s)
+[ 2026-09-01 16:46:36.246 | INFO     | exo.worker.engines.mlx.generator.generate:prefill:950 ] [MEM] after prefill (189597 tok): active=91.65 GB
+[ 2026-09-01 16:46:36.473 | INFO     | exo.worker.engines.mlx.generator.batch_generate:submit:2733 ] MTP cache prefilled (1180 positions)
+[ 2026-09-01 16:46:36.475 | INFO     | exo.worker.engines.mlx.generator.batch_generate:submit:2761 ] DSpark ctx warmed (1 positions)
+[ 2026-09-01 16:46:41.825 | DEBUG    | exo.worker.engines.mlx.generator.batch_generate:step:4695 ] step overhead: 0.09ms (next=88.74ms total=88.83ms)
+#
+# == Prefix-cache state lines (cache.py) ==
+[ 2026-09-01 16:47:18.374 | INFO     | exo.worker.engines.mlx.cache:update_kv_cache:977 ] [SNAPMEM] leaf 0: 2 snapshots total=2.46GB depths=[189596,190808]
+[ 2026-09-01 16:47:18.374 | INFO     | exo.worker.engines.mlx.cache:update_kv_cache:1000 ] KV cache extended (leaf 0): +1212 tokens (kept 189598 shared, total 190810)
+[ 2026-09-01 16:20:23.897 | INFO     | exo.worker.engines.mlx.cache:make_kv_cache:2472 ] Using MLX LM's make cache
+# NOTE: "KV cache added" appears only 2x in the whole live log (cache-create path);
+# the per-turn hit path emits "KV cache extended (leaf 0): +N tokens (kept M shared, total T)".
+#
+# == Request lifecycle markers ==
+[ 2026-09-01 16:38:50.104 | INFO     | exo.worker.runner.runner:handle_generation_tasks:563 ] received chat request: TextGeneration(task_id='a0be8c52-...', instance_id='3ed6023d-...', command_id='192cd684-...', ...)
+[ 2026-09-01 16:47:09.645 | INFO     | exo.worker.runner.runner:handle_generation_tasks:858 ] runner ready
+[ 2026-09-01 16:47:09.645 | INFO     | exo.worker.runner.runner:handle_generation_tasks:853 ] runner idle: reclaimed MLX allocator pool
+#
+# == API access log (only request line + method; NO status, NO duration, NO tokens) ==
+[ 2026-09-01 16:29:37.344 | DEBUG    | exo.api.main:_log_requests:338 ] API request: POST /v1/chat/completions
+#
+# == What does NOT appear anywhere in exo.log (grep counts over 745,676 live lines) ==
+#   "TTFT" / "first token" (outside chat content): 0 real emit lines
+#   "finish_reason=" as a structured log field: 0 real emit lines (only inside chat content)
+#   "cached_tokens": 0
+#   "prompt_tokens"/"completion_tokens" as structured fields: 0 real emit lines
+#   Per-chunk timestamps: TokenChunk/ToolCallChunk are NOT logged with timestamps at all.
+#
+# == The per-request numbers live in the EVENT LOG (msgpack), not exo.log ==
+#   ~/.exo/event_log/api/events.bin (+ .zst archives), length-prefixed msgpack records,
+#   written by exo.utils.disk_event_log.DiskEventLog. Record types seen (api log, 266,025 recs):
+#     NodeGatheredInfo 226047 | ChunkGenerated 28950 | NodeDownloadProgress 8730 |
+#     RunnerStatusUpdated 1557 | TaskStatusUpdated 367 | TaskCreated 280 | ...
+#   NO timestamp field on any event record (only event_id UUID + record order).
+#
+#   Terminal chunk of a request (verbatim msgpack->JSON, real request command_id
+#   192cd684-717c-4660-ae63-b61b808d143e, the session's first 189K-token call):
+{"ChunkGenerated": {"event_id": "c98d3478-0022-4c92-8c5d-97f69cb16b97", "command_id": "192cd684-717c-4660-ae63-b61b808d143e", "chunk": {"ToolCallChunk": {"model": "deepseek-ai/DeepSeek-V4-Flash-0731", "tool_calls": [{"id": "c624d816-...", "name": "terminal", "arguments": "..."}], "usage": {"prompt_tokens": 189598, "completion_tokens": 990, "total_tokens": 190588, "prompt_tokens_details": {"cached_tokens": 0, "audio_tokens": 0}, "completion_tokens_details": {"reasoning_tokens": 727, "audio_tokens": 0, "accepted_prediction_tokens": 0, "rejected_prediction_tokens": 0}}, "finish_reason": "tool_calls", "stats": {"prompt_tps": 407.09089512675075, "generation_tps": 30.047708362861307, "prompt_tokens": 189598, "generation_tokens": 990, "peak_memory_usage": {"in_bytes": ...}, "prefix_cache_hit": "none", "mtp_cycles_cumulative": ..., "mtp_accepted_drafts_cumulative": ...}}}}
+#   TokenChunk terminal example (real, command 8ec411ec):
+{"chunk": {"TokenChunk": {"text": "", "token_id": 1, "usage": {"prompt_tokens": 193004, "completion_tokens": 189, "total_tokens": 193193, "prompt_tokens_details": {"cached_tokens": 192279, ...}}, "finish_reason": "stop", "stats": {"prompt_tps": 157.12895450168534, "generation_tps": 30.49025568116457, "prompt_tokens": 193004, "generation_tokens": 189, "peak_memory_usage": {"in_bytes": 106520186316}, "prefix_cache_hit": "partial", "mtp_cycles_cumulative": 1081, "mtp_accepted_drafts_cumulative": 1679}}}}
+#
+# == /metrics endpoint (Prometheus, master node m4-2) — instance 339f04f8 snapshot (captured live during the session's era): ==
+exo_generation_requests_total{finish_reason="tool_calls",instance_id="339f04f8-82de-4976-8b97-ce067f35a7d3",model_id="deepseek-ai/DeepSeek-V4-Flash-0731"} 31.0
+exo_generation_requests_total{finish_reason="stop",instance_id="339f04f8-82de-4976-8b97-ce067f35a7d3",model_id="deepseek-ai/DeepSeek-V4-Flash-0731"} 6.0
+exo_generation_requests_total{finish_reason="length",instance_id="339f04f8-82de-4976-8b97-ce067f35a7d3",model_id="deepseek-ai/DeepSeek-V4-Flash-0731"} 1.0
+exo_prefix_cache_hits_total{hit_kind="partial",instance_id="339f04f8-82de-4976-8b97-ce067f35a7d3",...} 37.0
+exo_prefix_cache_hits_total{hit_kind="none",instance_id="339f04f8-82de-4976-8b97-ce067f35a7d3",...} 3.0
+#
+# == Code schema (local repo, src/exo/api/types/api.py) — what stats/usage carry: ==
+class Usage: prompt_tokens, completion_tokens, total_tokens, prompt_tokens_details{cached_tokens}, completion_tokens_details{reasoning_tokens,...}
+class GenerationStats: prompt_tps, generation_tps, prompt_tokens, generation_tokens, peak_memory_usage, prefix_cache_hit, mtp_cycles_cumulative, mtp_accepted_drafts_cumulative
+# -> NO TTFT, NO wall-clock timestamps, NO per-phase times anywhere in the schema.

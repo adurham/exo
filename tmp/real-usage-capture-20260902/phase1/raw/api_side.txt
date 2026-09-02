@@ -1,0 +1,41 @@
+=== ~/.exo tree (dirs + sizes) ===
+total 320
+drwxr-xr-x@  16 adam.durham  staff     512 Aug 31 01:22 .
+drwxr-x---+ 355 adam.durham  staff   11360 Sep  1 16:16 ..
+-rw-r--r--    1 adam.durham  staff       0 Feb 25  2026 .dashboard_opened
+-rw-r--r--@   1 adam.durham  staff       0 Sep  1 16:19 config.toml
+drwxr-xr-x    2 adam.durham  staff      64 Jun  9 15:08 custom_model_cards
+drwxr-xr-x    6 adam.durham  staff     192 Jun  4 21:05 custom_model_cards_backup_20260604_210510
+drwxr-xr-x    4 adam.durham  staff     128 Mar  2  2026 event_log
+drwxr-xr-x    9 adam.durham  staff     288 Sep  1 16:19 exo_log
+-rw-------    1 adam.durham  staff       5 Sep  1 16:19 exo.pid
+drwxr-xr-x@   2 adam.durham  staff      64 Feb 10  2026 images
+-rwx--x--x    1 adam.durham  staff    3864 Jun 11 23:59 jaccl_wedge_watchdog.sh
+drwxr-xr-x@  24 adam.durham  staff     768 Aug 28 22:34 models
+-rw-r--r--@   1 adam.durham  staff      68 Dec 18  2025 node_id.keypair
+-rw-r--r--    1 adam.durham  staff       4 Feb 25  2026 onboarding_complete
+drwxr-xr-x   56 adam.durham  staff    1792 Jun 17 18:07 wedge_dumps
+-rw-r--r--    1 adam.durham  staff  145826 Dec 29  2025 worker.log
+
+=== api.main / api emit points ===
+19570 | exo.api.main:_log_requests:338 
+   4 | exo.api.main:_choose_jit_placement_with_wait:1412 
+   3 | exo.api.main:_trigger_notify_user_to_download_model:1053 
+   2 | exo.api.main:unpause:391 
+   1 | exo.api.main:run:2398 
+   1 | exo.api.main:reset:372 
+
+=== api.main:log lines other than _log_requests:338 (samples) ===
+   3 [ 2026-09-01 17INFO     | exo.api.main:_choose_jit_placement_with_wait:1412 ] JIT placement for mlx-community/DeepSeek-V4-Flash not yet admissible (no admissible placement (No cycles found with sufficient memory)); polling for up to 120s (EXO_JIT_PLACEMENT_WAIT_SECONDS) while cluster state converges.
+   3 [ 2026-09-01 16WARNING  | exo.api.main:_trigger_notify_user_to_download_model:1053 ] TODO: we should send a notification to the user to download the model
+   2 [ 2026-09-01 16INFO     | exo.api.main:unpause:391 ] Unpausing API
+   1 [ 2026-09-02 02INFO     | exo.api.main:_choose_jit_placement_with_wait:1412 ] JIT placement for mlx-community/DeepSeek-V4-Flash not yet admissible (no admissible placement (No cycles found with sufficient memory)); polling for up to 120s (EXO_JIT_PLACEMENT_WAIT_SECONDS) while cluster state converges.
+   1 [ 2026-09-01 16INFO     | exo.api.main:run:2398 ] Starting API
+   1 [ 2026-09-01 16INFO     | exo.api.main:reset:372 ] Resetting API State
+
+=== disk_event_log / event store location hints ===
+[ 2026-09-01 16:19:36.965 | INFO     | exo.utils.disk_event_log:_rotate:177 ] Rotated event log: /Users/adam.durham/.exo/event_log/api/events.bin -> /Users/adam.durham/.exo/event_log/api/events.2026-09-01_21-19-36_813144.bin.zst
+[ 2026-09-01 16:19:37.097 | INFO     | exo.utils.disk_event_log:_rotate:177 ] Rotated event log: /Users/adam.durham/.exo/event_log/master/events.bin -> /Users/adam.durham/.exo/event_log/master/events.2026-09-01_21-19-36_988518.bin.zst
+[ 2026-09-01 16:19:41.678 | INFO     | exo.utils.disk_event_log:_rotate:177 ] Rotated event log: /Users/adam.durham/.exo/event_log/master/events.bin -> /Users/adam.durham/.exo/event_log/master/events.2026-09-01_21-19-41_676966.bin.zst
+stderr.log
+stdout.log

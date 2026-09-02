@@ -1,0 +1,29 @@
+=== _log_requests variants ===
+14490 API request: GET /node_id
+4574 API request: GET /metrics
+ 316 API request: GET /state
+  54 API request: POST /bench/chat/completions
+  48 API request: POST /v1/chat/completions
+  16 API request: GET /v1/models
+  12 API request: GET /version
+  12 API request: GET /v1/props
+  12 API request: GET /props
+  12 API request: GET /api/v1/models
+  12 API request: GET /api/tags
+   2 API request: GET /state/instances
+   2 API request: GET /instance/placement
+   1 API request: POST /instance
+
+=== lines containing (excluding content pollution): finished|Finished|decode|Decode|E2E|stream complete|generated ===
+   2 exo.worker.engines.mlx.utils_mlx:mlx_distributed_init:191 ] Rank 0 mlx distributed initialization complete
+   2 exo.worker.engines.mlx.generator.generate:mlx_generate:2454 ] Generation complete: prefill array([0, 128803, 125842, ..., 16, 128804, 128821], dtype=int32) tokens @ <F> tok/s, generated 50 tokens @ <F> tok/s
+   2 exo.worker.engines.mlx.generator.generate:mlx_generate:2222 ] Starting decode
+   2 exo.worker.engines.mlx.generator.generate:mlx_generate:2217 ] [MEM] after prefill, before decode: active=<F> GB, peak=<F> GB, cache=<F> GB
+   2 exo.shared.election:_campaign:197 ] Waiting for other campaign to finish
+   1 logging:handle:1681 ] propagate_queryable; self=south:0:peer res=@/8a72dcea89175a23393803f857659b0a/router/** other_info=Some(QueryableInfoType { complete: false, distance: 0 })
+   1 logging:handle:1681 ] propagate_queryable; self=south:0:client res=@/8a72dcea89175a23393803f857659b0a/router/** other_info=Some(QueryableInfoType { complete: false, distance: 0 })
+   1 logging:handle:1681 ] propagate_queryable; self=north res=@/8a72dcea89175a23393803f857659b0a/router/** other_info=Some(QueryableInfoType { complete: false, distance: 0 })
+   1 logging:handle:1681 ] declare_queryable; id=2 expr=@/8a72dcea89175a23393803f857659b0a/router/** complete=false distance=0
+   1 exo.shared.election:run:99 ] Initial campaign finished
+   1 exo.shared.election:_campaign:238 ] Election finished, new SessionId(master_node_id='cb31822b407fdb0848b60a17c8509f8b' election_clock=0) with queue [ElectionMessage(clock=2, seniority=1, proposed_session=SessionId(master_node_id='8a72dcea89175a23393803f857659b0a', election_clock=0), commands_seen=0), ElectionMessage(clock=2, seniority=1, proposed_session=SessionId(master_node_id='cb31822b407fdb0848b60a17c8509f8b', election_clock=0), commands_seen=0)]
+   1 exo.shared.election:_campaign:238 ] Election finished, new SessionId(master_node_id='8a72dcea89175a23393803f857659b0a' election_clock=0) with queue [ElectionMessage(clock=0, seniority=0, proposed_session=SessionId(master_node_id='8a72dcea89175a23393803f857659b0a', election_clock=0), commands_seen=0)]
