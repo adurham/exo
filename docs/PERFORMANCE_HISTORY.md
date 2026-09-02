@@ -7718,3 +7718,21 @@ Gap attribution: 94.5% TTFT/prefill, 5.5% stream/network. Zero unexplained decod
 Artifacts: tmp/real-usage-capture-20260902/ (REPORT.md, partition_verified.json, phase1/FINDINGS.md, phase2/, requests.jsonl).
 
 **Performance-campaign implication:** the cluster's decode engine is operating at or slightly above the benchmark baseline in real usage. The user's 30+ target is ALREADY MET by the decode engine (33-34 t/s); perceived ~20 is wall-clock reality dominated by TTFT on 145K+ prompts. If wall-perceived throughput is the goal, the lever is TTFT/prefill reduction (94.5% of the gap), NOT decode speed.
+
+### WALL-ATTRIBUTION — 11-16% gap mostly an accounting artifact; true out-of-bracket cost ~5% (2026-09-02)
+
+The 11-16% "unaccounted decode wall" from the V3/depth-scan analysis was ~70-85% cycle undercount. Corrected gap table (measured from dump-timestamp deltas / 50 cycles, no token counts or acceptance estimates):
+
+| depth | wall ms | profiled ms | outside ms | % wall |
+|---|---|---|---|---|
+| 89K | 71.47 | 67.43/68.40 | 3.55 | 5.0% |
+| 150K | 72.61 | 69.16/68.63 | 3.71 | 5.1% |
+| 250K | 73.80 | 70.34/70.01 | 3.62 | 4.9% |
+
+Identity 1 - naive_gap = coverage x (profiled/wall) reproduces published 15.6%/11.1% to 4 s.f. Validations: measured decode reproduced exactly from true tokens/cycle / wall (33.73/31.84/30.16); inter-dump gaps match prefill time within 0.8-2.3%; TRUE acceptance monotonic 1.411 -> 1.312 -> 1.226 (naive 1.731->1.560->2.072 was non-monotonic and impossible).
+
+Candidates (gap flat with depth, doesn't track acceptance): A) two fenced coord collectives before t_cycle_start (dsv4_mtp.py:2259-2310, fixed 1024-int32 payload); B) agree_on_tasks + agree_on_cancellations_fast unconditional every step() (batch_generator.py:678-720); C) per-token response building argued against (acceptance -13% while gap +2%). A/B not separable from existing data; plan: timing brackets + B-ablation (gate to every 8th step) — lazy-eval spillover contaminates both brackets, timing shows where paid, ablation where caused.
+
+NOTE: report's "entropy A/B still to run" recommendation is STALE — that A/B completed 2026-09-02 09:41 (see ENTROPY A/B entry): natural prose NOT inflated, random -12.6%. True acceptance 1.411 (not 1.73) means the accounting changed, but the natural-text question is settled. Direct acceptance measurement from runner stderr [MTP] lines (untimestamped, anchor-aligned per V2 feasibility method) can confirm the inferred acceptance for the Sep 2 arm windows.
+
+Artifacts: tmp/wall-attribution-20260902/REPORT.md
