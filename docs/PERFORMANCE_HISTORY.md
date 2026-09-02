@@ -7651,3 +7651,13 @@ PM-executed follow-up to the researcher's vector recommendations. V4 (c=2 concur
 - Bottom line: if per-cycle decode latency is the goal, the data points at verify (56 ms, 81%), not snapshots. Pool ratchet (1.95->2.27 GB) remains a separate memory-residency question.
 
 Methodology notes recorded: cumulative [MTP-PROF] dumps are running means — naive mean-of-dumps double-counts early cycles; must de-aggregate per interval. Model ID used was deepseek-ai/DeepSeek-V4-Flash-0731 (actually placed). PYTHONPATH=<repo>/tools/src required for bench/concurrent_bench.py.
+
+### SIDE-FIXES SHIPPED — profiler units, telemetry filter, stale comments (2026-09-01)
+
+Three root-cause fixes from the RESEARCH ROUND findings, committed bbb0e9341 (pushed).
+
+1. **Profiler unit metadata** (dsv4_mtp.py): _PhaseTimer stamped hardcoded "ms" on every series; rb_pool_restores (an integer counter) rendered as phantom 18.91ms hotspot. Series now carry per-series unit metadata (Literal["ms","count"]); record() gained additive unit param defaulting to "ms" (23 time call sites unchanged). Audited all 24 call sites: rb_pool_restores is the only non-time series. No consumer parses these dumps.
+2. **Telemetry restart detector** (collect_telemetry.py): parse_ps_runner now requires comm basename starts with "python" — validated live on both nodes: 4->1 match, wrappers + multiprocessing children rejected, negative control at HEAD returns 4. Caveat written into code: a future compiled native runner (comm=exo) would be missed.
+3. **Stale comments** (dsv4_mtp.py): corrected false "O(1) reference snapshot" claim (both rings AND pools copy; cache.py:783-784) and stale "41 pools" -> 62.
+
+Checks: ruff 18 pre-existing (I001 at HEAD), basedpyright 734 baseline no new errors (measured via detached worktree). nix fmt not run (nix not installed on this machine); CI flake gate pending. Note: second live session ran the identical task concurrently; main chain verified clean, no conflicts.
