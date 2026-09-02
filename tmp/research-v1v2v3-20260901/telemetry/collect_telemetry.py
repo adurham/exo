@@ -332,7 +332,20 @@ def parse_ps_runner(text: str, pattern: str) -> list[dict]:
         # the comm field is long, but for our purposes first token is enough).
         comm = comm_args.split(None, 1)[0] if comm_args else ""
         args = comm_args
-        if rx.search(args):
+        # Only the real runner runs under a python interpreter. The cluster is
+        # launched as `screen -dmS exorun zsh -l -c "... .venv/bin/python -m exo -v ..."`,
+        # so the SCREEN, login, and zsh WRAPPER processes all embed the literal
+        # `-m exo` marker in their own args and would otherwise match the regex.
+        # A wrapper re-exec (new shell, screen reattach) gives the wrapper a NEW
+        # lstart while the real runner keeps its old one -- indistinguishable from
+        # a genuine runner restart. Requiring the comm BASENAME to start with
+        # `python` excludes those wrappers. The genuine runner and its
+        # multiprocessing spawn children all run under a python interpreter
+        # (mp.set_start_method("spawn") re-execs the interpreter), so this does
+        # not drop any real runner. Do NOT re-widen this to accept an
+        # `exo`-prefixed comm without re-verifying how runners are spawned.
+        comm_base = comm.rsplit("/", 1)[-1]
+        if comm_base.startswith("python") and rx.search(args):
             procs.append({"pid": int(pid), "lstart": lstart, "comm": comm, "args": args})
     return procs
 

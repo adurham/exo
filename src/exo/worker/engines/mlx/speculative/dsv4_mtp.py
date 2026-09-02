@@ -33,7 +33,7 @@ import logging
 import os
 import time
 from collections import deque
-from typing import Any, BinaryIO, Optional, Sequence, cast
+from typing import Any, BinaryIO, Literal, Optional, Sequence, cast
 
 import mlx.core as mx
 from mlx_lm.models.cache import (
@@ -690,11 +690,14 @@ _POOL_SNAPSHOT_BATCH = (
 # clean at short unwrapped ctx but drift the moment the ring rotates
 # (P=41 drifts exactly at abs 127; P=4096 immediately; up to 0.6 logits
 # with junk drafts). With EXO_DSV4_SPEC_STATE_RESTORE=1 the B=1 path takes
-# an O(1) reference snapshot of every ring (slice-assign rebinds
-# keys/values, so pre-verify refs preserve pre-verify contents) plus a
-# save_meta of every pool BEFORE verify; on ANY rejection it restores all
-# of them wholesale and re-commits [y]+accepted with one small forward
-# (bitwise = sequential under rowseq+rowmask). This supersedes the
+# a snapshot of every ring and every pool BEFORE verify; on ANY rejection
+# it restores all of them wholesale and re-commits [y]+accepted with one
+# small forward (bitwise = sequential under rowseq+rowmask). There is no
+# O(1) path today: BOTH rings and pools copy. Ring snapshots materialize
+# keys/values via mx.array() (mlx-lm cache.py save_spec_state — mx
+# __setitem__ mutates in place, so a bare reference does NOT preserve
+# pre-write contents), and pool snapshots copy their buffers via
+# save_meta(). This supersedes the
 # regime-a/-b distinction entirely in this mode. Cost: ring-donation
 # blocking during verify + pool buf copies per cycle + one commit-forward
 # per rejection — the price of exactness; default path unchanged.
@@ -775,30 +778,40 @@ _FENCE_ASYNC_MAX_STREAMS = max(
 )
 
 
+# Unit of a profiler series. Durations/deltas are ``ms``; integer
+# counters (e.g. ``rb_pool_restores``) are ``count``. The formatter
+# renders the correct suffix per series instead of a hardcoded ``ms``.
+_ProfUnit = Literal["ms", "count"]
+
+
 class _PhaseTimer:
     """Per-cycle phase timer for MTP profiling, sliced by batch size.
 
     Keeps a per-(B, phase) buffer of samples and emits ``{mean, min,
-    max}`` in milliseconds every ``_PROFILE_INTERVAL`` cycles. Active
-    only when that env var is non-zero.
+    max}`` every ``_PROFILE_INTERVAL`` cycles. Each series carries its
+    own unit: durations/deltas are ``ms``; integer counters (e.g.
+    ``rb_pool_restores``) are ``count``. The formatter renders the
+    correct suffix per series instead of a hardcoded ``ms``.
     """
 
     def __init__(self) -> None:
         self.cycles: int = 0
         self.cycles_by_b: dict[int, int] = {}
-        # samples[B][phase] = list of ms.
-        self.samples: dict[int, dict[str, list[float]]] = {}
-        self._pending: dict[str, float] = {}
+        # samples[B][phase] = list of (value, unit).
+        self.samples: dict[int, dict[str, list[tuple[float, _ProfUnit]]]] = {}
+        self._pending: dict[str, tuple[float, _ProfUnit]] = {}
 
-    def record(self, phase: str, ms: float) -> None:
-        self._pending[phase] = ms
+    def record(
+        self, phase: str, value: float, unit: _ProfUnit = "ms"
+    ) -> None:
+        self._pending[phase] = (value, unit)
 
     def end_cycle(self, batch_size: int) -> None:
         self.cycles += 1
         self.cycles_by_b[batch_size] = self.cycles_by_b.get(batch_size, 0) + 1
         bucket = self.samples.setdefault(batch_size, {})
-        for phase, ms in self._pending.items():
-            bucket.setdefault(phase, []).append(ms)
+        for phase, (ms, unit) in self._pending.items():
+            bucket.setdefault(phase, []).append((ms, unit))
         self._pending = {}
         if _PROFILE_INTERVAL > 0 and self.cycles % _PROFILE_INTERVAL == 0:
             self.dump()
@@ -815,11 +828,21 @@ class _PhaseTimer:
                 xs = self.samples[b].get(phase)
                 if not xs:
                     continue
-                mean = sum(xs) / len(xs)
-                logger.warning(
-                    f"[MTP-PROF]   B={b} {phase:10s} mean={mean:6.2f}ms "
-                    f"min={min(xs):6.2f}ms max={max(xs):6.2f}ms n={len(xs)}"
-                )
+                unit = xs[0][1]
+                values = [v for v, _ in xs]
+                mean = sum(values) / len(values)
+                if unit == "ms":
+                    logger.warning(
+                        f"[MTP-PROF]   B={b} {phase:10s} mean={mean:6.2f}ms "
+                        f"min={min(values):6.2f}ms max={max(values):6.2f}ms "
+                        f"n={len(values)}"
+                    )
+                else:
+                    logger.warning(
+                        f"[MTP-PROF]   B={b} {phase:10s} mean={mean:6.2f} "
+                        f"min={min(values):6.2f} max={max(values):6.2f} "
+                        f"n={len(values)}"
+                    )
 
 
 _phase_timer = _PhaseTimer() if _PROFILE_INTERVAL > 0 else None
@@ -4104,7 +4127,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # forward. A pool flushes when remainder + (γ+1) >= ratio. Pools
         # that won't flush → rejected drafts sit in the remainder tail →
         # trim(rollback) handles them correctly → no snapshot needed.
-        # This avoids 41 × mx.array() sync copies on cycles that don't
+        # This avoids 62 × mx.array() sync copies on cycles that don't
         # need them (the vast majority: ratio=4 → flush every 4th cycle,
         # ratio=128 → flush every 128th cycle).
         _verify_len = gamma + 1
@@ -4118,7 +4141,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if _SPEC_STATE_RESTORE:
             # Unified rollback: snapshot EVERYTHING the verify can mutate
             # (all pools — every pool's remainder grows on every row — and
-            # every ring, by O(1) reference).
+            # every ring). Both copy: rings materialize keys/values via
+            # mx.array() (save_spec_state), pools via save_meta().
             _pool_snaps = [pc.save_meta() for pc in _pool_caches]
             for c in gen_batch.prompt_cache:
                 subs = c.caches if hasattr(c, "caches") else [c]
@@ -5020,7 +5044,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     mx.synchronize()
                     _rbt4 = time.perf_counter()
                     prof.record("rb_pool", (_rbt4 - _rbt3) * 1000.0)
-                    prof.record("rb_pool_restores", float(_rb_pool_restores))
+                    prof.record("rb_pool_restores", float(_rb_pool_restores), unit="count")
             else:
                 for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
                     rc.restore_spec_state(rsnap)
