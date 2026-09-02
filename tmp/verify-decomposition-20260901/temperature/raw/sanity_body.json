@@ -1,0 +1,43 @@
+{
+  "config": {
+    "host": "192.168.86.201",
+    "port": 52415,
+    "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "mode": "repetitive",
+    "target_tokens": 89408,
+    "iterations": 2,
+    "warmup": 1,
+    "max_tokens": 8,
+    "timeout": 10.0,
+    "seed": 1234,
+    "temperature": 1.0,
+    "json_out": "/Users/adam.durham/repos/exo/tmp/verify-decomposition-20260901/temperature/raw/sanity_body.json",
+    "fixed_words": 75000
+  },
+  "achieved_prompt_tokens": 89408,
+  "iterations": [
+    {
+      "iteration": 0,
+      "generation_tps": 33.0,
+      "prompt_tps": 300.0,
+      "prompt_tokens": 89408,
+      "generation_tokens": 256
+    },
+    {
+      "iteration": 1,
+      "generation_tps": 33.0,
+      "prompt_tps": 300.0,
+      "prompt_tokens": 89408,
+      "generation_tokens": 256
+    }
+  ],
+  "summary": {
+    "mode": "repetitive",
+    "achieved_prompt_tokens": 89408,
+    "generation_tps_mean": 33.0,
+    "generation_tps_median": 33.0,
+    "generation_tps_min": 33.0,
+    "generation_tps_max": 33.0,
+    "prompt_tps_mean": 300.0
+  }
+}

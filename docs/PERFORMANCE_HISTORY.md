@@ -7678,3 +7678,17 @@ Artifacts: tmp/verify-decomposition-20260901/entropy/ (RESULTS.md, PREREGISTRATI
 - **Session drift: 8.62% in the same condition 65 min apart** (repetitive pooled 32.77 -> recheck 35.60). Comparable in size to the random-arm effect (-12.6%). Cycle time moved with it, so not purely acceptance-side. Adds to the boot-variance story: within-boot drift is real and unexplained at hourly scales, not just across boots.
 - Latent harness bug found+fixed: old run_entropy.sh logged rc=$? from the wrong command (failed probe would log rc=0); new driver correct. Old file left untouched.
 - All error-grep matches across arms are benign (single recurring HF catalog-fetch 404, ~once/78s) — naive grep -i error on these logs is misleading.
+
+### TEMPERATURE ARM — hypothesis dies at the premise (2026-09-02)
+
+Verdict: temperature does NOT explain the real-usage decode gap.
+
+**Layer 1 (decisive): premise false.** Hypothesis assumed real sessions sample at temp=1.0 vs bench 0.8. Real Hermes sessions send NO temperature field (verified: zero matches across config.yaml, all profiles, exo provider profile). Server resolves sampling per field (request -> instance -> card -> env -> hardcoded); the model card pins temperature=0.8. Production and bench resolve to the SAME 0.8. No delta exists. agent.adaptive_sampling is enabled in config but read by zero installed client files (inert).
+
+**Layer 2 (moot for production):** measured contrast PARTIAL/underpowered: temp=1.0 32.535 vs pooled 33.579 (drop 1.043 t/s = 3.11%, Welch t=1.396, one-sided p=0.101, CI [-0.70, +2.79]). Explains 7.45% of the 14 t/s gap at point estimate; MDE ~2.7 t/s so smaller drops can't be excluded. Cycle time +0.44% while decode -3.11% -> acceptance signature (consistent with entropy study). Inferred tok/cycle 2.192 vs 2.251.
+
+**Open quality question (not throughput):** card pins temp=0.8 but comment says DeepSeek officially recommends 1.0; parity carried from the PREVIEW checkpoint, never re-validated against -0731 weights.
+
+**Remaining suspects by elimination:** (1) 11-16% of decode wall outside all profiled phases (now PRIMARY); (2) measurement-convention: bench reports server-side generation_tps; user experiences total_tokens/total_wall including TTFT on 150K+ prompts, thinking phases, tool-call round trips. Entropy and temperature both closed; neither touched the convention difference between what the bench reports and what the user feels.
+
+Artifacts: tmp/verify-decomposition-20260901/temperature/ (RESULTS.md, PREREGISTRATION_TEMPERATURE.md, raw/).

@@ -1,0 +1,6 @@
+Using pre-calibrated word count for mode=repetitive: 75000 words (offline-tokenizer calibrated).
+
+Mode: repetitive
+PROMPT TOKENS: 89408
+Generation TPS: mean=32.54, median=32.22, min=32.05, max=33.42
+Prompt TPS: mean=425.93
