@@ -1,0 +1,290 @@
+# Decode-side per-collective instrumentation — code sketch (NOT applied)
+# Round 3, 2026-09-02. Design doc: findings/c-decode-instrumentation-design.md
+# Base HEAD: 17d427b01. Applies with: git apply artifacts/decode_instrumentation.patch
+# Env gate: EXO_DSV4_DECODE_COLLECTIVE_PROFILING=1 (strict no-op when unset/0).
+# Candidate A -> _mtp_trace_log JSONL (gated by EXO_DSV4_MTP_TRANSITION_TRACE=1 for output; records also carry the profiling fields)
+# Candidate B -> [PROF] logger lines (routed to runner stderr, captured in ~/exo.log)
+#
+# IMPORTANT: Candidate A's records only reach disk when EXO_DSV4_MTP_TRANSITION_TRACE=1
+# is ALSO set (the _mtp_trace_log sink is gated on it). The runbook sets both vars.
+#
+--- a/src/exo/worker/engines/mlx/speculative/dsv4_mtp.py
++++ b/src/exo/worker/engines/mlx/speculative/dsv4_mtp.py
+@@ -241,6 +241,21 @@
+ # pipelining — measurements are upper bounds on real production walls.
+ _PROFILE_INTERVAL = int(os.environ.get("EXO_DSV4_MTP_PROFILE", "0"))
+ 
++# DECODE COORD-COLLECTIVE PROFILING (EXO_DSV4_DECODE_COLLECTIVE_PROFILING=1,
++# round 3 design — see tmp/prefill-round3-20260902/findings/
++# c-decode-instrumentation-design.md). Direct per-collective timing of the
++# fenced upstream-sync collectives in `_next()` (uid-intersection all_sum +
++# _num_tokens all_max). Strict no-op when the env var is unset: the only
++# cost on the hot path is one module-constant bool check per collective.
++# Behavior-changing instrumentation it is NOT: no new mx.eval/synchronize is
++# inserted (the wrapped collectives are already synchronous — each already
++# carries its own in-place mx.eval), so nothing that previously overlapped
++# is serialised by this gate. Timing is duration-only per rank; records
++# deliberately carry no shared-epoch timestamps (cross-rank clock skew).
++_DECODE_COLLECTIVE_PROFILING = (
++    os.environ.get("EXO_DSV4_DECODE_COLLECTIVE_PROFILING") == "1"
++)
++
+ # ROLLBACK SUB-PHASE ATTRIBUTION (EXO_DSV4_RB_PROFILE=1, requires
+ # EXO_DSV4_MTP_PROFILE>0; B=1 _SPEC_STATE_RESTORE path only). The "rollback"
+ # bracket lumps together costs with very different fixes: the
+@@ -1656,6 +1671,16 @@
+         self._mtp_drift_handle: Optional[BinaryIO] = None
+         self._mtp_trace_handle: Optional[BinaryIO] = None
+         self._mtp_trace_seq: int = 0
++        # EXO_DSV4_DECODE_COLLECTIVE_PROFILING: first-occurrence warmup
++        # flags for the fenced upstream-sync collectives in `_next()`.
++        # The very first call per collective per process pays one-time
++        # costs (JACCL QP warmup, first-touch page faults, lazy group
++        # setup) that are NOT representative of steady-state decode cost;
++        # each emitted record carries "warmup" on the first occurrence so
++        # analysis buckets it separately and the steady-state mean is not
++        # polluted. Counters are only incremented when profiling is on.
++        self._coord_sync_all_sum_calls: int = 0
++        self._coord_sync_all_max_calls: int = 0
+         # EXO_DSV4_SPEC_TRACE=1: per-cycle committed-token + cache-offset
+         # divergence trace for the system-prompt degeneration hunt
+         # (2026-05-29). One JSONL record per spec cycle on rank 0. Cost
+@@ -2266,8 +2291,36 @@
+                 if 0 <= _u < uid_bound:
+                     local_presence[_u] = 1
+             presence_arr = mx.array(local_presence, dtype=mx.int32)
++            _prof_a = _DECODE_COLLECTIVE_PROFILING and time.perf_counter()
+             counted = mx.distributed.all_sum(presence_arr, group=coord_group)
+             mx.eval(counted)
++            if _prof_a:
++                _dt_a1_us = (time.perf_counter() - _prof_a) * 1e6
++                _n_ranks_a = coord_group.size()
++                _warmup_a1 = (
++                    "warmup"
++                    if self._coord_sync_all_sum_calls == 0
++                    else "steady"
++                )
++                self._mtp_trace_log(
++                    "decode_coord_collective_us",
++                    {
++                        "collective": "upstream_sync_all_sum",
++                        "us": round(_dt_a1_us, 1),
++                        "warmup": _warmup_a1,
++                        "local_num_tokens": list(gen_batch._num_tokens),
++                        # rank context for WITHIN-RANK analysis only. There
++                        # is deliberately NO shared-epoch timestamp in this
++                        # record: absolute timestamps must never be compared
++                        # or subtracted across ranks (unsynchronized clock
++                        # skew), and emitting only durations + rank id makes
++                        # that mistake structurally impossible.
++                        "coord_rank": coord_group.rank(),
++                        "coord_size": _n_ranks_a,
++                        "batch_size": len(gen_batch),
++                    },
++                )
++                self._coord_sync_all_sum_calls += 1
+             n_ranks = coord_group.size()
+             counted_lst = cast(list[int], counted.tolist())
+             keep_uids: set[int] = {
+@@ -2303,10 +2356,34 @@
+             # the same uid set in the same order, so the int array is
+             # length-equivalent for all_max.
+             if len(gen_batch) >= 1:
++                _prof_a2 = _DECODE_COLLECTIVE_PROFILING and time.perf_counter()
+                 synced = mx.distributed.all_max(
+                     mx.array(gen_batch._num_tokens), group=coord_group
+                 )
+                 mx.eval(synced)
++                if _prof_a2:
++                    _dt_a2_us = (time.perf_counter() - _prof_a2) * 1e6
++                    _warmup_a2 = (
++                        "warmup"
++                        if self._coord_sync_all_max_calls == 0
++                        else "steady"
++                    )
++                    self._mtp_trace_log(
++                        "decode_coord_collective_us",
++                        {
++                            "collective": "upstream_sync_all_max",
++                            "us": round(_dt_a2_us, 1),
++                            "warmup": _warmup_a2,
++                            # max(local _num_tokens) IS the committed decode
++                            # depth for this collective (all_max of per-uid
++                            # depths) — the depth stratum key for analysis.
++                            "depth_committed": max(gen_batch._num_tokens),
++                            "coord_rank": coord_group.rank(),
++                            "coord_size": coord_group.size(),
++                            "batch_size": len(gen_batch),
++                        },
++                    )
++                    self._coord_sync_all_max_calls += 1
+                 gen_batch._num_tokens = cast(list[int], synced.tolist())
+ 
+         # Drain buffered tokens first (one per call), per the parent
+--- a/src/exo/worker/runner/llm_inference/batch_generator.py
++++ b/src/exo/worker/runner/llm_inference/batch_generator.py
+@@ -4,7 +4,7 @@
+ from collections import deque
+ from collections.abc import Generator, Iterator
+ from dataclasses import dataclass, field
+-from typing import BinaryIO
++from typing import BinaryIO, cast
+ 
+ import mlx.core as mx
+ from mlx_lm.tokenizer_utils import TokenizerWrapper
+@@ -52,7 +52,20 @@
+ from .model_output_parsers import apply_all_parsers, map_responses_to_chunks
+ from .tool_parsers import ToolParser
+ 
++# DECODE AGREE-PROTOCOL PROFILING (EXO_DSV4_DECODE_COLLECTIVE_PROFILING=1,
++# round 3 design — see tmp/prefill-round3-20260902/findings/
++# c-decode-instrumentation-design.md). Direct per-collective timing of the
++# BatchGenerator agree_* primitives (gate mx_any + slow-path all_gather).
++# Strict no-op when unset. NO new mx.eval/synchronize is inserted: every
++# timed primitive already materializes internally (mx_any: mx.eval +
++# .item(); mx_all_gather_tasks: .tolist()), so the wrap measures real
++# execution, not enqueue, and adds no sync point. Timing is duration-only
++# per rank; records carry no shared-epoch timestamps (cross-rank clock skew).
++_DECODE_AGREE_PROFILING = (
++    os.environ.get("EXO_DSV4_DECODE_COLLECTIVE_PROFILING") == "1"
++)
+ 
++
+ class GeneratorQueue[T]:
+     def __init__(self):
+         self._q = deque[T]()
+@@ -425,6 +438,17 @@
+     _all_tasks: dict[TaskId, TextGeneration] = field(default_factory=dict, init=False)
+     _queue: deque[TextGeneration] = field(default_factory=deque, init=False)
+     _gen: ExoBatchGenerator = field(init=False)
++    # EXO_DSV4_DECODE_COLLECTIVE_PROFILING: first-occurrence warmup flags
++    # for the agree_* primitives. First calls per process pay one-time
++    # costs (JACCL QP warmup, first-touch, lazy coord-group setup) not
++    # representative of steady-state decode; each emitted record carries
++    # "warmup" on the first occurrence so analysis buckets it separately
++    # and steady-state means are not polluted. Counters only advance when
++    # profiling is on (strict no-op otherwise).
++    _agree_on_tasks_calls: int = field(default=0, init=False)
++    _agree_on_tasks_gather_calls: int = field(default=0, init=False)
++    _agree_cancel_fast_calls: int = field(default=0, init=False)
++    _agree_cancel_gather_calls: int = field(default=0, init=False)
+     _active_tasks: dict[
+         int,
+         tuple[
+@@ -521,10 +545,44 @@
+         `get_coord_group` in utils_mlx.
+         """
+         coord = get_coord_group(self.group)
++        _prof_b1 = _DECODE_AGREE_PROFILING and time.perf_counter()
+         if not mx_any(len(self._maybe_queue) > 0, coord):
+-            return
+-        _t0 = time.perf_counter()
++            if _prof_b1:
++                logger.info(
++                    "[PROF] agree_on_tasks.gate_us=%.1f warmup=%s depth=%d "
++                    "rank=%d queue=%d",
++                    (time.perf_counter() - _prof_b1) * 1e6,
++                    "warmup" if self._agree_on_tasks_calls == 0 else "steady",
++                    min(self._gen_num_tokens_depths(), default=0),
++                    coord.rank() if coord is not None else -1,
++                    len(self._maybe_queue),
++                )
++                self._agree_on_tasks_calls += 1
++            return
++        if _prof_b1:
++            logger.info(
++                "[PROF] agree_on_tasks.gate_us=%.1f warmup=%s depth=%d "
++                "rank=%d queue=%d slow_path=1",
++                (time.perf_counter() - _prof_b1) * 1e6,
++                "warmup" if self._agree_on_tasks_calls == 0 else "steady",
++                min(self._gen_num_tokens_depths(), default=0),
++                coord.rank() if coord is not None else -1,
++                len(self._maybe_queue),
++            )
++            self._agree_on_tasks_calls += 1
++        _prof_b1b = _DECODE_AGREE_PROFILING and time.perf_counter()
+         agreed, different = mx_all_gather_tasks(self._maybe_queue, coord)
++        if _prof_b1b:
++            logger.info(
++                "[PROF] agree_on_tasks.all_gather_us=%.1f warmup=%s depth=%d "
++                "rank=%d n_local=%d",
++                (time.perf_counter() - _prof_b1b) * 1e6,
++                "warmup" if self._agree_on_tasks_gather_calls == 0 else "steady",
++                min(self._gen_num_tokens_depths(), default=0),
++                coord.rank() if coord is not None else -1,
++                len(self._maybe_queue),
++            )
++            self._agree_on_tasks_gather_calls += 1
+         # Extend from `agreed` (sorted by task_id on all ranks) — upstream
+         # PR #2048 fix. See the other agree_on_tasks above for rationale.
+         self._queue.extend(agreed)
+@@ -577,16 +635,69 @@
+ 
+         coord = get_coord_group(self.group)
+         has_anything = has_cancel_all or len(self._maybe_cancel) > 0
++        _prof_b2a = _DECODE_AGREE_PROFILING and time.perf_counter()
+         if not mx_any(has_anything, coord):
++            if _prof_b2a:
++                logger.info(
++                    "[PROF] agree_on_cancellations_fast.gate_us=%.1f warmup=%s "
++                    "depth=%d rank=%d local_cancels=%d",
++                    (time.perf_counter() - _prof_b2a) * 1e6,
++                    "warmup"
++                    if self._agree_cancel_fast_calls == 0
++                    else "steady",
++                    min(self._gen_num_tokens_depths(), default=0),
++                    coord.rank() if coord is not None else -1,
++                    len(self._maybe_cancel),
++                )
++                self._agree_cancel_fast_calls += 1
+             return  # Fast path: no rank has cancellations — 1 collective op total
++        if _prof_b2a:
++            logger.info(
++                "[PROF] agree_on_cancellations_fast.gate_us=%.1f warmup=%s "
++                "depth=%d rank=%d local_cancels=%d slow_path=1",
++                (time.perf_counter() - _prof_b2a) * 1e6,
++                "warmup" if self._agree_cancel_fast_calls == 0 else "steady",
++                min(self._gen_num_tokens_depths(), default=0),
++                coord.rank() if coord is not None else -1,
++                len(self._maybe_cancel),
++            )
++            self._agree_cancel_fast_calls += 1
+ 
+         # Slow path: at least one rank has cancels — full protocol
++        _prof_b2b = _DECODE_AGREE_PROFILING and time.perf_counter()
+         if mx_any(has_cancel_all, coord):
+             self._cancelled_tasks.add(CANCEL_ALL_TASKS)
+ 
+         agreed, different = mx_all_gather_tasks(self._maybe_cancel, coord)
++        if _prof_b2b:
++            logger.info(
++                "[PROF] agree_on_cancellations_fast.all_gather_us=%.1f "
++                "warmup=%s depth=%d rank=%d n_local=%d",
++                (time.perf_counter() - _prof_b2b) * 1e6,
++                "warmup"
++                if self._agree_cancel_gather_calls == 0
++                else "steady",
++                min(self._gen_num_tokens_depths(), default=0),
++                coord.rank() if coord is not None else -1,
++                len(self._maybe_cancel),
++            )
++            self._agree_cancel_gather_calls += 1
+         self._cancelled_tasks.update(task.task_id for task in agreed)
+         self._maybe_cancel = list(different)
++
++    def _gen_num_tokens_depths(self) -> list[int]:
++        """Committed decode depth per active uid, read from the wrapped
++        MLX generator's gen_batch._num_tokens. Used ONLY as the depth
++        stratum key for decode-collective profiling records. Pure local
++        reads — no collectives. Defensive against the attribute being
++        absent (non-MTP wrapped generators) or mid-mutation.
++        """
++        gen_batch: object = getattr(
++            getattr(self._gen, "_mlx_gen", None), "_generation_batch", None
++        )
++        if gen_batch is None:
++            return []
++        return cast(list[int], getattr(gen_batch, "_num_tokens", []) or [])
+ 
+     def _jaccl_dump_step(self, label: str) -> None:
+         """Snapshot per-rank Python state once per step() call when

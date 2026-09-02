@@ -1,0 +1,116 @@
+{
+  "a_absent": {
+    "attempts": 1,
+    "http_status": 200,
+    "wall_time_seconds": 3.101,
+    "response_json": {
+      "id": "c70c084b-6dde-4d2d-b66a-dfede54cbd1c",
+      "object": "chat.completion",
+      "created": 1788388436,
+      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "The"
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 353,
+        "completion_tokens": 1,
+        "total_tokens": 354,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    "response_raw": "{\"id\":\"c70c084b-6dde-4d2d-b66a-dfede54cbd1c\",\"object\":\"chat.completion\",\"created\":1788388436,\"model\":\"deepseek-ai/DeepSeek-V4-Flash-0731\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"The\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":353,\"completion_tokens\":1,\"total_tokens\":354,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":1,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+  },
+  "b_empty": {
+    "attempts": 1,
+    "http_status": 200,
+    "wall_time_seconds": 0.98,
+    "response_json": {
+      "id": "61a3f4e8-9d43-47bc-82ac-508f141ca659",
+      "object": "chat.completion",
+      "created": 1788388437,
+      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "The"
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 353,
+        "completion_tokens": 1,
+        "total_tokens": 354,
+        "prompt_tokens_details": {
+          "cached_tokens": 351,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    "response_raw": "{\"id\":\"61a3f4e8-9d43-47bc-82ac-508f141ca659\",\"object\":\"chat.completion\",\"created\":1788388437,\"model\":\"deepseek-ai/DeepSeek-V4-Flash-0731\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"The\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":353,\"completion_tokens\":1,\"total_tokens\":354,\"prompt_tokens_details\":{\"cached_tokens\":351,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":1,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+  },
+  "c_space": {
+    "attempts": 1,
+    "http_status": 200,
+    "wall_time_seconds": 3.324,
+    "response_json": {
+      "id": "54e04fca-2d4c-4d28-b3c8-37ac1d6540d3",
+      "object": "chat.completion",
+      "created": 1788388440,
+      "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "</think>"
+          },
+          "finish_reason": "length"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 354,
+        "completion_tokens": 1,
+        "total_tokens": 355,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    "response_raw": "{\"id\":\"54e04fca-2d4c-4d28-b3c8-37ac1d6540d3\",\"object\":\"chat.completion\",\"created\":1788388440,\"model\":\"deepseek-ai/DeepSeek-V4-Flash-0731\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"</think>\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":354,\"completion_tokens\":1,\"total_tokens\":355,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":1,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+  }
+}

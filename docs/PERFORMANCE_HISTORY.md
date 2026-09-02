@@ -7761,3 +7761,21 @@ Artifacts: tmp/prefill-round2-20260902/REPORT.md + 6 findings files.
 Survivorship: 21.9% reproduces but LENGTH-dependent (2.1% @2 turns -> 21.9% @55); n=1 session — hypothesis, not calibrated (do not use in go/no-go).
 SDPA: closure INVALID — 2.029x was ms/token, per-call = 2x = 4.06x (identity verified); linear scaling predicts 1.0x. Fable same-phenomenon hypothesis refuted: depth slope ~86% explained by O(P); O(P) ~2.2% of 12K cost. Open: is the 4.06x per-call constant real and does it matter at 250K? Needs direct per-call timing at 2 lengths, no sweep.
 DECODE: 2 of 4 ablation arms would HANG the cluster (agree_on_tasks is the only path filling _queue). Direct-timestamp instrumentation preferred over sampled ablation. Pitfalls to dodge: lazy-eval (need mx.eval/sync before end timestamp), cross-rank clock skew (within-rank durations only), first-call warmup bucketing, disjoint timer placement.
+
+### PREFILL ROUND 3 (consult loop) — pad-strip shipped; production-proof of cache destruction; Fix B CONDITIONAL-GO (2026-09-02)
+
+Artifacts: tmp/prefill-round3-20260902/REPORT.md. hermes-agent commit bdc9b6f1fc (pushed): provider-scoped pad-strip, additive at serialization time, exact-match exo/custom:exo only; fail-safe verified (anthropic/ollama-cloud/unknown/'exotic'/'exo-remote' unchanged); 40 reasoning tests pass; FORK.md entry included.
+
+**A1 gate PASS + find of the round:** live 353/353/354 prompt_tokens matched offline render exactly; (a)-vs-(c) = one inserted space token at index 294. THE SMOKING GUN in raw responses: server's own cached_tokens = 351 for the unpadded variant vs 0 for the padded — direct production proof the pad destroyed cache reuse, independent of our probe.
+
+**Re-probe: PASS under identical bands** — median 1.000, p10 1.000 (all 3 conventions), 0 zeros / 54 ones. Pessimistic variant-B lower bound also passes (p10 0.8431). Pad-still-in replay reproduces round 2 EXACTLY (zero methodology drift). 7->0 zeros is the predicted outcome under both "clean system" and "proxy blind to what remains" — detection floor is now the binding constraint.
+
+**Optimism handling: option (b)** — the 54 pairs came from an ended session with no persisted decode ids; claim downgraded to "FAIL ruled out under optimistic reconstruction," NOT "Fix B works."
+
+**Fix B verdict: CONDITIONAL-GO** (never GO). Conditions: C1 de-optimize the proxy against real decode ids (amended post-hoc to require multi-invoke tool-call pairs — else it tests around the blind spot); C2 fleet value: 21.9% is a 55-turn figure, it is 4.23% at 6 turns.
+
+**SDPA 2-length timing script: ready** (~15-20 min, 2 short runs at 12K/64K, n>=5, direct perf_counter, reductio built into analyzer, decision rule pre-registered). Patch unapplied, bash -n + compile pass. Requires user approval.
+
+**Decode instrumentation: ready** — patches unapplied, line ranges re-verified at HEAD. Key finding: every interval already ends at a production-unconditional sync, so NO forced mx.eval needed — sidesteps the perturbation risk entirely.
+
+**Process notes:** A1 worker misread its own clean single-token insertion as "60 differing positions" and skipped the live half (re-dispatched); A2 worker's anthropic-padding framing was wrong (corrected). exo src/ untouched; no exo commits.

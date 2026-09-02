@@ -1,0 +1,103 @@
+--- a/mlx-lm/mlx_lm/models/deepseek_v4.py
++++ b/mlx-lm/mlx_lm/models/deepseek_v4.py
+@@ -22,6 +22,60 @@
+ _BUILD_PROBE_ENABLED = bool(os.environ.get("MLX_BUILD_PROBE"))
+ _BUILD_PROBE_LOG_EVERY = int(os.environ.get("MLX_BUILD_PROBE_LOG_EVERY", "8"))
+ _BUILD_PROBE_PERF = _bp_time.perf_counter
++
++# ---- ROUND-3 SDPA per-call timing (env-gated, EXO_DSV4_SDPA_CALL_PROFILE=1) ----
++# Directly wraps the `attn.sdpa` SDPA call site(s) in perf_counter so we
++# measure PER-CALL ABSOLUTE milliseconds, NOT ms/token (a per-call vs
++# per-token units conflation invalidated the round-2 closure — see
++# tmp/prefill-round2/findings/sdpa-reopen.md).
++#
++# MLX IS LAZY: a bare perf_counter around the call measures only ENQUEUE
++# (graph build), not execution. The kernel runs asynchronously when its
++# output is first forced. The existing `finalize(x)` / `span()` helpers in
++# mlx_lm/profiler.py are NO-OPS when no profiler hook is registered
++# (profiler.py:109-113), so they cannot be relied on here. This gate
++# inserts its OWN explicit `mx.eval(out)` on the SDPA output immediately
++# BEFORE the end timestamp, so the perf_counter delta reflects real GPU
++# kernel time for that one call. This is the mandatory correctness
++# requirement for round 3.
++#
++# Output: one `[SDPA-CALL] ...` line per measured call, written to stderr
++# (captured in ~/exo.log under `Runner stderr:` lines) — no SIGUSR1, no
++# autodump dependency, no cluster-side file writes; the analyzer greps the
++# SSH-pulled log. The probe is a PER-CALL emitter (n >= 5 needed per
++# length); the analysis script separates the FIRST call at each length
++# (warmup — excluded) from steady-state.
++#
++# Cost when OFF: one module-level bool read per `attn.sdpa` site (~ns).
++# Zero env-var reads, zero perf_counter calls, zero mx.eval in the hot path.
++_SDPA_CALL_PROFILE = bool(os.environ.get("EXO_DSV4_SDPA_CALL_PROFILE"))
++_SDPA_CALL_PERF = _bp_time.perf_counter
++
++
++def _sdpacall_mark_start() -> float:
++    """Return a perf_counter start timestamp when profiling is on, else 0.0."""
++    return _SDPA_CALL_PERF()
++
++
++def _sdpacall_record(out: mx.array, layer_idx: int, t0: float, tag: str) -> None:
++    """Force lazy evaluation of the SDPA output, then emit a per-call line.
++
++    ``mx.eval(out)`` is the MANDATORY lazy-eval sync: without forcing the
++    graph here, the perf_counter delta would measure only ENQUEUE time, not
++    the GPU kernel. The eval sits INSIDE the timed window (immediately
++    before the end timestamp), matching how SpanProfilerHook's sync mode
++    drains. ``out`` is the SDPA result (already an mx.array at this point —
++    under the sparse branch a concatenation of tile outputs).
++    """
++    mx.eval(out)
++    ms = (_SDPA_CALL_PERF() - t0) * 1000.0
++    import sys as _s
++    _s.stderr.write(
++        f"[SDPA-CALL] {tag} L={layer_idx} ms={ms:.3f}\n"
++    )
++    _s.stderr.flush()
++
++
+ _BUILD_PROBE_ACC: Dict[str, float] = {
+     "attn_pre": 0.0,
+     "attn": 0.0,
+@@ -4291,6 +4345,7 @@
+             mask = _clamp_mask_to_kv(mask, kv.shape[2])
+ 
+             with span("attn.sdpa"):
++                _sdp_t0 = _sdpacall_mark_start() if _SDPA_CALL_PROFILE else 0.0
+                 out = finalize(
+                     scaled_dot_product_attention(
+                         q,
+@@ -4302,6 +4357,8 @@
+                         sinks=_cached_sinks(self, q.dtype),
+                     )
+                 )
++                if _SDPA_CALL_PROFILE:
++                    _sdpacall_record(out, self.layer_idx, _sdp_t0, "local")
+             with span("attn.rope_out"):
+                 out = _rope_dispatch(self.rope, out, offset, inverse=True)
+                 out = finalize(out)
+@@ -4863,6 +4920,7 @@
+                 mask = mask[..., _seq_lo:_seq_hi, :]
+ 
+             with span("attn.sdpa"):
++                _sdp_t0 = _sdpacall_mark_start() if _SDPA_CALL_PROFILE else 0.0
+                 # Local attention
+                 if pooled.shape[1] == 0:
+                     out = scaled_dot_product_attention(
+@@ -5016,6 +5074,14 @@
+                                 sinks,
+                             )
+                 out = finalize(out)
++                if _SDPA_CALL_PROFILE:
++                    # tag = branch: local / compressed / sparse — the SDPA span
++                    # covers one of the three fused-kernel branches above.
++                    _sel = "local" if pooled.shape[1] == 0 else (
++                        "compressed" if pooled.shape[1] <= self.indexer.index_topk
++                        else "sparse"
++                    )
++                    _sdpacall_record(out, self.layer_idx, _sdp_t0, _sel)
+             if _stsub:
+                 mx.eval(out)
+                 mx.synchronize()
