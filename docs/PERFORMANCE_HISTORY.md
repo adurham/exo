@@ -7875,3 +7875,27 @@ Also: hc_expand Metal kernel guard mirrored into scope (ad8bdb735, 0->4 collecte
 **STILL OPEN:** CI green not directly observed (local venv mlx 0.32.0.dev20260804 matches neither pin, so 6 local failures are environmental and pre-date this work — needs `uv sync --extra mlx` or a real CI run). Two pre-existing collection errors (test_moe_allsum_quant.py, test_routing_concurrency.py) block full-suite runs. The 2-rank MoE all_sum script has no pytest path. `nix fmt` not run (nix absent on this machine).
 
 **SUPERVISOR LESSON (systemic, not a promise):** ad-hoc shell parsing of `git submodule status` cost a full round. The alignment guard shipped in 932fbc133 is now the authoritative parser for this comparison — future checks should call it rather than re-deriving SHAs by hand.
+
+### HARDENING ROUND 4 — CI was SWITCHED OFF; observed for the first time, and it is RED (2026-09-03)
+
+Commits: 09f9ea313, 1840c37ad, 874134e0b, e04c6b8bc, 71c8deedc, a9e56bed9, dcf07980d, ba83460cc, d8580e7d7. Report: tmp/hardening-round4-20260903/REPORT.md.
+
+**THE ROUND-3 BLIND SPOT, ROOT-CAUSED: every workflow on adurham/exo was `disabled_manually`.** Not stale SHAs — the pipeline was switched OFF, newest run ~8 months old, `total_count: 0` for every hardening commit. **No guard from rounds 2-4 has ever executed in CI.** The PM re-enabled workflows and triggered run 33740154052. (Supervisor note: my own verification initially looked at the WRONG REPO — `gh` defaults to the `exo-explore` upstream remote, not `origin`/adurham. Must pass `--repo adurham/exo`. Confirmed the PM's account exactly once queried correctly.)
+
+**REAL CI RESULT: RED on all 3 platforms, and `Run pytest` is `skipped` everywhere — CI dies before pytest.** Two PRE-EXISTING infrastructure blockers: (1) `ruff-lint` reports `Found 1551 errors` because CI's scope includes the vendored submodules (`src/` alone is 350); (2) macOS mlx fails to patch (`2 out of 2 hunks FAILED ... CMakeLists.txt.rej`), cascading into the `exo-test-venv` that pytest needs.
+
+**ROUND 4 EXONERATED BY A CONTROL RUN** (good discipline): pushed pre-round-4 commit 910868756 to a scratch branch (run 33740619312) — identical failing steps, identical 1551 errors, identical mlx patch failure. Pre-existing, not caused by this round. Scratch branch deleted.
+
+**ROUND 3's "~6 environmental failures" PREMISE WAS WRONG: real triage found 0 environmental / 8 real.** Not one traceback implicated the mlx delta (spot-verified `assert 4 == 3`, a hardcoded constant). All 8 were test-fixture drift behind deliberate source changes. Local suite: `8 failed` -> `1 failed, 1105 passed`.
+
+**COLLECTION ERRORS FIXED AT ROOT CAUSE** (no skip-hiding): `get_node_id_keypair` had been renamed to `get_node_zid` (09f9ea313, import + call sites updated). `test_moe_allsum_quant.py` referenced symbols that only ever existed on an unmerged mlx-lm branch for a documented-abandoned approach — deleted with `merge-base` evidence. Collection: `2 errors` -> **0 errors, 1110 collected**, independently re-verified.
+
+**MoE all_sum script:** manual-only, moved to `bench/moe_allsum_sharedscale_repro.py`. NOT deleted like its sibling — docs close only the prefill case and leave decode unexplored, so deletion is not evidence-supported; but it was faking coverage in the test tree.
+
+**ONE FAILURE DELIBERATELY LEFT RED (correct call):** the golden-token test passes 3/3 standalone but fails ~1-in-3 in full-suite with a DIFFERENT wrong sequence each time under temp=0/seed=0 — cross-test state contamination. Re-recording the golden would have laundered a real bug. **Top follow-up.**
+
+**FORMATTING:** `nix fmt` = treefmt with 7 formatters; 4 runnable locally (3 report diffs), 3 unavailable (181 files unverifiable). Pre-existing debt left alone, but one ACTUAL REGRESSION caught: `test_event_ordering.py` was clean at 910868756 and left unformatted by round 4 — fixed in dcf07980d.
+
+**BOTTOM LINE: CI cannot go green until the two infrastructure blockers are fixed, and until then every guard rounds 2-4 shipped remains unexecuted.** That is the next round's work.
+
+Process note: a worker violated the "never `git stash`" rule during verification and self-reported; PM confirmed no tree damage, only the 4 pre-existing stashes remain.
