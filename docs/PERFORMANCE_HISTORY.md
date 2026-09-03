@@ -7933,3 +7933,45 @@ Commits: 7dc6416a8, e3210bf8f. Report: tmp/hardening-round6-20260903/REPORT.md (
 **THE ONE REAL FAILURE — golden-token test, and it got WORSE in an informative way.** Frozen golden `[1686, 1475, 1851, ...]`; round 4 observed `[2842, 1155, ...]`; CI produced a THIRD distinct sequence `[1686, 1194, 2993, ...]` with a different token COUNT. Three different wrong answers at temp=0/seed=0 is cross-test state contamination, NOT a stale golden — a stale golden fails identically every time. Left RED deliberately; re-recording would launder a real nondeterminism bug into a green suite.
 
 **OPEN (scoped separately):** (1) root-cause the golden-token contamination — now has 3 data points; (2) the ~13,135-error basedpyright debt, still red and honest by decision.
+
+### HARDENING ROUND 7 — golden-token nondeterminism ROOT-CAUSED; first GREEN CI pytest (2026-09-03)
+
+Commit 45bcbe348 (pushed). Report: tmp/hardening-round7-20260903/REPORT.md.
+
+**IT WAS NOT A LEAK — it was an out-of-bounds read in the victim's OWN fixture.** The test builds a
+tiny Llama with `vocab_size=4096` but tokenizes with the real Qwen3.5 tokenizer (vocab 248,044).
+Three prompt ids per prompt exceed the embedding table, so `mx.take` reads PAST THE BUFFER END into
+recycled Metal buffer-cache pages: zeros on fresh pages (passes standalone, 0/33 failures), stale
+freed weights once other tests have allocated (wrong sequence, different every process). That is
+why three observations produced three different wrong answers — classic undefined behaviour, not
+stale-golden and not cross-test leakage.
+
+**MINIMAL PAIR (bisected 461 -> 1, PM-reproduced 3/3 pre-fix):**
+`test_fused_qkv.py::test_install_skips_when_bias_present` ->
+`test_batch_generate_batched_decode_flag_off_smoke.py::test_exobatchgenerator_flag_off_matches_verified_pre_edit_baseline`.
+Culprit->victim 25/25 fail; reversed 0/3; victim alone 0/33.
+**Magic-fingerprint proof:** a `777.0`-filled Linear freed by the earlier test -> the victim's OOB
+row reads back exactly `[777.0 x4]`. Decisive.
+
+**One earlier observation corrected:** the "different token COUNT" was a pytest-elision misread —
+all sequences are 6 tokens (argmax over 4096 logits cannot emit a Qwen EOS id).
+
+**FIX (one test file, +83/-1):** zero-pad the embedding table to 25,900 rows so every fed id is
+in-bounds with explicit deterministic zeros (the exact semantics the golden recorded) + graft a
+bit-identical untied `lm_head` from the original 4096 rows (output projection unchanged, RNG stream
+unshifted) + an in-bounds guard through the real `encode_prompt()` path, proven to fire under
+sabotage. **Goldens byte-identical — nothing laundered:** no re-record, no flaky/xfail, no reorder.
+The "leaking" side needs no fix: allocator recycling is normal GPU behaviour; the UB read was the
+defect.
+
+**VERIFICATION:** minimal pair 5/5 post-fix (PM) + 10/10 (implementer); negative control HEAD-swap
+fails on demand; victim alone 10/10; reversed 3/3; **5/5 consecutive full-suite runs** (stated as
+strong-but-not-proof against the ~1-in-3 historical rate); and **CI run 33762676093 pytest step
+GREEN: `1107 passed, 4 skipped, 205 deselected in 126.94s`** — supervisor-verified via the jobs API,
+out-of-sample on a different machine. **First green CI pytest of the campaign.**
+
+Typecheck debt untouched (~13,135 basedpyright errors, red by decision — `nix flake check` still
+fails there, so the job is still red overall and honest about it). ruff clean.
+
+Side-inventory `STATIC-HAZARDS.md` records latent-but-unimplicated hazards for future rounds (e.g.
+an unrestored `random.seed` in `test_loop_detection.py`).
