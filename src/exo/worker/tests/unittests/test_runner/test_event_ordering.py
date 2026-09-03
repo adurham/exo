@@ -126,7 +126,9 @@ class MockLoadOutput:
 @pytest.fixture
 def patch_out_mlx(monkeypatch: pytest.MonkeyPatch):
     # initialize_mlx returns a mock group
-    monkeypatch.setattr(mlx_builder, "initialize_mlx", make_nothin(mx.distributed.init()))
+    monkeypatch.setattr(
+        mlx_builder, "initialize_mlx", make_nothin(mx.distributed.init())
+    )
 
     def lmi_gen():
         yield MockLoadOutput(1, 1)
@@ -148,9 +150,7 @@ def patch_out_mlx(monkeypatch: pytest.MonkeyPatch):
     # always take the empty-cancellations early return and never drive
     # the fake generator's step(), hanging the runner loop forever
     # polling an empty work queue.
-    monkeypatch.setattr(
-        mlx_batch_generator, "mx_any", lambda bool_, _group=None: bool_
-    )
+    monkeypatch.setattr(mlx_batch_generator, "mx_any", lambda bool_, _group=None: bool_)
 
     def fake_all_gather(
         tasks: list[TextGeneration], group: object
@@ -210,9 +210,7 @@ class FakeExoBatchGenerator:
         for uid in uids:
             self._pending.pop(uid, None)
 
-    def set_prefill_cancel_probe(
-        self, probe: "Callable[[], bool] | None"
-    ) -> None:
+    def set_prefill_cancel_probe(self, probe: "Callable[[], bool] | None") -> None:
         """Match ExoBatchGenerator.set_prefill_cancel_probe's interface
         (called unconditionally by batch_generator.py's chunked-prefill
         drive setup). This fake never actually drives a chunked prefill
@@ -273,7 +271,6 @@ class MockTokenizer:
     @staticmethod
     def encode(_text: str, add_special_tokens: bool = True) -> list[int]:
         return [0]
-
 
 
 def _run(tasks: Iterable[Task], send_after_ready: list[Task] | None = None):
