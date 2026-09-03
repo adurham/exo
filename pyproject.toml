@@ -249,10 +249,43 @@ torchaudio = ["torch"]
 ###
 
 [tool.ruff]
-extend-exclude = [".typings/**", "rust/exo_rs/**", "bench/vendor/**"]
+# The CI lint derivation (python/parts.nix `checks.lint`) runs
+# `ruff check ${inputs.self}` — a traversal of the WHOLE flake source tree, not
+# just our packages. Scope it to code we actually own and maintain.
+extend-exclude = [
+  ".typings/**",
+  "rust/exo_rs/**",
+  # Vendored third-party benchmark harness code — not ours to restyle.
+  "bench/vendor/**",
+  # Vendored upstream dependencies, checked out as git submodules. These are
+  # NOT what was inflating the CI lint count: they are gitlinks (mode 160000)
+  # with zero tracked files, and CI's actions/checkout@v4 has no `submodules:`
+  # key, so CI never populates them. They ARE populated in a normal local
+  # checkout though, so excluding them keeps `uv run ruff check` usable locally
+  # and keeps the lint correctly scoped if submodule checkout is ever enabled.
+  "mlx/**",
+  "mlx-lm/**",
+  # One-off performance/diagnostic probe scripts. Not shipped, not imported by
+  # `src/`, and already excluded from the pytest run (`--ignore=tmp` below).
+  "bench/**",
+  "tmp/**",
+]
 
 [tool.ruff.lint]
 extend-select = ["I", "N", "B", "A", "PIE", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Hand-written MLX/Metal GPU kernel shims. These use single-capital and
+# capitalized-compound identifiers (B, M, N, K, S_pre, H_q, H_kv, K_groups,
+# N_QKV) as tensor/matrix DIMENSION names, matching (a) the accompanying
+# hand-written .metal kernel source, (b) mlx upstream's own kernel-binding
+# naming, and (c) standard GEMM/attention notation. Lowercasing them would
+# break the one-to-one correspondence with the kernel code these shims bind
+# to, which is the primary thing that makes them reviewable. This is a
+# naming-convention exemption ONLY (N803 argument names / N806 local
+# variables); every other rule still applies to these files.
+"src/exo/worker/engines/mlx/patches/**" = ["N803", "N806"]
+"src/exo/worker/engines/mlx/speculative/**" = ["N803", "N806"]
 
 [tool.pytest.ini_options]
 pythonpath = "."

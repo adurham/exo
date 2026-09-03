@@ -6,6 +6,7 @@ Falls back to vanilla MoE when called without _residual (from vanilla decoder pa
 """
 
 import mlx.core as mx
+import mlx.nn as nn
 
 from .common import COMPUTE_DTYPE
 from .kernels.batched_merged_down_proj_8bit import batched_merged_down_proj_8bit
@@ -33,7 +34,7 @@ def _fused_shared_expert(moe, x):
     shared_inter = moe._shared_inter
     x_gate = gu[..., :shared_inter]
     x_up = gu[..., shared_inter:]
-    intermediate = nn_silu(x_gate) * x_up
+    intermediate = nn.silu(x_gate) * x_up
 
     # down_proj (unchanged)
     shared_y = mx.quantized_matmul(

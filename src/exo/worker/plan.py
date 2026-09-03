@@ -26,7 +26,6 @@ from exo.shared.types.worker.downloads import (
     DownloadCompleted,
     DownloadFailed,
     DownloadOngoing,
-    DownloadPaused,
     DownloadProgress,
 )
 from exo.shared.types.worker.instances import BoundInstance, Instance, InstanceId

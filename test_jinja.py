@@ -1,4 +1,3 @@
-import sys
 from transformers import AutoTokenizer
 
 tokenizer = AutoTokenizer.from_pretrained("mlx-community/Qwen2.5-Coder-32B-Instruct-4bit")

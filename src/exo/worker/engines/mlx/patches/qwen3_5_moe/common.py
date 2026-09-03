@@ -41,7 +41,7 @@ def convert_model_to_compute_dtype(model: nn.Module) -> None:
     conv weights, etc.) and converts bf16 → fp16. This ensures the entire
     compute graph runs in fp16 without bf16 upcasts.
     """
-    if COMPUTE_DTYPE == mx.bfloat16:
+    if mx.bfloat16 == COMPUTE_DTYPE:
         return
 
     from mlx.utils import tree_flatten, tree_unflatten
@@ -176,10 +176,7 @@ def _patch_oproj_gate_rms(layer, gate_bm=8):
     moe = layer.mlp
 
     # ── Get attention output projection (works for both attention types) ──
-    if layer.is_linear:
-        oproj = layer.linear_attn.out_proj
-    else:
-        oproj = layer.self_attn.o_proj
+    oproj = layer.linear_attn.out_proj if layer.is_linear else layer.self_attn.o_proj
 
     # ── Dequantize gate and o_proj (temporary, for M1 computation) ──
     # Eval incrementally to limit peak memory (E=512: dequant temps are ~140 MB)
@@ -490,10 +487,8 @@ def build_model(n_experts=16, n_layers=1, top_k=4,
         # nn.quantize only touches nn.Linear; other params (conv1d, dt_bias,
         # norm, A_log) must be cast manually.
         attn_mod = layer.linear_attn if layer.is_linear else layer.self_attn
-        for name, mod in attn_mod.named_modules():
-            if isinstance(mod, nn.Linear):
-                mod.weight = mod.weight.astype(COMPUTE_DTYPE)
-            elif isinstance(mod, nn.Conv1d):
+        for _name, mod in attn_mod.named_modules():
+            if isinstance(mod, (nn.Linear, nn.Conv1d)):
                 mod.weight = mod.weight.astype(COMPUTE_DTYPE)
         # Cast leaf parameters (dt_bias, norm.weight, q/k_norm)
         # A_log stays f32 (matches real model)

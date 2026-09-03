@@ -1150,7 +1150,7 @@ class BatchGenerator(Engine):
             )
 
     def _start_task(self, task: TextGeneration) -> int:
-        from exo.worker.engines.mlx.trace import request_trace, T
+        from exo.worker.engines.mlx.trace import T, request_trace
 
         _check_for_debug_prompts(task.task_params)
         with T("start_task.apply_chat_template"):

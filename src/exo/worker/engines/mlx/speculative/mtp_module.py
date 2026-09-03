@@ -86,12 +86,12 @@ def speculative_forward(model, inputs, cache, speculative=False):
     fa_mask = create_attention_mask(hidden_states, cache_list[inner.fa_idx])
     ssm_mask = create_ssm_mask(hidden_states, cache_list[inner.ssm_idx])
 
-    for layer, c in zip(inner.layers, cache_list):
+    for layer, c in zip(inner.layers, cache_list, strict=True):
         mask = ssm_mask if layer.is_linear else fa_mask
 
         if do_spec and layer.is_linear:
-            from .speculative_cache import SpeculativeArraysCache as _SAC
-            if isinstance(c, _SAC):
+            from .speculative_cache import SpeculativeArraysCache
+            if isinstance(c, SpeculativeArraysCache):
                 pre_conv = c[0]
                 if pre_conv is None:
                     gdn = layer.linear_attn
@@ -105,11 +105,11 @@ def speculative_forward(model, inputs, cache, speculative=False):
     if do_spec:
         _qwen3_5_mod.gated_delta_update = _orig_gdu
 
-        gdn_idx = 0
-        for layer_input, pre_conv, spec_cache, parent_layer in gdn_spec_data:
+        for gdn_idx, (layer_input, pre_conv, spec_cache, parent_layer) in enumerate(
+            gdn_spec_data
+        ):
             if gdn_idx < len(spec_all_states):
                 spec_cache.all_states = spec_all_states[gdn_idx]
-            gdn_idx += 1
 
             gdn = parent_layer.linear_attn
             normed = parent_layer.input_layernorm(layer_input)
@@ -144,8 +144,9 @@ def _make_speculative_gdu(all_states_list):
 
     Returns (y, state_out) — same interface as original gated_delta_update.
     """
-    from .speculative_gdn_kernel import speculative_gated_delta_kernel
     from mlx_lm.models.gated_delta import compute_g
+
+    from .speculative_gdn_kernel import speculative_gated_delta_kernel
 
     def speculative_gated_delta_update(q, k, v, a, b, A_log, dt_bias,
                                         state=None, mask=None, use_kernel=True):
@@ -211,7 +212,7 @@ class MTPPredictor:
         _noshift_marker = os.path.splitext(mtp_weights_path)[0] + ".noshift"
         _already_shifted = _os.path.exists(_noshift_marker)
         if _already_shifted:
-            print(f"  Dedicated MTP head (pre-shifted norms) — skipping +1.0 shift")
+            print("  Dedicated MTP head (pre-shifted norms) — skipping +1.0 shift")
         else:
             shifted = []
             for k in list(weights.keys()):
@@ -238,10 +239,8 @@ class MTPPredictor:
 
         fc_w = weights['mtp.fc.weight']
         hidden_size = _dim(fc_w, 0)                    # 4096 (9B) or 5120 (27B)
-        fc_in = _dim(fc_w, 1)                          # 2 * hidden_size
 
         q_w = weights['mtp.layers.0.self_attn.q_proj.weight']
-        q_out = _dim(q_w, 0)                           # num_heads * head_dim * 2 (gate)
         k_w = weights['mtp.layers.0.self_attn.k_proj.weight']
         kv_out = _dim(k_w, 0)                          # num_kv_heads * head_dim
         o_w = weights['mtp.layers.0.self_attn.o_proj.weight']
@@ -277,9 +276,9 @@ class MTPPredictor:
                 ql.update({'weight': w, 'scales': scales, 'biases': biases})
                 return ql
             out_dim, in_dim = w.shape
-            l = nn.Linear(in_dim, out_dim, bias=False)
-            l.weight = w
-            return l
+            linear = nn.Linear(in_dim, out_dim, bias=False)
+            linear.weight = w
+            return linear
 
         self.pre_fc_norm_hidden = nn.RMSNorm(hidden_size)
         self.pre_fc_norm_hidden.weight = weights['mtp.pre_fc_norm_hidden.weight']
@@ -342,9 +341,7 @@ class MTPPredictor:
                     if not hasattr(m, 'to_quantized'):
                         return False
                     w = getattr(m, 'weight', None)
-                    if w is not None and min(w.shape) < 64:
-                        return False
-                    return True
+                    return not (w is not None and min(w.shape) < 64)
                 nn.quantize(self.mlp, group_size=64, bits=4, class_predicate=_q_predicate)
 
             # Load MTP MoE weights — remap HF expert names to mlx-lm SwitchLinear.
@@ -423,7 +420,7 @@ class MTPPredictor:
             print(f"  MoE MLP: {len(moe_weights)} weight groups loaded "
                   f"({len(expert_weights)} stacked expert projections)")
         elif skip_mlp:
-            print(f"  MLP skipped (skip_mlp=True)")
+            print("  MLP skipped (skip_mlp=True)")
         else:
             self.gate_proj = make_linear(gate_w, 'mtp.layers.0.mlp.gate_proj')
             self.up_proj = make_linear(weights['mtp.layers.0.mlp.up_proj.weight'])

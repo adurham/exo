@@ -10,7 +10,6 @@ Usage:
     apply_lpb_patches(model, batch_size=4)
 """
 
-import mlx.core as mx
 import mlx.nn as nn
 
 from .custom_qmv_loop_over_b import custom_qmv_loop_over_b
@@ -55,7 +54,7 @@ def apply_lpb_patches(model, batch_size=4):
     inner = getattr(model, 'model', None) or model.language_model.model
     patched = 0
 
-    for li, layer in enumerate(inner.layers):
+    for _li, layer in enumerate(inner.layers):
         # MLP: gate_proj, up_proj (N=17408, K=5120)
         mlp = layer.mlp
         for proj_name in ['gate_proj', 'up_proj', 'down_proj']:

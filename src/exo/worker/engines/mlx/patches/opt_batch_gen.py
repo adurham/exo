@@ -168,7 +168,9 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
         _t_step_end = _time.perf_counter()
         _wall_ns = int((_t_step_end - _wall_start) * 1e9)
         _gpu_ns_delta = mx.metal.gpu_time_ns() - _gpu_ns_start
-        _ns = lambda a, b: int((b - a) * 1e9)
+        def _ns(a: float, b: float) -> int:
+            return int((b - a) * 1e9)
+
         _pre_fwd_ns = _ns(_wall_start, _t_pre_forward)
         _fwd_build_ns = _ns(_t_pre_forward, _t_post_forward)
         _sample_build_ns = _ns(_t_post_forward, _t_pre_async_eval)
@@ -187,7 +189,9 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
         self._gpu_probe_sum_eval = getattr(self, "_gpu_probe_sum_eval", 0) + _eval_block_ns
         self._gpu_probe_sum_post = getattr(self, "_gpu_probe_sum_post", 0) + _post_eval_ns
         if cnt % _gpu_log_every == 0:
-            avg = lambda x: x / cnt / 1e6
+            def avg(x: float) -> float:
+                return x / cnt / 1e6
+
             B = inputs.shape[0] if hasattr(inputs, "shape") else len(inputs)
             pct = (self._gpu_probe_sum_gpu / self._gpu_probe_sum_wall * 100.0) if self._gpu_probe_sum_wall > 0 else 0.0
             _sys.stderr.write(

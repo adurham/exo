@@ -7,19 +7,18 @@ import time
 
 import mlx.nn as nn
 from loguru import logger
+from mlx_lm.models.qwen3_5 import DecoderLayer, GatedDeltaNet
+from mlx_lm.models.qwen3_next import Qwen3NextAttention, Qwen3NextSparseMoeBlock
 
 from .common import (
-    _patch_swiglu_weights,
-    _patch_shared_expert,
     _patch_down_proj,
-    _patch_oproj_gate_rms,
     _patch_gdn_proj_weights,
     _patch_gqa_proj_weights,
+    _patch_oproj_gate_rms,
+    _patch_shared_expert,
+    _patch_swiglu_weights,
     convert_model_to_compute_dtype,
 )
-from mlx_lm.models.qwen3_5 import DecoderLayer
-from mlx_lm.models.qwen3_next import Qwen3NextAttention, Qwen3NextSparseMoeBlock
-from mlx_lm.models.qwen3_5 import GatedDeltaNet
 
 
 def apply_qwen35_batched_fused_patches(model: nn.Module) -> None:
@@ -78,10 +77,10 @@ def apply_qwen35_batched_fused_patches(model: nn.Module) -> None:
         return
 
     # Import patched __call__ methods
-    from .fused_gdn_attention import _fused_gdn_call
     from .batched_fused_gqa_attention import _batched_fused_gqa_call
     from .batched_moe import _batched_oproj_moe_call
     from .decoder import _fused_gdn_decoder_call
+    from .fused_gdn_attention import _fused_gdn_call
 
     # Class-level method replacement
     GatedDeltaNet.__call__ = _fused_gdn_call

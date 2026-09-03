@@ -28,6 +28,7 @@ BS>1 batched-MTP is NOT yet enabled here — that's Phase 5.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -750,10 +751,13 @@ def _pool_flushed_since(pc: Any, snap: Any) -> bool:
     """
     if hasattr(pc, "_pool_lengths"):  # BatchPoolingCache: per-stream lists
         cur = [
-            int(l) + int(p)
-            for l, p in zip(pc._pool_lengths, pc._pending_bumps, strict=True)
+            int(length) + int(pending)
+            for length, pending in zip(pc._pool_lengths, pc._pending_bumps, strict=True)
         ]
-        pre = [int(l) + int(p) for l, p in zip(snap[0], snap[5], strict=True)]
+        pre = [
+            int(length) + int(pending)
+            for length, pending in zip(snap[0], snap[5], strict=True)
+        ]
         return cur != pre
     return (pc._pool_offset + pc._pending_offset_bump) != (snap[0] + snap[1])
 
@@ -1303,6 +1307,8 @@ class DSv4MTPPredictor:
         """
         from mlx_lm.models.cache import (
             BatchRotatingKVCache,
+        )
+        from mlx_lm.models.cache import (
             PerStreamBatchRotatingKVCache as _PerStream,
         )
 
@@ -2625,7 +2631,6 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )  # (N,1) for per-stream draft scaling; clamp avoids div-by-zero
 
         # Verify each uid has the prerequisites.
-        ys: list[mx.array] = []
         y_logprobs_list: list[Any] = []
         pre_norms: list[mx.array] = []
         for uid in uids:
@@ -3210,7 +3215,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # LEGACY ORDER (double-rollback bug, see
                 # _POOL_RESTORE_AFTER_TRIM): the blanket trim below re-trims
                 # the pools restore_meta just rewound.
-                for pc, snap in zip(_pool_caches, _pool_snaps):
+                for pc, snap in zip(_pool_caches, _pool_snaps, strict=True):
                     if snap is not None:
                         pc.restore_meta(snap)
             _full = gamma + 1
@@ -3652,10 +3657,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # rather than getting folded into the predict() wall.
             if _c2_trace:
                 if _eagle_installed:
-                    try:
+                    with contextlib.suppress(Exception):
                         mx.eval(soft_emb)  # type: ignore[has-type]
-                    except Exception:
-                        pass
                 _c2_t_after_eagle_install_ns = time.perf_counter_ns()
             try:
                 logits, h = self.mtp.predict(
@@ -3677,10 +3680,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # proposed bistability fence and is acceptable here BECAUSE
             # we're diagnosing, not validating.
             if _c2_trace:
-                try:
+                with contextlib.suppress(Exception):
                     mx.eval(logits, h)
-                except Exception:
-                    pass
                 _c2_t_after_predict_ns = time.perf_counter_ns()
             prev_logits = logits
             # logits: at S=1, predict() squeezes to (N, vocab).
@@ -3764,10 +3765,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # work for the step is complete; subsequent steps will start
             # from a clean queue.
             if _c2_trace:
-                try:
+                with contextlib.suppress(Exception):
                     mx.eval(tok_arr, tok_pre_sync)  # type: ignore[has-type]
-                except Exception:
-                    pass
                 _c2_t_step_end_ns = time.perf_counter_ns()
                 # Materialize per-stream tokens for the record. tok_arr
                 # is shape (N, 1) int32 post-broadcast. tok_pre_sync is
@@ -4816,7 +4815,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         _top3_ids: list[int] = cast("list[int]", _top3.tolist())
                         _top3_logits: list[float] = [float(_vl[i].item()) for i in _top3_ids]
                         _pools = []
-                        for _pc, _snap in zip(_pool_caches, _pool_snaps):
+                        for _pc, _snap in zip(_pool_caches, _pool_snaps, strict=True):
                             _pools.append({
                                 "off": int(getattr(_pc, "_pool_offset", -1)),
                                 "rem": int(getattr(_pc, "remainder", -1)),
@@ -5136,7 +5135,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # LEGACY ORDER (double-rollback bug, see
                     # _POOL_RESTORE_AFTER_TRIM): the blanket trim below
                     # re-trims the pools restore_meta just rewound.
-                    for pc, snap in zip(_pool_caches, _pool_snaps):
+                    for pc, snap in zip(_pool_caches, _pool_snaps, strict=True):
                         if snap is not None:
                             pc.restore_meta(snap)
                 # Trim γ+1 (root y included) so the commit-forward re-adds
@@ -5753,14 +5752,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # TODO(v1.1): rebuild MTP cache from accepted path for
         # acceptance >= 90%.
         contiguous_accept = list(best_path) == list(range(1, n_accepted + 1))
-        if contiguous_accept:
-            # FAST PATH: trim only the rejected suffix from local_cache;
-            # cols 0..n_accepted already hold correct accepted-path KV.
-            trim_local = n_nodes - (n_accepted + 1)
-        else:
-            # SLOW PATH: trim the entire tree; step 5b re-writes y +
-            # accepted drafts via a commit forward.
-            trim_local = n_nodes
+        # FAST PATH (contiguous_accept): trim only the rejected suffix from
+        # local_cache; cols 0..n_accepted already hold correct accepted-path KV.
+        # SLOW PATH: trim the entire tree; step 5b re-writes y + accepted
+        # drafts via a commit forward.
+        trim_local = n_nodes - (n_accepted + 1) if contiguous_accept else n_nodes
 
         if trim_local > 0:
             for c in gen_batch.prompt_cache:

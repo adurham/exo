@@ -1,7 +1,7 @@
-import sys
 from transformers import AutoTokenizer
-from exo.worker.engines.mlx.utils_mlx import apply_chat_template
+
 from exo.worker.engines.mlx.generator.batch_generate import TextGenerationTaskParams
+from exo.worker.engines.mlx.utils_mlx import apply_chat_template
 
 tokenizer = AutoTokenizer.from_pretrained("mlx-community/Qwen2.5-Coder-32B-Instruct-4bit")
 messages = [{"role": "user", "content": [{"type": "text", "text": "What is in this image?"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}]}]

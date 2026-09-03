@@ -1,7 +1,13 @@
 """Summarize routing histograms collected by ROUTE_HIST probe."""
 from __future__ import annotations
-import argparse, glob, os, re, sys
+
+import argparse
+import glob
+import os
+import re
+import sys
 from collections import defaultdict
+
 import numpy as np
 
 
@@ -40,7 +46,7 @@ def main() -> int:
         return 2
 
     print("=" * 80)
-    print(f"DSv4 Expert Routing Histogram Summary")
+    print("DSv4 Expert Routing Histogram Summary")
     print(f"  Dir: {args.dir}")
     print(f"  Files: {len(files)}    Layers: {len(by_layer)} of {args.n_layers}")
     print("=" * 80)
@@ -69,7 +75,7 @@ def main() -> int:
     print(f"\nMean per expert: {avg:.0f}    Max: {global_counts.max()} (E{global_counts.argmax()})    Min: {global_counts.min()}")
     print(f"Cold experts (<10% mean): {cold}/{args.n_experts}   Hot (>3x mean): {hot}/{args.n_experts}")
 
-    print(f"\nPer-layer concentration:")
+    print("\nPer-layer concentration:")
     print(f"  {'Layer':>5}  {'Total':>10}  {'Top-1':>7}  {'Top-8':>7}  {'Top-32':>7}  {'Cold':>5}  {'Hot':>5}")
     rows = []
     for li in sorted(by_layer.keys()):
@@ -86,7 +92,7 @@ def main() -> int:
         rows.append((li, cc[7]))
 
     rows.sort(key=lambda t: -t[1])
-    print(f"\nLayers ranked by top-8 concentration (best co-location candidates):")
+    print("\nLayers ranked by top-8 concentration (best co-location candidates):")
     for li, conc in rows[:10]:
         print(f"  L{li:02d}: top-8 = {conc:.2f}%")
 

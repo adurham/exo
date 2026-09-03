@@ -125,6 +125,7 @@ def _fused_prefill_gdn_call(self, inputs, mask=None, cache=None):
             mx.split(conv_out, [self.key_dim, 2 * self.key_dim], -1),
             [self.num_k_heads, self.num_k_heads, self.num_v_heads],
             [self.head_k_dim, self.head_k_dim, self.head_v_dim],
+            strict=True,
         )
     ]
 
@@ -250,6 +251,7 @@ def _pre_oproj_qwen35_linear_attn_call(
             mx.split(conv_out, [self.key_dim, 2 * self.key_dim], -1),
             [self.num_k_heads, self.num_k_heads, self.num_v_heads],
             [self.head_k_dim, self.head_k_dim, self.head_v_dim],
+            strict=True,
         )
     ]
 

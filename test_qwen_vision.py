@@ -1,10 +1,17 @@
-import sys
 import asyncio
+
+from exo.api.adapters.chat_completions import (
+    ChatCompletionRequest,
+    chat_request_to_text_generation,
+)
+from exo.api.types import (
+    ChatCompletionMessage,
+    ChatCompletionMessageImageUrl,
+    ChatCompletionMessageText,
+)
 from exo.worker.engines.mlx.utils_mlx import load_model
-from exo.shared.types.text_generation import TextGenerationTaskParams
-from exo.api.types import ChatCompletionMessage, ChatCompletionMessageText, ChatCompletionMessageImageUrl
-from exo.api.adapters.chat_completions import chat_request_to_text_generation, ChatCompletionRequest
 from exo.worker.engines.mlx.vision import prepare_vision
+
 
 async def test():
     req = ChatCompletionRequest(
@@ -25,7 +32,7 @@ async def test():
     )
     
     print("Model loaded. Preparing vision...")
-    vision_result = prepare_vision(
+    prepare_vision(
         images=task_params.images,
         chat_template_messages=task_params.chat_template_messages,
         vision_processor=vision_processor,

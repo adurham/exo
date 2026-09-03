@@ -54,10 +54,6 @@ from exo.worker.engines.mlx.generator.generate import (
     safe_think_token_id,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
-from exo.worker.engines.mlx.patches.opt_batch_gen import (
-    set_needs_topk,
-    take_ready_topk,
-)
 from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
@@ -436,10 +432,8 @@ def _mem_profile_record(
             getattr(mx.metal, "live_array_desc_count", None),
         )
         if live_arraydesc_fn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 record["live_array_desc"] = int(live_arraydesc_fn())
-            except Exception:
-                pass
         # Fork-only: per-primitive-type live ArrayDesc breakdown. Empty when
         # MLX_PER_TYPE_TRACK / MLX_PER_TYPE_DUMP_INTERVAL are unset. The map
         # is small (~50-100 entries) and the snapshot is mutex-protected;
@@ -1968,7 +1962,7 @@ class ExoBatchGenerator:
         # The dedicated drafter repos are the entire (small) model with bare
         # keys and already-shifted norms. Detect them by name/model_type so we
         # take the bare-key + no-shift path.
-        is_dedicated = repo_id.endswith("-MTP-bf16") or repo_id.endswith("-MTP")
+        is_dedicated = repo_id.endswith(("-MTP-bf16", "-MTP"))
         if not is_dedicated:
             try:
                 cfg_path = hf_hub_download(repo_id, "config.json")
@@ -2002,7 +1996,7 @@ class ExoBatchGenerator:
                 mtp_shards = {
                     shard
                     for key, shard in idx["weight_map"].items()
-                    if key.startswith("model.mtp.") or key.startswith("mtp.")
+                    if key.startswith(("model.mtp.", "mtp."))
                 }
                 logger.info(
                     f"MTP weights span {len(mtp_shards)} of {len(set(idx['weight_map'].values()))} shards"
@@ -2718,20 +2712,20 @@ class ExoBatchGenerator:
                 if prompt_pre_norm.shape[0] != 1:
                     prompt_pre_norm = prompt_pre_norm[-1:, :, :]
                 self._mlx_gen.mtp.reset_cache()
-                S_pre = prompt_pre_norm.shape[1]
-                if S_pre > 1:
+                s_pre = prompt_pre_norm.shape[1]
+                if s_pre > 1:
                     toks_list = (
                         all_prompt_tokens.tolist()
                         if hasattr(all_prompt_tokens, "tolist")
                         else list(all_prompt_tokens)
                     )
-                    mtp_tokens = toks_list[1:S_pre]
+                    mtp_tokens = toks_list[1:s_pre]
                     _ = self._mlx_gen.mtp.predict(
                         prompt_pre_norm[:, :-1, :], mx.array([mtp_tokens])
                     )
                     mx.eval(_)
-                    logger.info(f"MTP cache prefilled ({S_pre} positions)")
-                # Snapshot for this uid. Safe even when S_pre==1 (empty cache
+                    logger.info(f"MTP cache prefilled ({s_pre} positions)")
+                # Snapshot for this uid. Safe even when s_pre==1 (empty cache
                 # is a valid snapshot — subsequent draft will start from
                 # zero MTP history, same as the pre-fix c=1 short-prompt case).
                 if hasattr(self._mlx_gen.mtp, "snapshot_for_uid"):
@@ -2892,7 +2886,6 @@ class ExoBatchGenerator:
         eligible: list[int] = []
         ineligible: list[int] = []
         for i, (task_params, _prompt, _opp, _dppc, _ogt) in enumerate(tasks):
-            is_bench = task_params.bench
             has_remote = task_params.prefill_endpoint is not None
             has_vision = bool(task_params.images)
             # OPT-11 (2026-06-24): removed is_bench gate. Batched prefill
@@ -3158,11 +3151,11 @@ class ExoBatchGenerator:
                 # Slice this stream's pre_norm: (N, last_chunk, hidden) → (1, last_chunk, hidden).
                 stream_pre_norm = captured_prompt_pre_norm[i : i + 1]
                 self._mlx_gen.mtp.reset_cache()
-                S_pre = stream_pre_norm.shape[1]
+                s_pre = stream_pre_norm.shape[1]
                 # Ragged batch: the captured chunk is RIGHT-padded to the
                 # batch max_L, so a shorter stream's true rows are the FIRST
-                # k_i = len_i - (max_L - S_pre) rows; its tail rows are
-                # padding. Pairing the uniform S_pre-row capture with this
+                # k_i = len_i - (max_L - s_pre) rows; its tail rows are
+                # padding. Pairing the uniform s_pre-row capture with this
                 # stream's unpadded token tail crashed the runner on any
                 # rendezvous batch of unequal-length prompts
                 # ([broadcast_shapes] (1,21,4096) vs (1,72,4096), 2026-07-02).
@@ -3172,7 +3165,7 @@ class ExoBatchGenerator:
                 max_l = max(len(t) for t in all_prompt_tokens_list)
                 toks_list = all_prompt_tokens_list[i].tolist()
                 n_total = len(toks_list)
-                k_i = min(S_pre, n_total - (max_l - S_pre))
+                k_i = min(s_pre, n_total - (max_l - s_pre))
                 if k_i > 1:
                     # hidden rows 0..k_i-2 (positions n-k_i .. n-2) pair with
                     # tokens n-k_i+1 .. n-1 — same offset semantics as the

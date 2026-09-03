@@ -9,7 +9,6 @@ On rejection, rollback(n_accepted) restores both recurrent and conv
 state to the correct intermediate position.
 """
 
-import mlx.core as mx
 
 
 class SpeculativeArraysCache:

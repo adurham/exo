@@ -9,6 +9,7 @@ the state at EVERY timestep to an extra output buffer `all_states`.
 """
 
 from typing import Optional, Tuple
+
 import mlx.core as mx
 
 

@@ -1,10 +1,6 @@
-import sys
-from typing import Any
-import mlx.core as mx
+from exo.worker.engines.mlx.vendor.deepseek_v4_encoding import encode_messages
 
 messages = [{"role": "user", "content": [{"type": "text", "text": "What is in this image?"}, {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}]}]
-
-from exo.worker.engines.mlx.vendor.deepseek_v4_encoding import encode_messages
 
 try:
     prompt = encode_messages(messages, thinking_mode="chat")

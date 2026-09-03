@@ -260,6 +260,7 @@ def load_mlx_items(
         if not _is_pp_r0 and os.environ.get("EXO_SPECULATIVE", "0") == "1":
             try:
                 import hashlib
+
                 from .generator.batch_generate import ExoBatchGenerator
 
                 _resolver = ExoBatchGenerator.__new__(ExoBatchGenerator)

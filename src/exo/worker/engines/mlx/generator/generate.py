@@ -54,7 +54,6 @@ from exo.worker.engines.mlx.cache import (
     make_kv_cache,
     snapshot_ssm_states,
 )
-from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.constants import (
     DEFAULT_TOP_LOGPROBS,
     KV_BITS,
@@ -74,6 +73,7 @@ from exo.worker.engines.mlx.pp_prefill_session import (
     ResumablePrefillSession,
     supports_chunked_prefill_interruption,
 )
+from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -168,9 +168,11 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
                     pick = None
                     for r in refs:
                         if isinstance(r, (_types.FrameType, _types.ModuleType)):
-                            pick = r; break
+                            pick = r
+                            break
                         if type(r).__name__ not in ("list", "tuple", "dict", "cell", "list_iterator"):
-                            pick = r; break
+                            pick = r
+                            break
                     if pick is None:
                         pick = refs[0] if refs else None
                     if pick is None:
@@ -844,7 +846,7 @@ def prefill(
             distributed_prompt_progress_callback()
         progress_callback(processed, total)
 
-    from exo.worker.engines.mlx.trace import request_trace, T
+    from exo.worker.engines.mlx.trace import T
 
     set_pipeline_prefill(model, is_prefill=True)
 
@@ -962,10 +964,8 @@ def prefill(
     # attn.sdpa, attn.compressor, moe.*, attn.all_sum). Signal-free — avoids the
     # SIGUSR1-to-a-live-MLX-process crash. No-op when EXO_PROFILER!=spans.
     if _ph is not None:
-        try:
+        with contextlib.suppress(Exception):
             _ph.dump(reset=True)
-        except Exception:
-            pass
     # Exclude the last snapshot
     _final_snapshots = snapshots[:-1] if snapshots else []
     if _diag:
@@ -1559,12 +1559,10 @@ def prefill_batched(
 
     set_pipeline_prefill(model, is_prefill=False)
 
-    try:
+    with contextlib.suppress(Exception):
         _log_cache_profile(
             f"after batched prefill (B={n_streams} L={max_length})", batched_cache
         )
-    except Exception:
-        pass
 
     # Extract per-stream caches. Cache offset is already at
     # ``full_lengths[i] - 1`` (= caller's prompt[:-1] length minus 1)
@@ -2215,10 +2213,8 @@ def mlx_generate(
     peak_gb = mx.metal.get_peak_memory() / 1024**3
     cache_gb = mx.metal.get_cache_memory() / 1024**3
     logger.info(f"[MEM] after prefill, before decode: active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB")
-    try:
+    with contextlib.suppress(Exception):
         _log_cache_profile("after prefill (serial cache)", caches)
-    except Exception:
-        pass
     logger.info("Starting decode")
     mx_barrier(group)
 
@@ -2238,10 +2234,9 @@ def mlx_generate(
         and group.size() > 1):
         try:
             from ..pp_speculation import (
+                _install_spec_layers,
                 get_pipeline_info,
                 pp_speculative_decode_loop,
-                _install_spec_layers,
-                _configure_layers,
             )
             pp_info = get_pipeline_info(model)
             logger.info(f"PP spec: get_pipeline_info returned {pp_info}")

@@ -25,7 +25,9 @@ from typing import Any, Optional
 import mlx.core as mx
 import mlx.nn as nn
 
-from .kernels.batched_fused_gdn_projections_8bit import batched_fused_gdn_projections as fused_gdn_projections
+from .kernels.batched_fused_gdn_projections_8bit import (
+    batched_fused_gdn_projections as fused_gdn_projections,
+)
 from .kernels.fused_qk_rmsnorm import fused_qk_rmsnorm
 from .kernels.fused_rms_norm_gated import fused_rms_norm_gated
 
@@ -62,6 +64,7 @@ def _vanilla_gdn_call(self, inputs, mask, cache):
             mx.split(conv_out, [self.key_dim, 2 * self.key_dim], -1),
             [self.num_k_heads, self.num_k_heads, self.num_v_heads],
             [self.head_k_dim, self.head_k_dim, self.head_v_dim],
+            strict=True,
         )
     ]
 

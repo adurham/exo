@@ -23,18 +23,16 @@ Overlap strategy:
 import os
 import sys
 import time
-from copy import deepcopy
 from typing import Any, Callable, Generator
 
+import loguru
 import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten, tree_map
 from mlx_lm.generate import generation_stream
 from mlx_lm.models.cache import BatchPoolingCache, CacheList, PoolingCache
-from mlx_lm.sample_utils import make_sampler
 
 from .auto_parallel import (
-    CustomMlxLayer,
     PipelineFirstLayer,
     PipelineLastLayer,
 )
@@ -53,8 +51,6 @@ from .pp_speculation_spec_tag import (
     unpack_deep_draft_ext,
     unpack_spec_tag,
 )
-
-import loguru
 
 logger: "loguru.Logger" = loguru.logger
 
@@ -405,7 +401,7 @@ def _snapshot_cache(cache: list[Any]) -> list[Any]:
 
 def _restore_cache(cache: list[Any], snap: list[Any]) -> None:
     """Restore cache from a `_snapshot_cache` snapshot. See _restore_one."""
-    for c, s in zip(cache, snap):
+    for c, s in zip(cache, snap, strict=True):
         _restore_one(c, s)
 
 
@@ -789,7 +785,6 @@ def pp_speculative_decode_loop(
     _mtp_rejected = 0
 
     y = first_y
-    logprobs = first_logprobs
 
     def _rank0_compute(token: mx.array) -> None:
         """Rank 0: forward layers 0-29 in pp_send mode (sends hidden to rank 1)."""
@@ -3501,8 +3496,8 @@ _DRAFT_KV_WINDOW = int(os.environ.get("EXO_DRAFT_KV_WINDOW", "4096"))
 def load_draft_model(model_path: str) -> tuple[nn.Module, list[Any]] | None:
     """Load a small draft model for speculation. Returns (model, cache) or None."""
     try:
-        from mlx_lm.utils import load
         from mlx_lm.models.cache import make_prompt_cache
+        from mlx_lm.utils import load
 
         _log(f"Loading draft model: {model_path}")
         model, _ = load(model_path)

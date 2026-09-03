@@ -46,8 +46,6 @@ from mlx_lm.models.kimi_k25 import Model as KimiK25Model
 from mlx_lm.models.llama import Model as LlamaModel
 from mlx_lm.models.minimax import MiniMaxAttention, ShardedRMSNorm
 from mlx_lm.models.minimax import Model as MiniMaxModel
-from mlx_lm.profiler import finalize as _minimax_finalize
-from mlx_lm.profiler import span as _minimax_span
 from mlx_lm.models.ministral3 import Model as Ministral3Model
 from mlx_lm.models.nemotron_h import Model as NemotronHModel
 from mlx_lm.models.nemotron_h import (
@@ -76,6 +74,8 @@ from mlx_lm.models.qwen3_vl import Model as Qwen3VLModel
 from mlx_lm.models.step3p5 import Model as Step35Model
 from mlx_lm.models.step3p5 import Step3p5MLP as Step35MLP
 from mlx_lm.models.step3p5 import Step3p5Model as Step35InnerModel
+from mlx_lm.profiler import finalize as _minimax_finalize
+from mlx_lm.profiler import span as _minimax_span
 
 from exo.shared.types.worker.runner_response import ModelLoadingResponse
 from exo.shared.types.worker.shards import PipelineShardMetadata
@@ -250,7 +250,8 @@ class PipelineFirstLayer(CustomMlxLayer):
         _pf_dbg = _pf_os.environ.get("EXO_PP_DEBUG") == "1"
         if self.r != 0:
             if _pf_dbg:
-                _pf_sys.stderr.write(f"[PP FIRST-RECV-PRE r={self.r} t={_pf_time.perf_counter():.3f} shape={x.shape}]\n"); _pf_sys.stderr.flush()
+                _pf_sys.stderr.write(f"[PP FIRST-RECV-PRE r={self.r} t={_pf_time.perf_counter():.3f} shape={x.shape}]\n")
+                _pf_sys.stderr.flush()
             # We want to avoid GPU timeout errors by evalling the distributed operation
             # so that it stays on CPU, which does not have a timeout.
             # JACCL/RDMA requires bf16 for transport — cast to bf16 for recv template,
@@ -263,7 +264,8 @@ class PipelineFirstLayer(CustomMlxLayer):
             if x_dtype != mx.bfloat16:
                 x = x.astype(x_dtype)
             if _pf_dbg:
-                _pf_sys.stderr.write(f"[PP FIRST-RECV-POST r={self.r} t={_pf_time.perf_counter():.3f} sum={float(mx.abs(x).sum()):.4f}]\n"); _pf_sys.stderr.flush()
+                _pf_sys.stderr.write(f"[PP FIRST-RECV-POST r={self.r} t={_pf_time.perf_counter():.3f} sum={float(mx.abs(x).sum()):.4f}]\n")
+                _pf_sys.stderr.flush()
         return self.original_layer(x, *args, **kwargs)
 
 
@@ -296,7 +298,6 @@ class PipelineLastLayer(CustomMlxLayer):
 
         if self.r != self.s - 1:
             # JACCL/RDMA requires bf16 for transport — cast before send.
-            out_dtype = output.dtype
             output_to_send = output.astype(mx.bfloat16) if output.dtype != mx.bfloat16 else output
             if self.queue_sends:
                 _pending_prefill_sends.append(
@@ -344,20 +345,24 @@ class PipelineLastLayer(CustomMlxLayer):
                 # Last rank: send to rank 0
                 mx.eval(output)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape} sum={float(mx.abs(output).sum()):.4f}]\n")
+                    _pp_sys.stderr.flush()
                 sent = mx.distributed.send(output, 0, group=self.group)
                 mx.eval(sent)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP SEND-DONE #{self._pp_cnt} t={_pp_time.perf_counter():.3f}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP SEND-DONE #{self._pp_cnt} t={_pp_time.perf_counter():.3f}]\n")
+                    _pp_sys.stderr.flush()
                     self._pp_cnt += 1
             elif self.r == 0:
                 # Rank 0: receive from last rank
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape}]\n")
+                    _pp_sys.stderr.flush()
                 output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
                 mx.eval(output)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} t={_pp_time.perf_counter():.3f} sum={float(mx.abs(output).sum()):.4f}]\n"); _pp_sys.stderr.flush()
+                    _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} t={_pp_time.perf_counter():.3f} sum={float(mx.abs(output).sum()):.4f}]\n")
+                    _pp_sys.stderr.flush()
                     self._pp_cnt += 1
             # Middle ranks (if any): no-op, pass through
 

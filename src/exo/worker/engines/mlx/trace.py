@@ -120,8 +120,14 @@ request_trace = RequestTrace()
 
 
 @contextmanager
-def T(name: str) -> Generator[None]:
-    """Shorthand for request_trace.span(name)."""
+def T(name: str) -> Generator[None]:  # noqa: N802 - terse by design; see docstring
+    """Shorthand for request_trace.span(name).
+
+    Deliberately a single capital letter: this is a hot-path tracing wrapper
+    used inline as ``with T("prefill.barrier"):`` at ~46 call sites, where a
+    longer name would dominate the line it annotates. Renaming it would churn
+    every call site and every import for no readability gain.
+    """
     if not request_trace._active:
         yield
         return

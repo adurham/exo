@@ -17,12 +17,10 @@ Gated by EXO_TURBOQUANT=1 env var.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
-import numpy as np
 import mlx.core as mx
+import numpy as np
 from mlx_lm.models.cache import _BaseCache, create_attention_mask
-
 
 # ---------------------------------------------------------------------------
 # Projection: random rotation via sign-flip + permutation
@@ -61,6 +59,19 @@ def apply_inverse_rotation(x: mx.array, spec: ProjectionSpec) -> mx.array:
     signs = spec.signs.astype(x.dtype) if spec.signs.dtype != x.dtype else spec.signs
     unperm = mx.take(x, spec.inv_perm, axis=-1)
     return unperm * signs  # signs are self-inverse (±1 × ±1 = 1)
+
+
+def apply_sketch(x: mx.array, spec: ProjectionSpec) -> mx.array:
+    """Project ``x`` onto the sign-sketch subspace used for residual correction.
+
+    Restores the helper that was inadvertently dropped in b257915ce, where this
+    function's slot was reused for ``apply_inverse_rotation`` while its caller in
+    ``_quantize_keys`` was left in place -- making ``use_residual=True`` raise
+    ``NameError``. The default is ``use_residual=False`` (``EXO_TURBOQUANT_RESIDUAL``
+    is unset), which is why the break went unnoticed.
+    """
+    sketch_signs = spec.sketch_signs.astype(x.dtype) if spec.sketch_signs.dtype != x.dtype else spec.sketch_signs
+    return mx.take(x, spec.sketch_idx, axis=-1) * sketch_signs
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +134,7 @@ class TurboQuantKVCache(_BaseCache):
     ) -> tuple[mx.array, ...]:
         if current is None:
             return update
-        return tuple(mx.concatenate([c, u], axis=2) for c, u in zip(current, update))
+        return tuple(mx.concatenate([c, u], axis=2) for c, u in zip(current, update, strict=True))
 
     def _append_array(self, current: mx.array | None, update: mx.array) -> mx.array:
         return update if current is None else mx.concatenate([current, update], axis=2)
