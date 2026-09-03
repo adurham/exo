@@ -22,8 +22,14 @@ OP_USER_REF="op://sxghbs2czadjbz76hh4jkssvb4/Mac Studio filevault/username"
 OP_PW_REF="op://sxghbs2czadjbz76hh4jkssvb4/Mac Studio filevault/password"
 
 CHECK=0
-if [ "${1:-}" = "--check" ]; then CHECK=1; shift; fi
-if [ $# -eq 0 ]; then echo "usage: $0 [--check] <node> [node...]" >&2; exit 1; fi
+if [ "${1:-}" = "--check" ]; then
+  CHECK=1
+  shift
+fi
+if [ $# -eq 0 ]; then
+  echo "usage: $0 [--check] <node> [node...]" >&2
+  exit 1
+fi
 
 # Resolve creds once from 1Password (prompts Touch ID if needed).
 FV_USER="$(op read "$OP_USER_REF")"
@@ -63,7 +69,7 @@ for NODE in "$@"; do
   fi
   echo "  issuing authrestart (reboots + auto-unlocks on next boot)..."
   # Pipe the plist over ssh stdin straight into fdesetup; nothing written to disk.
-  make_plist | ssh -o ConnectTimeout=8 "$NODE" 'sudo -n /usr/bin/fdesetup authrestart -inputplist' \
-    || echo "  NOTE: connection dropped (expected — the box is rebooting)."
+  make_plist | ssh -o ConnectTimeout=8 "$NODE" 'sudo -n /usr/bin/fdesetup authrestart -inputplist' ||
+    echo "  NOTE: connection dropped (expected — the box is rebooting)."
 done
 echo "done. nodes will return ssh-able + unlocked in ~2-3 min."

@@ -85,7 +85,7 @@
 # scraping): 128 = 289 t/s, 256 = 353 t/s (+22%), 512 = 293 t/s (regression
 # — OPT-4 gathered-tensor tiling overhead dominates). Needle + BOS-spam
 # gates clean. 512 stays a non-default override.
-: "${EXO_PREFILL_STEP_SIZE:=2048}"  # validated 2026-07-13 (+7% prefill at all context levels; 4096 breaks quality)
+: "${EXO_PREFILL_STEP_SIZE:=2048}" # validated 2026-07-13 (+7% prefill at all context levels; 4096 breaks quality)
 # Context-adaptive prefill chunk sizing (2026-06-21). At LOW context, larger
 # chunks (256) amortize the ~390ms per-chunk fixed overhead (43 layers x kernel
 # launches x RDMA all_sum x eval x clear_cache) — +39% throughput at 100K. But
@@ -162,9 +162,9 @@
 # noise hurts accuracy). Override to a positive N only for memory-
 # constrained deploys near the 124 GB wired-limit ceiling.
 if [ -n "$EXO_TURBOQUANT" ]; then
-    EXO_KV_CACHE_BITS=""
+  EXO_KV_CACHE_BITS=""
 else
-    : "${EXO_KV_CACHE_BITS:=0}"
+  : "${EXO_KV_CACHE_BITS:=0}"
 fi
 : "${EXO_COMPUTE_DTYPE:=bf16}"
 # 2-pass SDPA block count override (MLX PR #3455). Empirical sweet-spot
@@ -345,7 +345,7 @@ fi
 # c>=6, producing a 16% per-request regression and 25% bad-run rate.
 # macOS dynamically adjusts priorities better than a static pin.
 : "${EXO_RUNNER_QOS:=off}"
-: "${LOG_LEVEL:=INFO}"  # DEBUG measurably slows serving (session 3)
+: "${LOG_LEVEL:=INFO}" # DEBUG measurably slows serving (session 3)
 
 # DeepSeek V4 Flash (~100 GB/rank at 6-bit): 158B total / 13B activated, hybrid
 # Compressed Sparse Attention + sliding-window=128, 1 KV head, 1M context via
@@ -389,126 +389,126 @@ fi
 # is unaffected by this -- it's the mechanism EXO_SPECULATIVE=1 actually
 # enables for DSv4.
 if [ "${DSV4_ENABLED}" = "1" ]; then
-    # DEFAULT RE-ENABLED 2026-08-02: DSpark's self-doubt-loop bug (found
-    # 2026-07-26, disabled since) is FIXED and re-validated. Root cause
-    # confirmed via a systematic elimination sweep (2026-07-31/08-02
-    # session): NOT the documented BOS-spam/cache-wraparound bug (ruled
-    # out -- zero wrap events across a full failing run), NOT numerics-
-    # divergence/near-tie (ruled out -- live logit-margin capture showed
-    # a confident mean ~9 logits at every self-doubt transition point,
-    # nowhere close to a tie), NOT unique to DSpark specifically (the
-    # SAME loop reproduced under classic draft-model spec AND plain
-    # chained-MTP, both without DSpark's context-conditioning side
-    # channel) -- it was DeepseekV4's well-known "L>1 batched verify !=
-    # L sequential decode steps" numerics-drift class (see
-    # EXO_DSV4_VERIFY_ROWSEQ's comment in deepseek_v4.py -- the SAME
-    # mechanism previously root-caused for MTP's tool-call-corruption
-    # bug at long context). EXO_DSV4_VERIFY_ROWSEQ alone (already
-    # default-on) fixes the attention-layer piece but is insufficient on
-    # its own for the self-doubt loop; EXO_DSV4_ROWSEQ_FULLBLOCK +
-    # EXO_DSV4_ROWSEQ_FULLBLOCK_MOE (below, now also default-on) close
-    # the remaining hc-adjacent-ops and MoE divergence, making DSpark's
-    # verify forward bitwise-equivalent to sequential decode. Confirmed
-    # live via 2x identical temp=0 reruns of the original failing prompt
-    # (math_digit_sum, 8000-token budget): clean convergence both times
-    # (finish_reason=stop, correct boxed answer, vs the prior 18-24x
-    # "sum is X?" repetition that never terminated), ~24 tok/s (within
-    # the documented 27-33 tok/s DSpark range -- FULLBLOCK's per-row
-    # overhead is real but modest, not a regression to plain decode
-    # speed). Set to 0 to fall back to sequential-only decode.
-    : "${EXO_SPECULATIVE:=1}"
-    # DSv4 FUSION/COMPILE PATHS — DISABLED 2026-06-18 (correctness > ~3-4% perf).
-    # All three batch-mis-specialize at batch_size>1: with any of them ON, a
-    # concurrent (BS>1) MTP verify forward produces repetition-biased logits,
-    # collapsing one stream into a deterministic period-6 prompt-echo loop that
-    # trips the degeneration kill-switch (HTTP 500 on every concurrent request).
-    # Proven: with all three =0, BS=2 MTP-on is CLEAN (0 errors, 0 degeneration);
-    # with them ON, BS=2 degenerates every iteration. Combined perf they buy is
-    # only ~3-4% (FUSED_MOE +1.2%/+1.1%, COMPILE_FFN +1.3% c=2, COMPILE_LAYER
-    # incremental) — not worth breaking concurrent serving. Implementation is
-    # left intact (env-gated, dormant) pending a batch-correct rework; set any
-    # of these =1 to re-enable for single-stream-only experiments.
-    # Full diagnosis: skills/.../references/dsv4-mtp-batch-degeneration-and-
-    # diagnosis-2026-06-17.md (UPDATE9). Also fixed two real sampling bugs this
-    # session (per-request temp 1b443098, residual correction 6cd30df9).
-    : "${EXO_DSV4_FUSED_MOE:=0}"
-    : "${EXO_DSV4_COMPILE_FFN:=0}"
-    : "${EXO_DSV4_COMPILE_LAYER:=0}"
-    # Cross-rank fence cadence during decode.
-    #
-    # 2026-05-17 update — REQUIRED for gamma>=2 MTP stability:
-    #   fence=43 (one fence per forward) on gamma>=2 builds up an 86-deep
-    #   chained-collective dependency in the GPU/comm-stream command buffer
-    #   (43 layers x 2 all_sums per layer). Each chained all_sum is gated
-    #   on the previous one peer CQE; tail-stall probability accumulates per
-    #   cycle and collapses gamma=2 decode into ~30-50% bistability at iter 2+.
-    #   fence=8 (~5 fences per 43-layer forward) breaks the chain into shorter
-    #   independent segments. Verified 2026-05-17 by 5-iter gamma=2 c=1 100K
-    #   bench: mean=31.5 t/s sigma=0.15, bad_rate=0/5. Beats gamma=1 champion
-    #   (30.4 mean) by +1.1 t/s while maintaining stability.
-    #
-    # Throughput vs stability tradeoff sweep (2026-05-11 historical, gamma=1):
-    #   fence=1  -> 15.4 tok/s   fence=4  -> 16.9   fence=8  -> 17.0
-    #   fence=16 -> 17.3         fence=43 -> 17.4 (asymptote)
-    # Note: those numbers predate the current decode champion (30.5).
-    #
-    # gamma=2 stability sweep (2026-05-17):
-    #   fence=1  -> 28.2 stable    (high fence overhead)
-    #   fence=8  -> 31.5 stable    (c=1 best stable throughput)
-    #   fence=43 -> bistable (10.9-31.6 t/s, ~30% stall rate)
-    #
-    # gamma=2 c=2 100K stability sweep (2026-05-22):
-    #   fence=2  -> bistable (iter 1: 22.90)        (over-fenced)
-    #   fence=4  -> 34.18 mean sigma=0.05 (4/5 clean)  <-- SELECTED for c=2
-    #   fence=8  -> bistable (2-3/5 iters at 22 agg)
-    # The c=2 stable-decode regime needs SHORTER fence segments than c=1
-    # because B=2 doubles per-collective payload size, raising peer-CQE
-    # tail probability per call. fence=4 keeps the 43-layer chain in
-    # ~11 fence segments (vs ~6 at fence=8), enough to push per-cycle
-    # stall probability below threshold. Cost: ~0.7 t/s on c=1 (29.7 ->
-    # ~29.0) from extra GPU syncs — acceptable to unlock c=2 stability.
-    #
-    # Set to 1 to revert to per-layer fences (slower but maximally stable).
-    # Set to 8 to recover c=1 ceiling at the cost of c=2 bistability.
-    # Set to 43 only when running gamma=1 (where the chain depth is harmless).
-    : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=4}"
-    # Metal command buffer size limit. M4 Max defaults to 50MB, but the
-    # DSv4 43-layer B=2 batched prefill forward produces >50MB of intermediate
-    # results. The 50MB limit causes mid-forward command buffer flushes that
-    # create bimodal stalls (fast chunks 0.77s, slow chunks 2.3s, 3x ratio).
-    # Setting 200MB lets the full B=2 forward fit in one command buffer,
-    # eliminating the stalls. Measured: B=2 aggregate 317 t/s (was 144 t/s).
-    : "${MLX_MAX_MB_PER_BUFFER:=200}"
-    : "${MLX_MAX_OPS_PER_BUFFER:=200}"
-    # MTP self-spec gate. DEFAULT FLIPPED TO OFF 2026-07-26 alongside
-    # EXO_SPECULATIVE above -- with speculation itself off by default,
-    # there is no reason to spend load time/memory attaching heads that
-    # will never be used at decode time. Activates when (a) the
-    # checkpoint contains mtp.* weights (mlx-community variants strip
-    # them; use scripts/patch_dsv4_mtp.py to add them back from
-    # upstream) AND (b) EXO_DSV4_MTP is non-zero. Set to 1 (with
-    # EXO_SPECULATIVE=1) to re-enable plain single-token MTP -- though
-    # per the plan for this cluster, DSpark below is the ONLY intended
-    # MTP mechanism; there's no real reason to run plain MTP instead of
-    # DSpark once DSpark's bug (see EXO_SPECULATIVE comment above) is
-    # fixed, so this existing separately in the first place is itself
-    # legacy redundancy worth revisiting.
-    : "${EXO_DSV4_MTP:=1}"
-    # Use the dedicated mlx-community/DeepSeek-V4-Flash-MTP-bf16 head instead of
-    # the checkpoint-bundled MTP weights. Only matters if EXO_DSV4_MTP=1
-    # (see above -- default OFF alongside it 2026-07-26). Measured
-    # ~68% single-stream speedup (18.8 → 31.6 t/s) from better draft acceptance
-    # (the dedicated repo's quant/packing suits the draft path) when MTP
-    # IS in use. Overlaid onto mtp[0] before sharding in
-    # utils_mlx._overlay_dsv4_dedicated_mtp. Set =0 to fall back to the
-    # native checkpoint-bundled MTP head instead.
-    # NOTE (2026-08-27): DEDICATED flipped 1→0 to match the promoted DSpark MTP
-    # production baseline — the 24-run +36.7% verdict used the NATIVE
-    # checkpoint-bundled head (EXO_DSV4_DSPARK_NATIVE=1); see
-    # docs/dspark-mtp-production-baseline-2026-08-27.md.
-    : "${EXO_DSV4_MTP_DEDICATED:=0}"
+  # DEFAULT RE-ENABLED 2026-08-02: DSpark's self-doubt-loop bug (found
+  # 2026-07-26, disabled since) is FIXED and re-validated. Root cause
+  # confirmed via a systematic elimination sweep (2026-07-31/08-02
+  # session): NOT the documented BOS-spam/cache-wraparound bug (ruled
+  # out -- zero wrap events across a full failing run), NOT numerics-
+  # divergence/near-tie (ruled out -- live logit-margin capture showed
+  # a confident mean ~9 logits at every self-doubt transition point,
+  # nowhere close to a tie), NOT unique to DSpark specifically (the
+  # SAME loop reproduced under classic draft-model spec AND plain
+  # chained-MTP, both without DSpark's context-conditioning side
+  # channel) -- it was DeepseekV4's well-known "L>1 batched verify !=
+  # L sequential decode steps" numerics-drift class (see
+  # EXO_DSV4_VERIFY_ROWSEQ's comment in deepseek_v4.py -- the SAME
+  # mechanism previously root-caused for MTP's tool-call-corruption
+  # bug at long context). EXO_DSV4_VERIFY_ROWSEQ alone (already
+  # default-on) fixes the attention-layer piece but is insufficient on
+  # its own for the self-doubt loop; EXO_DSV4_ROWSEQ_FULLBLOCK +
+  # EXO_DSV4_ROWSEQ_FULLBLOCK_MOE (below, now also default-on) close
+  # the remaining hc-adjacent-ops and MoE divergence, making DSpark's
+  # verify forward bitwise-equivalent to sequential decode. Confirmed
+  # live via 2x identical temp=0 reruns of the original failing prompt
+  # (math_digit_sum, 8000-token budget): clean convergence both times
+  # (finish_reason=stop, correct boxed answer, vs the prior 18-24x
+  # "sum is X?" repetition that never terminated), ~24 tok/s (within
+  # the documented 27-33 tok/s DSpark range -- FULLBLOCK's per-row
+  # overhead is real but modest, not a regression to plain decode
+  # speed). Set to 0 to fall back to sequential-only decode.
+  : "${EXO_SPECULATIVE:=1}"
+  # DSv4 FUSION/COMPILE PATHS — DISABLED 2026-06-18 (correctness > ~3-4% perf).
+  # All three batch-mis-specialize at batch_size>1: with any of them ON, a
+  # concurrent (BS>1) MTP verify forward produces repetition-biased logits,
+  # collapsing one stream into a deterministic period-6 prompt-echo loop that
+  # trips the degeneration kill-switch (HTTP 500 on every concurrent request).
+  # Proven: with all three =0, BS=2 MTP-on is CLEAN (0 errors, 0 degeneration);
+  # with them ON, BS=2 degenerates every iteration. Combined perf they buy is
+  # only ~3-4% (FUSED_MOE +1.2%/+1.1%, COMPILE_FFN +1.3% c=2, COMPILE_LAYER
+  # incremental) — not worth breaking concurrent serving. Implementation is
+  # left intact (env-gated, dormant) pending a batch-correct rework; set any
+  # of these =1 to re-enable for single-stream-only experiments.
+  # Full diagnosis: skills/.../references/dsv4-mtp-batch-degeneration-and-
+  # diagnosis-2026-06-17.md (UPDATE9). Also fixed two real sampling bugs this
+  # session (per-request temp 1b443098, residual correction 6cd30df9).
+  : "${EXO_DSV4_FUSED_MOE:=0}"
+  : "${EXO_DSV4_COMPILE_FFN:=0}"
+  : "${EXO_DSV4_COMPILE_LAYER:=0}"
+  # Cross-rank fence cadence during decode.
+  #
+  # 2026-05-17 update — REQUIRED for gamma>=2 MTP stability:
+  #   fence=43 (one fence per forward) on gamma>=2 builds up an 86-deep
+  #   chained-collective dependency in the GPU/comm-stream command buffer
+  #   (43 layers x 2 all_sums per layer). Each chained all_sum is gated
+  #   on the previous one peer CQE; tail-stall probability accumulates per
+  #   cycle and collapses gamma=2 decode into ~30-50% bistability at iter 2+.
+  #   fence=8 (~5 fences per 43-layer forward) breaks the chain into shorter
+  #   independent segments. Verified 2026-05-17 by 5-iter gamma=2 c=1 100K
+  #   bench: mean=31.5 t/s sigma=0.15, bad_rate=0/5. Beats gamma=1 champion
+  #   (30.4 mean) by +1.1 t/s while maintaining stability.
+  #
+  # Throughput vs stability tradeoff sweep (2026-05-11 historical, gamma=1):
+  #   fence=1  -> 15.4 tok/s   fence=4  -> 16.9   fence=8  -> 17.0
+  #   fence=16 -> 17.3         fence=43 -> 17.4 (asymptote)
+  # Note: those numbers predate the current decode champion (30.5).
+  #
+  # gamma=2 stability sweep (2026-05-17):
+  #   fence=1  -> 28.2 stable    (high fence overhead)
+  #   fence=8  -> 31.5 stable    (c=1 best stable throughput)
+  #   fence=43 -> bistable (10.9-31.6 t/s, ~30% stall rate)
+  #
+  # gamma=2 c=2 100K stability sweep (2026-05-22):
+  #   fence=2  -> bistable (iter 1: 22.90)        (over-fenced)
+  #   fence=4  -> 34.18 mean sigma=0.05 (4/5 clean)  <-- SELECTED for c=2
+  #   fence=8  -> bistable (2-3/5 iters at 22 agg)
+  # The c=2 stable-decode regime needs SHORTER fence segments than c=1
+  # because B=2 doubles per-collective payload size, raising peer-CQE
+  # tail probability per call. fence=4 keeps the 43-layer chain in
+  # ~11 fence segments (vs ~6 at fence=8), enough to push per-cycle
+  # stall probability below threshold. Cost: ~0.7 t/s on c=1 (29.7 ->
+  # ~29.0) from extra GPU syncs — acceptable to unlock c=2 stability.
+  #
+  # Set to 1 to revert to per-layer fences (slower but maximally stable).
+  # Set to 8 to recover c=1 ceiling at the cost of c=2 bistability.
+  # Set to 43 only when running gamma=1 (where the chain depth is harmless).
+  : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=4}"
+  # Metal command buffer size limit. M4 Max defaults to 50MB, but the
+  # DSv4 43-layer B=2 batched prefill forward produces >50MB of intermediate
+  # results. The 50MB limit causes mid-forward command buffer flushes that
+  # create bimodal stalls (fast chunks 0.77s, slow chunks 2.3s, 3x ratio).
+  # Setting 200MB lets the full B=2 forward fit in one command buffer,
+  # eliminating the stalls. Measured: B=2 aggregate 317 t/s (was 144 t/s).
+  : "${MLX_MAX_MB_PER_BUFFER:=200}"
+  : "${MLX_MAX_OPS_PER_BUFFER:=200}"
+  # MTP self-spec gate. DEFAULT FLIPPED TO OFF 2026-07-26 alongside
+  # EXO_SPECULATIVE above -- with speculation itself off by default,
+  # there is no reason to spend load time/memory attaching heads that
+  # will never be used at decode time. Activates when (a) the
+  # checkpoint contains mtp.* weights (mlx-community variants strip
+  # them; use scripts/patch_dsv4_mtp.py to add them back from
+  # upstream) AND (b) EXO_DSV4_MTP is non-zero. Set to 1 (with
+  # EXO_SPECULATIVE=1) to re-enable plain single-token MTP -- though
+  # per the plan for this cluster, DSpark below is the ONLY intended
+  # MTP mechanism; there's no real reason to run plain MTP instead of
+  # DSpark once DSpark's bug (see EXO_SPECULATIVE comment above) is
+  # fixed, so this existing separately in the first place is itself
+  # legacy redundancy worth revisiting.
+  : "${EXO_DSV4_MTP:=1}"
+  # Use the dedicated mlx-community/DeepSeek-V4-Flash-MTP-bf16 head instead of
+  # the checkpoint-bundled MTP weights. Only matters if EXO_DSV4_MTP=1
+  # (see above -- default OFF alongside it 2026-07-26). Measured
+  # ~68% single-stream speedup (18.8 → 31.6 t/s) from better draft acceptance
+  # (the dedicated repo's quant/packing suits the draft path) when MTP
+  # IS in use. Overlaid onto mtp[0] before sharding in
+  # utils_mlx._overlay_dsv4_dedicated_mtp. Set =0 to fall back to the
+  # native checkpoint-bundled MTP head instead.
+  # NOTE (2026-08-27): DEDICATED flipped 1→0 to match the promoted DSpark MTP
+  # production baseline — the 24-run +36.7% verdict used the NATIVE
+  # checkpoint-bundled head (EXO_DSV4_DSPARK_NATIVE=1); see
+  # docs/dspark-mtp-production-baseline-2026-08-27.md.
+  : "${EXO_DSV4_MTP_DEDICATED:=0}"
 else
-    : "${EXO_SPECULATIVE:=1}"
+  : "${EXO_SPECULATIVE:=1}"
 fi
 # Prefix cache: DSv4's sliding-window-128 means the prefix-cache slicing
 # benefit is limited (RotatingKVCache becomes non-sliceable after rotation).
@@ -559,7 +559,7 @@ fi
 # See dsv4_prefill_blowup memory + docs/upstream-prs.md.
 # Lowered 256 -> 128 on 2026-05-11; re-raised to 256 on 2026-07-01 with
 # argpartition ON — see EXO_PREFILL_STEP_SIZE note above.
-: "${DSV4_PREFILL_STEP_SIZE:=}"  # empty = inherit EXO_PREFILL_STEP_SIZE env (single source of truth)
+: "${DSV4_PREFILL_STEP_SIZE:=}" # empty = inherit EXO_PREFILL_STEP_SIZE env (single source of truth)
 # Prefill indexer top-k via argpartition O(P) instead of argsort O(P log P)
 # (2026-07-01, quality-equivalent: top-k SET identical, downstream gathered-KV
 # softmax is order-invariant). MIN_P=8192 keeps argsort at small pools where
@@ -806,34 +806,34 @@ IS_M4_2=false
 IS_MBP=false
 
 for IP in $CURRENT_IPS; do
-    if [ "$IP" == "$M4_1_IP" ]; then
-        IS_M4_1=true
-        break
-    fi
-    if [ "$IP" == "$M4_2_IP" ]; then
-        IS_M4_2=true
-        break
-    fi
-    if [ "$IP" == "$MBP_IP" ]; then
-        IS_MBP=true
-        break
-    fi
+  if [ "$IP" == "$M4_1_IP" ]; then
+    IS_M4_1=true
+    break
+  fi
+  if [ "$IP" == "$M4_2_IP" ]; then
+    IS_M4_2=true
+    break
+  fi
+  if [ "$IP" == "$MBP_IP" ]; then
+    IS_MBP=true
+    break
+  fi
 done
 
 if [ "$IS_M4_1" = true ]; then
-    echo "Detected M4-1 ($M4_1_IP)"
-    # Peer with M4-2
-    export EXO_DISCOVERY_PEERS="/ip4/$M4_2_IP/tcp/52415/p2p/$M4_2_PEER_ID"
+  echo "Detected M4-1 ($M4_1_IP)"
+  # Peer with M4-2
+  export EXO_DISCOVERY_PEERS="/ip4/$M4_2_IP/tcp/52415/p2p/$M4_2_PEER_ID"
 elif [ "$IS_M4_2" = true ]; then
-    echo "Detected M4-2 ($M4_2_IP)"
-    # Peer with M4-1
-    export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
+  echo "Detected M4-2 ($M4_2_IP)"
+  # Peer with M4-1
+  export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
 elif [ "$IS_MBP" = true ]; then
-    echo "Detected MacBook Pro ($MBP_IP)"
-    # Peer with M4-1
-    export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
+  echo "Detected MacBook Pro ($MBP_IP)"
+  # Peer with M4-1
+  export EXO_DISCOVERY_PEERS="/ip4/$M4_1_IP/tcp/52415/p2p/$M4_1_PEER_ID"
 else
-    echo "Unknown host IPs: $CURRENT_IPS. Running as remote controller."
+  echo "Unknown host IPs: $CURRENT_IPS. Running as remote controller."
 fi
 
 # Full cluster setup — always runs regardless of which machine launches the script
@@ -844,36 +844,36 @@ echo "-----------------------------------------------------"
 NODES=("macstudio-m4-1" "macstudio-m4-2")
 # NODES=("macstudio-m4-1" "macstudio-m4-2" "macbook-m4")
 
-    # Thunderbolt Connectivity Check
-    echo "Discovering active Thunderbolt IPs..."
+# Thunderbolt Connectivity Check
+echo "Discovering active Thunderbolt IPs..."
 
 get_node_tb_ips() {
-    local node=$1
-    # 1. Ask the node for its Thunderbolt device names (e.g., en1, en2)
-    local devices=$(ssh "$node" "networksetup -listallhardwareports" | awk '/Hardware Port: Thunderbolt/{getline; print $2}')
-    
-    # 2. Iterate through them locally, asking the node about each one individually
-    for dev in $devices; do
-        if ssh "$node" "ifconfig $dev" 2>/dev/null | grep -q "status: active"; then
-            ssh "$node" "ifconfig $dev" | awk '/inet / && !/127\.0\.0\.1/{print $2}'
-        fi
-    done
+  local node=$1
+  # 1. Ask the node for its Thunderbolt device names (e.g., en1, en2)
+  local devices=$(ssh "$node" "networksetup -listallhardwareports" | awk '/Hardware Port: Thunderbolt/{getline; print $2}')
+
+  # 2. Iterate through them locally, asking the node about each one individually
+  for dev in $devices; do
+    if ssh "$node" "ifconfig $dev" 2>/dev/null | grep -q "status: active"; then
+      ssh "$node" "ifconfig $dev" | awk '/inet / && !/127\.0\.0\.1/{print $2}'
+    fi
+  done
 }
 
 find_shared_ip() {
-    local target_ips=$1
-    local peer_ips=$2
-    for tip in $target_ips; do
-        local t_subnet=$(echo "$tip" | awk -F. '{print $1"."$2"."$3}')
-        for pip in $peer_ips; do
-            local p_subnet=$(echo "$pip" | awk -F. '{print $1"."$2"."$3}')
-            if [ "$t_subnet" == "$p_subnet" ]; then
-                echo "$tip"
-                return 0
-            fi
-        done
+  local target_ips=$1
+  local peer_ips=$2
+  for tip in $target_ips; do
+    local t_subnet=$(echo "$tip" | awk -F. '{print $1"."$2"."$3}')
+    for pip in $peer_ips; do
+      local p_subnet=$(echo "$pip" | awk -F. '{print $1"."$2"."$3}')
+      if [ "$t_subnet" == "$p_subnet" ]; then
+        echo "$tip"
+        return 0
+      fi
     done
-    return 1
+  done
+  return 1
 }
 
 echo "Fetching active Thunderbolt IPs from all nodes..."
@@ -896,20 +896,20 @@ echo "macstudio-m4-2 routes: -> M4-1 ($M4_2_TO_M4_1)"
 
 # Verify Studio-to-Studio connection was discovered
 if [ -z "$M4_1_TO_M4_2" ] || [ -z "$M4_2_TO_M4_1" ]; then
-    echo "CRITICAL ERROR: Could not map Studio-to-Studio Thunderbolt topology!"
-    exit 1
+  echo "CRITICAL ERROR: Could not map Studio-to-Studio Thunderbolt topology!"
+  exit 1
 fi
 
 # Validate each Studio has at least 1 active Thunderbolt interface
 echo "Verifying direct Thunderbolt links..."
 for node in macstudio-m4-1 macstudio-m4-2; do
-    active_count=$(echo "$(get_node_tb_ips "$node")" | grep -c '.')
-    if [ "$active_count" -lt 1 ]; then
-        echo "CRITICAL ERROR: $node has no active Thunderbolt interfaces."
-        echo "Check physical Thunderbolt cable connections!"
-        exit 1
-    fi
-    echo "  $node: $active_count active TB interfaces ✓"
+  active_count=$(echo "$(get_node_tb_ips "$node")" | grep -c '.')
+  if [ "$active_count" -lt 1 ]; then
+    echo "CRITICAL ERROR: $node has no active Thunderbolt interfaces."
+    echo "Check physical Thunderbolt cable connections!"
+    exit 1
+  fi
+  echo "  $node: $active_count active TB interfaces ✓"
 done
 
 # Direct-link pings — clear any stale cross-subnet routes from previous runs first,
@@ -922,7 +922,7 @@ done
 # launch indefinitely (no error, no timeout) instead of failing visibly.
 echo "Testing direct-link connectivity (clearing stale routes first)..."
 for node in macstudio-m4-1 macstudio-m4-2; do
-    ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo -n route delete -net \$r 2>/dev/null; done" &> /dev/null
+  ssh "$node" "for r in \$(netstat -rn | awk '/192\.168\.(200|201|202)\./{print \$1}' | sort -u); do sudo -n route delete -net \$r 2>/dev/null; done" &>/dev/null
 done
 
 # Direct-link TB MTU. The KNOWN-GOOD BASELINE is 9000 — verified 2026-06-08
@@ -951,23 +951,23 @@ done
 # the desired MTU) on the interface that owns the link IP.
 #   $1 = node, $2 = the LOCAL link IP on that node (e.g. 192.168.204.1)
 repair_direct_route() {
-    local node="$1" local_ip="$2"
-    [ -z "$local_ip" ] && return 0
-    local subnet="${local_ip%.*}.0/24"
-    # NOTE (2026-06-07): do NOT touch the interface MTU here. Running
-    # `ifconfig <tbiface> mtu N` forces the Thunderbolt PHY to renegotiate,
-    # and on this hardware that renegotiation intermittently lands in a
-    # "No device connected" / link-dead state that survives until reboot.
-    # We were the cause of the repeated TB drops this session. Only the
-    # connected ROUTE is repaired here (passive — does not reset the PHY).
-    # If a specific MTU is genuinely required, set it ONCE by hand when the
-    # link is known-healthy; never bounce it on every boot.
-    ssh "$node" "
+  local node="$1" local_ip="$2"
+  [ -z "$local_ip" ] && return 0
+  local subnet="${local_ip%.*}.0/24"
+  # NOTE (2026-06-07): do NOT touch the interface MTU here. Running
+  # `ifconfig <tbiface> mtu N` forces the Thunderbolt PHY to renegotiate,
+  # and on this hardware that renegotiation intermittently lands in a
+  # "No device connected" / link-dead state that survives until reboot.
+  # We were the cause of the repeated TB drops this session. Only the
+  # connected ROUTE is repaired here (passive — does not reset the PHY).
+  # If a specific MTU is genuinely required, set it ONCE by hand when the
+  # link is known-healthy; never bounce it on every boot.
+  ssh "$node" "
         iface=\$(ifconfig 2>/dev/null | awk -v ip='$local_ip' '/^[a-z0-9]+: /{i=substr(\$1,1,length(\$1)-1)} \$1==\"inet\" && \$2==ip {print i; exit}')
         [ -z \"\$iface\" ] && exit 0
         sudo route -n delete -net $subnet 2>/dev/null
         sudo route -n add -net $subnet -interface \$iface 2>/dev/null
-    " &> /dev/null
+    " &>/dev/null
 }
 # $M4_*_TO_M4_* are the PEER IPs; the local IP on each node is the other one.
 # Do NOT preemptively repair on every boot — a healthy link must be left
@@ -977,26 +977,28 @@ repair_direct_route() {
 # M4-1 ↔ M4-2 (direct link). Retry once after a fresh route repair before
 # declaring a real cable fault, so a transient missing-route doesn't abort boot.
 direct_link_ok() {
-    local from="$1" to_ip="$2"
-    ssh "$from" "ping -c 1 -W 1 $to_ip" &> /dev/null
+  local from="$1" to_ip="$2"
+  ssh "$from" "ping -c 1 -W 1 $to_ip" &>/dev/null
 }
 if ! direct_link_ok macstudio-m4-1 "$M4_2_TO_M4_1"; then
-    echo "  Direct link m4-1→m4-2 down; repairing route and retrying..."
-    repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
-    repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
-    sleep 1
-    if ! direct_link_ok macstudio-m4-1 "$M4_2_TO_M4_1"; then
-        echo "ERROR: macstudio-m4-1 cannot directly reach M4-2 ($M4_2_TO_M4_1) even after route repair. Check cable!"; exit 1
-    fi
+  echo "  Direct link m4-1→m4-2 down; repairing route and retrying..."
+  repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
+  repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
+  sleep 1
+  if ! direct_link_ok macstudio-m4-1 "$M4_2_TO_M4_1"; then
+    echo "ERROR: macstudio-m4-1 cannot directly reach M4-2 ($M4_2_TO_M4_1) even after route repair. Check cable!"
+    exit 1
+  fi
 fi
 if ! direct_link_ok macstudio-m4-2 "$M4_1_TO_M4_2"; then
-    echo "  Direct link m4-2→m4-1 down; repairing route and retrying..."
-    repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
-    repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
-    sleep 1
-    if ! direct_link_ok macstudio-m4-2 "$M4_1_TO_M4_2"; then
-        echo "ERROR: macstudio-m4-2 cannot directly reach M4-1 ($M4_1_TO_M4_2) even after route repair. Check cable!"; exit 1
-    fi
+  echo "  Direct link m4-2→m4-1 down; repairing route and retrying..."
+  repair_direct_route macstudio-m4-2 "$M4_2_TO_M4_1"
+  repair_direct_route macstudio-m4-1 "$M4_1_TO_M4_2"
+  sleep 1
+  if ! direct_link_ok macstudio-m4-2 "$M4_1_TO_M4_2"; then
+    echo "ERROR: macstudio-m4-2 cannot directly reach M4-1 ($M4_1_TO_M4_2) even after route repair. Check cable!"
+    exit 1
+  fi
 fi
 
 echo "All direct Thunderbolt links verified ✓"
@@ -1007,9 +1009,9 @@ echo "All direct Thunderbolt links verified ✓"
 echo "Checking per-device RDMA port states (active TB interfaces only)..."
 RDMA_HEALTHY=true
 for NODE in macstudio-m4-1 macstudio-m4-2; do
-    echo -n "  $NODE: "
-    # Get only the RDMA devices whose underlying interface has an active IP
-    PORT_STATUS=$(ssh "$NODE" 'for dev in rdma_en1 rdma_en2 rdma_en3 rdma_en4 rdma_en5; do
+  echo -n "  $NODE: "
+  # Get only the RDMA devices whose underlying interface has an active IP
+  PORT_STATUS=$(ssh "$NODE" 'for dev in rdma_en1 rdma_en2 rdma_en3 rdma_en4 rdma_en5; do
         iface=${dev#rdma_}
         # Only check if this interface has a 192.168.x.x IP (active TB link)
         ip=$(ifconfig "$iface" 2>/dev/null | awk "/inet / && /192\.168\./{print \$2}")
@@ -1021,28 +1023,28 @@ for NODE in macstudio-m4-1 macstudio-m4-2; do
         fi
     done' 2>/dev/null)
 
-    if [ -z "$PORT_STATUS" ]; then
-        echo "no active RDMA devices found"
-        RDMA_HEALTHY=false
-    else
-        echo "$PORT_STATUS"
-        if echo "$PORT_STATUS" | grep -q "PORT_DOWN"; then
-            echo "    ERROR: PORT_DOWN on an active TB interface on $NODE! Check cable."
-            RDMA_HEALTHY=false
-        fi
+  if [ -z "$PORT_STATUS" ]; then
+    echo "no active RDMA devices found"
+    RDMA_HEALTHY=false
+  else
+    echo "$PORT_STATUS"
+    if echo "$PORT_STATUS" | grep -q "PORT_DOWN"; then
+      echo "    ERROR: PORT_DOWN on an active TB interface on $NODE! Check cable."
+      RDMA_HEALTHY=false
     fi
+  fi
 done
 
 if [ "$RDMA_HEALTHY" = false ]; then
-    echo ""
-    if [ "${SKIP_RDMA_PORT_CHECK:-0}" = "1" ]; then
-        echo "WARNING: RDMA ports are DOWN but SKIP_RDMA_PORT_CHECK=1 is set. Continuing (fresh boot assumed)."
-    else
-        echo "ERROR: One or more active-link RDMA ports are DOWN. Fix cables and retry."
-        exit 1
-    fi
+  echo ""
+  if [ "${SKIP_RDMA_PORT_CHECK:-0}" = "1" ]; then
+    echo "WARNING: RDMA ports are DOWN but SKIP_RDMA_PORT_CHECK=1 is set. Continuing (fresh boot assumed)."
+  else
+    echo "ERROR: One or more active-link RDMA ports are DOWN. Fix cables and retry."
+    exit 1
+  fi
 else
-    echo "  All active-link RDMA ports active \u2713"
+  echo "  All active-link RDMA ports active \u2713"
 fi
 
 # RoCEv2 (RDMA) support is already verified by the per-device PORT_ACTIVE
@@ -1092,37 +1094,37 @@ LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "none")
 git fetch origin --quiet 2>/dev/null || true
 ORIGIN_TARGET=$(git rev-parse "origin/$PUSH_CHECK_BRANCH" 2>/dev/null || echo "none")
 if [ "$LOCAL_HEAD" = "none" ]; then
-    echo "WARNING: Not in a git repo on controller. Skipping push check."
+  echo "WARNING: Not in a git repo on controller. Skipping push check."
 elif [ "$ORIGIN_TARGET" = "none" ]; then
-    echo "WARNING: Could not fetch origin/$PUSH_CHECK_BRANCH. Skipping push check."
+  echo "WARNING: Could not fetch origin/$PUSH_CHECK_BRANCH. Skipping push check."
 elif ! git merge-base --is-ancestor "$LOCAL_HEAD" "origin/$PUSH_CHECK_BRANCH" 2>/dev/null; then
-    echo ""
-    echo "╔═══════════════════════════════════════════════════════════════╗"
-    echo "║  WARNING: Local HEAD is NOT on origin/$PUSH_CHECK_BRANCH!"
-    echo "╠═══════════════════════════════════════════════════════════════╣"
-    echo "║  Local HEAD:               $LOCAL_HEAD"
-    echo "║  origin/$PUSH_CHECK_BRANCH: $(git rev-parse --short origin/$PUSH_CHECK_BRANCH)"
-    echo "║                                                              ║"
-    echo "║  Cluster nodes will reset to origin/$PUSH_CHECK_BRANCH, so your local"
-    echo "║  commits will NOT be deployed. Push first:                   ║"
-    echo "║    git push origin $PUSH_CHECK_BRANCH                       "
-    echo "╚═══════════════════════════════════════════════════════════════╝"
-    echo ""
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted."
-        exit 1
-    fi
+  echo ""
+  echo "╔═══════════════════════════════════════════════════════════════╗"
+  echo "║  WARNING: Local HEAD is NOT on origin/$PUSH_CHECK_BRANCH!"
+  echo "╠═══════════════════════════════════════════════════════════════╣"
+  echo "║  Local HEAD:               $LOCAL_HEAD"
+  echo "║  origin/$PUSH_CHECK_BRANCH: $(git rev-parse --short origin/$PUSH_CHECK_BRANCH)"
+  echo "║                                                              ║"
+  echo "║  Cluster nodes will reset to origin/$PUSH_CHECK_BRANCH, so your local"
+  echo "║  commits will NOT be deployed. Push first:                   ║"
+  echo "║    git push origin $PUSH_CHECK_BRANCH                       "
+  echo "╚═══════════════════════════════════════════════════════════════╝"
+  echo ""
+  read -p "Continue anyway? (y/N) " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
 else
-    echo "  Local HEAD ($LOCAL_HEAD) is on origin/$PUSH_CHECK_BRANCH ✓"
+  echo "  Local HEAD ($LOCAL_HEAD) is on origin/$PUSH_CHECK_BRANCH ✓"
 fi
 
 # Residual (wired + compressor) GB on a node — the memory classes exo's dead
 # runners leave behind. Healthy idle macOS sits well under the threshold;
 # freshly-killed exo takes ~1 min to drain back under it.
 node_residual_gb() {
-    ssh "$1" "vm_stat" | awk '
+  ssh "$1" "vm_stat" | awk '
         /page size of/                 { page_size = $8 }
         /Pages wired down:/            { wired = $4 }
         /Pages occupied by compressor:/ { compressor = $5 }
@@ -1134,281 +1136,286 @@ node_residual_gb() {
 # until it recovers or EXO_RECLAIM_DEADLINE_SECONDS pass, then alert
 # explicitly (warn-only). See the EXO_RECLAIM_* block up top.
 wait_for_memory_reclaim() {
-    local NODE=$1 KILL_EPOCH=$2
-    [ "$EXO_RECLAIM_CHECK" == "1" ] || return 0
-    [ -n "$KILL_EPOCH" ] || return 0
-    local DEADLINE=$(( KILL_EPOCH + EXO_RECLAIM_DEADLINE_SECONDS ))
-    local RESIDUAL
-    while :; do
-        RESIDUAL=$(node_residual_gb "$NODE")
-        if [ -n "$RESIDUAL" ] && [ "$RESIDUAL" -le "$EXO_RECLAIM_RESIDUAL_MAX_GB" ]; then
-            echo "  Memory reclaim on $NODE complete (wired+compressor ${RESIDUAL} GB <= ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB)."
-            return 0
-        fi
-        if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-            echo ""
-            echo "  ============================ STUCK MEMORY ============================"
-            echo "  WARNING: $NODE wired+compressor is still ${RESIDUAL:-?} GB"
-            echo "  (> ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB) ${EXO_RECLAIM_DEADLINE_SECONDS}s after the exo kill."
-            echo "  This is the pathological post-SIGKILL state: AGX/Metal wired pages"
-            echo "  orphaned mid-GPU-op (m4-2 2026-07-09: 61 GB stuck in the compressor"
-            echo "  with no owning process). Model placement on this node will refuse /"
-            echo "  JIT requests will 503 until it clears."
-            echo "  ESCAPE HATCH: reboot $NODE — userspace cannot reclaim these pages."
-            echo "  ======================================================================"
-            echo ""
-            return 1
-        fi
-        echo "  Waiting for memory reclaim on $NODE (wired+compressor ${RESIDUAL:-?} GB > ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB)..."
-        sleep 5
-    done
+  local NODE=$1 KILL_EPOCH=$2
+  [ "$EXO_RECLAIM_CHECK" == "1" ] || return 0
+  [ -n "$KILL_EPOCH" ] || return 0
+  local DEADLINE=$((KILL_EPOCH + EXO_RECLAIM_DEADLINE_SECONDS))
+  local RESIDUAL
+  while :; do
+    RESIDUAL=$(node_residual_gb "$NODE")
+    if [ -n "$RESIDUAL" ] && [ "$RESIDUAL" -le "$EXO_RECLAIM_RESIDUAL_MAX_GB" ]; then
+      echo "  Memory reclaim on $NODE complete (wired+compressor ${RESIDUAL} GB <= ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB)."
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+      echo ""
+      echo "  ============================ STUCK MEMORY ============================"
+      echo "  WARNING: $NODE wired+compressor is still ${RESIDUAL:-?} GB"
+      echo "  (> ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB) ${EXO_RECLAIM_DEADLINE_SECONDS}s after the exo kill."
+      echo "  This is the pathological post-SIGKILL state: AGX/Metal wired pages"
+      echo "  orphaned mid-GPU-op (m4-2 2026-07-09: 61 GB stuck in the compressor"
+      echo "  with no owning process). Model placement on this node will refuse /"
+      echo "  JIT requests will 503 until it clears."
+      echo "  ESCAPE HATCH: reboot $NODE — userspace cannot reclaim these pages."
+      echo "  ======================================================================"
+      echo ""
+      return 1
+    fi
+    echo "  Waiting for memory reclaim on $NODE (wired+compressor ${RESIDUAL:-?} GB > ${EXO_RECLAIM_RESIDUAL_MAX_GB} GB)..."
+    sleep 5
+  done
 }
 
 # 1. Cleanup, Update, and Build
 for NODE in "${NODES[@]}"; do
-    echo "Preparing $NODE..."
-    echo "Setting Metal memory limit on $NODE..."
-    if [[ "$NODE" == *"macbook"* ]]; then
-        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=32000"
+  echo "Preparing $NODE..."
+  echo "Setting Metal memory limit on $NODE..."
+  if [[ $NODE == *"macbook"* ]]; then
+    ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=32000"
+  else
+    # 115000 (was 124000), lowered 2026-06-29 to PREVENT the Metal-allocator
+    # wedge root-caused this session. Mechanism: under a memory-pressure event
+    # (compressed memory spiking — observed 16 GB) the MLX Metal allocator
+    # falls off its fast pooled-reuse path into a stuck wired-malloc state;
+    # prefill then drops ~5x (256→58 tok/s, GPU ~9W/idle, CPU pegged in
+    # mlx::core::Fence::wait + MetalAllocator::malloc) and does NOT recover
+    # without a full reboot (wired memory is pinned; relaunch can't reclaim
+    # it). Trigger condition: 124000 on a 137 GB node co-hosting DSv4 (~79 GB
+    # wired steady) + Qwen3.6 left only ~13 GB for OS + transient prefill
+    # scratch, so a deep-context prefill's scratch spike pushed the system
+    # into compression pressure. 115000 gives ~22 GB non-wired headroom —
+    # DSv4+Qwen+worst-case retained KV still fit, but a transient spike can no
+    # longer drive the OS into the pressure state that degrades the allocator.
+    # Override via DSV4_WIRED_LIMIT_MB if a future footprint needs more.
+    ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=${DSV4_WIRED_LIMIT_MB:-115000}"
+  fi
+
+  echo "Killing existing Exo processes on $NODE..."
+  # GRACEFUL FIRST. Exo runners hold live RoCE/RDMA queue pairs (jaccl TP).
+  # SIGKILL (-9) skips the C++ static-duration destructors that call
+  # destroy_qp/dealloc_pd/close_device — leaking active QPs on the
+  # Thunderbolt NIC, which accumulates and wedges the Apple TB stack to
+  # "No device connected" (needs an OS reboot). So SIGTERM and WAIT for a
+  # clean exit (static destructors run on normal interpreter exit → QPs
+  # freed), and only escalate to -9 as a last resort. (root cause: warm-mem
+  # fact 526; 2026-06-08)
+  ssh "$NODE" "pkill -TERM -f 'python.*exo' 2>/dev/null || true; pkill -TERM -f 'exo.main' 2>/dev/null || true"
+  # Wait up to ~15s for graceful exit so jaccl tears down RDMA cleanly.
+  _gone=false
+  for i in {1..15}; do
+    if ssh "$NODE" "pgrep -f 'python.*exo'" >/dev/null 2>&1; then
+      sleep 1
     else
-        # 115000 (was 124000), lowered 2026-06-29 to PREVENT the Metal-allocator
-        # wedge root-caused this session. Mechanism: under a memory-pressure event
-        # (compressed memory spiking — observed 16 GB) the MLX Metal allocator
-        # falls off its fast pooled-reuse path into a stuck wired-malloc state;
-        # prefill then drops ~5x (256→58 tok/s, GPU ~9W/idle, CPU pegged in
-        # mlx::core::Fence::wait + MetalAllocator::malloc) and does NOT recover
-        # without a full reboot (wired memory is pinned; relaunch can't reclaim
-        # it). Trigger condition: 124000 on a 137 GB node co-hosting DSv4 (~79 GB
-        # wired steady) + Qwen3.6 left only ~13 GB for OS + transient prefill
-        # scratch, so a deep-context prefill's scratch spike pushed the system
-        # into compression pressure. 115000 gives ~22 GB non-wired headroom —
-        # DSv4+Qwen+worst-case retained KV still fit, but a transient spike can no
-        # longer drive the OS into the pressure state that degrades the allocator.
-        # Override via DSV4_WIRED_LIMIT_MB if a future footprint needs more.
-        ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=${DSV4_WIRED_LIMIT_MB:-115000}"
+      _gone=true
+      break
     fi
-    
-    echo "Killing existing Exo processes on $NODE..."
-    # GRACEFUL FIRST. Exo runners hold live RoCE/RDMA queue pairs (jaccl TP).
-    # SIGKILL (-9) skips the C++ static-duration destructors that call
-    # destroy_qp/dealloc_pd/close_device — leaking active QPs on the
-    # Thunderbolt NIC, which accumulates and wedges the Apple TB stack to
-    # "No device connected" (needs an OS reboot). So SIGTERM and WAIT for a
-    # clean exit (static destructors run on normal interpreter exit → QPs
-    # freed), and only escalate to -9 as a last resort. (root cause: warm-mem
-    # fact 526; 2026-06-08)
-    ssh "$NODE" "pkill -TERM -f 'python.*exo' 2>/dev/null || true; pkill -TERM -f 'exo.main' 2>/dev/null || true"
-    # Wait up to ~15s for graceful exit so jaccl tears down RDMA cleanly.
-    _gone=false
-    for i in {1..15}; do
-        if ssh "$NODE" "pgrep -f 'python.*exo'" > /dev/null 2>&1; then
-            sleep 1
-        else
-            _gone=true
-            break
-        fi
-    done
-    if [ "$_gone" = false ]; then
-        echo "  WARNING: Exo on $NODE did not exit on SIGTERM after 15s — escalating to SIGKILL (may leak RDMA QPs; reboot if TB wedges)."
-        ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
-        ssh "$NODE" "pkill -9 -f 'exo.main' || true"
-        ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
-        sleep 1
-    fi
-    
-    ssh "$NODE" "screen -wipe || true"
+  done
+  if [ "$_gone" = false ]; then
+    echo "  WARNING: Exo on $NODE did not exit on SIGTERM after 15s — escalating to SIGKILL (may leak RDMA QPs; reboot if TB wedges)."
+    ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
+    ssh "$NODE" "pkill -9 -f 'exo.main' || true"
+    ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
+    sleep 1
+  fi
 
-    # Timestamp the kill for the reclaim-curve check before launch (bash 3.2:
-    # no associative arrays, so one dynamically-named scalar per node).
-    printf -v "KILL_EPOCH_${NODE//-/_}" '%s' "$(date +%s)"
+  ssh "$NODE" "screen -wipe || true"
 
-    echo "Ensuring Xcode developer directory on $NODE..."
-    # -n (non-interactive): fail fast instead of hanging on a password
-    # prompt that can never arrive over a non-interactive SSH session --
-    # discovered 2026-08-08 when this line silently blocked launches for
-    # 10+ minutes each on both studios (no cached sudo credential over
-    # SSH, no TTY to type a password into). xcode-select -p already
-    # confirmed correct on both nodes at the time, so this call was a
-    # no-op in effect anyway -- the fix is purely about failing fast
-    # rather than hanging, not about actually needing sudo to succeed.
-    #
-    # 2026-08-25: only point xcode-select at Xcode.app if the node actually
-    # HAS it. Xcode.app was removed from both studios, leaving only
-    # CommandLineTools; unconditionally -s'ing a nonexistent path would
-    # break the node's default toolchain outright the moment a sudo
-    # credential happened to be cached.
-    ssh "$NODE" "if [ -d /Applications/Xcode.app/Contents/Developer ]; then sudo -n xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true; fi"
+  # Timestamp the kill for the reclaim-curve check before launch (bash 3.2:
+  # no associative arrays, so one dynamically-named scalar per node).
+  printf -v "KILL_EPOCH_${NODE//-/_}" '%s' "$(date +%s)"
 
-    # Per-node developer-toolchain prelude, resolved ON THE NODE.
-    #
-    # 2026-08-25: the build steps below used to hardcode
-    #   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-    # which is fatal on a node where Xcode.app is absent: every cc/clang
-    # invocation dies with "xcrun: error: missing DEVELOPER_DIR path:
-    # /Applications/Xcode.app/Contents/Developer". Observed live on
-    # macstudio-m4-1 inside uv sync's isolated maturin build of exo_rs
-    # (maturin pep517 build-wheel -> cargo -> cc -> xcrun), which aborted
-    # the whole deploy before a single line of exo ran.
-    #
-    # Resolution MUST happen remotely (this string is single-quoted so the
-    # laptop does not expand any of it) -- the laptop still has Xcode, so
-    # deciding here would reintroduce exactly the bug being fixed.
-    #
-    # CommandLineTools is a valid DEVELOPER_DIR for cc/clang/ld, so Rust
-    # links fine under the fallback. It has NO metal compiler, so the
-    # `dirname $(xcrun -f metal)` PATH segment is added only when metal is
-    # actually resolvable; a missing metal simply omits that segment
-    # instead of poisoning PATH with dirname's "." fallback.
-    REMOTE_DEV_ENV='if [ -d /Applications/Xcode.app/Contents/Developer ]; then export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer; else export DEVELOPER_DIR=/Library/Developer/CommandLineTools; fi; _metal_bin=$(xcrun -f metal 2>/dev/null); if [ -n "$_metal_bin" ]; then export PATH="/opt/homebrew/bin:$(dirname "$_metal_bin"):$PATH"; else export PATH="/opt/homebrew/bin:$PATH"; fi'
+  echo "Ensuring Xcode developer directory on $NODE..."
+  # -n (non-interactive): fail fast instead of hanging on a password
+  # prompt that can never arrive over a non-interactive SSH session --
+  # discovered 2026-08-08 when this line silently blocked launches for
+  # 10+ minutes each on both studios (no cached sudo credential over
+  # SSH, no TTY to type a password into). xcode-select -p already
+  # confirmed correct on both nodes at the time, so this call was a
+  # no-op in effect anyway -- the fix is purely about failing fast
+  # rather than hanging, not about actually needing sudo to succeed.
+  #
+  # 2026-08-25: only point xcode-select at Xcode.app if the node actually
+  # HAS it. Xcode.app was removed from both studios, leaving only
+  # CommandLineTools; unconditionally -s'ing a nonexistent path would
+  # break the node's default toolchain outright the moment a sudo
+  # credential happened to be cached.
+  ssh "$NODE" "if [ -d /Applications/Xcode.app/Contents/Developer ]; then sudo -n xcode-select -s /Applications/Xcode.app/Contents/Developer 2>/dev/null || true; fi"
 
-    
-    # Update and Build Logic
-    #
-    # Branch selection lives at the pre-deploy push check above
-    # (PUSH_CHECK_BRANCH / EXO_TARGET_BRANCH, ~line 997): that gate verifies
-    # this laptop's HEAD is pushed to the intended branch BEFORE anything is
-    # deployed. Since the rsync below copies this checkout's working tree
-    # verbatim, whatever branch is checked out HERE is what the studios run
-    # -- there is no separate per-node branch decision to make anymore, so
-    # the old local TARGET_BRANCH variable would be dead weight.
-    #
-    # 2026-08-15: this used to be a per-node
-    #   `git fetch origin && git reset --hard origin/$TARGET_BRANCH
-    #    && git submodule update --init --recursive`
-    # i.e. every studio independently pulled from github.com over the
-    # internet. That step failed FIVE times in a single session with
-    # "fatal: unable to access 'https://github.com/adurham/exo.git/':
-    # Could not resolve host: github.com" -- brief DNS blips on the LAN's
-    # single resolver (192.168.86.2, no fallback). Direct testing showed
-    # the resolver healthy 10/10 immediately afterwards, so these are
-    # transient, not an outage.
-    #
-    # Worse than the lost time: a failure here is PER-NODE, so a blip on
-    # one studio left the two nodes on DIFFERENT commits while the launch
-    # continued -- observed live (m4-1 on 8862ec00, m4-2 stranded on
-    # 247f3db9). That is a real correctness hazard for a 2-rank cluster
-    # where both ranks must run identical code.
-    #
-    # This laptop's checkout is already the canonical source of truth (the
-    # studios never commit -- they were `git reset --hard`ed every launch
-    # anyway), so rsync from it directly instead: no github dependency, one
-    # source for both nodes, and much faster (incremental ~instant vs a
-    # cold 2m14s).
-    #
-    # --delete keeps the old reset --hard semantics (remote-only files are
-    # removed). .git IS synced so existing git-based sanity checks (the
-    # commit-consistency verification below, `git rev-parse` health checks)
-    # keep working unchanged.
-    #
-    # CRITICAL: mlx/ and especially mlx/build (~1.0G) MUST be included.
-    # mlx is a submodule and its C++ build cache lives there -- excluding
-    # it turns every relaunch into a full MLX rebuild (~8min instead of
-    # ~3min). Only genuinely regenerable/host-specific dirs are excluded.
-    echo "Syncing repo to $NODE via rsync (canonical source: $(hostname -s))..."
-    rsync -a --delete \
-        --exclude '.venv/' \
-        --exclude '__pycache__/' \
-        --exclude '*.pyc' \
-        --exclude 'dashboard/node_modules/' \
-        --exclude '.pytest_cache/' \
-        --exclude 'tmp/' \
-        "$HOME/repos/exo/" "$NODE:~/repos/exo/" \
-        || { echo "Failed to rsync repo to $NODE"; exit 1; }
-    
-    echo "Ensuring build dependencies on $NODE..."
-    ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
+  # Per-node developer-toolchain prelude, resolved ON THE NODE.
+  #
+  # 2026-08-25: the build steps below used to hardcode
+  #   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+  # which is fatal on a node where Xcode.app is absent: every cc/clang
+  # invocation dies with "xcrun: error: missing DEVELOPER_DIR path:
+  # /Applications/Xcode.app/Contents/Developer". Observed live on
+  # macstudio-m4-1 inside uv sync's isolated maturin build of exo_rs
+  # (maturin pep517 build-wheel -> cargo -> cc -> xcrun), which aborted
+  # the whole deploy before a single line of exo ran.
+  #
+  # Resolution MUST happen remotely (this string is single-quoted so the
+  # laptop does not expand any of it) -- the laptop still has Xcode, so
+  # deciding here would reintroduce exactly the bug being fixed.
+  #
+  # CommandLineTools is a valid DEVELOPER_DIR for cc/clang/ld, so Rust
+  # links fine under the fallback. It has NO metal compiler, so the
+  # `dirname $(xcrun -f metal)` PATH segment is added only when metal is
+  # actually resolvable; a missing metal simply omits that segment
+  # instead of poisoning PATH with dirname's "." fallback.
+  REMOTE_DEV_ENV='if [ -d /Applications/Xcode.app/Contents/Developer ]; then export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer; else export DEVELOPER_DIR=/Library/Developer/CommandLineTools; fi; _metal_bin=$(xcrun -f metal 2>/dev/null); if [ -n "$_metal_bin" ]; then export PATH="/opt/homebrew/bin:$(dirname "$_metal_bin"):$PATH"; else export PATH="/opt/homebrew/bin:$PATH"; fi'
 
-    # Sync dependencies (mlx and mlx-lm are pulled from git via uv sources).
-    # mlx + mlx-lm + mlx-vlm + torch live in the `mlx` extra (upstream's
-    # 2026-05-25 restructure moved them from base deps to optional-dependencies),
-    # so we need `--extra mlx` to actually install them on darwin. Otherwise the
-    # runner crashes at import-time with `ModuleNotFoundError: No module named 'mlx.nn'`.
-    # --all-packages installs workspace members too (exo-tools used by bench scripts).
-    #
-    # --inexact --no-install-package mlx: mlx is EXCLUDED from this sync.
-    #
-    # pyproject.toml's [tool.uv.sources] resolves mlx on darwin from
-    # `git+https://github.com/adurham/mlx.git?branch=main`, so `uv sync` builds
-    # and installs mlx from uv's OWN internal clone of that repo, into uv's own
-    # cache -- a completely separate artifact from the ./mlx submodule checkout
-    # on disk that the block below compiles. Two competing installers, one
-    # package:
-    #   - uv sync (git clone, uv cache, NO CMAKE_ARGS/FETCHCONTENT pin)
-    #   - `uv pip install ./mlx` below (local submodule, authoritative)
-    #
-    # This is not theoretical. `uv sync --extra mlx --all-packages --dry-run`
-    # on macstudio-m4-1 (2026-08-20) reports, every single run:
-    #   - mlx==0.32.1.dev20260820+f8b77fe5a (from file:///.../repos/exo/mlx)
-    #   + mlx==0.32.1.dev20260820+f8b77fe5  (from git+.../mlx.git@f8b77fe5a...)
-    # i.e. uv sync UNINSTALLS the local-checkout build and installs its own
-    # git-cache build in its place, on every deploy.
-    #
-    # That alone is survivable while the block below always rebuilds. The real
-    # hazard is the interaction with that block's skip-check: the git-sourced
-    # build satisfies BOTH skip conditions (`git rev-parse HEAD` matches the
-    # stamp, and `import mlx` succeeds), so the skip fires and the authoritative
-    # local rebuild never runs -- leaving a correctly-labelled but
-    # differently-compiled binary in the venv. Same commit is NOT the same
-    # binary here: the git build gets no CMAKE_ARGS and no FETCHCONTENT_BASE_DIR
-    # pin, so it is a different compile of the same source.
-    #
-    # --no-install-package mlx alone is NOT enough: it makes uv sync *uninstall*
-    # mlx (leaving the venv with no mlx at all until the block below runs).
-    # --inexact is what stops uv from removing packages it wasn't asked to
-    # manage, so together they make uv sync leave mlx completely alone --
-    # neither installed nor uninstalled. The local submodule checkout is then
-    # the ONLY thing that ever installs mlx: exactly one source of truth.
-    # (--inexact also stops uv sync from clobbering the `maturin` install that
-    # the Rust-bindings step below depends on.)
-    #
-    # mlx-lm is still swapped to the git source by this sync, which is fine and
-    # intentional -- the unconditional force-reinstall from ./mlx-lm below
-    # always overwrites it (see that step's comment for why).
-    echo "Syncing dependencies on $NODE..."
-    ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages --inexact --no-install-package mlx'" || { echo "Failed to sync on $NODE"; exit 1; }
+  # Update and Build Logic
+  #
+  # Branch selection lives at the pre-deploy push check above
+  # (PUSH_CHECK_BRANCH / EXO_TARGET_BRANCH, ~line 997): that gate verifies
+  # this laptop's HEAD is pushed to the intended branch BEFORE anything is
+  # deployed. Since the rsync below copies this checkout's working tree
+  # verbatim, whatever branch is checked out HERE is what the studios run
+  # -- there is no separate per-node branch decision to make anymore, so
+  # the old local TARGET_BRANCH variable would be dead weight.
+  #
+  # 2026-08-15: this used to be a per-node
+  #   `git fetch origin && git reset --hard origin/$TARGET_BRANCH
+  #    && git submodule update --init --recursive`
+  # i.e. every studio independently pulled from github.com over the
+  # internet. That step failed FIVE times in a single session with
+  # "fatal: unable to access 'https://github.com/adurham/exo.git/':
+  # Could not resolve host: github.com" -- brief DNS blips on the LAN's
+  # single resolver (192.168.86.2, no fallback). Direct testing showed
+  # the resolver healthy 10/10 immediately afterwards, so these are
+  # transient, not an outage.
+  #
+  # Worse than the lost time: a failure here is PER-NODE, so a blip on
+  # one studio left the two nodes on DIFFERENT commits while the launch
+  # continued -- observed live (m4-1 on 8862ec00, m4-2 stranded on
+  # 247f3db9). That is a real correctness hazard for a 2-rank cluster
+  # where both ranks must run identical code.
+  #
+  # This laptop's checkout is already the canonical source of truth (the
+  # studios never commit -- they were `git reset --hard`ed every launch
+  # anyway), so rsync from it directly instead: no github dependency, one
+  # source for both nodes, and much faster (incremental ~instant vs a
+  # cold 2m14s).
+  #
+  # --delete keeps the old reset --hard semantics (remote-only files are
+  # removed). .git IS synced so existing git-based sanity checks (the
+  # commit-consistency verification below, `git rev-parse` health checks)
+  # keep working unchanged.
+  #
+  # CRITICAL: mlx/ and especially mlx/build (~1.0G) MUST be included.
+  # mlx is a submodule and its C++ build cache lives there -- excluding
+  # it turns every relaunch into a full MLX rebuild (~8min instead of
+  # ~3min). Only genuinely regenerable/host-specific dirs are excluded.
+  echo "Syncing repo to $NODE via rsync (canonical source: $(hostname -s))..."
+  rsync -a --delete \
+    --exclude '.venv/' \
+    --exclude '__pycache__/' \
+    --exclude '*.pyc' \
+    --exclude 'dashboard/node_modules/' \
+    --exclude '.pytest_cache/' \
+    --exclude 'tmp/' \
+    "$HOME/repos/exo/" "$NODE:~/repos/exo/" ||
+    {
+      echo "Failed to rsync repo to $NODE"
+      exit 1
+    }
 
-    # FETCHCONTENT_BASE_DIR pins CMake's FetchContent cache to a PERSISTENT
-    # directory instead of uv's per-build temp dir. Without it every MLX
-    # rebuild re-clones fmt, nanobind, gguflib, doctest, json and metal_cpp
-    # from github.com, and a single transient DNS hiccup on any one of them
-    # aborts the whole deploy ("Could not resolve host: github.com", after
-    # CMake's own 3 retries). That failure mode killed three separate timed
-    # measurement runs on 2026-08-15 -- nanobind twice, fmt once -- despite
-    # DNS resolving fine on both nodes before and after each failure. The
-    # deps were already sitting in ~/repos/exo/mlx/build/_deps; they were
-    # simply invisible to the temp-dir build. Reusing them makes rebuilds
-    # both faster and network-independent.
-    #
-    # 2026-08-19: skip the (multi-minute, ~28-parallel-clang) rebuild when
-    # nothing that could change the compiled extension has changed since
-    # the last successful build on THIS node. Consulted + safety-checked
-    # before landing (see docs/start-cluster-mlx-rebuild-skip-2026-08-19.md):
-    #   - stamp lives INSIDE the venv (.venv/.mlx-installed-sha) so it dies
-    #     with the venv on a `uv sync --reinstall` / fresh clone -- can't go
-    #     stale relative to what's actually installed.
-    #   - dirty-tree check is on TRACKED files only (git diff --quiet +
-    #     --cached --quiet), so build/ and other untracked artifacts in the
-    #     mlx submodule don't force a rebuild every time.
-    #   - condition ALSO verifies `import mlx` succeeds in the current venv,
-    #     not just "SHA matches" -- catches a venv that lost the package
-    #     without the stamp knowing.
-    #   - stamp is written ONLY after a successful install (never on a
-    #     failed/interrupted build).
-    #   - MLX_FORCE_REINSTALL=1 escape hatch bypasses the skip entirely.
-    #   - 2026-08-20: the skip ALSO asserts PROVENANCE. Version/SHA stamps
-    #     cannot distinguish a local-checkout build from a uv-git-cache build
-    #     of the same commit, but they are not the same binary. The installed
-    #     dist-info's direct_url.json must point at THIS node's ./mlx checkout
-    #     (a `file://` dir_info install); anything else -- notably a vcs_info
-    #     entry, meaning uv installed its own git-cloned build -- forces a
-    #     rebuild from the local checkout regardless of a matching stamp.
-    #   - 2026-08-20: both probe commands use `uv run --no-SYNC`. A bare
-    #     `uv run` implicitly runs `uv sync` first, so the very act of ASKING
-    #     "is the right mlx installed?" would re-trigger the git-source swap
-    #     this step exists to prevent -- the check would corrupt the state it
-    #     is checking. Observed live: a bare `uv run python3 -c ...` probe on
-    #     macstudio-m4-1 printed "Uninstalled 1 package / Installed 1 package".
-    ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c '
+  echo "Ensuring build dependencies on $NODE..."
+  ssh "$NODE" "/opt/homebrew/bin/brew install cmake 2>/dev/null || true"
+
+  # Sync dependencies (mlx and mlx-lm are pulled from git via uv sources).
+  # mlx + mlx-lm + mlx-vlm + torch live in the `mlx` extra (upstream's
+  # 2026-05-25 restructure moved them from base deps to optional-dependencies),
+  # so we need `--extra mlx` to actually install them on darwin. Otherwise the
+  # runner crashes at import-time with `ModuleNotFoundError: No module named 'mlx.nn'`.
+  # --all-packages installs workspace members too (exo-tools used by bench scripts).
+  #
+  # --inexact --no-install-package mlx: mlx is EXCLUDED from this sync.
+  #
+  # pyproject.toml's [tool.uv.sources] resolves mlx on darwin from
+  # `git+https://github.com/adurham/mlx.git?branch=main`, so `uv sync` builds
+  # and installs mlx from uv's OWN internal clone of that repo, into uv's own
+  # cache -- a completely separate artifact from the ./mlx submodule checkout
+  # on disk that the block below compiles. Two competing installers, one
+  # package:
+  #   - uv sync (git clone, uv cache, NO CMAKE_ARGS/FETCHCONTENT pin)
+  #   - `uv pip install ./mlx` below (local submodule, authoritative)
+  #
+  # This is not theoretical. `uv sync --extra mlx --all-packages --dry-run`
+  # on macstudio-m4-1 (2026-08-20) reports, every single run:
+  #   - mlx==0.32.1.dev20260820+f8b77fe5a (from file:///.../repos/exo/mlx)
+  #   + mlx==0.32.1.dev20260820+f8b77fe5  (from git+.../mlx.git@f8b77fe5a...)
+  # i.e. uv sync UNINSTALLS the local-checkout build and installs its own
+  # git-cache build in its place, on every deploy.
+  #
+  # That alone is survivable while the block below always rebuilds. The real
+  # hazard is the interaction with that block's skip-check: the git-sourced
+  # build satisfies BOTH skip conditions (`git rev-parse HEAD` matches the
+  # stamp, and `import mlx` succeeds), so the skip fires and the authoritative
+  # local rebuild never runs -- leaving a correctly-labelled but
+  # differently-compiled binary in the venv. Same commit is NOT the same
+  # binary here: the git build gets no CMAKE_ARGS and no FETCHCONTENT_BASE_DIR
+  # pin, so it is a different compile of the same source.
+  #
+  # --no-install-package mlx alone is NOT enough: it makes uv sync *uninstall*
+  # mlx (leaving the venv with no mlx at all until the block below runs).
+  # --inexact is what stops uv from removing packages it wasn't asked to
+  # manage, so together they make uv sync leave mlx completely alone --
+  # neither installed nor uninstalled. The local submodule checkout is then
+  # the ONLY thing that ever installs mlx: exactly one source of truth.
+  # (--inexact also stops uv sync from clobbering the `maturin` install that
+  # the Rust-bindings step below depends on.)
+  #
+  # mlx-lm is still swapped to the git source by this sync, which is fine and
+  # intentional -- the unconditional force-reinstall from ./mlx-lm below
+  # always overwrites it (see that step's comment for why).
+  echo "Syncing dependencies on $NODE..."
+  ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv sync --extra mlx --all-packages --inexact --no-install-package mlx'" || {
+    echo "Failed to sync on $NODE"
+    exit 1
+  }
+
+  # FETCHCONTENT_BASE_DIR pins CMake's FetchContent cache to a PERSISTENT
+  # directory instead of uv's per-build temp dir. Without it every MLX
+  # rebuild re-clones fmt, nanobind, gguflib, doctest, json and metal_cpp
+  # from github.com, and a single transient DNS hiccup on any one of them
+  # aborts the whole deploy ("Could not resolve host: github.com", after
+  # CMake's own 3 retries). That failure mode killed three separate timed
+  # measurement runs on 2026-08-15 -- nanobind twice, fmt once -- despite
+  # DNS resolving fine on both nodes before and after each failure. The
+  # deps were already sitting in ~/repos/exo/mlx/build/_deps; they were
+  # simply invisible to the temp-dir build. Reusing them makes rebuilds
+  # both faster and network-independent.
+  #
+  # 2026-08-19: skip the (multi-minute, ~28-parallel-clang) rebuild when
+  # nothing that could change the compiled extension has changed since
+  # the last successful build on THIS node. Consulted + safety-checked
+  # before landing (see docs/start-cluster-mlx-rebuild-skip-2026-08-19.md):
+  #   - stamp lives INSIDE the venv (.venv/.mlx-installed-sha) so it dies
+  #     with the venv on a `uv sync --reinstall` / fresh clone -- can't go
+  #     stale relative to what's actually installed.
+  #   - dirty-tree check is on TRACKED files only (git diff --quiet +
+  #     --cached --quiet), so build/ and other untracked artifacts in the
+  #     mlx submodule don't force a rebuild every time.
+  #   - condition ALSO verifies `import mlx` succeeds in the current venv,
+  #     not just "SHA matches" -- catches a venv that lost the package
+  #     without the stamp knowing.
+  #   - stamp is written ONLY after a successful install (never on a
+  #     failed/interrupted build).
+  #   - MLX_FORCE_REINSTALL=1 escape hatch bypasses the skip entirely.
+  #   - 2026-08-20: the skip ALSO asserts PROVENANCE. Version/SHA stamps
+  #     cannot distinguish a local-checkout build from a uv-git-cache build
+  #     of the same commit, but they are not the same binary. The installed
+  #     dist-info's direct_url.json must point at THIS node's ./mlx checkout
+  #     (a `file://` dir_info install); anything else -- notably a vcs_info
+  #     entry, meaning uv installed its own git-cloned build -- forces a
+  #     rebuild from the local checkout regardless of a matching stamp.
+  #   - 2026-08-20: both probe commands use `uv run --no-SYNC`. A bare
+  #     `uv run` implicitly runs `uv sync` first, so the very act of ASKING
+  #     "is the right mlx installed?" would re-trigger the git-source swap
+  #     this step exists to prevent -- the check would corrupt the state it
+  #     is checking. Observed live: a bare `uv run python3 -c ...` probe on
+  #     macstudio-m4-1 printed "Uninstalled 1 package / Installed 1 package".
+  ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c '
       cd ~/repos/exo
       MLX_SHA=\$(git -C mlx rev-parse HEAD)
       STAMP=.venv/.mlx-installed-sha
@@ -1452,38 +1459,49 @@ sys.exit(0 if got == pathlib.Path(sys.argv[1]).resolve() else 1)
         CMAKE_ARGS=\"\$CMAKE_ARGS\" uv pip install --no-deps --force-reinstall ./mlx \\
           && echo \"\$MLX_SHA\" > \"\$STAMP\"
       fi
-    '" || { echo "Failed to rebuild MLX from source on $NODE"; exit 1; }
+    '" || {
+    echo "Failed to rebuild MLX from source on $NODE"
+    exit 1
+  }
 
-    # Pin mlx-lm to the vendored ./mlx-lm submodule (uv sync installs a stale copy).
-    #
-    # uv sync resolves mlx-lm from uv.lock, which pins an EXACT commit SHA
-    # (the `git = ".../mlx-lm.git?branch=main#<sha>"` entry). When an exo
-    # commit bumps the ./mlx-lm submodule gitlink WITHOUT also running
-    # `uv lock --upgrade-package mlx-lm` + committing the new uv.lock, the
-    # lockfile lags the vendored source. Worse, the package version string
-    # doesn't change between mlx-lm commits, so uv reports "already satisfied"
-    # and never reinstalls — the runner then imports OLD mlx_lm code while the
-    # checked-out submodule has the fix. This bit us with the affine-DSv4
-    # warmup crash: "[quantized_matmul] Scale type must be uint8 but received
-    # type bfloat16" (make_quantization_config forced mode=mxfp8 onto affine
-    # attention weights; the fix that gates the override on on-disk scale dtype
-    # was in the submodule but not in the lock-pinned venv copy).
-    #
-    # The submodule gitlink is the source of truth for which mlx-lm THIS exo
-    # commit was reviewed against, so force the venv to match it exactly. This
-    # is deterministic and offline (no re-resolution against remote branch HEAD,
-    # which line ~721's `git reset --hard` would clobber every run anyway).
-    # Same idiom as the Rust-bindings rebuild below.
-    echo "Pinning mlx-lm to vendored submodule on $NODE..."
-    ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx-lm'" || { echo "Failed to pin vendored mlx-lm on $NODE"; exit 1; }
+  # Pin mlx-lm to the vendored ./mlx-lm submodule (uv sync installs a stale copy).
+  #
+  # uv sync resolves mlx-lm from uv.lock, which pins an EXACT commit SHA
+  # (the `git = ".../mlx-lm.git?branch=main#<sha>"` entry). When an exo
+  # commit bumps the ./mlx-lm submodule gitlink WITHOUT also running
+  # `uv lock --upgrade-package mlx-lm` + committing the new uv.lock, the
+  # lockfile lags the vendored source. Worse, the package version string
+  # doesn't change between mlx-lm commits, so uv reports "already satisfied"
+  # and never reinstalls — the runner then imports OLD mlx_lm code while the
+  # checked-out submodule has the fix. This bit us with the affine-DSv4
+  # warmup crash: "[quantized_matmul] Scale type must be uint8 but received
+  # type bfloat16" (make_quantization_config forced mode=mxfp8 onto affine
+  # attention weights; the fix that gates the override on on-disk scale dtype
+  # was in the submodule but not in the lock-pinned venv copy).
+  #
+  # The submodule gitlink is the source of truth for which mlx-lm THIS exo
+  # commit was reviewed against, so force the venv to match it exactly. This
+  # is deterministic and offline (no re-resolution against remote branch HEAD,
+  # which line ~721's `git reset --hard` would clobber every run anyway).
+  # Same idiom as the Rust-bindings rebuild below.
+  echo "Pinning mlx-lm to vendored submodule on $NODE..."
+  ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx-lm'" || {
+    echo "Failed to pin vendored mlx-lm on $NODE"
+    exit 1
+  }
 
-    # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
-    echo "Rebuilding Rust pyo3 bindings on $NODE..."
-    ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install maturin 2>/dev/null && uv run maturin develop --release -m rust/exo_rs/Cargo.toml'" || { echo "Failed to rebuild Rust bindings on $NODE"; exit 1; }
+  # Rebuild Rust pyo3 bindings from source (uv sync installs a stale pre-compiled version)
+  echo "Rebuilding Rust pyo3 bindings on $NODE..."
+  ssh "$NODE" "zsh -l -c 'cd ~/repos/exo && uv pip install maturin 2>/dev/null && uv run maturin develop --release -m rust/exo_rs/Cargo.toml'" || {
+    echo "Failed to rebuild Rust bindings on $NODE"
+    exit 1
+  }
 
-
-    echo "Building dashboard on $NODE..."
-    ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || { echo "Failed to build dashboard on $NODE"; exit 1; }
+  echo "Building dashboard on $NODE..."
+  ssh "$NODE" "zsh -l -c 'source ~/.zshrc; cd ~/repos/exo/dashboard && npm install && npm run build'" || {
+    echo "Failed to build dashboard on $NODE"
+    exit 1
+  }
 
 done
 
@@ -1494,1296 +1512,1295 @@ COMMIT_M4_2=$(ssh macstudio-m4-2 "cd ~/repos/exo && git rev-parse --short HEAD")
 # COMMIT_MBP=$(ssh macbook-m4 "cd ~/repos/exo && git rev-parse --short HEAD")
 
 if [ "$COMMIT_M4_1" != "$COMMIT_M4_2" ]; then
-    echo "CRITICAL ERROR: Cluster out of sync!"
-    echo "macstudio-m4-1: $COMMIT_M4_1"
-    echo "macstudio-m4-2: $COMMIT_M4_2"
-    exit 1
+  echo "CRITICAL ERROR: Cluster out of sync!"
+  echo "macstudio-m4-1: $COMMIT_M4_1"
+  echo "macstudio-m4-2: $COMMIT_M4_2"
+  exit 1
 fi
 echo "Nodes synchronized on commit $COMMIT_M4_1."
 
 # 3. Start Exo on each node
 for NODE in "${NODES[@]}"; do
-    echo "Starting Exo on $NODE..."
+  echo "Starting Exo on $NODE..."
 
-    # Reclaim-curve check (item 1b): make stuck post-kill memory an explicit,
-    # named alert at launch time instead of a mysterious placement 503 later.
-    # Warn-only — a failed check does not abort the launch.
-    _kill_epoch_var="KILL_EPOCH_${NODE//-/_}"
-    wait_for_memory_reclaim "$NODE" "${!_kill_epoch_var}" || true
+  # Reclaim-curve check (item 1b): make stuck post-kill memory an explicit,
+  # named alert at launch time instead of a mysterious placement 503 later.
+  # Warn-only — a failed check does not abort the launch.
+  _kill_epoch_var="KILL_EPOCH_${NODE//-/_}"
+  wait_for_memory_reclaim "$NODE" "${!_kill_epoch_var}" || true
 
-    # Build the node environment string
-    # AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1: Apple GPU driver env var that relaxes
-    # the command buffer context store timeout. Without it, macOS's IOGPU
-    # watchdog kills our process with kIOGPUCommandBufferCallbackErrorImpacting-
-    # Interactivity when long ML workloads block WindowServer compositing —
-    # silent SIGABRT that MLX's check_error never gets to log because the
-    # kernel kills us first. Recommended by MLX maintainer in mlx#3267 and
-    # confirmed working by reporter.
-    # IOGPU silent SIGABRT root-caused (ResidencySet::insert calling
-    # IOGPUMetalResidencySet::addAllocation which unconditionally aborts on
-    # certain conditions). Fixed in fork mlx/backend/metal/resident.cpp by
-    # routing all allocations through unwired_set_. The DYLD interposer that
-    # caught it is no longer needed.
-    EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
-    EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
-    EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
-    EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
-    # EXO_PYSAMPLER=1 (2026-08-22): activates an in-process Python-level
-    # stack sampler (~1kHz, sys._current_frames()-based) via a
-    # sitecustomize.py placed on PYTHONPATH, for the decode idle-gap
-    # investigation (see docs/decode-idle-time-investigation-interim-
-    # synthesis-2026-08-22.md). Zero-privilege alternative to py-spy,
-    # which requires root/sudo on macOS. NOT wired to a repo file --
-    # points at a diagnostic-only script placed manually in /tmp on each
-    # Studio (never committed; consistent with the exo deploy hard rule
-    # of never live-editing the deployed repo/mlx code, since this file
-    # lives entirely outside the repo). PYTHONPATH forwarding is
-    # otherwise unused by production, so this is safe to leave wired
-    # unconditionally -- with EXO_PYSAMPLER unset, sitecustomize.py's own
-    # top-level `if _ENABLED:` guard means the import is a no-op.
-    [ -n "${EXO_PYTHONPATH_DIAG:-}" ] && EXO_ENV="$EXO_ENV PYTHONPATH=$EXO_PYTHONPATH_DIAG"
-    [ -n "${EXO_PYSAMPLER:-}" ] && EXO_ENV="$EXO_ENV EXO_PYSAMPLER=$EXO_PYSAMPLER"
-    [ -n "${EXO_PYSAMPLER_INTERVAL_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_PYSAMPLER_INTERVAL_MS=$EXO_PYSAMPLER_INTERVAL_MS"
-    # PP-only: the classic small-draft-model speculation path. Was
-    # previously exported unconditionally regardless of sharding mode;
-    # gated here (2026-08-16, TP-only pivot) since it has no effect
-    # under Tensor sharding (pp_speculation.get_pipeline_info() finds no
-    # PipelineLastLayer and the whole PP-spec loop never engages) but
-    # was cluttering the live env of every TP launch.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
-        EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
-    fi
-    # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
-    [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
-    [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
-    [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
-    [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
-    [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"
-    # EXO_PP_LAYER_SPLIT: manual override for placement_utils.py's proportional
-    # (memory-fraction-based) layer allocation across PP ranks. Format "A,B"
-    # for a 2-node split (e.g. "21,22"). Used to A/B test whether the
-    # rank-to-layer-count assignment (which drifts run-to-run based on each
-    # node's free RAM at placement time) affects prefill throughput decay.
-    # The master (elected on either node) reads this from its own env, so it
-    # must be in the shared EXO_ENV applied to both nodes, not runner-only.
-    # PP-only concept (there is no per-rank "layer split" under Tensor
-    # sharding, every rank holds every layer) -- gated 2026-08-16.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        [ -n "${EXO_PP_LAYER_SPLIT:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_LAYER_SPLIT=$EXO_PP_LAYER_SPLIT"
-    fi
-    # MLX_JACCL_STALL_TIMEOUT_US: jaccl's collective-poll-loop stall watchdog
-    # (mesh_impl.h StallWatch), default 8s. Calibrated for TP-style frequent
-    # short collectives ("well under a second" per the source comment) — PP's
-    # long individual p2p send/recv (model forward on the peer rank between
-    # handoffs) can legitimately exceed 8s at high context, same class of
-    # issue as the MLX_EVENT_WAIT_TIMEOUT_MS / EXO_RUNNER_HANG_TIMEOUT_SECONDS
-    # fixes already applied for MlxRing PP mode. Raise for PP+MlxJaccl testing.
-    [ -n "${MLX_JACCL_STALL_TIMEOUT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_STALL_TIMEOUT_US=$MLX_JACCL_STALL_TIMEOUT_US"
-    # EXO_RUNNER_HANG_TIMEOUT_SECONDS: raise for the reliable ARQ path — large
-    # prefill all_reduces are slow (4KB stop-and-wait; UC can't do fast large or
-    # concurrent sends) and can legitimately run past the default 45s.
-    # PP mode: must be >= MLX_EVENT_WAIT_TIMEOUT_MS (1800s) so the supervisor
-    # doesn't SIGKILL the runner during a legitimate long first-decode drain.
-    # Default 45s is incoherent with the 1800s Event::wait — the supervisor
-    # kills at 45s before the GPU wait can resolve.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ] && [ -z "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]; then
-        EXO_RUNNER_HANG_TIMEOUT_SECONDS=1800
-    fi
-    [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]  && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
-    # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. Depth 8 is
-    # validated for sz<=2 chunks (<=16KB concurrent UC sends are clean; the old
-    # MUST-be-1 note predates the 2026-07-06 pipelining patch, mlx 452fbebf).
-    : "${MLX_JACCL_RELIABLE_INFLIGHT:=8}"
-    [ -n "${MLX_JACCL_RELIABLE_INFLIGHT:-}" ]      && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_INFLIGHT=$MLX_JACCL_RELIABLE_INFLIGHT"
-    # MLX_JACCL_DATA_RECV_POOL: gates the standing pre-posted recv pool on the
-    # data QP (Sections 52/64). The C++ reads it via std::getenv and its own
-    # comment advertises "=0 to A/B against the old behaviour" -- but it was
-    # never threaded here, and the runner environment is an ALLOWLIST, so that
-    # A/B was not actually runnable through the deploy path. Section 52's
-    # 1403->0 result came from comparing rebuilds, not from toggling this gate.
-    # Threaded 2026-08-16 so the gate is genuinely testable.
-    [ -n "${MLX_JACCL_DATA_RECV_POOL:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_DATA_RECV_POOL=$MLX_JACCL_DATA_RECV_POOL"
-    # MLX_JACCL_P2P_DRAIN_QUIET_US: quiet period for the p2p send()/recv()
-    # drain loops only (Section 71), split out from the collective ack
-    # retransmit timer. Default 25ms in the C++. Threaded here from the
-    # start -- Section 66's lesson was that a gate nobody can toggle is a
-    # gate nobody can A/B, and MLX_JACCL_DATA_RECV_POOL sat untestable for
-    # a fortnight because of exactly that. Set to 500000 to restore the
-    # old shared-timer behaviour for comparison.
-    [ -n "${MLX_JACCL_P2P_DRAIN_QUIET_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_P2P_DRAIN_QUIET_US=$MLX_JACCL_P2P_DRAIN_QUIET_US"
-    [ -n "${MLX_LOG_ARRAY_DESC_COUNT_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=$MLX_LOG_ARRAY_DESC_COUNT_INTERVAL"
-    [ -n "${MLX_PER_TYPE_DUMP_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_DUMP_INTERVAL=$MLX_PER_TYPE_DUMP_INTERVAL"
-    [ -n "${MLX_PER_TYPE_TRACK:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_TRACK=$MLX_PER_TYPE_TRACK"
-    [ -n "${MLX_LM_EAGER_EVAL_CACHES:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_EAGER_EVAL_CACHES=$MLX_LM_EAGER_EVAL_CACHES"
-    [ -n "${MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL=$MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL"
-    [ -n "${MLX_LM_SYNC_AFTER_STEP:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SYNC_AFTER_STEP=$MLX_LM_SYNC_AFTER_STEP"
-    [ -n "${MLX_GPU_TIME:-}" ] && EXO_ENV="$EXO_ENV MLX_GPU_TIME=$MLX_GPU_TIME"
-    [ -n "${EXO_DECODE_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PROBE=$EXO_DECODE_PROBE"
-    [ -n "${EXO_DECODE_PROBE_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PROBE_EVERY=$EXO_DECODE_PROBE_EVERY"
-    [ -n "${EXO_DSV4_DEGEN_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DEGEN_PROBE=$EXO_DSV4_DEGEN_PROBE"
-    [ -n "${MLX_GPU_TIME_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV MLX_GPU_TIME_LOG_EVERY=$MLX_GPU_TIME_LOG_EVERY"
-    [ -n "${MLX_SDPA_BLOCKS:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
-    [ -n "${MLX_LM_SDPA_ROWSPLIT:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SDPA_ROWSPLIT=$MLX_LM_SDPA_ROWSPLIT"
-    [ -n "${MLX_BUILD_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_BUILD_PROBE=$MLX_BUILD_PROBE"
-    [ -n "${MLX_BUILD_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV MLX_BUILD_PROBE_LOG_EVERY=$MLX_BUILD_PROBE_LOG_EVERY"
-    [ -n "${MLX_OP_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_OP_PROBE=$MLX_OP_PROBE"
-    [ -n "${MLX_MAX_OPS_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_OPS_PER_BUFFER=$MLX_MAX_OPS_PER_BUFFER"
-    [ -n "${MLX_MAX_MB_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_MB_PER_BUFFER=$MLX_MAX_MB_PER_BUFFER"
-    # M-batched sorted-run gather qmv kill switch / tuning (mlx cb539cda).
-    [ -n "${MLX_GATHER_QMV_RHS:-}" ] && EXO_ENV="$EXO_ENV MLX_GATHER_QMV_RHS=$MLX_GATHER_QMV_RHS"
-    [ -n "${MLX_GATHER_QMV_RHS_TILE:-}" ] && EXO_ENV="$EXO_ENV MLX_GATHER_QMV_RHS_TILE=$MLX_GATHER_QMV_RHS_TILE"
-    [ -n "${EXO_PP_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DEBUG=$EXO_PP_DEBUG"
-    [ -n "${MLX_GATHER_QMV_RHS_RPS:-}" ] && EXO_ENV="$EXO_ENV MLX_GATHER_QMV_RHS_RPS=$MLX_GATHER_QMV_RHS_RPS"
-    EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
-    [ -n "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_HIGH_CTX=$EXO_PREFILL_STEP_SIZE_HIGH_CTX"
-    [ -n "${EXO_PREFILL_STEP_SIZE_CROSSOVER:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_CROSSOVER=$EXO_PREFILL_STEP_SIZE_CROSSOVER"
-    EXO_ENV="$EXO_ENV EXO_PREFILL_CLEAR_CACHE_INTERVAL=$EXO_PREFILL_CLEAR_CACHE_INTERVAL"
-    EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_BALANCED=$EXO_DSV4_SEQSPLIT_BALANCED"
-    [ -n "${EXO_DSV4_SPARSE_SDPA_TILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPARSE_SDPA_TILE=$EXO_DSV4_SPARSE_SDPA_TILE"
-    [ -n "${EXO_DSV4_SINGLE_GATHER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SINGLE_GATHER=$EXO_DSV4_SINGLE_GATHER"
-    [ -n "${EXO_DSV4_FUSED_SOFTMAX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_SOFTMAX=$EXO_DSV4_FUSED_SOFTMAX"
-    # MLX gather_qmm_rhs_lhs tile override (opt/gqmm-tile-env branch)
-    [ -n "${MLX_GQMM_RHS_LHS_BM:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_BM=$MLX_GQMM_RHS_LHS_BM"
-    [ -n "${MLX_GQMM_RHS_LHS_BN:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_BN=$MLX_GQMM_RHS_LHS_BN"
-    [ -n "${MLX_GQMM_RHS_LHS_BK:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_BK=$MLX_GQMM_RHS_LHS_BK"
-    [ -n "${MLX_GQMM_RHS_LHS_WM:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_WM=$MLX_GQMM_RHS_LHS_WM"
-    [ -n "${MLX_GQMM_RHS_LHS_WN:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_WN=$MLX_GQMM_RHS_LHS_WN"
-    # SDPA D=512 fused kernel (gated, default off)
-    [ -n "${MLX_SDPA_D512_FUSED:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_D512_FUSED=$MLX_SDPA_D512_FUSED"
-    [ -n "${MLX_SDPA_D512_BQ16:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_D512_BQ16=$MLX_SDPA_D512_BQ16"
-    [ -n "${EXO_PREFILL_GPU_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_GPU_TRACE=$EXO_PREFILL_GPU_TRACE"
-    [ -n "${EXO_PREFILL_GPU_TIME:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_GPU_TIME=$EXO_PREFILL_GPU_TIME"
-    [ -n "${EXO_PREFILL_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_ASYNC_EVAL=$EXO_PREFILL_ASYNC_EVAL"
-    [ -n "${EXO_PREFILL_EVAL_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_EVAL_INTERVAL=$EXO_PREFILL_EVAL_INTERVAL"
-    EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
-    EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
-    [ -n "$EXO_PROFILER" ]       && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
-    [ -n "$EXO_PROFILER_SYNC_SPANS" ] && EXO_ENV="$EXO_ENV EXO_PROFILER_SYNC_SPANS=$EXO_PROFILER_SYNC_SPANS"
-    [ -n "$EXO_DSV4_SECTION_TIME" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SECTION_TIME=$EXO_DSV4_SECTION_TIME"
-    [ -n "$EXO_DSV4_SECTION_TIME_LOG_EVERY" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SECTION_TIME_LOG_EVERY=$EXO_DSV4_SECTION_TIME_LOG_EVERY"
-    [ -n "$EXO_DSV4_PREFILL_ARGPARTITION" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PREFILL_ARGPARTITION=$EXO_DSV4_PREFILL_ARGPARTITION"
-    [ -n "${EXO_DSV4_ARGPARTITION_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ARGPARTITION_MIN_P=$EXO_DSV4_ARGPARTITION_MIN_P"
-    [ -n "$EXO_DSV4_LMHEAD_LASTROW" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_LASTROW=$EXO_DSV4_LMHEAD_LASTROW"
-    [ -n "${EXO_DSV4_LMHEAD_MXFP8:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_MXFP8=$EXO_DSV4_LMHEAD_MXFP8"
-    [ -n "$EXO_DSV4_SEQ_SPLIT" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT=$EXO_DSV4_SEQ_SPLIT"
-    # Seq-split output reconstruction path: default (unset/1) uses a
-    # zero-padded all_sum on the TOP-LEVEL group (2x wire bytes) to work
-    # around a subgroup all_gather wedge (no TCP coordinator on subgroups
-    # -> reliable ARQ couldn't arm there, observed 2026-07-06). Tonight's
-    # 2026-08-21 jaccl fix (commit f8b77fe5a, "give subgroups their own
-    # TCP coordinator") may have retired that precondition -- set to 0 to
-    # test the real (cheaper) subgroup all_gather path. See deepseek_v4.py
-    # docstring at _SEQ_SPLIT_GATHER_VIA_ALLSUM for full context.
-    [ -n "$EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM=$EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM"
-    # JIT model lifecycle (master + API read these; always forwarded so the
-    # kill-switch and reserve are explicit in the runner env).
-    EXO_ENV="$EXO_ENV EXO_JIT_ENABLED=$EXO_JIT_ENABLED"
-    EXO_ENV="$EXO_ENV EXO_JIT_MEMORY_RESERVE_GB=$EXO_JIT_MEMORY_RESERVE_GB"
-    EXO_ENV="$EXO_ENV EXO_JIT_LOAD_TIMEOUT_SECONDS=$EXO_JIT_LOAD_TIMEOUT_SECONDS"
-    EXO_ENV="$EXO_ENV EXO_JIT_IDLE_UNLOAD_SECONDS=$EXO_JIT_IDLE_UNLOAD_SECONDS"
-    EXO_ENV="$EXO_ENV EXO_JIT_PLACEMENT_WAIT_SECONDS=$EXO_JIT_PLACEMENT_WAIT_SECONDS"
-    [ -n "${EXO_DSV4_HEAPCENSUS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HEAPCENSUS=$EXO_DSV4_HEAPCENSUS"
-    [ -n "$EXO_DSV4_SEQ_SPLIT_MIN_L" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT_MIN_L=$EXO_DSV4_SEQ_SPLIT_MIN_L"
-    [ -n "$EXO_PREFIX_CACHE_TRACE" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_TRACE=$EXO_PREFIX_CACHE_TRACE"
-    [ -n "$EXO_RUNNER_COREDUMP" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_COREDUMP=$EXO_RUNNER_COREDUMP"
-    [ -n "$EXO_MEMORY_PROFILE_PATH" ] && EXO_ENV="$EXO_ENV EXO_MEMORY_PROFILE_PATH=$EXO_MEMORY_PROFILE_PATH EXO_MEMORY_PROFILE_INTERVAL=$EXO_MEMORY_PROFILE_INTERVAL"
-    [ -n "$EXO_TRACEMALLOC_PATH" ] && EXO_ENV="$EXO_ENV EXO_TRACEMALLOC_PATH=$EXO_TRACEMALLOC_PATH EXO_TRACEMALLOC_INTERVAL=$EXO_TRACEMALLOC_INTERVAL EXO_TRACEMALLOC_TOP_N=$EXO_TRACEMALLOC_TOP_N"
-    [ "$EXO_MLX_CLEAR_CACHE_INTERVAL" != "0" ] && EXO_ENV="$EXO_ENV EXO_MLX_CLEAR_CACHE_INTERVAL=$EXO_MLX_CLEAR_CACHE_INTERVAL"
-    EXO_ENV="$EXO_ENV EXO_GC_COLLECT_INTERVAL=$EXO_GC_COLLECT_INTERVAL"
-    [ "$EXO_MALLOC_RELIEF_INTERVAL" != "0" ] && EXO_ENV="$EXO_ENV EXO_MALLOC_RELIEF_INTERVAL=$EXO_MALLOC_RELIEF_INTERVAL"
-    [ -n "$EXO_PROFILER_LEVEL" ] && EXO_ENV="$EXO_ENV EXO_PROFILER_LEVEL=$EXO_PROFILER_LEVEL"
-    EXO_ENV="$EXO_ENV EXO_LAYER_EVAL_INTERVAL=$EXO_LAYER_EVAL_INTERVAL"
-    EXO_ENV="$EXO_ENV EXO_DRAFT_KV_WINDOW=$EXO_DRAFT_KV_WINDOW"
-    EXO_ENV="$EXO_ENV EXO_KV_CACHE_BITS=$EXO_KV_CACHE_BITS"
-    if [ -n "$EXO_TURBOQUANT" ]; then
-        EXO_ENV="$EXO_ENV EXO_TURBOQUANT=$EXO_TURBOQUANT"
-    fi
-    EXO_ENV="$EXO_ENV EXO_SPECULATIVE=$EXO_SPECULATIVE"
-    EXO_ENV="$EXO_ENV EXO_SPECULATIVE_GAMMA=$EXO_SPECULATIVE_GAMMA"
-    [ -n "${EXO_QWEN_SPECULATIVE_GAMMA:-}" ] && EXO_ENV="$EXO_ENV EXO_QWEN_SPECULATIVE_GAMMA=$EXO_QWEN_SPECULATIVE_GAMMA"
-    EXO_ENV="$EXO_ENV EXO_COMPUTE_DTYPE=$EXO_COMPUTE_DTYPE"
-    EXO_ENV="$EXO_ENV EXO_RUNNER_QOS=$EXO_RUNNER_QOS"
-    EXO_ENV="$EXO_ENV LOG_LEVEL=$LOG_LEVEL"
+  # Build the node environment string
+  # AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1: Apple GPU driver env var that relaxes
+  # the command buffer context store timeout. Without it, macOS's IOGPU
+  # watchdog kills our process with kIOGPUCommandBufferCallbackErrorImpacting-
+  # Interactivity when long ML workloads block WindowServer compositing —
+  # silent SIGABRT that MLX's check_error never gets to log because the
+  # kernel kills us first. Recommended by MLX maintainer in mlx#3267 and
+  # confirmed working by reporter.
+  # IOGPU silent SIGABRT root-caused (ResidencySet::insert calling
+  # IOGPUMetalResidencySet::addAllocation which unconditionally aborts on
+  # certain conditions). Fixed in fork mlx/backend/metal/resident.cpp by
+  # routing all allocations through unwired_set_. The DYLD interposer that
+  # caught it is no longer needed.
+  EXO_ENV="PYTHONFAULTHANDLER=1 PYTHONUNBUFFERED=1 IBV_FORK_SAFE=1 AGX_RELAX_CDM_CTXSTORE_TIMEOUT=1"
+  EXO_ENV="$EXO_ENV EXO_ZENOH_NAMESPACE=$EXO_ZENOH_NAMESPACE"
+  EXO_ENV="$EXO_ENV EXO_FAST_SYNCH=$EXO_FAST_SYNCH"
+  EXO_ENV="$EXO_ENV EXO_MAX_ACTIVE_TASKS=$EXO_MAX_ACTIVE_TASKS"
+  # EXO_PYSAMPLER=1 (2026-08-22): activates an in-process Python-level
+  # stack sampler (~1kHz, sys._current_frames()-based) via a
+  # sitecustomize.py placed on PYTHONPATH, for the decode idle-gap
+  # investigation (see docs/decode-idle-time-investigation-interim-
+  # synthesis-2026-08-22.md). Zero-privilege alternative to py-spy,
+  # which requires root/sudo on macOS. NOT wired to a repo file --
+  # points at a diagnostic-only script placed manually in /tmp on each
+  # Studio (never committed; consistent with the exo deploy hard rule
+  # of never live-editing the deployed repo/mlx code, since this file
+  # lives entirely outside the repo). PYTHONPATH forwarding is
+  # otherwise unused by production, so this is safe to leave wired
+  # unconditionally -- with EXO_PYSAMPLER unset, sitecustomize.py's own
+  # top-level `if _ENABLED:` guard means the import is a no-op.
+  [ -n "${EXO_PYTHONPATH_DIAG:-}" ] && EXO_ENV="$EXO_ENV PYTHONPATH=$EXO_PYTHONPATH_DIAG"
+  [ -n "${EXO_PYSAMPLER:-}" ] && EXO_ENV="$EXO_ENV EXO_PYSAMPLER=$EXO_PYSAMPLER"
+  [ -n "${EXO_PYSAMPLER_INTERVAL_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_PYSAMPLER_INTERVAL_MS=$EXO_PYSAMPLER_INTERVAL_MS"
+  # PP-only: the classic small-draft-model speculation path. Was
+  # previously exported unconditionally regardless of sharding mode;
+  # gated here (2026-08-16, TP-only pivot) since it has no effect
+  # under Tensor sharding (pp_speculation.get_pipeline_info() finds no
+  # PipelineLastLayer and the whole PP-spec loop never engages) but
+  # was cluttering the live env of every TP launch.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    : "${EXO_PP_DRAFT_MODEL:=$HOME/.exo/models/mlx-community--Qwen3.5-0.8B-MLX-8bit}"
+    EXO_ENV="$EXO_ENV EXO_PP_DRAFT_MODEL=$EXO_PP_DRAFT_MODEL"
+  fi
+  # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
+  [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
+  [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
+  [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
+  [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
+  [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"
+  # EXO_PP_LAYER_SPLIT: manual override for placement_utils.py's proportional
+  # (memory-fraction-based) layer allocation across PP ranks. Format "A,B"
+  # for a 2-node split (e.g. "21,22"). Used to A/B test whether the
+  # rank-to-layer-count assignment (which drifts run-to-run based on each
+  # node's free RAM at placement time) affects prefill throughput decay.
+  # The master (elected on either node) reads this from its own env, so it
+  # must be in the shared EXO_ENV applied to both nodes, not runner-only.
+  # PP-only concept (there is no per-rank "layer split" under Tensor
+  # sharding, every rank holds every layer) -- gated 2026-08-16.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    [ -n "${EXO_PP_LAYER_SPLIT:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_LAYER_SPLIT=$EXO_PP_LAYER_SPLIT"
+  fi
+  # MLX_JACCL_STALL_TIMEOUT_US: jaccl's collective-poll-loop stall watchdog
+  # (mesh_impl.h StallWatch), default 8s. Calibrated for TP-style frequent
+  # short collectives ("well under a second" per the source comment) — PP's
+  # long individual p2p send/recv (model forward on the peer rank between
+  # handoffs) can legitimately exceed 8s at high context, same class of
+  # issue as the MLX_EVENT_WAIT_TIMEOUT_MS / EXO_RUNNER_HANG_TIMEOUT_SECONDS
+  # fixes already applied for MlxRing PP mode. Raise for PP+MlxJaccl testing.
+  [ -n "${MLX_JACCL_STALL_TIMEOUT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_STALL_TIMEOUT_US=$MLX_JACCL_STALL_TIMEOUT_US"
+  # EXO_RUNNER_HANG_TIMEOUT_SECONDS: raise for the reliable ARQ path — large
+  # prefill all_reduces are slow (4KB stop-and-wait; UC can't do fast large or
+  # concurrent sends) and can legitimately run past the default 45s.
+  # PP mode: must be >= MLX_EVENT_WAIT_TIMEOUT_MS (1800s) so the supervisor
+  # doesn't SIGKILL the runner during a legitimate long first-decode drain.
+  # Default 45s is incoherent with the 1800s Event::wait — the supervisor
+  # kills at 45s before the GPU wait can resolve.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ] && [ -z "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]; then
+    EXO_RUNNER_HANG_TIMEOUT_SECONDS=1800
+  fi
+  [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
+  # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. Depth 8 is
+  # validated for sz<=2 chunks (<=16KB concurrent UC sends are clean; the old
+  # MUST-be-1 note predates the 2026-07-06 pipelining patch, mlx 452fbebf).
+  : "${MLX_JACCL_RELIABLE_INFLIGHT:=8}"
+  [ -n "${MLX_JACCL_RELIABLE_INFLIGHT:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_INFLIGHT=$MLX_JACCL_RELIABLE_INFLIGHT"
+  # MLX_JACCL_DATA_RECV_POOL: gates the standing pre-posted recv pool on the
+  # data QP (Sections 52/64). The C++ reads it via std::getenv and its own
+  # comment advertises "=0 to A/B against the old behaviour" -- but it was
+  # never threaded here, and the runner environment is an ALLOWLIST, so that
+  # A/B was not actually runnable through the deploy path. Section 52's
+  # 1403->0 result came from comparing rebuilds, not from toggling this gate.
+  # Threaded 2026-08-16 so the gate is genuinely testable.
+  [ -n "${MLX_JACCL_DATA_RECV_POOL:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_DATA_RECV_POOL=$MLX_JACCL_DATA_RECV_POOL"
+  # MLX_JACCL_P2P_DRAIN_QUIET_US: quiet period for the p2p send()/recv()
+  # drain loops only (Section 71), split out from the collective ack
+  # retransmit timer. Default 25ms in the C++. Threaded here from the
+  # start -- Section 66's lesson was that a gate nobody can toggle is a
+  # gate nobody can A/B, and MLX_JACCL_DATA_RECV_POOL sat untestable for
+  # a fortnight because of exactly that. Set to 500000 to restore the
+  # old shared-timer behaviour for comparison.
+  [ -n "${MLX_JACCL_P2P_DRAIN_QUIET_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_P2P_DRAIN_QUIET_US=$MLX_JACCL_P2P_DRAIN_QUIET_US"
+  [ -n "${MLX_LOG_ARRAY_DESC_COUNT_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_ARRAY_DESC_COUNT_INTERVAL=$MLX_LOG_ARRAY_DESC_COUNT_INTERVAL"
+  [ -n "${MLX_PER_TYPE_DUMP_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_DUMP_INTERVAL=$MLX_PER_TYPE_DUMP_INTERVAL"
+  [ -n "${MLX_PER_TYPE_TRACK:-}" ] && EXO_ENV="$EXO_ENV MLX_PER_TYPE_TRACK=$MLX_PER_TYPE_TRACK"
+  [ -n "${MLX_LM_EAGER_EVAL_CACHES:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_EAGER_EVAL_CACHES=$MLX_LM_EAGER_EVAL_CACHES"
+  [ -n "${MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL=$MLX_LM_CLEAR_COMPILE_CACHE_INTERVAL"
+  [ -n "${MLX_LM_SYNC_AFTER_STEP:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SYNC_AFTER_STEP=$MLX_LM_SYNC_AFTER_STEP"
+  [ -n "${MLX_GPU_TIME:-}" ] && EXO_ENV="$EXO_ENV MLX_GPU_TIME=$MLX_GPU_TIME"
+  [ -n "${EXO_DECODE_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PROBE=$EXO_DECODE_PROBE"
+  [ -n "${EXO_DECODE_PROBE_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PROBE_EVERY=$EXO_DECODE_PROBE_EVERY"
+  [ -n "${EXO_DSV4_DEGEN_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DEGEN_PROBE=$EXO_DSV4_DEGEN_PROBE"
+  [ -n "${MLX_GPU_TIME_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV MLX_GPU_TIME_LOG_EVERY=$MLX_GPU_TIME_LOG_EVERY"
+  [ -n "${MLX_SDPA_BLOCKS:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
+  [ -n "${MLX_LM_SDPA_ROWSPLIT:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SDPA_ROWSPLIT=$MLX_LM_SDPA_ROWSPLIT"
+  [ -n "${MLX_BUILD_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_BUILD_PROBE=$MLX_BUILD_PROBE"
+  [ -n "${MLX_BUILD_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV MLX_BUILD_PROBE_LOG_EVERY=$MLX_BUILD_PROBE_LOG_EVERY"
+  [ -n "${MLX_OP_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_OP_PROBE=$MLX_OP_PROBE"
+  [ -n "${MLX_MAX_OPS_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_OPS_PER_BUFFER=$MLX_MAX_OPS_PER_BUFFER"
+  [ -n "${MLX_MAX_MB_PER_BUFFER:-}" ] && EXO_ENV="$EXO_ENV MLX_MAX_MB_PER_BUFFER=$MLX_MAX_MB_PER_BUFFER"
+  # M-batched sorted-run gather qmv kill switch / tuning (mlx cb539cda).
+  [ -n "${MLX_GATHER_QMV_RHS:-}" ] && EXO_ENV="$EXO_ENV MLX_GATHER_QMV_RHS=$MLX_GATHER_QMV_RHS"
+  [ -n "${MLX_GATHER_QMV_RHS_TILE:-}" ] && EXO_ENV="$EXO_ENV MLX_GATHER_QMV_RHS_TILE=$MLX_GATHER_QMV_RHS_TILE"
+  [ -n "${EXO_PP_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DEBUG=$EXO_PP_DEBUG"
+  [ -n "${MLX_GATHER_QMV_RHS_RPS:-}" ] && EXO_ENV="$EXO_ENV MLX_GATHER_QMV_RHS_RPS=$MLX_GATHER_QMV_RHS_RPS"
+  EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE=$EXO_PREFILL_STEP_SIZE"
+  [ -n "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_HIGH_CTX=$EXO_PREFILL_STEP_SIZE_HIGH_CTX"
+  [ -n "${EXO_PREFILL_STEP_SIZE_CROSSOVER:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_STEP_SIZE_CROSSOVER=$EXO_PREFILL_STEP_SIZE_CROSSOVER"
+  EXO_ENV="$EXO_ENV EXO_PREFILL_CLEAR_CACHE_INTERVAL=$EXO_PREFILL_CLEAR_CACHE_INTERVAL"
+  EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_BALANCED=$EXO_DSV4_SEQSPLIT_BALANCED"
+  [ -n "${EXO_DSV4_SPARSE_SDPA_TILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPARSE_SDPA_TILE=$EXO_DSV4_SPARSE_SDPA_TILE"
+  [ -n "${EXO_DSV4_SINGLE_GATHER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SINGLE_GATHER=$EXO_DSV4_SINGLE_GATHER"
+  [ -n "${EXO_DSV4_FUSED_SOFTMAX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_SOFTMAX=$EXO_DSV4_FUSED_SOFTMAX"
+  # MLX gather_qmm_rhs_lhs tile override (opt/gqmm-tile-env branch)
+  [ -n "${MLX_GQMM_RHS_LHS_BM:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_BM=$MLX_GQMM_RHS_LHS_BM"
+  [ -n "${MLX_GQMM_RHS_LHS_BN:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_BN=$MLX_GQMM_RHS_LHS_BN"
+  [ -n "${MLX_GQMM_RHS_LHS_BK:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_BK=$MLX_GQMM_RHS_LHS_BK"
+  [ -n "${MLX_GQMM_RHS_LHS_WM:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_WM=$MLX_GQMM_RHS_LHS_WM"
+  [ -n "${MLX_GQMM_RHS_LHS_WN:-}" ] && EXO_ENV="$EXO_ENV MLX_GQMM_RHS_LHS_WN=$MLX_GQMM_RHS_LHS_WN"
+  # SDPA D=512 fused kernel (gated, default off)
+  [ -n "${MLX_SDPA_D512_FUSED:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_D512_FUSED=$MLX_SDPA_D512_FUSED"
+  [ -n "${MLX_SDPA_D512_BQ16:-}" ] && EXO_ENV="$EXO_ENV MLX_SDPA_D512_BQ16=$MLX_SDPA_D512_BQ16"
+  [ -n "${EXO_PREFILL_GPU_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_GPU_TRACE=$EXO_PREFILL_GPU_TRACE"
+  [ -n "${EXO_PREFILL_GPU_TIME:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_GPU_TIME=$EXO_PREFILL_GPU_TIME"
+  [ -n "${EXO_PREFILL_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_ASYNC_EVAL=$EXO_PREFILL_ASYNC_EVAL"
+  [ -n "${EXO_PREFILL_EVAL_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_EVAL_INTERVAL=$EXO_PREFILL_EVAL_INTERVAL"
+  EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL=$EXO_DSV4_BATCHED_PREFILL"
+  EXO_ENV="$EXO_ENV EXO_BATCHED_PREFILL_RENDEZVOUS_MS=$EXO_BATCHED_PREFILL_RENDEZVOUS_MS"
+  [ -n "$EXO_PROFILER" ] && EXO_ENV="$EXO_ENV EXO_PROFILER=$EXO_PROFILER"
+  [ -n "$EXO_PROFILER_SYNC_SPANS" ] && EXO_ENV="$EXO_ENV EXO_PROFILER_SYNC_SPANS=$EXO_PROFILER_SYNC_SPANS"
+  [ -n "$EXO_DSV4_SECTION_TIME" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SECTION_TIME=$EXO_DSV4_SECTION_TIME"
+  [ -n "$EXO_DSV4_SECTION_TIME_LOG_EVERY" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SECTION_TIME_LOG_EVERY=$EXO_DSV4_SECTION_TIME_LOG_EVERY"
+  [ -n "$EXO_DSV4_PREFILL_ARGPARTITION" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PREFILL_ARGPARTITION=$EXO_DSV4_PREFILL_ARGPARTITION"
+  [ -n "${EXO_DSV4_ARGPARTITION_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ARGPARTITION_MIN_P=$EXO_DSV4_ARGPARTITION_MIN_P"
+  [ -n "$EXO_DSV4_LMHEAD_LASTROW" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_LASTROW=$EXO_DSV4_LMHEAD_LASTROW"
+  [ -n "${EXO_DSV4_LMHEAD_MXFP8:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LMHEAD_MXFP8=$EXO_DSV4_LMHEAD_MXFP8"
+  [ -n "$EXO_DSV4_SEQ_SPLIT" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT=$EXO_DSV4_SEQ_SPLIT"
+  # Seq-split output reconstruction path: default (unset/1) uses a
+  # zero-padded all_sum on the TOP-LEVEL group (2x wire bytes) to work
+  # around a subgroup all_gather wedge (no TCP coordinator on subgroups
+  # -> reliable ARQ couldn't arm there, observed 2026-07-06). Tonight's
+  # 2026-08-21 jaccl fix (commit f8b77fe5a, "give subgroups their own
+  # TCP coordinator") may have retired that precondition -- set to 0 to
+  # test the real (cheaper) subgroup all_gather path. See deepseek_v4.py
+  # docstring at _SEQ_SPLIT_GATHER_VIA_ALLSUM for full context.
+  [ -n "$EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM=$EXO_DSV4_SEQSPLIT_GATHER_VIA_ALLSUM"
+  # JIT model lifecycle (master + API read these; always forwarded so the
+  # kill-switch and reserve are explicit in the runner env).
+  EXO_ENV="$EXO_ENV EXO_JIT_ENABLED=$EXO_JIT_ENABLED"
+  EXO_ENV="$EXO_ENV EXO_JIT_MEMORY_RESERVE_GB=$EXO_JIT_MEMORY_RESERVE_GB"
+  EXO_ENV="$EXO_ENV EXO_JIT_LOAD_TIMEOUT_SECONDS=$EXO_JIT_LOAD_TIMEOUT_SECONDS"
+  EXO_ENV="$EXO_ENV EXO_JIT_IDLE_UNLOAD_SECONDS=$EXO_JIT_IDLE_UNLOAD_SECONDS"
+  EXO_ENV="$EXO_ENV EXO_JIT_PLACEMENT_WAIT_SECONDS=$EXO_JIT_PLACEMENT_WAIT_SECONDS"
+  [ -n "${EXO_DSV4_HEAPCENSUS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HEAPCENSUS=$EXO_DSV4_HEAPCENSUS"
+  [ -n "$EXO_DSV4_SEQ_SPLIT_MIN_L" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SEQ_SPLIT_MIN_L=$EXO_DSV4_SEQ_SPLIT_MIN_L"
+  [ -n "$EXO_PREFIX_CACHE_TRACE" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_TRACE=$EXO_PREFIX_CACHE_TRACE"
+  [ -n "$EXO_RUNNER_COREDUMP" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_COREDUMP=$EXO_RUNNER_COREDUMP"
+  [ -n "$EXO_MEMORY_PROFILE_PATH" ] && EXO_ENV="$EXO_ENV EXO_MEMORY_PROFILE_PATH=$EXO_MEMORY_PROFILE_PATH EXO_MEMORY_PROFILE_INTERVAL=$EXO_MEMORY_PROFILE_INTERVAL"
+  [ -n "$EXO_TRACEMALLOC_PATH" ] && EXO_ENV="$EXO_ENV EXO_TRACEMALLOC_PATH=$EXO_TRACEMALLOC_PATH EXO_TRACEMALLOC_INTERVAL=$EXO_TRACEMALLOC_INTERVAL EXO_TRACEMALLOC_TOP_N=$EXO_TRACEMALLOC_TOP_N"
+  [ "$EXO_MLX_CLEAR_CACHE_INTERVAL" != "0" ] && EXO_ENV="$EXO_ENV EXO_MLX_CLEAR_CACHE_INTERVAL=$EXO_MLX_CLEAR_CACHE_INTERVAL"
+  EXO_ENV="$EXO_ENV EXO_GC_COLLECT_INTERVAL=$EXO_GC_COLLECT_INTERVAL"
+  [ "$EXO_MALLOC_RELIEF_INTERVAL" != "0" ] && EXO_ENV="$EXO_ENV EXO_MALLOC_RELIEF_INTERVAL=$EXO_MALLOC_RELIEF_INTERVAL"
+  [ -n "$EXO_PROFILER_LEVEL" ] && EXO_ENV="$EXO_ENV EXO_PROFILER_LEVEL=$EXO_PROFILER_LEVEL"
+  EXO_ENV="$EXO_ENV EXO_LAYER_EVAL_INTERVAL=$EXO_LAYER_EVAL_INTERVAL"
+  EXO_ENV="$EXO_ENV EXO_DRAFT_KV_WINDOW=$EXO_DRAFT_KV_WINDOW"
+  EXO_ENV="$EXO_ENV EXO_KV_CACHE_BITS=$EXO_KV_CACHE_BITS"
+  if [ -n "$EXO_TURBOQUANT" ]; then
+    EXO_ENV="$EXO_ENV EXO_TURBOQUANT=$EXO_TURBOQUANT"
+  fi
+  EXO_ENV="$EXO_ENV EXO_SPECULATIVE=$EXO_SPECULATIVE"
+  EXO_ENV="$EXO_ENV EXO_SPECULATIVE_GAMMA=$EXO_SPECULATIVE_GAMMA"
+  [ -n "${EXO_QWEN_SPECULATIVE_GAMMA:-}" ] && EXO_ENV="$EXO_ENV EXO_QWEN_SPECULATIVE_GAMMA=$EXO_QWEN_SPECULATIVE_GAMMA"
+  EXO_ENV="$EXO_ENV EXO_COMPUTE_DTYPE=$EXO_COMPUTE_DTYPE"
+  EXO_ENV="$EXO_ENV EXO_RUNNER_QOS=$EXO_RUNNER_QOS"
+  EXO_ENV="$EXO_ENV LOG_LEVEL=$LOG_LEVEL"
 
-    # Cluster-wide sampling defaults (only export if explicitly set).
-    [ -n "$EXO_DEFAULT_TEMPERATURE" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_TEMPERATURE=$EXO_DEFAULT_TEMPERATURE"
-    [ -n "$EXO_DEFAULT_TOP_P" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_P=$EXO_DEFAULT_TOP_P"
-    [ -n "$EXO_DEFAULT_TOP_K" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_K=$EXO_DEFAULT_TOP_K"
-    [ -n "$EXO_DEFAULT_MIN_P" ]       && EXO_ENV="$EXO_ENV EXO_DEFAULT_MIN_P=$EXO_DEFAULT_MIN_P"
+  # Cluster-wide sampling defaults (only export if explicitly set).
+  [ -n "$EXO_DEFAULT_TEMPERATURE" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_TEMPERATURE=$EXO_DEFAULT_TEMPERATURE"
+  [ -n "$EXO_DEFAULT_TOP_P" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_P=$EXO_DEFAULT_TOP_P"
+  [ -n "$EXO_DEFAULT_TOP_K" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_K=$EXO_DEFAULT_TOP_K"
+  [ -n "$EXO_DEFAULT_MIN_P" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_MIN_P=$EXO_DEFAULT_MIN_P"
 
-    # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
-    # while we validate decode quality vs unfused.
-    [ -n "$EXO_DSV4_FUSED_MOE" ]       && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
-    [ -n "${EXO_DSV4_MOE_FUSED_GATE_UP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_FUSED_GATE_UP=$EXO_DSV4_MOE_FUSED_GATE_UP"
-    # wq_a+wkv fusion (2026-08-21, c=1-only -- see deepseek_v4.py header near
-    # _try_fuse_two_quantized_linears for the B>1-unvalidated caveat).
-    [ -n "${EXO_DSV4_QA_KV_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QA_KV_FUSED=$EXO_DSV4_QA_KV_FUSED"
-    [ -n "${EXO_DSV4_COMPILE_FFN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_FFN=$EXO_DSV4_COMPILE_FFN"
-    [ -n "${EXO_DSV4_COMPILE_LAYER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_LAYER=$EXO_DSV4_COMPILE_LAYER"
-    [ -n "${EXO_DSV4_FENCE_EVERY_N_LAYERS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_EVERY_N_LAYERS=$EXO_DSV4_FENCE_EVERY_N_LAYERS"
-    [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
-    [ -n "${EXO_DSV4_ALLSUM_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE_LOG_EVERY=$EXO_DSV4_ALLSUM_PROBE_LOG_EVERY"
-    # Decode fence overlap (2026-07-02): non-blocking per-layer fence
-    # (mx.async_eval) at the DSv4 MoE all_sum site, armed ONLY at c=1
-    # steady state via a two-key side channel (batch_generate "engine" key:
-    # exactly one active request; dsv4_mtp "cache" key: single-uid steady,
-    # disarm+synchronize around cache transitions). Measured: c=1 decode
-    # 28.9 -> 37.0 t/s (+28%), outputs byte-identical (blocking-fence
-    # parity), needle/BOS clean. At c>=2 the fence stays blocking (keys
-    # disarmed).
-    # NOTE (history): the 2026-07-02 c=2 JOIN corruption was the per-stream
-    # ring bootstrap (fixed, mlx-lm 8b7b5f9) — unrelated to this c=1 fence.
-    # The 2026-07-03 c=2 DEEP-generation corruption is a different bug,
-    # implicated on FENCE_ASYNC_C2 (see below); this B==1-gated arming is
-    # not affected.
-    : "${EXO_DSV4_FENCE_ASYNC:=1}"
-    [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
-    # TEMP DIAGNOSTIC (2026-08-22, EXO_DSV4_FENCE_GATE_DIAG=1): rate-limited
-    # real-value log of the async-fence gate's four conditions on every
-    # blocking-branch fallthrough, plus every _set_fence_async_ok() setter
-    # call. For the decode idle-gap investigation -- a real in-process
-    # Python sampler found ~95% of real decode-time compute-thread wall
-    # time blocked in the SYNCHRONOUS mx.eval(y) branch, not the intended
-    # async mx.async_eval(y) branch, despite EXO_DSV4_FENCE_ASYNC=1 being
-    # live -- this traces WHY the gate fails to arm. See
-    # docs/pysampler-blocking-eval-root-cause-2026-08-22.md. Remove once
-    # understood; not meant to be a permanent flag.
-    [ -n "${EXO_DSV4_FENCE_GATE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_GATE_DIAG=$EXO_DSV4_FENCE_GATE_DIAG"
-    # c=2 decode levers.
-    #
-    # BS_MIN_ACCEPT DEFAULT 1 (2026-07-12, was 0). Per-stream acceptance
-    # (=0) was kept from the 2026-07-02 A/B (+24% vs min-clamp) and
-    # believed "exonerated" by the 2026-07-03 deep battery — but that whole
-    # era ran spec-OFF at c>=2 (MTP_C2_MAX_CTX=1), so the lever was DORMANT
-    # and the battery could never see it. When the 2026-07-11 campaign
-    # re-enabled c>=2 spec, =0 turned out to be THE c>=2 temp>0 repetition
-    # attractor: per-stream yields (n_acc[n]+1 tokens) vs batch-UNIFORM
-    # pool rollback arithmetic (keep = n_min+1 / trim = gamma-n_min) bleed
-    # committed tokens out of every higher-accepting stream's PoolingCache
-    # on each acceptance-spread cycle -> pooled positions desync ->
-    # repetition within ~300 tok at temp=1.0 (probe: 3 degens + runner
-    # hang in 4 rounds at =0; 8/8 clean at =1, kernels identical). The
-    # dsv4_mtp.py code default has said "known-corrupt at c=2" since
-    # 2026-07-02 — this file was overriding it. Perf at c=2 spec-on with
-    # =1 is ~14.3 t/s/stream (parity with spec-off). Second instance of
-    # the "flipping a gate awakens a latent env" lesson (cf. the
-    # 2026-07-10 pool-gate crash) — A/B "exoneration" is void if the
-    # lever was dormant when tested.
-    #
-    # FENCE_ASYNC_C2 DEFAULT 0 (2026-07-03): async fencing at c=2 is
-    # IMPLICATED in the deep-generation corruption. 4000-token divergent
-    # c=2 pairs with FENCE_ASYNC_C2=2 degenerate at ~27%/pair (repetition
-    # loops at tokens 1400-3900, kill-switch fires, then the mid-batch
-    # kill rank-desyncs a collective -> 100% CPU spin wedge needing
-    # kill -9). Same battery with FENCE_ASYNC_C2=0: 12/12 clean.
-    # Exonerated by direct A/B: MLX_LM_SDPA_ROWSPLIT, BS_MIN_ACCEPT,
-    # MTP-off (clean -> spec path), preceded-by-c1, xctrace attach.
-    # Part 6's 800-token validation was too shallow to catch this.
-    # Cost: c=2 drops ~24.5 -> ~19 t/s/stream; c=1 keeps its +28% async
-    # win (FENCE_ASYNC=1 arming is B==1-gated and validated deep).
-    # Re-enable only with a fix for the steady-state batched-cycle race
-    # (per-stream ring trims vs in-flight deferred async graphs) plus a
-    # 4000-token c=2 battery. See MOE_KERNEL_HANDOFF.md 2026-07-03.
-    : "${EXO_DSV4_FENCE_ASYNC_C2:=0}"
-    : "${EXO_DSV4_BS_MIN_ACCEPT:=1}"
-    [ -n "${EXO_DSV4_FENCE_ASYNC_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC_C2=$EXO_DSV4_FENCE_ASYNC_C2"
-    [ -n "${EXO_DSV4_BS_MIN_ACCEPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BS_MIN_ACCEPT=$EXO_DSV4_BS_MIN_ACCEPT"
-    [ -n "${EXO_DSV4_ROUTE_HIST:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST=$EXO_DSV4_ROUTE_HIST"
-    [ -n "${EXO_DSV4_ROUTE_HIST_DECODE_ONLY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST_DECODE_ONLY=$EXO_DSV4_ROUTE_HIST_DECODE_ONLY"
-    [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
-    [ -n "$EXO_DSV4_INDEX_TOPK" ]      && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
-    # One-shot decode-step top-k overlap diagnostic (Indexer, deepseek_v4.py)
-    # -- opt-in, off by default, no effect on production decode.
-    [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
-    # P08 Item 2 live A/B gate (mlx-lm a248d0a7): take the exact top-k Metal
-    # kernel for PREFILL chunks (L>16) too. Default OFF -> absent unless set,
-    # so production behaviour is unchanged.
-    [ -n "${EXO_DSV4_EXACT_TOPK_PREFILL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_EXACT_TOPK_PREFILL=$EXO_DSV4_EXACT_TOPK_PREFILL"
-    # P09 Item 1 (mlx-lm query-tiled compressed SDPA): default OFF -> absent
-    # unless set, so the OFF arm of the A/B is a genuine unset env.
-    [ -n "${EXO_DSV4_QUERY_TILED_SDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_SDPA=$EXO_DSV4_QUERY_TILED_SDPA"
-    [ -n "${EXO_DSV4_QUERY_TILED_B:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_B=$EXO_DSV4_QUERY_TILED_B"
-    [ -n "${EXO_DSV4_MTP:-}" ]         && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
-    # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
-    # MTP-1 chained draft at c=1. DEFAULT RE-ENABLED 2026-08-02: the
-    # self-doubt-loop bug (found 2026-07-26) is FIXED and re-validated --
-    # see the EXO_SPECULATIVE comment near the top of this file for the
-    # full root-cause/fix writeup (EXO_DSV4_ROWSEQ_FULLBLOCK +
-    # EXO_DSV4_ROWSEQ_FULLBLOCK_MOE, both also default-on now, close the
-    # L>1-batched-verify-vs-sequential-decode numerics drift that was
-    # causing it). DSpark is this cluster's intended sole MTP mechanism
-    # (no reason to keep plain single-token MTP as a separate fallback
-    # once DSpark exists). Confidence pruning via EXO_DSV4_DSPARK_CONF_TAU
-    # (default 0.5; 0 disables). Requires the converted local head dir on
-    # every node (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a
-    # missing dir fails rank-consistently back to MTP-1.
-    # EXO_DSV4_DSPARK_DIR overrides.
-    #
-    # DORMANT UNDER TP (confirmed 2026-08-22, see
-    # docs/roofline-sanity-check-inputs-confirmed-2026-08-22.md): DSpark's
-    # actual decode loop (pp_dspark_decode_loop) is PP-only -- auto-selected
-    # in Pipeline sharding mode when DSpark is attached (see ~line 2346),
-    # but this cluster runs Tensor sharding (MLX_JACCL_SHARDING_MODE=Tensor)
-    # for decode, which has no DSpark decode path at all. The module still
-    # loads and warms its context ("DSpark ctx warmed" in the log) but its
-    # speculative decode loop never fires -- confirmed via a live log grep
-    # finding zero "PP speculation using DSpark" lines across a full
-    # session. Left ON (not disabled) because it's genuinely load-bearing
-    # for PP deployments and costs nothing extra to warm under TP; this
-    # comment exists so a future investigation doesn't re-waste time
-    # assuming DSpark is providing a decode-time speedup under TP that it
-    # is not.
-    #
-    # SHIPPED DEFAULT RECONCILED 2026-08-24 (P4v2 milestone M0). The block
-    # above was written when DSpark was believed to be load-bearing-but-
-    # free under TP. Two of its claims are now known wrong:
-    #
-    #   * "costs nothing extra to warm under TP" — it costs ~10 GB of
-    #     RESIDENT unified memory per node for the whole process lifetime
-    #     (the local head's model.safetensors is 10,876,789,654 B). The
-    #     comment accounted for compute, not residency, on nodes documented
-    #     at ~125 GB of 128 GB co-resident weights.
-    #   * the DSpark decode path is not merely "PP-only": under TP there IS
-    #     a first-class DSpark draft branch in _speculative_next
-    #     (dsv4_mtp.py), it is simply unreachable in the shipped config
-    #     because reaching it needs EXO_DSV4_MTP=1 as well (that flag is
-    #     what makes inner.mtp exist, which is what is_dsv4_with_mtp tests,
-    #     which is what constructs the generator).
-    #
-    # So DSPARK=1 with MTP=0 under Tensor sharding buys a ~10 GB head that
-    # can never draft. Rather than flip this default (DSpark IS this
-    # cluster's intended sole speculation mechanism and the flag should
-    # stay expressing that intent), utils_mlx now GATES THE LOAD on a
-    # consumer actually being reachable: TP needs SPECULATIVE=1 AND MTP=1,
-    # PP needs SPECULATIVE=1 + EXO_PP_DRAFT_MODEL + Pipeline sharding.
-    # EXO_DSV4_DSPARK_FORCE_LOAD=1 overrides. Configurations that really
-    # speculate are byte-identical to before; the dead ones reclaim ~10 GB.
-    : "${EXO_DSV4_DSPARK:=1}"
-    [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
-    # Force the head to attach even when no consumer is reachable (the M0
-    # gate above). Opt-in; used to measure the head's own memory/load cost.
-    [ -n "${EXO_DSV4_DSPARK_FORCE_LOAD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_FORCE_LOAD=$EXO_DSV4_DSPARK_FORCE_LOAD"
-    # ── DSPARK SHADOW MEASUREMENT (P4v2 milestone M1, 2026-08-24) ───────
-    # EXO_DSV4_SPEC_SHADOW=1 runs the DSpark draft + the batched verify
-    # every cycle, logs what WOULD have been accepted plus the measured
-    # draft and verify walls, then forces n_accepted=0 so the EMITTED
-    # stream still comes from the sequential path. Requires all three
-    # speculation flags to be on (EXO_SPECULATIVE=1 EXO_DSV4_MTP=1
-    # EXO_DSV4_DSPARK=1) or there is no DSpark cycle to shadow.
-    #
-    # This is a MEASUREMENT BUILD, never a serving config: it pays the
-    # draft + the (k+1)-row verify + the rollback to commit ONE token, so
-    # it is strictly slower than plain decode. Default off; with the flag
-    # unset the code is dead and behaviour is unchanged.
-    #
-    # Structured output in the runner log:
-    #   [DSPARK-SHADOW]        aggregate every _INTERVAL cycles
-    #   [DSPARK-SHADOW-GUARD]  one-shot non-degeneracy + ctx-tap verdict
-    #   [DSPARK-GUARD]         one-shot load-time provenance/param-tree
-    [ -n "${EXO_DSV4_SPEC_SHADOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW=$EXO_DSV4_SPEC_SHADOW"
-    [ -n "${EXO_DSV4_SPEC_SHADOW_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_INTERVAL=$EXO_DSV4_SPEC_SHADOW_INTERVAL"
-    [ -n "${EXO_DSV4_SPEC_SHADOW_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_LOG=$EXO_DSV4_SPEC_SHADOW_LOG"
-    [ -n "${EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES=$EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES"
-    [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
-    # EXO_DSV4_DSPARK_NATIVE=1 (2026-08-04): use the checkpoint's OWN
-    # bundled mtp.0/1/2.* DSpark head (trained alongside these exact target
-    # weights) instead of the separately-converted local head above. Use
-    # for checkpoints like deepseek-ai/DeepSeek-V4-Flash-0731 whose draft
-    # head wasn't trained on the SAME checkpoint as EXO_DSV4_DSPARK_DIR's
-    # local conversion (that dir was converted from the PREVIEW checkpoint's
-    # mtp shards). Default off -- opt in per-checkpoint. See
-    # docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md for the full
-    # background/validation writeup.
-    [ -n "${EXO_DSV4_DSPARK_NATIVE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_NATIVE=$EXO_DSV4_DSPARK_NATIVE"
-    # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
-    # with EXO_DSV4_VERIFY_ROWSEQ_VEC=1 + MLX_STEEL_BATCH_INVARIANT=1 —
-    # the vec+tau0 config from the task #23/#24 campaigns).
-    [ -n "${EXO_DSV4_DSPARK_CONF_TAU:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_CONF_TAU=$EXO_DSV4_DSPARK_CONF_TAU"
-    # Vectorized rowseq verify (task #23) — CHAMPION since 2026-07-12:
-    # vec + ROWSDPA=3 (hoisted batched projections over the REAL per-row
-    # loop attention body: real update_and_fetch / row masks / buffer
-    # reads, + the sharding_group all_sum fix, mlx-lm 095c98c).
-    # Byte-lossless: gold gate 3/3 vs the loop AND vs MTP-off; 33.7 t/s
-    # short-ctx (vs 29.5 loop champion), 36.9 t/s + 10/10 needle recall
-    # at 100K. Set EXO_DSV4_VERIFY_ROWSEQ_VEC=0 to fall back to the loop.
-    : "${EXO_DSV4_VERIFY_ROWSEQ_VEC:=1}"
-    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC=$EXO_DSV4_VERIFY_ROWSEQ_VEC"
-    # ROWSDPA levels: 1 = per-row sdpa over gathered views + manual ring
-    # write (35.5 t/s), 2 = +per-row projections (diagnostic), 3 = real
-    # loop attention body + hoisted projections (lossless champion).
-    : "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:=3}"
-    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=$EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA"
-    # Attention-tail all_sum on replicated attention — DEFAULT 0 since
-    # 2026-07-12: the probe proved it an EXACT 2.000000 doubling of
-    # bitwise rank-identical replicas (a latent 2-node numerics bug, not
-    # a resync; single-node semantics are the reference). With it off:
-    # vec == loop == MTP-off 3/3, 36.1-36.3 t/s short-ctx, 39.1 t/s +
-    # 10/10 recall at 100K, and one fewer network round trip per
-    # compressed/sparse layer. Set =1 to reproduce the historical
-    # (doubled) 2-node numerics. EXO_DSV4_ALLSUM_PROBE=<path> dumps
-    # pre/post norms + prehash for the first 200 sums.
-    : "${EXO_DSV4_ATTN_ALLSUM:=0}"
-    [ -n "${EXO_DSV4_ATTN_ALLSUM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ATTN_ALLSUM=$EXO_DSV4_ATTN_ALLSUM"
-    [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
-    # 2026-08-19: quantized moe.all_sum diagnostic (feat/moe-allsum-quant
-    # branch, not yet merged to mlx-lm main). Default OFF; unset ->
-    # byte-identical to the un-quantized path. See
-    # docs/moe-allsum-quant-compute-overhead-analysis-2026-08-19.md.
-    [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT=$EXO_DSV4_MOE_ALLSUM_QUANT"
-    [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_BITS=$EXO_DSV4_MOE_ALLSUM_QUANT_BITS"
-    [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_GROUP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_GROUP=$EXO_DSV4_MOE_ALLSUM_QUANT_GROUP"
-    # 2026-08-19: shared-scale int8 all_sum (100% on jaccl's reliable
-    # all_sum path, no all_gather -- see
-    # docs/moe-allsum-quant-root-cause-and-closure-2026-08-19.md for why
-    # the EARLIER all_gather-based EXO_DSV4_MOE_ALLSUM_QUANT above was
-    # abandoned). Default OFF; unset -> byte-identical to plain all_sum.
-    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE"
-    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS"
-    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE"
-    [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY"
-    # 2026-08-20: TP-native chunk-loop compute/comm overlap for
-    # prefill_batched() (docs/dsv4-220k-prefill-span-profile... family).
-    # Default OFF; unset -> byte-identical to today's eager-eval path.
-    # MUST be set identically on both ranks -- flag skew is the primary
-    # hazard (see the code-site comment in generate.py).
-    [ -n "${EXO_PREFILL_CHUNK_OVERLAP:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_CHUNK_OVERLAP=$EXO_PREFILL_CHUNK_OVERLAP"
-    # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
-    # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
-    # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
-    # (that's fixed, mlx-lm 8b7b5f9); it is batch-dependent bf16 rounding
-    # DRIFT in the decode: on-cluster spec-trace showed a c=2 stream match
-    # its canonical c=1 trajectory BITWISE for 75 tokens then flip a near-tie,
-    # which cascades into a repetition attractor (~23% of deep temp-1.0 c=2
-    # pairs). fp32 activations fix it (batch-invariant, proven: 0 server degen)
-    # but reliably crash this cluster's jaccl/RDMA transport at ~2 c=2 pairs
-    # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
-    # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
-    # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
-    # 2026-07-11: RE-ARMED =1 after live degens (4 kill-switch events on
-    # ragged c=2 hermes pairs at temp=1.0).
-    # 2026-07-12 ROOT CAUSE FOUND — it was never kernel drift: the degens
-    # were EXO_DSV4_BS_MIN_ACCEPT=0 (see the c=2 decode levers block below)
-    # desyncing the batch-uniform pool rollback. With BS_MIN_ACCEPT=1,
-    # spec-on c=2 is CLEAN (probe 8/8 ragged temp-1.0 pairs, zero degens)
-    # but only perf-PARITY with spec-off (~14.3 vs ~15 t/s/stream — the
-    # min-clamp wastes drafts), so spec stays OFF at c>=2 for the smaller
-    # code surface. Safe to set =0 for experiments ONLY with
-    # BS_MIN_ACCEPT=1; gate any default flip on bench/c2_temp1_degen_probe.py
-    # (temp=0 batteries are blind to acceptance-spread bugs). Making c>=2
-    # spec actually PROFITABLE needs per-stream pool rollback (pools track
-    # per-stream keeps like PerStreamBatchRotatingKVCache.trim_per_stream).
-    : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}"  # 1 = spec-off at c>=2 (default); 0 = spec on (needs BS_MIN_ACCEPT=1)
-    [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
-    [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
-    # jaccl start-of-collective ACK barrier (mesh_impl.h ack_sync_pre). Keeps
-    # the two TP ranks in lockstep at each collective boundary so a leading
-    # rank's data/ack SEND never arrives before the peer posts its RECV WR —
-    # the UC-silent-drop that wedges drain_acks/the data loop under c>=2. The
-    # dedicated ACK QP (mesh.cpp 2026-05-17) fixes ack_sync_POST; this closes
-    # the remaining PRE-side data-path race. Gated OFF upstream for A/B.
-    [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
-    [ -n "${JACCL_POLL_INSTRUMENT:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
-    [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
-    [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
-    # Runner hang watchdog (supervisor _check_hang). Default 45s SIGKILLs a
-    # runner wedged in a native jaccl collective under c>=2 load (self-heal).
-    # Raise it for diagnostics to widen the sampling window before the kill.
-    [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
-    # Batch-invariant matmul (mlx-lm deepseek_v4): per-row gemv for small M so
-    # c>=2 decode bitwise-matches c=1 — the bf16 batch-drift corruption fix.
-    [ -n "${EXO_DSV4_BATCH_INVARIANT_MM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM=$EXO_DSV4_BATCH_INVARIANT_MM"
-    [ -n "${EXO_DSV4_BATCH_INVARIANT_MM_MAX_M:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM_MAX_M=$EXO_DSV4_BATCH_INVARIANT_MM_MAX_M"
-    [ -n "${EXO_DSV4_BATCHED_PREFILL_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL_DEBUG=$EXO_DSV4_BATCHED_PREFILL_DEBUG"
-    [ -n "${EXO_HC_USE_OPS:-}" ]       && EXO_ENV="$EXO_ENV EXO_HC_USE_OPS=$EXO_HC_USE_OPS"
-    [ -n "${EXO_DSV4_ACT_PROBE:-}" ]   && EXO_ENV="$EXO_ENV EXO_DSV4_ACT_PROBE=$EXO_DSV4_ACT_PROBE"
-    [ -n "${EXO_DSV4_MTP_DEDICATED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DEDICATED=$EXO_DSV4_MTP_DEDICATED"
-    [ -n "${EXO_LEAF_SNAPSHOT_RETENTION:-}" ] && EXO_ENV="$EXO_ENV EXO_LEAF_SNAPSHOT_RETENTION=$EXO_LEAF_SNAPSHOT_RETENTION"
-    [ -n "${EXO_ARRAYSCACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_ARRAYSCACHE_DIAG=$EXO_ARRAYSCACHE_DIAG"
-    # Diagnostic-only (2026-07-23): root-causing rank 1's always-cold
-    # KV-prefix-cache lookup under PP mode. See cache.py's get_kv_cache
-    # for the log points. Remove once root-caused.
-    [ -n "${EXO_PREFIX_CACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_DIAG=$EXO_PREFIX_CACHE_DIAG"
-    # Eagle soft-embedding for chained MTP draft (Phase 14 Plan B.2).
-    # Default OFF (0): mlx-lm's DeepseekV4MTPModule.__call__ uses the
-    # hard-argmax embed_tokens() lookup — bit-exact with prior behavior.
-    # When > 0: at every chained draft step beyond the first, the input
-    # embedding is replaced with a probability-weighted top-K mixture
-    # built from the previous step's logits. Targets step-1 P(top-1)
-    # acceptance lift. Requires the _EAGLE_CTX side channel, which is on
-    # adurham/mlx-lm@main (cluster's pin since 2026-05-29; formerly the
-    # eagle-soft-emb branch, now merged into main). Recommended K=8.
-    [ -n "${EXO_DSV4_MTP_EAGLE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_K=$EXO_DSV4_MTP_EAGLE_K"
-    [ -n "${EXO_DSV4_MTP_EAGLE_T:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_T=$EXO_DSV4_MTP_EAGLE_T"
-    [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
-    [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
-    # Rollback sub-phase attribution (rb_snap/rb_gate/rb_drain/rb_ring/
-    # rb_pool/rb_commitfwd/rb_tail lines in the MTP-PROF dump). Diagnostic:
-    # inserts mx.synchronize sub-boundaries; pair with EXO_DSV4_MTP_PROFILE.
-    [ -n "${EXO_DSV4_RB_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_RB_PROFILE=$EXO_DSV4_RB_PROFILE"
-    [ -n "${EXO_DSV4_MTP_REFCHECK_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK_BATCH=$EXO_DSV4_MTP_REFCHECK_BATCH"
-    [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"
-    # W3 diagnostic: per-draft-step top-8 softmax dump. NOT a production
-    # knob — diagnostic only. Cost when off: zero (single env.get hit).
-    # Cost when on: ~1 sync per draft step (microseconds). See
-    # mtp_module.py:740 dump block and /tmp/w3_eagle_audit.md.
-    [ -n "${EXO_DSV4_MTP_DUMP_TOPK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DUMP_TOPK=$EXO_DSV4_MTP_DUMP_TOPK"
-    # MTP verify-audit JSONL path (diagnostic: special-token draft/accept dumps).
-    [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT=$EXO_DSV4_MTP_VERIFY_AUDIT"
-    # MTP verify-audit ALL-cycles mode (diagnostic: dump every cycle, not just
-    # special-token ones). Pairs with EXO_DSV4_MTP_VERIFY_AUDIT.
-    [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT_ALL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT_ALL=$EXO_DSV4_MTP_VERIFY_AUDIT_ALL"
-    # Spec-path EOS ban gate (default "0" OFF in code; "1" opts IN for the
-    # ban experiment only — the ban breaks losslessness at natural-end
-    # positions, confirmed 2026-08-26). Mirrors the code default so an unset
-    # env leaves production behavior unchanged.
-    [ -n "${EXO_DSV4_SPEC_EOS_BAN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_EOS_BAN=$EXO_DSV4_SPEC_EOS_BAN"
-    # MTP reference-forward refcheck JSONL path (diagnostic: verify vs clean greedy).
-    [ -n "${EXO_DSV4_MTP_REFCHECK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK=$EXO_DSV4_MTP_REFCHECK"
-    # MTP refcheck EVERY-CYCLE mode (1 = run ref forward every cycle, log divergences).
-    [ -n "${EXO_DSV4_MTP_REFCHECK_ALL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK_ALL=$EXO_DSV4_MTP_REFCHECK_ALL"
-    # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
-    [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
-    [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
-    # Greedy accept-rule alignment (see defaults block above).
-    [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
-    [ -n "${EXO_DSV4_POOL_SNAPSHOT_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_SNAPSHOT_BATCH=$EXO_DSV4_POOL_SNAPSHOT_BATCH"
-    # Regime-b double-rollback fix (see defaults block above).
-    [ -n "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_RESTORE_AFTER_TRIM=$EXO_DSV4_POOL_RESTORE_AFTER_TRIM"
-    # Per-request MTP cycle statistics (diagnostic; one log line per stream).
-    [ -n "${EXO_DSV4_MTP_CYCLE_STATS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_CYCLE_STATS=$EXO_DSV4_MTP_CYCLE_STATS"
-    # Rowseq per-row REAL decode masks (batch-cache SDPA parity).
-    [ -n "${EXO_DSV4_ROWSEQ_ROWMASK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_ROWMASK=$EXO_DSV4_ROWSEQ_ROWMASK"
-    # Unified bitwise-faithful spec rollback (ring+pool wholesale restore).
-    [ -n "${EXO_DSV4_SPEC_STATE_RESTORE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_STATE_RESTORE=$EXO_DSV4_SPEC_STATE_RESTORE"
-    [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK=$EXO_DSV4_SPEC_CACHE_ROLLBACK"
-    [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK_C2=$EXO_DSV4_SPEC_CACHE_ROLLBACK_C2"
-    [ -n "${MLX_GEMV_BATCH_INVARIANT:-}" ] && EXO_ENV="$EXO_ENV MLX_GEMV_BATCH_INVARIANT=$MLX_GEMV_BATCH_INVARIANT"
-    [ -n "${MLX_STEEL_BATCH_INVARIANT:-}" ] && EXO_ENV="$EXO_ENV MLX_STEEL_BATCH_INVARIANT=$MLX_STEEL_BATCH_INVARIANT"
-    [ -n "${EXO_DSV4_ROWSEQ_FULLBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_FULLBLOCK=$EXO_DSV4_ROWSEQ_FULLBLOCK"
-    [ -n "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=$EXO_DSV4_ROWSEQ_FULLBLOCK_MOE"
-    [ -n "${EXO_DSV4_MOE_PARTS_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_PARTS_ROWSEQ=$EXO_DSV4_MOE_PARTS_ROWSEQ"
-    [ -n "${EXO_DSV4_MOE_ISOLATION_DUMP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ISOLATION_DUMP=$EXO_DSV4_MOE_ISOLATION_DUMP"
-    [ -n "${EXO_DSV4_LAYER_HASH_DUMP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LAYER_HASH_DUMP=$EXO_DSV4_LAYER_HASH_DUMP"
-    [ -n "${EXO_DSV4_LAYER_HASH_MAX_POS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LAYER_HASH_MAX_POS=$EXO_DSV4_LAYER_HASH_MAX_POS"
-    [ -n "${EXO_DSV4_LAYER_HASH_SUBOPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LAYER_HASH_SUBOPS=$EXO_DSV4_LAYER_HASH_SUBOPS"
-    [ -n "${EXO_DSV4_SPEC_RB_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_RB_LOG=$EXO_DSV4_SPEC_RB_LOG"
-    # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
-    [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
-    [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
-    [ -n "${EXO_DSV4_MTP_TIE_REVERIFY_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY_EPS=$EXO_DSV4_MTP_TIE_REVERIFY_EPS"
-    [ -n "${EXO_DSV4_MTP_TIE_REVERIFY_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY_LOG=$EXO_DSV4_MTP_TIE_REVERIFY_LOG"
-    # Row-sequential verify attention (the losslessness root fix).
-    [ -n "${EXO_DSV4_VERIFY_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ=$EXO_DSV4_VERIFY_ROWSEQ"
-    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=$EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX"
-    [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MAX_L:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MAX_L=$EXO_DSV4_VERIFY_ROWSEQ_MAX_L"
-    # Verify-path batching (indexer-stream-sharing, default OFF). Must be
-    # exported explicitly when set — a silently-dropped flag has burned us
-    # before (the env allowlist gate drops anything not listed here).
-    [ -n "${EXO_DSV4_VERIFY_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH=$EXO_DSV4_VERIFY_BATCH"
-    # Depth gate: the ctx threshold below which verify-batch stays OFF.
-    [ -n "${EXO_DSV4_VERIFY_BATCH_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH_MIN_CTX=$EXO_DSV4_VERIFY_BATCH_MIN_CTX"
-    # min_p tail-clip for the temp>0 MTP correction/bonus sampling (default 0.05
-    # in code = the DSv4 card value; set 0 to disable for A/B). Stops MTP
-    # committing extreme-tail tokens that seed structured-output degeneration.
-    [ -n "${EXO_DSV4_MTP_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MIN_P=$EXO_DSV4_MTP_MIN_P"
-    # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
-    # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
-    # timestamps + per-stream tokens. NOT a production knob — diagnostic
-    # only. Inserts mx.eval() at every chain-step boundary, which acts
-    # like a per-step fence, so do NOT validate fixes with this on.
-    [ -n "${EXO_DSV4_C2_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_C2_TRACE=$EXO_DSV4_C2_TRACE"
-    # Degeneration-hunt per-cycle spec trace (2026-05-29). When 1,
-    # _speculative_next dumps committed tokens + cache offsets + n_accepted
-    # per cycle to /tmp/dsv4_spec_trace_pid<PID>.jsonl on rank 0. Diagnostic
-    # only — pairs with a plain-greedy capture to find first divergence.
-    [ -n "${EXO_DSV4_SPEC_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_TRACE=$EXO_DSV4_SPEC_TRACE"
-    [ -n "${EXO_DSV4_SDPA_CALL_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SDPA_CALL_PROFILE=$EXO_DSV4_SDPA_CALL_PROFILE"
-    [ -n "${EXO_DSV4_DECODE_COLLECTIVE_PROFILING:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DECODE_COLLECTIVE_PROFILING=$EXO_DSV4_DECODE_COLLECTIVE_PROFILING"
-    # c>=2 degen-kill WEDGE tracer (2026-07-03). When 1, batch_generate.step
-    # logs per-rank batch size + every generator eviction so a cross-rank diff
-    # shows whether a mid-batch degen eviction (and its B-transition) is
-    # symmetric. Diagnostic only.
-    [ -n "${EXO_DSV4_WEDGE_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_WEDGE_TRACE=$EXO_DSV4_WEDGE_TRACE"
-    [ -n "${EXO_DSV4_WEDGE_INJECT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_WEDGE_INJECT=$EXO_DSV4_WEDGE_INJECT"
-    # Runner hang-watchdog timeout (supervisor.py). Default 45s in-code; lower
-    # only to validate the watchdog (a short value risks false kills under
-    # legitimately slow steps).
-    [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
-    # c=2 corruption ROOT-CAUSE fix (2026-07-03): fp32 activations make the
-    # DSv4 forward batch-invariant (bf16's batch-size-dependent rounding flips
-    # ~17% of argmaxes at B=2 vs B=1 -> temp>0 repetition degeneration). Weights
-    # stay bf16/quantized so the weight-bandwidth-bound cost is ~unchanged.
-    [ -n "${EXO_DSV4_FP32_ACT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FP32_ACT=$EXO_DSV4_FP32_ACT"
-    [ -n "${EXO_DSV4_FP32_COLL_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FP32_COLL_LOG=$EXO_DSV4_FP32_COLL_LOG"
-    [ -n "${EXO_DSV4_VERIFY_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_TRACE=$EXO_DSV4_VERIFY_TRACE"
-    [ -n "${EXO_DSV4_VERIFY_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_DIAG=$EXO_DSV4_VERIFY_DIAG"
-    # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
-    # logs MTP top-5 IDs and _speculative_next joins them with verify-target
-    # argmax to /tmp/dsv4_tree_alpha_probe_pid<PID>.jsonl on rank 0 only.
-    [ -n "${EXO_DSV4_TREE_ALPHA_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_ALPHA_PROBE=$EXO_DSV4_TREE_ALPHA_PROBE"
-    # Token-tree drafting (Phases 2-7 of the May-19 plan). When 1,
-    # _speculative_next routes to _speculative_next_tree which uses K^gamma
-    # top-K MTP expansion + tree-attention verify instead of the linear
-    # gamma chain. K is set by EXO_DSV4_TREE_K (default 2). Greedy temp=0
-    # only; temp>0 falls back to the linear path.
-    [ -n "${EXO_DSV4_TREE_DRAFT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DRAFT=$EXO_DSV4_TREE_DRAFT"
-    [ -n "${EXO_DSV4_TREE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_K=$EXO_DSV4_TREE_K"
-    # Greedy tree: only top-1 d1 expands d2 children. Cuts L_q=7 -> L_q=5
-    # for K=2 gamma=2. Trades worse-case acceptance for cheaper verify.
-    [ -n "${EXO_DSV4_TREE_GREEDY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_GREEDY=$EXO_DSV4_TREE_GREEDY"
-    # One-shot first-cycle diagnostic for the tree-verify side channel.
-    # When 1, dsv4_mtp.py logs n_nodes/parent_idx/depth/mask.shape/positions
-    # on the first cycle to ~/exo.log. Default off; off-state is bit-exact.
-    [ -n "${EXO_DSV4_TREE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DEBUG=$EXO_DSV4_TREE_DEBUG"
-    [ -n "${EXO_DSV4_PSCACHE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PSCACHE_DEBUG=$EXO_DSV4_PSCACHE_DEBUG"
-    [ -n "$EXO_DSV4_INDEXER_WINDOW" ]  && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
-    [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"
-    # Tiled-P indexer score block size (mlx-lm deepseek_v4 _indexer_score_tiled).
-    # >0 caps the (B,64,L,P) indexer transient by processing pooled-P in blocks —
-    # bounds the high-context prefill alloc spikes. Default OFF in the model.
-    [ -n "${EXO_DSV4_INDEXER_PBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_PBLOCK=$EXO_DSV4_INDEXER_PBLOCK"
-    # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
-    [ -n "$MLX_SDPA_BLOCKS" ]          && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
-    # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).
-    [ -n "${MLX_LM_SDPA_ROWSPLIT:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SDPA_ROWSPLIT=$MLX_LM_SDPA_ROWSPLIT"
-    # JACCL per-call trace (Phase 0 c=2 corruption diagnostic). When set
-    # to 1, every collective entry writes one line to
-    # /tmp/jaccl_trace_rank_${MLX_RANK}.log on each runner host. Use
-    # for finding the first cross-rank divergence in the call sequence;
-    # don't leave on permanently (fflush per call slows decode).
-    [ -n "${JACCL_TRACE_CALLS:-}" ]    && EXO_ENV="$EXO_ENV JACCL_TRACE_CALLS=$JACCL_TRACE_CALLS"
-    # Skip the cross-rank ack_sync_pre round-trip when the prior
-    # collective on the same MeshGroup was its own ack_sync_post. At
-    # gamma=2 100K decode this saves ~8 ms/forward (172 all_reduces ×
-    # 50 us per skipped pre). Off by default; set to 1 to enable.
-    # Implementation: mlx commit 0b8aca69 (mesh_impl.h fastskip).
-    [ -n "${EXO_JACCL_ACK_PRE_FASTSKIP:-}" ] && EXO_ENV="$EXO_ENV EXO_JACCL_ACK_PRE_FASTSKIP=$EXO_JACCL_ACK_PRE_FASTSKIP"
-    # Per-call output-hash diagnostic; orthogonal to JACCL_TRACE_CALLS
-    # gating but uses the same trace file. Identifies transport
-    # non-bit-exactness as a divergent hash at a specific call_id.
-    [ -n "${JACCL_TRACE_HASH:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_HASH=$JACCL_TRACE_HASH"
-    # Per-call real steady_clock transport-duration diagnostic (2026-08-21);
-    # orthogonal to JACCL_TRACE_CALLS gating but uses the same trace file,
-    # same as JACCL_TRACE_HASH above. Appends transport_us=<float> to each
-    # collective's trace line, timed tightly around the actual ring-reduce
-    # transport call (mesh.cpp MeshGroup::all_sum). Built to decompose the
-    # moe.all_sum 34x software-overhead gap (see
-    # docs/offline-collective-microbenchmark-2026-08-21.md) into real
-    # jaccl-internal transport time vs overhead outside this call.
-    [ -n "${JACCL_TRACE_TIMING:-}" ]   && EXO_ENV="$EXO_ENV JACCL_TRACE_TIMING=$JACCL_TRACE_TIMING"
-    # Per-stage RDMA progress logging (mesh_impl all_reduce +
-    # drain_acks). Writes [jaccl-prog] lines to ~/exo.log stderr.
-    # Localizes a wedge to a specific RDMA stage: ENTER /
-    # PREFILL_DONE / POLL / CQE / DATA_DONE / ack POSTED / ack
-    # DRAINED / DONE.
-    [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
-    # MLX_JACCL_ACK_SYNC_PRE: gate the ce5c64fd pre-lambda ack barrier.
-    # Default OFF. Set to 1 to enable the start-of-lambda cross-rank
-    # ACK round-trip (one extra ACK_SEND/RECV pair on the dedicated
-    # ACK QP per collective). Intended to close the inter-lambda race
-    # where peer SEND beats our recv-post on the data QP and UC
-    # silently drops. Requires the bootstrap barrier in MeshGroup
-    # ctors (mlx commit 3882458d on try/ack-qp-isolated). Off-by-
-    # default preserves the post-Plan-A baseline; bench-time opt-in
-    # via this env. See mlx/mlx/distributed/jaccl/mesh_impl.h
-    # jaccl_ack_sync_pre_enabled() and the long doc block at the top.
-    # Default flipped ON 2026-07-04: measured to keep c>=2 wedge failures
-    # CLEANER — ACK_SYNC_PRE=1 self-heals with 0 IOConnectUnmapMemory GPU
-    # faults; =0 saw the peer GPU-fault and the re-place stick in
-    # RunnerConnecting. Pairs with the StallWatch UC-drop recovery
-    # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
-    : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
-    [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
-    # MLX_JACCL_ACK_RETRANSMIT_US: how long a send waits before
-    # retransmitting a frame the peer hasn't acknowledged. jaccl's own
-    # default is 500000 (500ms), chosen as "far above a healthy sub-ms ACK,
-    # so it only fires on genuine loss" -- see jaccl_ack_retransmit_us() in
-    # mlx/mlx/distributed/jaccl/lib/jaccl/mesh_impl.h.
-    #
-    # 2026-08-15 (design doc Section 51): that assumption does not hold on
-    # this cluster's PP decode hot path, where the timer is NOT a rare
-    # backstop but a per-token tax. Measured over one 100K-context run:
-    #   barrier latency <100ms : 29101   (healthy path is 71-122 MICROseconds)
-    #   barrier latency  >1s   :  1403   (4.5% of barriers)
-    # Each slow one is the same shape on both ranks -- rank0 posts its send
-    # in ~45us, immediately sees peer_got_count=0/1, waits the FULL 500ms
-    # quiet timer, retransmits (to_resend_count=1), and the retransmit
-    # succeeds. That is ~1403 x 0.5s = ~700s of pure stall in a single run,
-    # and it dominated decode throughput (0.48 tok/s at 100K vs 18.01 tok/s
-    # at 300K on the identical config -- a 37x spread explained entirely by
-    # how many of these stalls a run happened to hit).
-    #
-    # The underlying loss is NOT wire loss (en3 shows Ierrs 0 / Oerrs 0 /
-    # Coll 0, link healthy 8X @ 10Gbps) -- it is a software race: every
-    # retransmit is num_chunks=1 (bulk 2049-chunk transfers lose nothing),
-    # and rank0 loses 3.7x more than rank1, i.e. the side that races ahead
-    # of its peer's recv-post. mesh_impl.h's own ack_sync_pre comment names
-    # this exact failure ("peer SEND lands at our empty data-QP recv FIFO
-    # and UC silently drops") but that mitigation is wired into COLLECTIVE
-    # lambdas, not the p2p send()/recv() path PP decode uses.
-    #
-    # Lowering this does not remove the race -- it collapses the cost of
-    # each occurrence from 500ms to a few ms. The proper root-cause fix
-    # (extending the ack_sync_pre pattern to the p2p path) is tracked
-    # separately. Retransmits are cheap and idempotent here (single-chunk
-    # control frames on a dedicated QP), so a short timer mainly trades a
-    # few redundant sends for a large latency win. Set to 500000 to restore
-    # jaccl's historical default.
-    # EXPERIMENT RESULT (2026-08-15): 10000 (10ms) was tried and REVERTED --
-    # it BREAKS generation outright. At 10ms the timer fires below the real
-    # round-trip for these transfers, so we retransmit frames that were merely
-    # IN FLIGHT, not lost. The duplicates then arrive after the receiver has
-    # advanced and are discarded as stale: 184 "recv() discarded stale
-    # message" events (baseline: ZERO), with the signature
-    # received_seq=410 expected_seq=411 -- off-by-one duplicates from the
-    # previous call. Net effect was 0 completion tokens and needle=NO at BOTH
-    # 100K and 300K, i.e. no output at all, versus a working baseline.
-    # Left at jaccl's default; any retune must stay above the real RTT and be
-    # re-validated with the needle check, not just with a throughput number.
-    : "${MLX_JACCL_ACK_RETRANSMIT_US:=500000}"
-    [ -n "${MLX_JACCL_ACK_RETRANSMIT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_RETRANSMIT_US=$MLX_JACCL_ACK_RETRANSMIT_US"
-    # MLX_JACCL_RECONNECT_FRESH: in-process device-context rebuild — the warmup
-    # QP-flake fix (mlx e399ecfb); ~0.15s vs a 90s re-place. Validated prod default.
-    : "${MLX_JACCL_RECONNECT_FRESH:=1}"
-    [ -n "${MLX_JACCL_RECONNECT_FRESH:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RECONNECT_FRESH=$MLX_JACCL_RECONNECT_FRESH"
-    # MLX_JACCL_RELIABLE_OPTIMISTIC: v2 small-collective path (no TCP barrier),
-    # +29% decode @4K (mlx 57ffb39a). PP placements must keep this OFF —
-    # PipelineLastLayer send/recv/all_gather ride the model group.
-    : "${MLX_JACCL_RELIABLE_OPTIMISTIC:=1}"
-    [ -n "${MLX_JACCL_RELIABLE_OPTIMISTIC:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_OPTIMISTIC=$MLX_JACCL_RELIABLE_OPTIMISTIC"
-    # Pool-write donation threshold (session-4 pool fixes) — validated prod value.
-    : "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:=8388608}"
-    [ -n "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES=$EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES"
-    # EXO_DSV4_POOL_GROW_STEP: BatchPoolingCache growth chunking. DEFAULT FLIPPED
-    # to 256 in mlx-lm on 2026-08-23 after the live A/B confirmed +3.46% tok/s
-    # @100K and +9.79% @352.6K -- see docs/p3-followup-poolgrow-ab-2026-08-23.md
-    # Part III. Set EXO_DSV4_POOL_GROW_STEP=1 for the bit-identical legacy
-    # exact-fit growth (the A/B's arm A) -- that is the escape hatch and the
-    # reference arm for the byte-identity gates.
-    # EXO_DSV4_POOL_GROW_MIN (default 512 in mlx-lm) and
-    # EXO_DSV4_POOL_GROW_MAX_RATIO (default 4) are the neutrality gates: never
-    # pad below index_topk valid columns, and never pad a ratio-128 pool
-    # (CompressedAttention has no top-k, so it would attend the pads).
-    # Deliberately NO ``: "${VAR:=default}"`` lines here -- the mlx-lm module
-    # constants carry the defaults, so an unset var leaves the production
-    # launch command line unchanged and opt-in forwarding stays exact.
-    [ -n "${EXO_DSV4_POOL_GROW_STEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_STEP=$EXO_DSV4_POOL_GROW_STEP"
-    [ -n "${EXO_DSV4_POOL_GROW_MIN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MIN=$EXO_DSV4_POOL_GROW_MIN"
-    [ -n "${EXO_DSV4_POOL_GROW_MAX_RATIO:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MAX_RATIO=$EXO_DSV4_POOL_GROW_MAX_RATIO"
-    # EXO_DSV4_HC_EXPAND_KERNEL: fused Metal kernel for HyperConnection expand
-    # (layer.attn_residual / ffn_residual). Env-gated in mlx-lm/mlx_lm/models/
-    # hyper_connection.py; the kernel path itself is bit-identical to the op
-    # path when the kernel is disabled (verified max_abs=0.0 vs the pre-kernel
-    # code path when EXO_DSV4_HC_EXPAND_KERNEL is unset). DEFAULT FLIPPED TO
-    # 1 on 2026-08-24 after the live A/B measured +3.87% prefill @70.6K real
-    # tokens (arm A mean 359.89 tok/s, arm B mean 373.80 tok/s, 2 runs each,
-    # needle FALCON-MERCURY-7749 recovered exact on all 4 probes) -- see
-    # docs/hc-expand-kernel-ab-2026-08-24.md. Set EXO_DSV4_HC_EXPAND_KERNEL=0
-    # to revert to the pre-kernel op path (bit-identical, no perf gain).
-    : "${EXO_DSV4_HC_EXPAND_KERNEL:=1}"
-    [ -n "${EXO_DSV4_HC_EXPAND_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_EXPAND_KERNEL=$EXO_DSV4_HC_EXPAND_KERNEL"
-    # EXO_DSV4_HC_COLLAPSE_KERNEL: fused Metal precursor kernel for the
-    # HyperConnection collapse (layer.attn_hc / layer.ffn_hc), env-gated in
-    # mlx-lm/mlx_lm/models/hyper_connection.py. Default OFF is bit-identical to
-    # the classic astype+rms_norm+matmul precursor path (the gate is read once
-    # at import, so unset => the kernel is never even compiled). DEFAULT
-    # FLIPPED TO ON on 2026-08-25 after the live 2x2 A/B passed all
-    # pre-registered framings (+1.89% mean prefill @ ~70.5K real tokens).
-    # Set EXO_DSV4_HC_COLLAPSE_KERNEL=0 to revert to the classic
-    # astype+rms_norm+matmul precursor path; see
-    # docs/hc-collapse-kernel-ab-2026-08-25.md.
-    : "${EXO_DSV4_HC_COLLAPSE_KERNEL:=1}"
-    [ -n "${EXO_DSV4_HC_COLLAPSE_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_COLLAPSE_KERNEL=$EXO_DSV4_HC_COLLAPSE_KERNEL"
-    # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
-    : "${EXO_STALL_SAMPLER_SECONDS:=10}"
-    [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
-    # PP-spec finish-decision diagnostic (2026-07-19, default off): logs
-    # [PP_SPEC_FINISH] lines (per-rank call_n + is_eos decision +
-    # runner status transitions) to investigate the stream-never-closed
-    # hang. Distinct from EXO_TRACING_ENABLED's much noisier per-cycle
-    # wire-protocol trace in pp_speculation.py. Set =1 only when actively
-    # chasing that bug -- see references/pp-chained-mtp-draft-and-dspark.md.
-    [ -n "${EXO_PP_SPEC_FINISH_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_SPEC_FINISH_LOG=$EXO_PP_SPEC_FINISH_LOG"
-    # MLX_JACCL_CONFIRMED_BARRIER: reliable ack barrier over the TCP coordinator
-    # instead of the UC ack exchange (which wedges on a lost completion).
-    # Deterministic recv-side wedge PREVENTION for c>=2. Default off (adds a
-    # coordinator round-trip per ack barrier); set =1 for c>=2 correctness.
-    [ -n "${MLX_JACCL_CONFIRMED_BARRIER:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER=$MLX_JACCL_CONFIRMED_BARRIER"
-    # Split gates to isolate pre vs post confirmed barrier (pre is entangled with
-    # RDMA data-recv ordering; post runs after data drains).
-    [ -n "${MLX_JACCL_CONFIRMED_BARRIER_PRE:-}" ]  && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_PRE=$MLX_JACCL_CONFIRMED_BARRIER_PRE"
-    [ -n "${MLX_JACCL_CONFIRMED_BARRIER_POST:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_POST=$MLX_JACCL_CONFIRMED_BARRIER_POST"
-    # MLX_JACCL_SHARDING_MODE: tells jaccl's C++ MeshGroup ctor which sharding
-    # mode this runner is in, so it allocates only the QPs that mode actually
-    # uses. The Thunderbolt RDMA HCA reports max_qp=3 (verified via
-    # `ibv_devinfo -v` on both nodes); the ctor otherwise builds FOUR dedicated
-    # QP types per peer (data + ack + pool + p2p_retry) and the 4th
-    # ibv_create_qp always fails EBUSY, which _init_jaccl_with_backoff then
-    # retries forever (that backoff was written for transient leaked-QP EBUSY,
-    # not this structural cause) -- runners hang in PREPARING. PP drops the
-    # pool QP, TP drops the p2p_retry QP; each lands at exactly 3.
-    # Mirrors DSV4_SHARDING so there is a single source of truth for the mode.
-    EXO_ENV="$EXO_ENV MLX_JACCL_SHARDING_MODE=${DSV4_SHARDING:-Tensor}"
-    # MLX_JACCL_RELIABLE_DATA: reliable ARQ all_reduce data path (2-rank) — chunks
-    # carry a seq header, receiver assembles + dedups + defers the reduce, and a
-    # coordinator bitmask barrier retransmits missing chunks. Eliminates the
-    # data-phase all_reduce STALLED wedge. Gated (perf cost + core-path change).
-    : "${MLX_JACCL_RELIABLE_DATA:=1}"  # validated prod default (task #23/24 wedge fix)
-    [ -n "${MLX_JACCL_RELIABLE_DATA:-}" ]         && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_DATA=$MLX_JACCL_RELIABLE_DATA"
-    # MLX_JACCL_RELIABLE_MAX_SZ: cap reliable chunk size class (0=4KB..7=512KB).
-    # Larger => fewer chunks => faster, but must still reliably COMPLETE on
-    # librdma (large UC sends >=64KB/sz>=4 stick). Bisect for the sweet spot.
-    : "${MLX_JACCL_RELIABLE_MAX_SZ:=2}"  # 16KB — MUST stay <=2 (>=sz4 UC sends stick)
-    [ -n "${MLX_JACCL_RELIABLE_MAX_SZ:-}" ]        && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_MAX_SZ=$MLX_JACCL_RELIABLE_MAX_SZ"
-    # MLX_JACCL_RELIABLE_IDLE_US: sleep per idle drain poll (anti-CPU-spin).
-    [ -n "${MLX_JACCL_RELIABLE_IDLE_US:-}" ]       && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_IDLE_US=$MLX_JACCL_RELIABLE_IDLE_US"
-    # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
-    # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
-    # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
-    # that ignores its timeout when a c>=2 collective is wedged). Polling lets a
-    # wedged PEER self-abort (surface a captured stream exception, or hit the
-    # total timeout) and reach group.reconnect() for in-place transport recovery
-    # instead of hanging until the _check_hang SIGKILL. TIMEOUT_MS default 20000
-    # (< the 45s watchdog and >> any healthy/warmup wait; keeps the primary's
-    # StallWatch->reconnect->coordinator-barrier wait for the peer well under the
-    # watchdog). POLL_US = sleep granularity (default 50), SPIN = spins before
-    # sleeping (default 2000). POLL_US=0 restores the legacy blocking wait.
-    : "${MLX_EVENT_WAIT_TIMEOUT_MS:=20000}"
-    # PP mode: the first decode step's p2p recv_like in PipelineLastLayer
-    # blocks waiting for rank 1 to finish draining the prefill pipeline +
-    # its decode forward. At high context (500K) this takes >20s (rank 1's
-    # last attention microbatches over the full KV cache). The coord
-    # collective fix (EXO_PP_NO_COORD_COLLECTIVE) removes the mx_any
-    # rendezvous, but the p2p handoff itself is an UNAVOIDABLE rendezvous —
-    # rank 0 can't proceed until rank 1 sends. Raise the event timeout to
-    # 120s for PP so the legitimate pipeline-drain skew doesn't self-abort.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        MLX_EVENT_WAIT_TIMEOUT_MS=1800000
-    fi
-    [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
-    # PP mode: disable coord collectives (mx_any / agree_on_*) by default. Under
-    # MlxRing (TCP backend), group.split() throws, so coord collectives would
-    # share the full PP group's TCP socket with the p2p send/recv. The mx_any
-    # gate is an unnecessary rendezvous for single-request PP (both ranks
-    # serve the same request; the p2p handoff already synchronizes them).
-    # Removing it eliminates one ~20s skew point; the 120s timeout above
-    # covers the remaining one (p2p recv).
-    #
-    # OVERRIDABLE 2026-07-31 (was unconditionally forced to 1): confirmed via
-    # direct source read that jaccl's group.split() is fully implemented
-    # (mlx/mlx/distributed/jaccl/lib/jaccl/mesh.cpp MeshGroup::split(), real
-    # QP allocation -- NOT a stub) -- only MlxRing's split() throws, contrary
-    # to what this comment originally implied about jaccl too. The cluster's
-    # DEFAULT transport (DSV4_INSTANCE_META unset -> MlxJaccl, see line 2297)
-    # is real RDMA, not the TCP fallback this gating was reasoned about for.
-    # Also confirmed the historical jaccl+PP p2p stall ("[jaccl] recv
-    # STALLED... UC completion lost") that would have made testing this
-    # dangerous was root-caused (UC send-before-recv-posted race) and fixed
-    # in mlx commit c168e2f4b, already deployed. Prerequisite work for
-    # supporting EXO_MAX_CONCURRENT_REQUESTS>1 under PP needs agree_on_tasks/
-    # agree_on_cancellations to actually run across ranks -- testing that
-    # requires the ability to turn this gate back on. Set
-    # EXO_PP_NO_COORD_COLLECTIVE=0 explicitly to test; unset/anything else
-    # keeps the safe default (1) for Pipeline mode.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        : "${EXO_PP_NO_COORD_COLLECTIVE:=1}"
-        EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=$EXO_PP_NO_COORD_COLLECTIVE"
-    fi
-    # Batched-PP sharding design, Phase 0.5 (docs/hybrid-pp-prefill-tp-
-    # decode-design-2026-08-04.md): opt-in metadata-framed PP transport
-    # (pp_metaframe.py), swapping today's ambient-mutable-state
-    # PipelineFirstLayer/PipelineLastLayer for MetaFramedPipelineFirstLayer/
-    # MetaFramedPipelineLastLayer. Validated LOCALLY (simulated 2-rank,
-    # exact parity, 9/9 tests) but NOT YET A/B'd on the real cluster --
-    # this launcher line exists so that A/B can happen, not because the
-    # flag is production-ready. Default OFF (unset/0 keeps today's
-    # trusted transport). MUST be set IDENTICALLY on both nodes --
-    # pp_metaframe.py's handshake_metaframe_protocol() fails loudly at
-    # warmup (not a silent hang) if the two ranks disagree, but that
-    # loud failure still means the launch failed, so get it right here.
-    # Does NOT change EXO_MAX_CONCURRENT_REQUESTS=1 below -- PP is
-    # single-request-only regardless of which transport is active.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        : "${EXO_PP_METAFRAME:=0}"
-        EXO_ENV="$EXO_ENV EXO_PP_METAFRAME=$EXO_PP_METAFRAME"
-    fi
-    # Phase 1 batched-decode (design doc, Section 9): opt-in scheduler
-    # (pp_batched_decode_glue.py/pp_batched_decode_runtime.py) with its
-    # own real, per-request slot-based state (BatchedCacheRouter,
-    # SchedulerCore) -- a STRUCTURALLY DIFFERENT design from the
-    # singular-instance-attribute hazard the concurrency gate directly
-    # below exists to prevent (see that gate's own comment). Verified
-    # this session via a real 2-OS-process test exercising exactly the
-    # N=2-concurrent-request scenario the gate below exists to block
-    # for the OTHER PP paths (test_pp_batched_decode_glue_subprocess.py:
-    # admit request A, admit request B mid-stream while A is already
-    # decoding, decode both together, evict A via a real wire round-
-    # trip, continue B solo -- matching two independent serial golden
-    # references exactly). Requires EXO_PP_METAFRAME=1 as a prerequisite
-    # (the batched layers are built on top of the metaframe transport,
-    # not a replacement for it -- see utils_mlx.py's own EXO_PP_
-    # BATCHED_DECODE branch, which only installs the batched layers
-    # when EXO_PP_METAFRAME=1 is also set). Default OFF -- this
-    # launcher line exists so a real cluster A/B CAN happen, not
-    # because the path is production-ready; requires the user's own
-    # separate explicit go-ahead per standing rule before actually
-    # setting it to 1 for a live run.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        : "${EXO_PP_BATCHED_DECODE:=0}"
-        EXO_ENV="$EXO_ENV EXO_PP_BATCHED_DECODE=$EXO_PP_BATCHED_DECODE"
-    fi
-    # Per-token decode phase attribution (Section 59/60). Diagnostic
-    # only, default off. Must be threaded explicitly: the runner
-    # environment is an ALLOWLIST, so a var that is merely exported in
-    # the launching shell silently never reaches the runner process --
-    # which is exactly how the first attempt to use this tracer produced
-    # a clean deploy with no trace output at all.
-    [ -n "${EXO_DECODE_PHASE_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PHASE_TRACE=$EXO_DECODE_PHASE_TRACE"
-    # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
-    # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
-    # path (pp_dspark_decode_loop and friends) stores its per-request
-    # generator/uid state in SINGULAR instance attributes on
-    # ExoBatchGenerator (self._pp_spec_gen, self._pp_spec_uid) with no
-    # per-task keying whatsoever. A second concurrent request silently
-    # OVERWRITES the first's in-flight generator reference -- the first
-    # request's task is orphaned forever (runner wedges at RunnerRunning
-    # permanently) and the second request's own output is corrupted
-    # (confirmed live: it inherited stale KV/pipeline state from the
-    # first request's already-advanced forward pass). EXO_PP_NO_COORD_
-    # COLLECTIVE=1 above has documented "PP is single-request-only" as a
-    # constraint for a long time, but nothing in the runner's dispatch
-    # path actually ENFORCED it -- EXO_MAX_CONCURRENT_REQUESTS defaults
-    # to 8 (shared/constants.py) and was never overridden here. Force it
-    # to 1 for Pipeline mode specifically; do NOT let a higher
-    # user-supplied value survive for this mode, since this is a data-
-    # corruption bug, not a throughput knob. Loud log line since this
-    # silently overrides whatever the caller passed in.
-    #
-    # EXCEPTION (2026-08-05, design doc Section 9): when
-    # EXO_PP_BATCHED_DECODE=1 is genuinely active, relax the cap to 2 --
-    # the batched-decode scheduler is the one PP path with real,
-    # verified N=2-safe per-request state (see the comment above this
-    # gate). Every OTHER Pipeline-mode path (PP-spec, plain serial PP)
-    # still gets the original cap=1 enforcement below, completely
-    # unchanged -- this exception applies ONLY when the batched-decode
-    # flag is explicitly on, never as a default relaxation for Pipeline
-    # mode generally.
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        if [ "${EXO_PP_BATCHED_DECODE:-0}" = "1" ]; then
-            if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "2" ]; then
-                echo "  ⚠️  DSV4_SHARDING=Pipeline + EXO_PP_BATCHED_DECODE=1 forces EXO_MAX_CONCURRENT_REQUESTS=2 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- the batched-decode scheduler's max_concurrency is 2 (see BatchedDecodeSession.new's default); do not let a higher value silently overshoot the scheduler's own real slot capacity."
-            fi
-            EXO_MAX_CONCURRENT_REQUESTS=2
-        else
-            if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "1" ]; then
-                echo "  ⚠️  DSV4_SHARDING=Pipeline forces EXO_MAX_CONCURRENT_REQUESTS=1 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- PP's shared per-rank decode-loop state cannot survive >1 concurrent request without data corruption/wedging."
-            fi
-            EXO_MAX_CONCURRENT_REQUESTS=1
-        fi
-    fi
-    [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=$EXO_MAX_CONCURRENT_REQUESTS"
-    [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
-    [ -n "${MLX_EVENT_WAIT_SPIN:-}" ]       && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_SPIN=$MLX_EVENT_WAIT_SPIN"
-    # MLX_DIAG_HOLD_WEDGE: diagnostic only — hold a c>=2 wedge open (no
-    # reconnect/re-place) so the peer can be sampled in its real stuck location.
-    [ -n "${MLX_DIAG_HOLD_WEDGE:-}" ]       && EXO_ENV="$EXO_ENV MLX_DIAG_HOLD_WEDGE=$MLX_DIAG_HOLD_WEDGE"
-    # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
-    # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
-    # poll-stall under MTP load. Default off.
-    [ -n "${MLX_STREAM_QOS:-}" ]        && EXO_ENV="$EXO_ENV MLX_STREAM_QOS=$MLX_STREAM_QOS"
-    # MLX_STREAM_RT[+_COMPUTATION_US/_CONSTRAINT_US/_PERIOD_US]: Mach
-    # real-time time-constraint policy on stream worker threads. Hard
-    # contract with the scheduler — kernel will not preempt during the
-    # computation window. Fix for the asymmetric JACCL poll-stall.
-    [ -n "${MLX_STREAM_RT:-}" ]                  && EXO_ENV="$EXO_ENV MLX_STREAM_RT=$MLX_STREAM_RT"
-    [ -n "${MLX_STREAM_RT_COMPUTATION_US:-}" ]   && EXO_ENV="$EXO_ENV MLX_STREAM_RT_COMPUTATION_US=$MLX_STREAM_RT_COMPUTATION_US"
-    [ -n "${MLX_STREAM_RT_CONSTRAINT_US:-}" ]    && EXO_ENV="$EXO_ENV MLX_STREAM_RT_CONSTRAINT_US=$MLX_STREAM_RT_CONSTRAINT_US"
-    [ -n "${MLX_STREAM_RT_PERIOD_US:-}" ]        && EXO_ENV="$EXO_ENV MLX_STREAM_RT_PERIOD_US=$MLX_STREAM_RT_PERIOD_US"
-    # JACCL_POLL_INSTRUMENT: per-call wall + in-poll diagnostic for
-    # all_reduce stalls (see mesh_impl.h). Emits one stderr line per
-    # call whose total wall time exceeds the threshold (default 100ms).
-    [ -n "${JACCL_POLL_INSTRUMENT:-}" ]               && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
-    [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ]  && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
-    # MLX_SIGNAL_PROBE: per-Event::signal diagnostic on the GPU stream
-    # (see mlx/backend/metal/event.cpp). Emits two stderr lines per
-    # signal: SIGNAL_PROBE_ENC (ops at encode, t_enc_us) and
-    # SIGNAL_PROBE_DONE (t_done_us, gap_us = SharedEvent completion
-    # latency). Used to verify the γ=2 MTP bistable-stall hypothesis
-    # (decode-time signal lands at the tail of a deep command buffer).
-    # Diagnostic only; ZERO overhead when unset.
-    [ -n "${MLX_SIGNAL_PROBE:-}" ]                    && EXO_ENV="$EXO_ENV MLX_SIGNAL_PROBE=$MLX_SIGNAL_PROBE"
-    # EXO_CMDBUF_RING_DIAG: command-buffer commit/schedule/completion ring
-    # buffer diagnostic (see mlx/backend/metal/device.cpp +
-    # backend/metal/event.cpp). Dumps recent MTLCommandBuffer status +
-    # timestamps to stderr whenever Event::wait()'s existing slow-wait
-    # diagnostic fires (3+s stuck wait) -- answers whether the awaited
-    # event's command buffer was ever committed, and if so whether it's
-    # stuck at Committed (Metal driver never scheduled it), Scheduled (has
-    # it, GPU hasn't started), or genuinely mid-execution. Added 2026-07-21
-    # for the PP+DSpark decode-loop GPU-idle-stall investigation.
-    # Diagnostic only; ZERO overhead when unset (matches MLX_SIGNAL_PROBE's
-    # pattern one line above -- do NOT repeat the EXO_RUNNER_FAULTHANDLER
-    # marker-file lesson here; this one genuinely is a plain env var read
-    # via getenv() inside the mlx C++ library itself, not something
-    # bootstrap.py gates, so plain forwarding is the correct mechanism).
-    [ -n "${EXO_CMDBUF_RING_DIAG:-}" ]                 && EXO_ENV="$EXO_ENV EXO_CMDBUF_RING_DIAG=$EXO_CMDBUF_RING_DIAG"
-    # EXO_SPEC_STATE_SPLIT_DIAG: splits RotatingKVCache.save_spec_state's
-    # keys-copy vs values-copy timing (see mlx-lm's cache.py). Part of the
-    # PP+DSpark snapshot_eval stall investigation -- the per-layer
-    # SNAPSHOT PER-LAYER DIAG (pp_speculation.py, always-on above 0.5s)
-    # already isolated the stall to one deterministic layer index; this
-    # splits that one layer's cost further into keys vs values. Read via
-    # plain os.environ.get() in Python, same forwarding pattern as
-    # EXO_CMDBUF_RING_DIAG above. Diagnostic only; ZERO overhead when unset.
-    [ -n "${EXO_SPEC_STATE_SPLIT_DIAG:-}" ]            && EXO_ENV="$EXO_ENV EXO_SPEC_STATE_SPLIT_DIAG=$EXO_SPEC_STATE_SPLIT_DIAG"
-    # EXO_MOE_EXPERT_HIST_DIAG: logs the per-token MoE expert-assignment
-    # histogram whenever switch_mlp (GatherQMM) exceeds 300ms. Tests the
-    # skewed-expert-routing hypothesis for the r0_fwd/spec_fwd GPU stall.
-    # Plain os.environ.get() in Python (deepseek_v4.py); zero cost when unset.
-    [ -n "${EXO_MOE_EXPERT_HIST_DIAG:-}" ]              && EXO_ENV="$EXO_ENV EXO_MOE_EXPERT_HIST_DIAG=$EXO_MOE_EXPERT_HIST_DIAG"
-    # EXO_MOE_GPUTRACE_DIAG: wraps the confirmed-stuck model() call in
-    # mx.metal start_capture/stop_capture, keeping only slow (>2s)
-    # cycles' .gputrace files. CAUTION: real per-call overhead (Metal
-    # debug instrumentation), unlike the other zero-cost diagnostics --
-    # deploy with a short test first, watch for jaccl distress.
-    [ -n "${EXO_MOE_GPUTRACE_DIAG:-}" ]                  && EXO_ENV="$EXO_ENV EXO_MOE_GPUTRACE_DIAG=$EXO_MOE_GPUTRACE_DIAG"
-    # MTL_CAPTURE_ENABLED: Apple's own gate for MTLCaptureManager /
-    # mx.metal.start_capture(). MUST be set in the process environment
-    # BEFORE Metal initializes -- confirmed live 2026-07-21: without it,
-    # every EXO_MOE_GPUTRACE_DIAG start_capture() call fails cleanly
-    # (caught by the diagnostic's own try/except) with "[metal::
-    # start_capture] Failed to start: Capture layer is not inserted." --
-    # no crash, just silently produces zero .gputrace files. Required
-    # alongside EXO_MOE_GPUTRACE_DIAG for that diagnostic to do anything.
-    [ -n "${MTL_CAPTURE_ENABLED:-}" ]                    && EXO_ENV="$EXO_ENV MTL_CAPTURE_ENABLED=$MTL_CAPTURE_ENABLED"
-    # MLX_JACCL_RECV_RETRY_DEADLINE_SECS: raises jaccl's TCP recv retry
-    # deadline above its 60s default (see mlx/distributed/jaccl/lib/jaccl/
-    # tcp.cpp). Added 2026-07-21 as a safety buffer for profiling-adjacent
-    # diagnostics (EXO_MOE_GPUTRACE_DIAG, any live xctrace/Instruments
-    # attach) whose overhead can push a stalled recv past the default
-    # deadline and trigger "no progress for Ns, retry deadline 60s
-    # exceeded" -- confirmed to have caused one real cluster crash and one
-    # self-recovered jaccl transport fault this investigation BEFORE this
-    # forwarding line existed (the env var was set in the launcher's shell
-    # but never reached the runner subprocess, so the raise silently had
-    # no effect). Plain std::getenv() in jaccl's C++ tcp.cpp; ZERO
-    # overhead when unset (falls back to the 60.0 default).
-    [ -n "${MLX_JACCL_RECV_RETRY_DEADLINE_SECS:-}" ]     && EXO_ENV="$EXO_ENV MLX_JACCL_RECV_RETRY_DEADLINE_SECS=$MLX_JACCL_RECV_RETRY_DEADLINE_SECS"
-    # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
-    # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
-    # node directly, over SSH) instead of an env var -- an earlier
-    # EXO_RUNNER_FAULTHANDLER=1 env-var forwarding attempt here silently
-    # never reached the runner subprocess despite looking structurally
-    # identical to the working MLX_SIGNAL_PROBE line above, so this launcher
-    # no longer participates in arming it at all. See bootstrap.py's comment
-    # at the marker-file check for the full rationale.
-    # MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE: when set to 1, mlx will
-    # force-commit the producing GPU stream's pending command buffer
-    # before a CPU primitive (e.g. AllReduce) waits on its event.
-    # Targets the bistable peer-CQE-arrival-latency stall under γ=2
-    # MTP-on. mlx commit 4d21baa2 / branch mtp-allreduce-eager-commit.
-    [ -n "${MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE:-}" ] && EXO_ENV="$EXO_ENV MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE=$MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE"
-    # Subgroup split init progress trace (logs per-rank to stderr at
-    # each QP-exchange step). Use to localize a deadlock during
-    # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
-    [ -n "${JACCL_TRACE_SPLIT:-}" ]    && EXO_ENV="$EXO_ENV JACCL_TRACE_SPLIT=$JACCL_TRACE_SPLIT"
-    # When set, MeshGroup::split opens a fresh ibv_context per
-    # subgroup instead of borrowing the parent's. Required on macOS
-    # librdma to fully isolate QPs across subgroups; without it both
-    # subgroups share the parent's context and post-init collectives
-    # deadlock after a few calls.
-    [ -n "${JACCL_SPLIT_FRESH_CTX:-}" ] && EXO_ENV="$EXO_ENV JACCL_SPLIT_FRESH_CTX=$JACCL_SPLIT_FRESH_CTX"
-    # When set, MeshGroup::split makes the subgroup share the parent
-    # group's CPU stream (cpu::CommandEncoder thread) instead of
-    # allocating its own. Funnels master + coord lambdas onto one
-    # FIFO encoder thread — needed on macOS where two distinct
-    # encoder threads dispatching concurrently into separate QP sets
-    # appears to deadlock at the librdma layer.
-    [ -n "${JACCL_SPLIT_PARENT_STREAM:-}" ] && EXO_ENV="$EXO_ENV JACCL_SPLIT_PARENT_STREAM=$JACCL_SPLIT_PARENT_STREAM"
-    # Per-step BatchGenerator state snapshot; writes JSONL to
-    # /tmp/jaccl_step_rank_${rank}_pid${pid}.log. Diff across ranks
-    # to find the first asymmetric Python state on the prefix-cache
-    # share path. Memory: next_session_plan_jaccl_c2_prefix_cache.md.
-    [ -n "${JACCL_TRACE_STEP:-}" ]     && EXO_ENV="$EXO_ENV JACCL_TRACE_STEP=$JACCL_TRACE_STEP"
-    # Per-MTP-chain-step drift diagnostic; writes JSONL to
-    # /tmp/mtp_drift_rank_${rank}_pid${pid}.log. Cross-rank diff
-    # localises where in the unsharded MTP chain logits first
-    # drift across ranks. Memory: jaccl_phase_f_outcome_2026_05_06.md.
-    [ -n "${EXO_MTP_DRIFT_DUMP:-}" ]    && EXO_ENV="$EXO_ENV EXO_MTP_DRIFT_DUMP=$EXO_MTP_DRIFT_DUMP"
-    # Per-cycle dsv4_mtp BS-transition trace. Writes JSONL to
-    # /tmp/dsv4_mtp_trace_rank_${rank}_pid${pid}.log. Used to
-    # localize cross-rank divergence at the c=2→c=1 transition.
-    [ -n "${EXO_DSV4_MTP_TRANSITION_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TRANSITION_TRACE=$EXO_DSV4_MTP_TRANSITION_TRACE"
-    # Opt-in k-token chained MTP draft + batched verify for PP mode
-    # (pp_chained_decode_loop in pp_speculation.py). k>1 enables it;
-    # unset/1 keeps the proven single-token pp_speculative_decode_loop
-    # path (default, unchanged behavior).
-    [ -n "${EXO_PP_MTP_CHAIN_K:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_MTP_CHAIN_K=$EXO_PP_MTP_CHAIN_K"
-    # PP + DSpark (rank1-owned draft+verify, pp_dspark_decode_loop) is
-    # SELECTED AUTOMATICALLY in Pipeline mode whenever DSpark is attached
-    # at model load (EXO_DSV4_DSPARK=1, set above) -- highest priority in
-    # batch_generate.py's dispatch when available. There used to be a
-    # second EXO_PP_DSPARK flag gating "use it as the PP decode loop", but
-    # it was never toggled independently of EXO_DSV4_DSPARK in practice
-    # (this comment used to say so itself), so it was removed 2026-07-26 as
-    # pure redundancy. If you need to attach DSpark but NOT have it
-    # selected for PP decode, that's not currently a supported combination
-    # -- open an issue if you have a real use case for it.
-    # One-shot forward-width scaling diagnostic (pp_dspark_decode_loop) --
-    # opt-in, off by default, no effect on production decode.
-    [ -n "${EXO_PP_DSPARK_WIDTH_SWEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_WIDTH_SWEEP=$EXO_PP_DSPARK_WIDTH_SWEEP"
-    # Verify-width truncation for pp_dspark_decode_loop -- real perf lever
-    # found via the width-scaling sweep above (forward cost scales
-    # ~linearly with width, not flat). Unset = verify the whole DSpark
-    # block (unchanged default behavior).
-    [ -n "${EXO_PP_DSPARK_VERIFY_WIDTH:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_WIDTH=$EXO_PP_DSPARK_VERIFY_WIDTH"
-    # Draft-ahead hit-rate diagnostic (2026-07-19, default off): logs how
-    # often a hypothetical one-block-ahead speculative forward on rank0
-    # (assuming full acceptance of the current verify block) would have
-    # hit -- pure measurement, zero wire/KV changes, scoping whether the
-    # "optimistic overlap" architecture (rank0 speculatively computes the
-    # NEXT block during its otherwise-idle ~61.6ms/cycle window) is worth
-    # building. See pp_speculation.py's DRAFT_AHEAD_LOG comment for the
-    # full rationale and the Fable-consult numbers (~14% E2E speedup at a
-    # 30% hit rate, ~22% at 50%, not worth building below ~15%).
-    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_LOG=$EXO_PP_DSPARK_DRAFT_AHEAD_LOG"
-    # Verify-margin diagnostic (2026-07-31, EXO_PP_DSPARK_VERIFY_MARGIN_LOG=1,
-    # default OFF): direct, LOW-RISK root-cause test for the confirmed
-    # self-doubt infinite-loop bug (fact 1131 -- DSpark never converges
-    # on math_digit_sum at temp=0/8000 tokens, vs clean 629-token
-    # resolution with speculation off). Replaces the abandoned inline
-    # numerics-audit approach (EXO_PP_DSPARK_NUMERICS_AUDIT, 3 broken
-    # iterations -- fault, fault, unrecovered hang -- see fact 1134;
-    # extra forward passes on the live jaccl/RDMA critical path proved
-    # too fragile). This diagnostic reads values ALREADY COMPUTED by the
-    # real verify forward -- zero extra forward passes, zero cache
-    # snapshot/restore, zero spec-layer reconfiguration -- logging the
-    # top1-vs-top2 logit margin at every verify position. Tests whether
-    # the self-doubt loop correlates with low-confidence (near-tied)
-    # verify decisions. See pp_speculation.py's VERIFY-MARGIN DIAGNOSTIC
-    # comment for the full rationale.
-    [ -n "${EXO_PP_DSPARK_VERIFY_MARGIN_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_MARGIN_LOG=$EXO_PP_DSPARK_VERIFY_MARGIN_LOG"
-    # Draft-ahead STEP 1+2b diagnostic plumbing (2026-07-19, originally
-    # default off, commits 6aff7a5f/e6e10927/fe7bbfcb): gates a msg2
-    # spec-id tag exchange (rank1 builds a SpecId from the cycle's
-    # anchor/drafted/bonus tokens, rank0 independently reconstructs +
-    # validates a match) AND a msg1b deep-draft-extension send/recv (vw-1
-    # extra tokens DSpark's draft() already computed for free, round-trip
-    # shape-validated on rank0). BOTH branches are diagnostic-only --
-    # decode NEVER branches on the result, this only proves the
-    # wire/tagging mechanism is sound under real cross-rank timing. NOT
-    # the broken EXECUTE/YIELD speculative-forward mechanism below --
-    # this is just DRAFT_AHEAD's own diagnostic tagging, safe and part of
-    # the validated 2026-07-22 stress-sweep config. DEFAULT ON 2026-07-23
-    # alongside DSV4_SHARDING=Pipeline / DSpark auto-selection above.
-    # PP-only (pp_speculation.py DRAFT_AHEAD diagnostic tagging never
-    # engages under Tensor sharding -- gated 2026-08-16, TP-only pivot).
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        : "${EXO_PP_DSPARK_DRAFT_AHEAD:=1}"
-        [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
-    fi
-    # Draft-ahead STEP 3a (2026-07-19, commit 0ed76f74; CONFIRMED BROKEN
-    # 2026-07-22 -- see exo-stall-faulthandler-breakthrough-2026-07-21
-    # skill, update 14): rank0 actually runs a real speculative forward
-    # on the msg1b extension batch against the LIVE shared KV cache, then
-    # restores the pre-speculative snapshot / discards the buffer on a
-    # miss. This "speculate against live shared state, then roll back"
-    # design is confirmed via clean 2-for-2 A/B to cause severe (15-70s)
-    # GPU-confirmed-busy stalls -- a ~25-40x throughput regression --
-    # whenever enabled, vs. zero stalls with DRAFT_AHEAD alone (EXECUTE
-    # unset). Root cause not yet isolated as of 2026-07-22: the stall
-    # shows up in BOTH EXECUTE's own added forward call AND the
-    # unrelated, textually-unchanged shared forward call, pointing at
-    # state pollution (KV cache / allocator pool) rather than a single
-    # slow line -- likely needs a redesign (e.g. speculate against an
-    # isolated cache copy, not the live one) rather than a point fix.
-    # DEFAULT OFF, INTENTIONALLY NOT WIRED TO THE ENV VAR BELOW: set
-    # EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE_I_KNOW_THIS_IS_BROKEN=1 (exact
-    # value "1", any other value is silently ignored) to force it on for
-    # deliberate root-cause/redesign debugging ONLY. Do not enable for
-    # any real workload until re-validated.
-    if [ "${EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE_I_KNOW_THIS_IS_BROKEN:-}" = "1" ]; then
-        echo "  ⚠️  EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE force-enabled via the"
-        echo "      _I_KNOW_THIS_IS_BROKEN override -- confirmed broken"
-        echo "      2026-07-22 (severe GPU-confirmed-busy stalls, ~25-40x"
-        echo "      throughput regression). Debugging/redesign use only."
-        EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=1"
-    fi
-    # Draft-ahead STEP 3b (2026-07-19, commit cca679ed): the actual perf
-    # lever, requires DRAFT_AHEAD_EXECUTE=1 above -- inherits the same
-    # confirmed-broken status and the same override gate (EXECUTE must
-    # be force-enabled via _I_KNOW_THIS_IS_BROKEN above for YIELD to do
-    # anything; YIELD itself is not separately gated since it's a no-op
-    # without EXECUTE).
-    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_YIELD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_YIELD=$EXO_PP_DSPARK_DRAFT_AHEAD_YIELD"
-    # Cache-eviction timing instrumentation (2026-07-19, default off,
-    # commit f1e23561): pins down whether the multi-hundred-second
-    # cluster-wide stalls seen in ~/exo_stall_dumps/ are caused by
-    # KVPrefixCache.get_memory_used_percentage()'s per-eviction-iteration
-    # cross-rank all-reduce. Emits [CACHE_EVICT_TIMING] evict_summary/
-    # get_mem_pct/add_kv_cache log lines when a call exceeds
-    # EXO_CACHE_EVICT_TIMING_MS (default 50ms). Diagnostic only, no
-    # behavior change.
-    [ -n "${EXO_CACHE_EVICT_TIMING_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_LOG=$EXO_CACHE_EVICT_TIMING_LOG"
-    [ -n "${EXO_CACHE_EVICT_TIMING_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_MS=$EXO_CACHE_EVICT_TIMING_MS"
-    [ -n "${EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL=$EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL"
-
-    # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
-    # these three vars is read anywhere in exo or mlx source, and macOS 26.5
-    # exposes no iogpu watchdog-timeout sysctl (only wired-limit knobs). The
-    # kIOGPUCommandBufferCallbackErrorTimeout runner death at 19:42 on
-    # 2026-07-11 fired straight through them — the watchdog measures
-    # completion latency INCLUDING queue wait, so GPU oversubscription
-    # (spec-on c>=3 + Qwen co-host + concurrent prefill) is what actually
-    # trips it. Real levers: MLX_MAX_OPS_PER_BUFFER / MLX_MAX_MB_PER_BUFFER
-    # (bounded buffers), spec-off at c>=2 (EXO_DSV4_MTP_C2_MAX_CTX=1), and
-    # the supervisor self-heal (contains the death: instance re-place,
-    # field-proven 19:43:11). Kept only to avoid perturbing a known-good
-    # env set; do not rely on them.
-    if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
-        EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
-    fi
-
-
-    # Rotate log: keep previous run as exo.log.prev, then append
-    ssh "$NODE" "cp ~/exo.log ~/exo.log.prev 2>/dev/null; : > ~/exo.log"
-
-    # caffeinate -s starts as a separate background process and uses -w to
-    # keep the system awake for as long as the exo process exists.
-    # IMPORTANT: don't `caffeinate -s python` because caffeinate is hardened
-    # and dyld strips DYLD_INSERT_LIBRARIES (and other DYLD_*) when exec-ing
-    # into a hardened binary, breaking our abort_tracer interposer.
-    # Regenerate the node-local relaunch script from THIS script's EXO_ENV so a
-    # quick node-side restart (~/relaunch_exo.sh) always uses the exact env that
-    # start_cluster.sh (the single source of truth) would launch with. Session
-    # 2026-07-07 lesson: the hand-edited relaunch scripts and this script had
-    # drifted apart (transport stack, prefill step, log level, ...); deriving
-    # one from the other closes that class of drift permanently.
-    if [ "$NODE" == "macstudio-m4-1" ]; then
-        NODE_PEERS="/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID"
-    elif [ "$NODE" == "macstudio-m4-2" ]; then
-        NODE_PEERS="/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID"
+  # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
+  # while we validate decode quality vs unfused.
+  [ -n "$EXO_DSV4_FUSED_MOE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
+  [ -n "${EXO_DSV4_MOE_FUSED_GATE_UP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_FUSED_GATE_UP=$EXO_DSV4_MOE_FUSED_GATE_UP"
+  # wq_a+wkv fusion (2026-08-21, c=1-only -- see deepseek_v4.py header near
+  # _try_fuse_two_quantized_linears for the B>1-unvalidated caveat).
+  [ -n "${EXO_DSV4_QA_KV_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QA_KV_FUSED=$EXO_DSV4_QA_KV_FUSED"
+  [ -n "${EXO_DSV4_COMPILE_FFN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_FFN=$EXO_DSV4_COMPILE_FFN"
+  [ -n "${EXO_DSV4_COMPILE_LAYER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_LAYER=$EXO_DSV4_COMPILE_LAYER"
+  [ -n "${EXO_DSV4_FENCE_EVERY_N_LAYERS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_EVERY_N_LAYERS=$EXO_DSV4_FENCE_EVERY_N_LAYERS"
+  [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
+  [ -n "${EXO_DSV4_ALLSUM_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE_LOG_EVERY=$EXO_DSV4_ALLSUM_PROBE_LOG_EVERY"
+  # Decode fence overlap (2026-07-02): non-blocking per-layer fence
+  # (mx.async_eval) at the DSv4 MoE all_sum site, armed ONLY at c=1
+  # steady state via a two-key side channel (batch_generate "engine" key:
+  # exactly one active request; dsv4_mtp "cache" key: single-uid steady,
+  # disarm+synchronize around cache transitions). Measured: c=1 decode
+  # 28.9 -> 37.0 t/s (+28%), outputs byte-identical (blocking-fence
+  # parity), needle/BOS clean. At c>=2 the fence stays blocking (keys
+  # disarmed).
+  # NOTE (history): the 2026-07-02 c=2 JOIN corruption was the per-stream
+  # ring bootstrap (fixed, mlx-lm 8b7b5f9) — unrelated to this c=1 fence.
+  # The 2026-07-03 c=2 DEEP-generation corruption is a different bug,
+  # implicated on FENCE_ASYNC_C2 (see below); this B==1-gated arming is
+  # not affected.
+  : "${EXO_DSV4_FENCE_ASYNC:=1}"
+  [ -n "${EXO_DSV4_FENCE_ASYNC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC=$EXO_DSV4_FENCE_ASYNC"
+  # TEMP DIAGNOSTIC (2026-08-22, EXO_DSV4_FENCE_GATE_DIAG=1): rate-limited
+  # real-value log of the async-fence gate's four conditions on every
+  # blocking-branch fallthrough, plus every _set_fence_async_ok() setter
+  # call. For the decode idle-gap investigation -- a real in-process
+  # Python sampler found ~95% of real decode-time compute-thread wall
+  # time blocked in the SYNCHRONOUS mx.eval(y) branch, not the intended
+  # async mx.async_eval(y) branch, despite EXO_DSV4_FENCE_ASYNC=1 being
+  # live -- this traces WHY the gate fails to arm. See
+  # docs/pysampler-blocking-eval-root-cause-2026-08-22.md. Remove once
+  # understood; not meant to be a permanent flag.
+  [ -n "${EXO_DSV4_FENCE_GATE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_GATE_DIAG=$EXO_DSV4_FENCE_GATE_DIAG"
+  # c=2 decode levers.
+  #
+  # BS_MIN_ACCEPT DEFAULT 1 (2026-07-12, was 0). Per-stream acceptance
+  # (=0) was kept from the 2026-07-02 A/B (+24% vs min-clamp) and
+  # believed "exonerated" by the 2026-07-03 deep battery — but that whole
+  # era ran spec-OFF at c>=2 (MTP_C2_MAX_CTX=1), so the lever was DORMANT
+  # and the battery could never see it. When the 2026-07-11 campaign
+  # re-enabled c>=2 spec, =0 turned out to be THE c>=2 temp>0 repetition
+  # attractor: per-stream yields (n_acc[n]+1 tokens) vs batch-UNIFORM
+  # pool rollback arithmetic (keep = n_min+1 / trim = gamma-n_min) bleed
+  # committed tokens out of every higher-accepting stream's PoolingCache
+  # on each acceptance-spread cycle -> pooled positions desync ->
+  # repetition within ~300 tok at temp=1.0 (probe: 3 degens + runner
+  # hang in 4 rounds at =0; 8/8 clean at =1, kernels identical). The
+  # dsv4_mtp.py code default has said "known-corrupt at c=2" since
+  # 2026-07-02 — this file was overriding it. Perf at c=2 spec-on with
+  # =1 is ~14.3 t/s/stream (parity with spec-off). Second instance of
+  # the "flipping a gate awakens a latent env" lesson (cf. the
+  # 2026-07-10 pool-gate crash) — A/B "exoneration" is void if the
+  # lever was dormant when tested.
+  #
+  # FENCE_ASYNC_C2 DEFAULT 0 (2026-07-03): async fencing at c=2 is
+  # IMPLICATED in the deep-generation corruption. 4000-token divergent
+  # c=2 pairs with FENCE_ASYNC_C2=2 degenerate at ~27%/pair (repetition
+  # loops at tokens 1400-3900, kill-switch fires, then the mid-batch
+  # kill rank-desyncs a collective -> 100% CPU spin wedge needing
+  # kill -9). Same battery with FENCE_ASYNC_C2=0: 12/12 clean.
+  # Exonerated by direct A/B: MLX_LM_SDPA_ROWSPLIT, BS_MIN_ACCEPT,
+  # MTP-off (clean -> spec path), preceded-by-c1, xctrace attach.
+  # Part 6's 800-token validation was too shallow to catch this.
+  # Cost: c=2 drops ~24.5 -> ~19 t/s/stream; c=1 keeps its +28% async
+  # win (FENCE_ASYNC=1 arming is B==1-gated and validated deep).
+  # Re-enable only with a fix for the steady-state batched-cycle race
+  # (per-stream ring trims vs in-flight deferred async graphs) plus a
+  # 4000-token c=2 battery. See MOE_KERNEL_HANDOFF.md 2026-07-03.
+  : "${EXO_DSV4_FENCE_ASYNC_C2:=0}"
+  : "${EXO_DSV4_BS_MIN_ACCEPT:=1}"
+  [ -n "${EXO_DSV4_FENCE_ASYNC_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_ASYNC_C2=$EXO_DSV4_FENCE_ASYNC_C2"
+  [ -n "${EXO_DSV4_BS_MIN_ACCEPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BS_MIN_ACCEPT=$EXO_DSV4_BS_MIN_ACCEPT"
+  [ -n "${EXO_DSV4_ROUTE_HIST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST=$EXO_DSV4_ROUTE_HIST"
+  [ -n "${EXO_DSV4_ROUTE_HIST_DECODE_ONLY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROUTE_HIST_DECODE_ONLY=$EXO_DSV4_ROUTE_HIST_DECODE_ONLY"
+  [ -n "${EXO_DSV4_TOPK_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_FUSED=$EXO_DSV4_TOPK_FUSED"
+  [ -n "$EXO_DSV4_INDEX_TOPK" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
+  # One-shot decode-step top-k overlap diagnostic (Indexer, deepseek_v4.py)
+  # -- opt-in, off by default, no effect on production decode.
+  [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
+  # P08 Item 2 live A/B gate (mlx-lm a248d0a7): take the exact top-k Metal
+  # kernel for PREFILL chunks (L>16) too. Default OFF -> absent unless set,
+  # so production behaviour is unchanged.
+  [ -n "${EXO_DSV4_EXACT_TOPK_PREFILL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_EXACT_TOPK_PREFILL=$EXO_DSV4_EXACT_TOPK_PREFILL"
+  # P09 Item 1 (mlx-lm query-tiled compressed SDPA): default OFF -> absent
+  # unless set, so the OFF arm of the A/B is a genuine unset env.
+  [ -n "${EXO_DSV4_QUERY_TILED_SDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_SDPA=$EXO_DSV4_QUERY_TILED_SDPA"
+  [ -n "${EXO_DSV4_QUERY_TILED_B:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_B=$EXO_DSV4_QUERY_TILED_B"
+  [ -n "${EXO_DSV4_MTP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
+  # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
+  # MTP-1 chained draft at c=1. DEFAULT RE-ENABLED 2026-08-02: the
+  # self-doubt-loop bug (found 2026-07-26) is FIXED and re-validated --
+  # see the EXO_SPECULATIVE comment near the top of this file for the
+  # full root-cause/fix writeup (EXO_DSV4_ROWSEQ_FULLBLOCK +
+  # EXO_DSV4_ROWSEQ_FULLBLOCK_MOE, both also default-on now, close the
+  # L>1-batched-verify-vs-sequential-decode numerics drift that was
+  # causing it). DSpark is this cluster's intended sole MTP mechanism
+  # (no reason to keep plain single-token MTP as a separate fallback
+  # once DSpark exists). Confidence pruning via EXO_DSV4_DSPARK_CONF_TAU
+  # (default 0.5; 0 disables). Requires the converted local head dir on
+  # every node (~/.exo/models/local--DeepSeek-V4-Flash-DSpark-MTP); a
+  # missing dir fails rank-consistently back to MTP-1.
+  # EXO_DSV4_DSPARK_DIR overrides.
+  #
+  # DORMANT UNDER TP (confirmed 2026-08-22, see
+  # docs/roofline-sanity-check-inputs-confirmed-2026-08-22.md): DSpark's
+  # actual decode loop (pp_dspark_decode_loop) is PP-only -- auto-selected
+  # in Pipeline sharding mode when DSpark is attached (see ~line 2346),
+  # but this cluster runs Tensor sharding (MLX_JACCL_SHARDING_MODE=Tensor)
+  # for decode, which has no DSpark decode path at all. The module still
+  # loads and warms its context ("DSpark ctx warmed" in the log) but its
+  # speculative decode loop never fires -- confirmed via a live log grep
+  # finding zero "PP speculation using DSpark" lines across a full
+  # session. Left ON (not disabled) because it's genuinely load-bearing
+  # for PP deployments and costs nothing extra to warm under TP; this
+  # comment exists so a future investigation doesn't re-waste time
+  # assuming DSpark is providing a decode-time speedup under TP that it
+  # is not.
+  #
+  # SHIPPED DEFAULT RECONCILED 2026-08-24 (P4v2 milestone M0). The block
+  # above was written when DSpark was believed to be load-bearing-but-
+  # free under TP. Two of its claims are now known wrong:
+  #
+  #   * "costs nothing extra to warm under TP" — it costs ~10 GB of
+  #     RESIDENT unified memory per node for the whole process lifetime
+  #     (the local head's model.safetensors is 10,876,789,654 B). The
+  #     comment accounted for compute, not residency, on nodes documented
+  #     at ~125 GB of 128 GB co-resident weights.
+  #   * the DSpark decode path is not merely "PP-only": under TP there IS
+  #     a first-class DSpark draft branch in _speculative_next
+  #     (dsv4_mtp.py), it is simply unreachable in the shipped config
+  #     because reaching it needs EXO_DSV4_MTP=1 as well (that flag is
+  #     what makes inner.mtp exist, which is what is_dsv4_with_mtp tests,
+  #     which is what constructs the generator).
+  #
+  # So DSPARK=1 with MTP=0 under Tensor sharding buys a ~10 GB head that
+  # can never draft. Rather than flip this default (DSpark IS this
+  # cluster's intended sole speculation mechanism and the flag should
+  # stay expressing that intent), utils_mlx now GATES THE LOAD on a
+  # consumer actually being reachable: TP needs SPECULATIVE=1 AND MTP=1,
+  # PP needs SPECULATIVE=1 + EXO_PP_DRAFT_MODEL + Pipeline sharding.
+  # EXO_DSV4_DSPARK_FORCE_LOAD=1 overrides. Configurations that really
+  # speculate are byte-identical to before; the dead ones reclaim ~10 GB.
+  : "${EXO_DSV4_DSPARK:=1}"
+  [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
+  # Force the head to attach even when no consumer is reachable (the M0
+  # gate above). Opt-in; used to measure the head's own memory/load cost.
+  [ -n "${EXO_DSV4_DSPARK_FORCE_LOAD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_FORCE_LOAD=$EXO_DSV4_DSPARK_FORCE_LOAD"
+  # ── DSPARK SHADOW MEASUREMENT (P4v2 milestone M1, 2026-08-24) ───────
+  # EXO_DSV4_SPEC_SHADOW=1 runs the DSpark draft + the batched verify
+  # every cycle, logs what WOULD have been accepted plus the measured
+  # draft and verify walls, then forces n_accepted=0 so the EMITTED
+  # stream still comes from the sequential path. Requires all three
+  # speculation flags to be on (EXO_SPECULATIVE=1 EXO_DSV4_MTP=1
+  # EXO_DSV4_DSPARK=1) or there is no DSpark cycle to shadow.
+  #
+  # This is a MEASUREMENT BUILD, never a serving config: it pays the
+  # draft + the (k+1)-row verify + the rollback to commit ONE token, so
+  # it is strictly slower than plain decode. Default off; with the flag
+  # unset the code is dead and behaviour is unchanged.
+  #
+  # Structured output in the runner log:
+  #   [DSPARK-SHADOW]        aggregate every _INTERVAL cycles
+  #   [DSPARK-SHADOW-GUARD]  one-shot non-degeneracy + ctx-tap verdict
+  #   [DSPARK-GUARD]         one-shot load-time provenance/param-tree
+  [ -n "${EXO_DSV4_SPEC_SHADOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW=$EXO_DSV4_SPEC_SHADOW"
+  [ -n "${EXO_DSV4_SPEC_SHADOW_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_INTERVAL=$EXO_DSV4_SPEC_SHADOW_INTERVAL"
+  [ -n "${EXO_DSV4_SPEC_SHADOW_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_LOG=$EXO_DSV4_SPEC_SHADOW_LOG"
+  [ -n "${EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES=$EXO_DSV4_SPEC_SHADOW_GUARD_CYCLES"
+  [ -n "${EXO_DSV4_DSPARK_DIR:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_DIR=$EXO_DSV4_DSPARK_DIR"
+  # EXO_DSV4_DSPARK_NATIVE=1 (2026-08-04): use the checkpoint's OWN
+  # bundled mtp.0/1/2.* DSpark head (trained alongside these exact target
+  # weights) instead of the separately-converted local head above. Use
+  # for checkpoints like deepseek-ai/DeepSeek-V4-Flash-0731 whose draft
+  # head wasn't trained on the SAME checkpoint as EXO_DSV4_DSPARK_DIR's
+  # local conversion (that dir was converted from the PREVIEW checkpoint's
+  # mtp shards). Default off -- opt in per-checkpoint. See
+  # docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md for the full
+  # background/validation writeup.
+  [ -n "${EXO_DSV4_DSPARK_NATIVE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_NATIVE=$EXO_DSV4_DSPARK_NATIVE"
+  # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
+  # with EXO_DSV4_VERIFY_ROWSEQ_VEC=1 + MLX_STEEL_BATCH_INVARIANT=1 —
+  # the vec+tau0 config from the task #23/#24 campaigns).
+  [ -n "${EXO_DSV4_DSPARK_CONF_TAU:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_CONF_TAU=$EXO_DSV4_DSPARK_CONF_TAU"
+  # Vectorized rowseq verify (task #23) — CHAMPION since 2026-07-12:
+  # vec + ROWSDPA=3 (hoisted batched projections over the REAL per-row
+  # loop attention body: real update_and_fetch / row masks / buffer
+  # reads, + the sharding_group all_sum fix, mlx-lm 095c98c).
+  # Byte-lossless: gold gate 3/3 vs the loop AND vs MTP-off; 33.7 t/s
+  # short-ctx (vs 29.5 loop champion), 36.9 t/s + 10/10 needle recall
+  # at 100K. Set EXO_DSV4_VERIFY_ROWSEQ_VEC=0 to fall back to the loop.
+  : "${EXO_DSV4_VERIFY_ROWSEQ_VEC:=1}"
+  [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC=$EXO_DSV4_VERIFY_ROWSEQ_VEC"
+  # ROWSDPA levels: 1 = per-row sdpa over gathered views + manual ring
+  # write (35.5 t/s), 2 = +per-row projections (diagnostic), 3 = real
+  # loop attention body + hoisted projections (lossless champion).
+  : "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:=3}"
+  [ -n "${EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA=$EXO_DSV4_VERIFY_ROWSEQ_VEC_ROWSDPA"
+  # Attention-tail all_sum on replicated attention — DEFAULT 0 since
+  # 2026-07-12: the probe proved it an EXACT 2.000000 doubling of
+  # bitwise rank-identical replicas (a latent 2-node numerics bug, not
+  # a resync; single-node semantics are the reference). With it off:
+  # vec == loop == MTP-off 3/3, 36.1-36.3 t/s short-ctx, 39.1 t/s +
+  # 10/10 recall at 100K, and one fewer network round trip per
+  # compressed/sparse layer. Set =1 to reproduce the historical
+  # (doubled) 2-node numerics. EXO_DSV4_ALLSUM_PROBE=<path> dumps
+  # pre/post norms + prehash for the first 200 sums.
+  : "${EXO_DSV4_ATTN_ALLSUM:=0}"
+  [ -n "${EXO_DSV4_ATTN_ALLSUM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ATTN_ALLSUM=$EXO_DSV4_ATTN_ALLSUM"
+  [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
+  # 2026-08-19: quantized moe.all_sum diagnostic (feat/moe-allsum-quant
+  # branch, not yet merged to mlx-lm main). Default OFF; unset ->
+  # byte-identical to the un-quantized path. See
+  # docs/moe-allsum-quant-compute-overhead-analysis-2026-08-19.md.
+  [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT=$EXO_DSV4_MOE_ALLSUM_QUANT"
+  [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_BITS=$EXO_DSV4_MOE_ALLSUM_QUANT_BITS"
+  [ -n "${EXO_DSV4_MOE_ALLSUM_QUANT_GROUP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_QUANT_GROUP=$EXO_DSV4_MOE_ALLSUM_QUANT_GROUP"
+  # 2026-08-19: shared-scale int8 all_sum (100% on jaccl's reliable
+  # all_sum path, no all_gather -- see
+  # docs/moe-allsum-quant-root-cause-and-closure-2026-08-19.md for why
+  # the EARLIER all_gather-based EXO_DSV4_MOE_ALLSUM_QUANT above was
+  # abandoned). Default OFF; unset -> byte-identical to plain all_sum.
+  [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE"
+  [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_BITS"
+  [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE"
+  [ -n "${EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY=$EXO_DSV4_MOE_ALLSUM_SHAREDSCALE_PROBE_LOG_EVERY"
+  # 2026-08-20: TP-native chunk-loop compute/comm overlap for
+  # prefill_batched() (docs/dsv4-220k-prefill-span-profile... family).
+  # Default OFF; unset -> byte-identical to today's eager-eval path.
+  # MUST be set identically on both ranks -- flag skew is the primary
+  # hazard (see the code-site comment in generate.py).
+  [ -n "${EXO_PREFILL_CHUNK_OVERLAP:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_CHUNK_OVERLAP=$EXO_PREFILL_CHUNK_OVERLAP"
+  # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
+  # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
+  # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
+  # (that's fixed, mlx-lm 8b7b5f9); it is batch-dependent bf16 rounding
+  # DRIFT in the decode: on-cluster spec-trace showed a c=2 stream match
+  # its canonical c=1 trajectory BITWISE for 75 tokens then flip a near-tie,
+  # which cascades into a repetition attractor (~23% of deep temp-1.0 c=2
+  # pairs). fp32 activations fix it (batch-invariant, proven: 0 server degen)
+  # but reliably crash this cluster's jaccl/RDMA transport at ~2 c=2 pairs
+  # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
+  # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
+  # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
+  # 2026-07-11: RE-ARMED =1 after live degens (4 kill-switch events on
+  # ragged c=2 hermes pairs at temp=1.0).
+  # 2026-07-12 ROOT CAUSE FOUND — it was never kernel drift: the degens
+  # were EXO_DSV4_BS_MIN_ACCEPT=0 (see the c=2 decode levers block below)
+  # desyncing the batch-uniform pool rollback. With BS_MIN_ACCEPT=1,
+  # spec-on c=2 is CLEAN (probe 8/8 ragged temp-1.0 pairs, zero degens)
+  # but only perf-PARITY with spec-off (~14.3 vs ~15 t/s/stream — the
+  # min-clamp wastes drafts), so spec stays OFF at c>=2 for the smaller
+  # code surface. Safe to set =0 for experiments ONLY with
+  # BS_MIN_ACCEPT=1; gate any default flip on bench/c2_temp1_degen_probe.py
+  # (temp=0 batteries are blind to acceptance-spread bugs). Making c>=2
+  # spec actually PROFITABLE needs per-stream pool rollback (pools track
+  # per-stream keeps like PerStreamBatchRotatingKVCache.trim_per_stream).
+  : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}" # 1 = spec-off at c>=2 (default); 0 = spec on (needs BS_MIN_ACCEPT=1)
+  [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
+  [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
+  # jaccl start-of-collective ACK barrier (mesh_impl.h ack_sync_pre). Keeps
+  # the two TP ranks in lockstep at each collective boundary so a leading
+  # rank's data/ack SEND never arrives before the peer posts its RECV WR —
+  # the UC-silent-drop that wedges drain_acks/the data loop under c>=2. The
+  # dedicated ACK QP (mesh.cpp 2026-05-17) fixes ack_sync_POST; this closes
+  # the remaining PRE-side data-path race. Gated OFF upstream for A/B.
+  [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+  [ -n "${JACCL_POLL_INSTRUMENT:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
+  [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
+  [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
+  # Runner hang watchdog (supervisor _check_hang). Default 45s SIGKILLs a
+  # runner wedged in a native jaccl collective under c>=2 load (self-heal).
+  # Raise it for diagnostics to widen the sampling window before the kill.
+  [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
+  # Batch-invariant matmul (mlx-lm deepseek_v4): per-row gemv for small M so
+  # c>=2 decode bitwise-matches c=1 — the bf16 batch-drift corruption fix.
+  [ -n "${EXO_DSV4_BATCH_INVARIANT_MM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM=$EXO_DSV4_BATCH_INVARIANT_MM"
+  [ -n "${EXO_DSV4_BATCH_INVARIANT_MM_MAX_M:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM_MAX_M=$EXO_DSV4_BATCH_INVARIANT_MM_MAX_M"
+  [ -n "${EXO_DSV4_BATCHED_PREFILL_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL_DEBUG=$EXO_DSV4_BATCHED_PREFILL_DEBUG"
+  [ -n "${EXO_HC_USE_OPS:-}" ] && EXO_ENV="$EXO_ENV EXO_HC_USE_OPS=$EXO_HC_USE_OPS"
+  [ -n "${EXO_DSV4_ACT_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ACT_PROBE=$EXO_DSV4_ACT_PROBE"
+  [ -n "${EXO_DSV4_MTP_DEDICATED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DEDICATED=$EXO_DSV4_MTP_DEDICATED"
+  [ -n "${EXO_LEAF_SNAPSHOT_RETENTION:-}" ] && EXO_ENV="$EXO_ENV EXO_LEAF_SNAPSHOT_RETENTION=$EXO_LEAF_SNAPSHOT_RETENTION"
+  [ -n "${EXO_ARRAYSCACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_ARRAYSCACHE_DIAG=$EXO_ARRAYSCACHE_DIAG"
+  # Diagnostic-only (2026-07-23): root-causing rank 1's always-cold
+  # KV-prefix-cache lookup under PP mode. See cache.py's get_kv_cache
+  # for the log points. Remove once root-caused.
+  [ -n "${EXO_PREFIX_CACHE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFIX_CACHE_DIAG=$EXO_PREFIX_CACHE_DIAG"
+  # Eagle soft-embedding for chained MTP draft (Phase 14 Plan B.2).
+  # Default OFF (0): mlx-lm's DeepseekV4MTPModule.__call__ uses the
+  # hard-argmax embed_tokens() lookup — bit-exact with prior behavior.
+  # When > 0: at every chained draft step beyond the first, the input
+  # embedding is replaced with a probability-weighted top-K mixture
+  # built from the previous step's logits. Targets step-1 P(top-1)
+  # acceptance lift. Requires the _EAGLE_CTX side channel, which is on
+  # adurham/mlx-lm@main (cluster's pin since 2026-05-29; formerly the
+  # eagle-soft-emb branch, now merged into main). Recommended K=8.
+  [ -n "${EXO_DSV4_MTP_EAGLE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_K=$EXO_DSV4_MTP_EAGLE_K"
+  [ -n "${EXO_DSV4_MTP_EAGLE_T:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_EAGLE_T=$EXO_DSV4_MTP_EAGLE_T"
+  [ -n "${EXO_DSV4_MTP_LOG_INTERVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_LOG_INTERVAL=$EXO_DSV4_MTP_LOG_INTERVAL"
+  [ -n "${EXO_DSV4_MTP_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_PROFILE=$EXO_DSV4_MTP_PROFILE"
+  # Rollback sub-phase attribution (rb_snap/rb_gate/rb_drain/rb_ring/
+  # rb_pool/rb_commitfwd/rb_tail lines in the MTP-PROF dump). Diagnostic:
+  # inserts mx.synchronize sub-boundaries; pair with EXO_DSV4_MTP_PROFILE.
+  [ -n "${EXO_DSV4_RB_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_RB_PROFILE=$EXO_DSV4_RB_PROFILE"
+  [ -n "${EXO_DSV4_MTP_REFCHECK_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK_BATCH=$EXO_DSV4_MTP_REFCHECK_BATCH"
+  [ -n "${EXO_DSV4_MTP_NO_BROADCAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_NO_BROADCAST=$EXO_DSV4_MTP_NO_BROADCAST"
+  # W3 diagnostic: per-draft-step top-8 softmax dump. NOT a production
+  # knob — diagnostic only. Cost when off: zero (single env.get hit).
+  # Cost when on: ~1 sync per draft step (microseconds). See
+  # mtp_module.py:740 dump block and /tmp/w3_eagle_audit.md.
+  [ -n "${EXO_DSV4_MTP_DUMP_TOPK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_DUMP_TOPK=$EXO_DSV4_MTP_DUMP_TOPK"
+  # MTP verify-audit JSONL path (diagnostic: special-token draft/accept dumps).
+  [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT=$EXO_DSV4_MTP_VERIFY_AUDIT"
+  # MTP verify-audit ALL-cycles mode (diagnostic: dump every cycle, not just
+  # special-token ones). Pairs with EXO_DSV4_MTP_VERIFY_AUDIT.
+  [ -n "${EXO_DSV4_MTP_VERIFY_AUDIT_ALL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_VERIFY_AUDIT_ALL=$EXO_DSV4_MTP_VERIFY_AUDIT_ALL"
+  # Spec-path EOS ban gate (default "0" OFF in code; "1" opts IN for the
+  # ban experiment only — the ban breaks losslessness at natural-end
+  # positions, confirmed 2026-08-26). Mirrors the code default so an unset
+  # env leaves production behavior unchanged.
+  [ -n "${EXO_DSV4_SPEC_EOS_BAN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_EOS_BAN=$EXO_DSV4_SPEC_EOS_BAN"
+  # MTP reference-forward refcheck JSONL path (diagnostic: verify vs clean greedy).
+  [ -n "${EXO_DSV4_MTP_REFCHECK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK=$EXO_DSV4_MTP_REFCHECK"
+  # MTP refcheck EVERY-CYCLE mode (1 = run ref forward every cycle, log divergences).
+  [ -n "${EXO_DSV4_MTP_REFCHECK_ALL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_REFCHECK_ALL=$EXO_DSV4_MTP_REFCHECK_ALL"
+  # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
+  [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
+  [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
+  # Greedy accept-rule alignment (see defaults block above).
+  [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
+  [ -n "${EXO_DSV4_POOL_SNAPSHOT_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_SNAPSHOT_BATCH=$EXO_DSV4_POOL_SNAPSHOT_BATCH"
+  # Regime-b double-rollback fix (see defaults block above).
+  [ -n "${EXO_DSV4_POOL_RESTORE_AFTER_TRIM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_RESTORE_AFTER_TRIM=$EXO_DSV4_POOL_RESTORE_AFTER_TRIM"
+  # Per-request MTP cycle statistics (diagnostic; one log line per stream).
+  [ -n "${EXO_DSV4_MTP_CYCLE_STATS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_CYCLE_STATS=$EXO_DSV4_MTP_CYCLE_STATS"
+  # Rowseq per-row REAL decode masks (batch-cache SDPA parity).
+  [ -n "${EXO_DSV4_ROWSEQ_ROWMASK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_ROWMASK=$EXO_DSV4_ROWSEQ_ROWMASK"
+  # Unified bitwise-faithful spec rollback (ring+pool wholesale restore).
+  [ -n "${EXO_DSV4_SPEC_STATE_RESTORE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_STATE_RESTORE=$EXO_DSV4_SPEC_STATE_RESTORE"
+  [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK=$EXO_DSV4_SPEC_CACHE_ROLLBACK"
+  [ -n "${EXO_DSV4_SPEC_CACHE_ROLLBACK_C2:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_CACHE_ROLLBACK_C2=$EXO_DSV4_SPEC_CACHE_ROLLBACK_C2"
+  [ -n "${MLX_GEMV_BATCH_INVARIANT:-}" ] && EXO_ENV="$EXO_ENV MLX_GEMV_BATCH_INVARIANT=$MLX_GEMV_BATCH_INVARIANT"
+  [ -n "${MLX_STEEL_BATCH_INVARIANT:-}" ] && EXO_ENV="$EXO_ENV MLX_STEEL_BATCH_INVARIANT=$MLX_STEEL_BATCH_INVARIANT"
+  [ -n "${EXO_DSV4_ROWSEQ_FULLBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_FULLBLOCK=$EXO_DSV4_ROWSEQ_FULLBLOCK"
+  [ -n "${EXO_DSV4_ROWSEQ_FULLBLOCK_MOE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ROWSEQ_FULLBLOCK_MOE=$EXO_DSV4_ROWSEQ_FULLBLOCK_MOE"
+  [ -n "${EXO_DSV4_MOE_PARTS_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_PARTS_ROWSEQ=$EXO_DSV4_MOE_PARTS_ROWSEQ"
+  [ -n "${EXO_DSV4_MOE_ISOLATION_DUMP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_ISOLATION_DUMP=$EXO_DSV4_MOE_ISOLATION_DUMP"
+  [ -n "${EXO_DSV4_LAYER_HASH_DUMP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LAYER_HASH_DUMP=$EXO_DSV4_LAYER_HASH_DUMP"
+  [ -n "${EXO_DSV4_LAYER_HASH_MAX_POS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LAYER_HASH_MAX_POS=$EXO_DSV4_LAYER_HASH_MAX_POS"
+  [ -n "${EXO_DSV4_LAYER_HASH_SUBOPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_LAYER_HASH_SUBOPS=$EXO_DSV4_LAYER_HASH_SUBOPS"
+  [ -n "${EXO_DSV4_SPEC_RB_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_RB_LOG=$EXO_DSV4_SPEC_RB_LOG"
+  # Long-ctx MTP gate + near-tie re-verify (see defaults block above).
+  [ -n "${EXO_DSV4_MTP_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MAX_CTX=$EXO_DSV4_MTP_MAX_CTX"
+  [ -n "${EXO_DSV4_MTP_TIE_REVERIFY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY=$EXO_DSV4_MTP_TIE_REVERIFY"
+  [ -n "${EXO_DSV4_MTP_TIE_REVERIFY_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY_EPS=$EXO_DSV4_MTP_TIE_REVERIFY_EPS"
+  [ -n "${EXO_DSV4_MTP_TIE_REVERIFY_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIE_REVERIFY_LOG=$EXO_DSV4_MTP_TIE_REVERIFY_LOG"
+  # Row-sequential verify attention (the losslessness root fix).
+  [ -n "${EXO_DSV4_VERIFY_ROWSEQ:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ=$EXO_DSV4_VERIFY_ROWSEQ"
+  [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX=$EXO_DSV4_VERIFY_ROWSEQ_MIN_CTX"
+  [ -n "${EXO_DSV4_VERIFY_ROWSEQ_MAX_L:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_ROWSEQ_MAX_L=$EXO_DSV4_VERIFY_ROWSEQ_MAX_L"
+  # Verify-path batching (indexer-stream-sharing, default OFF). Must be
+  # exported explicitly when set — a silently-dropped flag has burned us
+  # before (the env allowlist gate drops anything not listed here).
+  [ -n "${EXO_DSV4_VERIFY_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH=$EXO_DSV4_VERIFY_BATCH"
+  # Depth gate: the ctx threshold below which verify-batch stays OFF.
+  [ -n "${EXO_DSV4_VERIFY_BATCH_MIN_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_BATCH_MIN_CTX=$EXO_DSV4_VERIFY_BATCH_MIN_CTX"
+  # min_p tail-clip for the temp>0 MTP correction/bonus sampling (default 0.05
+  # in code = the DSv4 card value; set 0 to disable for A/B). Stops MTP
+  # committing extreme-tail tokens that seed structured-output degeneration.
+  [ -n "${EXO_DSV4_MTP_MIN_P:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_MIN_P=$EXO_DSV4_MTP_MIN_P"
+  # γ=3 c=2 bistability tracer (see dsv4_mtp.py::_draft_tokens_batched).
+  # When 1, writes /tmp/dsv4_c2_trace_pid<PID>.jsonl with per-step
+  # timestamps + per-stream tokens. NOT a production knob — diagnostic
+  # only. Inserts mx.eval() at every chain-step boundary, which acts
+  # like a per-step fence, so do NOT validate fixes with this on.
+  [ -n "${EXO_DSV4_C2_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_C2_TRACE=$EXO_DSV4_C2_TRACE"
+  # Degeneration-hunt per-cycle spec trace (2026-05-29). When 1,
+  # _speculative_next dumps committed tokens + cache offsets + n_accepted
+  # per cycle to /tmp/dsv4_spec_trace_pid<PID>.jsonl on rank 0. Diagnostic
+  # only — pairs with a plain-greedy capture to find first divergence.
+  [ -n "${EXO_DSV4_SPEC_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_TRACE=$EXO_DSV4_SPEC_TRACE"
+  [ -n "${EXO_DSV4_SDPA_CALL_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SDPA_CALL_PROFILE=$EXO_DSV4_SDPA_CALL_PROFILE"
+  [ -n "${EXO_DSV4_DECODE_COLLECTIVE_PROFILING:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DECODE_COLLECTIVE_PROFILING=$EXO_DSV4_DECODE_COLLECTIVE_PROFILING"
+  # c>=2 degen-kill WEDGE tracer (2026-07-03). When 1, batch_generate.step
+  # logs per-rank batch size + every generator eviction so a cross-rank diff
+  # shows whether a mid-batch degen eviction (and its B-transition) is
+  # symmetric. Diagnostic only.
+  [ -n "${EXO_DSV4_WEDGE_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_WEDGE_TRACE=$EXO_DSV4_WEDGE_TRACE"
+  [ -n "${EXO_DSV4_WEDGE_INJECT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_WEDGE_INJECT=$EXO_DSV4_WEDGE_INJECT"
+  # Runner hang-watchdog timeout (supervisor.py). Default 45s in-code; lower
+  # only to validate the watchdog (a short value risks false kills under
+  # legitimately slow steps).
+  [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
+  # c=2 corruption ROOT-CAUSE fix (2026-07-03): fp32 activations make the
+  # DSv4 forward batch-invariant (bf16's batch-size-dependent rounding flips
+  # ~17% of argmaxes at B=2 vs B=1 -> temp>0 repetition degeneration). Weights
+  # stay bf16/quantized so the weight-bandwidth-bound cost is ~unchanged.
+  [ -n "${EXO_DSV4_FP32_ACT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FP32_ACT=$EXO_DSV4_FP32_ACT"
+  [ -n "${EXO_DSV4_FP32_COLL_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FP32_COLL_LOG=$EXO_DSV4_FP32_COLL_LOG"
+  [ -n "${EXO_DSV4_VERIFY_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_TRACE=$EXO_DSV4_VERIFY_TRACE"
+  [ -n "${EXO_DSV4_VERIFY_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_VERIFY_DIAG=$EXO_DSV4_VERIFY_DIAG"
+  # Phase 1.2 token-tree alpha distribution probe. When 1, draft_tokens
+  # logs MTP top-5 IDs and _speculative_next joins them with verify-target
+  # argmax to /tmp/dsv4_tree_alpha_probe_pid<PID>.jsonl on rank 0 only.
+  [ -n "${EXO_DSV4_TREE_ALPHA_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_ALPHA_PROBE=$EXO_DSV4_TREE_ALPHA_PROBE"
+  # Token-tree drafting (Phases 2-7 of the May-19 plan). When 1,
+  # _speculative_next routes to _speculative_next_tree which uses K^gamma
+  # top-K MTP expansion + tree-attention verify instead of the linear
+  # gamma chain. K is set by EXO_DSV4_TREE_K (default 2). Greedy temp=0
+  # only; temp>0 falls back to the linear path.
+  [ -n "${EXO_DSV4_TREE_DRAFT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DRAFT=$EXO_DSV4_TREE_DRAFT"
+  [ -n "${EXO_DSV4_TREE_K:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_K=$EXO_DSV4_TREE_K"
+  # Greedy tree: only top-1 d1 expands d2 children. Cuts L_q=7 -> L_q=5
+  # for K=2 gamma=2. Trades worse-case acceptance for cheaper verify.
+  [ -n "${EXO_DSV4_TREE_GREEDY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_GREEDY=$EXO_DSV4_TREE_GREEDY"
+  # One-shot first-cycle diagnostic for the tree-verify side channel.
+  # When 1, dsv4_mtp.py logs n_nodes/parent_idx/depth/mask.shape/positions
+  # on the first cycle to ~/exo.log. Default off; off-state is bit-exact.
+  [ -n "${EXO_DSV4_TREE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TREE_DEBUG=$EXO_DSV4_TREE_DEBUG"
+  [ -n "${EXO_DSV4_PSCACHE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PSCACHE_DEBUG=$EXO_DSV4_PSCACHE_DEBUG"
+  [ -n "$EXO_DSV4_INDEXER_WINDOW" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW=$EXO_DSV4_INDEXER_WINDOW"
+  [ -n "$EXO_DSV4_INDEXER_WINDOW_LATE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_WINDOW_LATE=$EXO_DSV4_INDEXER_WINDOW_LATE"
+  # Tiled-P indexer score block size (mlx-lm deepseek_v4 _indexer_score_tiled).
+  # >0 caps the (B,64,L,P) indexer transient by processing pooled-P in blocks —
+  # bounds the high-context prefill alloc spikes. Default OFF in the model.
+  [ -n "${EXO_DSV4_INDEXER_PBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_PBLOCK=$EXO_DSV4_INDEXER_PBLOCK"
+  # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
+  [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
+  # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).
+  [ -n "${MLX_LM_SDPA_ROWSPLIT:-}" ] && EXO_ENV="$EXO_ENV MLX_LM_SDPA_ROWSPLIT=$MLX_LM_SDPA_ROWSPLIT"
+  # JACCL per-call trace (Phase 0 c=2 corruption diagnostic). When set
+  # to 1, every collective entry writes one line to
+  # /tmp/jaccl_trace_rank_${MLX_RANK}.log on each runner host. Use
+  # for finding the first cross-rank divergence in the call sequence;
+  # don't leave on permanently (fflush per call slows decode).
+  [ -n "${JACCL_TRACE_CALLS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_CALLS=$JACCL_TRACE_CALLS"
+  # Skip the cross-rank ack_sync_pre round-trip when the prior
+  # collective on the same MeshGroup was its own ack_sync_post. At
+  # gamma=2 100K decode this saves ~8 ms/forward (172 all_reduces ×
+  # 50 us per skipped pre). Off by default; set to 1 to enable.
+  # Implementation: mlx commit 0b8aca69 (mesh_impl.h fastskip).
+  [ -n "${EXO_JACCL_ACK_PRE_FASTSKIP:-}" ] && EXO_ENV="$EXO_ENV EXO_JACCL_ACK_PRE_FASTSKIP=$EXO_JACCL_ACK_PRE_FASTSKIP"
+  # Per-call output-hash diagnostic; orthogonal to JACCL_TRACE_CALLS
+  # gating but uses the same trace file. Identifies transport
+  # non-bit-exactness as a divergent hash at a specific call_id.
+  [ -n "${JACCL_TRACE_HASH:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_HASH=$JACCL_TRACE_HASH"
+  # Per-call real steady_clock transport-duration diagnostic (2026-08-21);
+  # orthogonal to JACCL_TRACE_CALLS gating but uses the same trace file,
+  # same as JACCL_TRACE_HASH above. Appends transport_us=<float> to each
+  # collective's trace line, timed tightly around the actual ring-reduce
+  # transport call (mesh.cpp MeshGroup::all_sum). Built to decompose the
+  # moe.all_sum 34x software-overhead gap (see
+  # docs/offline-collective-microbenchmark-2026-08-21.md) into real
+  # jaccl-internal transport time vs overhead outside this call.
+  [ -n "${JACCL_TRACE_TIMING:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_TIMING=$JACCL_TRACE_TIMING"
+  # Per-stage RDMA progress logging (mesh_impl all_reduce +
+  # drain_acks). Writes [jaccl-prog] lines to ~/exo.log stderr.
+  # Localizes a wedge to a specific RDMA stage: ENTER /
+  # PREFILL_DONE / POLL / CQE / DATA_DONE / ack POSTED / ack
+  # DRAINED / DONE.
+  [ -n "${JACCL_TRACE_PROGRESS:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_PROGRESS=$JACCL_TRACE_PROGRESS"
+  # MLX_JACCL_ACK_SYNC_PRE: gate the ce5c64fd pre-lambda ack barrier.
+  # Default OFF. Set to 1 to enable the start-of-lambda cross-rank
+  # ACK round-trip (one extra ACK_SEND/RECV pair on the dedicated
+  # ACK QP per collective). Intended to close the inter-lambda race
+  # where peer SEND beats our recv-post on the data QP and UC
+  # silently drops. Requires the bootstrap barrier in MeshGroup
+  # ctors (mlx commit 3882458d on try/ack-qp-isolated). Off-by-
+  # default preserves the post-Plan-A baseline; bench-time opt-in
+  # via this env. See mlx/mlx/distributed/jaccl/mesh_impl.h
+  # jaccl_ack_sync_pre_enabled() and the long doc block at the top.
+  # Default flipped ON 2026-07-04: measured to keep c>=2 wedge failures
+  # CLEANER — ACK_SYNC_PRE=1 self-heals with 0 IOConnectUnmapMemory GPU
+  # faults; =0 saw the peer GPU-fault and the re-place stick in
+  # RunnerConnecting. Pairs with the StallWatch UC-drop recovery
+  # (mlx a5be4403). Set =0 to A/B the old off-by-default behavior.
+  : "${MLX_JACCL_ACK_SYNC_PRE:=1}"
+  [ -n "${MLX_JACCL_ACK_SYNC_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_SYNC_PRE=$MLX_JACCL_ACK_SYNC_PRE"
+  # MLX_JACCL_ACK_RETRANSMIT_US: how long a send waits before
+  # retransmitting a frame the peer hasn't acknowledged. jaccl's own
+  # default is 500000 (500ms), chosen as "far above a healthy sub-ms ACK,
+  # so it only fires on genuine loss" -- see jaccl_ack_retransmit_us() in
+  # mlx/mlx/distributed/jaccl/lib/jaccl/mesh_impl.h.
+  #
+  # 2026-08-15 (design doc Section 51): that assumption does not hold on
+  # this cluster's PP decode hot path, where the timer is NOT a rare
+  # backstop but a per-token tax. Measured over one 100K-context run:
+  #   barrier latency <100ms : 29101   (healthy path is 71-122 MICROseconds)
+  #   barrier latency  >1s   :  1403   (4.5% of barriers)
+  # Each slow one is the same shape on both ranks -- rank0 posts its send
+  # in ~45us, immediately sees peer_got_count=0/1, waits the FULL 500ms
+  # quiet timer, retransmits (to_resend_count=1), and the retransmit
+  # succeeds. That is ~1403 x 0.5s = ~700s of pure stall in a single run,
+  # and it dominated decode throughput (0.48 tok/s at 100K vs 18.01 tok/s
+  # at 300K on the identical config -- a 37x spread explained entirely by
+  # how many of these stalls a run happened to hit).
+  #
+  # The underlying loss is NOT wire loss (en3 shows Ierrs 0 / Oerrs 0 /
+  # Coll 0, link healthy 8X @ 10Gbps) -- it is a software race: every
+  # retransmit is num_chunks=1 (bulk 2049-chunk transfers lose nothing),
+  # and rank0 loses 3.7x more than rank1, i.e. the side that races ahead
+  # of its peer's recv-post. mesh_impl.h's own ack_sync_pre comment names
+  # this exact failure ("peer SEND lands at our empty data-QP recv FIFO
+  # and UC silently drops") but that mitigation is wired into COLLECTIVE
+  # lambdas, not the p2p send()/recv() path PP decode uses.
+  #
+  # Lowering this does not remove the race -- it collapses the cost of
+  # each occurrence from 500ms to a few ms. The proper root-cause fix
+  # (extending the ack_sync_pre pattern to the p2p path) is tracked
+  # separately. Retransmits are cheap and idempotent here (single-chunk
+  # control frames on a dedicated QP), so a short timer mainly trades a
+  # few redundant sends for a large latency win. Set to 500000 to restore
+  # jaccl's historical default.
+  # EXPERIMENT RESULT (2026-08-15): 10000 (10ms) was tried and REVERTED --
+  # it BREAKS generation outright. At 10ms the timer fires below the real
+  # round-trip for these transfers, so we retransmit frames that were merely
+  # IN FLIGHT, not lost. The duplicates then arrive after the receiver has
+  # advanced and are discarded as stale: 184 "recv() discarded stale
+  # message" events (baseline: ZERO), with the signature
+  # received_seq=410 expected_seq=411 -- off-by-one duplicates from the
+  # previous call. Net effect was 0 completion tokens and needle=NO at BOTH
+  # 100K and 300K, i.e. no output at all, versus a working baseline.
+  # Left at jaccl's default; any retune must stay above the real RTT and be
+  # re-validated with the needle check, not just with a throughput number.
+  : "${MLX_JACCL_ACK_RETRANSMIT_US:=500000}"
+  [ -n "${MLX_JACCL_ACK_RETRANSMIT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_ACK_RETRANSMIT_US=$MLX_JACCL_ACK_RETRANSMIT_US"
+  # MLX_JACCL_RECONNECT_FRESH: in-process device-context rebuild — the warmup
+  # QP-flake fix (mlx e399ecfb); ~0.15s vs a 90s re-place. Validated prod default.
+  : "${MLX_JACCL_RECONNECT_FRESH:=1}"
+  [ -n "${MLX_JACCL_RECONNECT_FRESH:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RECONNECT_FRESH=$MLX_JACCL_RECONNECT_FRESH"
+  # MLX_JACCL_RELIABLE_OPTIMISTIC: v2 small-collective path (no TCP barrier),
+  # +29% decode @4K (mlx 57ffb39a). PP placements must keep this OFF —
+  # PipelineLastLayer send/recv/all_gather ride the model group.
+  : "${MLX_JACCL_RELIABLE_OPTIMISTIC:=1}"
+  [ -n "${MLX_JACCL_RELIABLE_OPTIMISTIC:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_OPTIMISTIC=$MLX_JACCL_RELIABLE_OPTIMISTIC"
+  # Pool-write donation threshold (session-4 pool fixes) — validated prod value.
+  : "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:=8388608}"
+  [ -n "${EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES=$EXO_DSV4_POOL_DEFER_COPY_MAX_BYTES"
+  # EXO_DSV4_POOL_GROW_STEP: BatchPoolingCache growth chunking. DEFAULT FLIPPED
+  # to 256 in mlx-lm on 2026-08-23 after the live A/B confirmed +3.46% tok/s
+  # @100K and +9.79% @352.6K -- see docs/p3-followup-poolgrow-ab-2026-08-23.md
+  # Part III. Set EXO_DSV4_POOL_GROW_STEP=1 for the bit-identical legacy
+  # exact-fit growth (the A/B's arm A) -- that is the escape hatch and the
+  # reference arm for the byte-identity gates.
+  # EXO_DSV4_POOL_GROW_MIN (default 512 in mlx-lm) and
+  # EXO_DSV4_POOL_GROW_MAX_RATIO (default 4) are the neutrality gates: never
+  # pad below index_topk valid columns, and never pad a ratio-128 pool
+  # (CompressedAttention has no top-k, so it would attend the pads).
+  # Deliberately NO ``: "${VAR:=default}"`` lines here -- the mlx-lm module
+  # constants carry the defaults, so an unset var leaves the production
+  # launch command line unchanged and opt-in forwarding stays exact.
+  [ -n "${EXO_DSV4_POOL_GROW_STEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_STEP=$EXO_DSV4_POOL_GROW_STEP"
+  [ -n "${EXO_DSV4_POOL_GROW_MIN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MIN=$EXO_DSV4_POOL_GROW_MIN"
+  [ -n "${EXO_DSV4_POOL_GROW_MAX_RATIO:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_GROW_MAX_RATIO=$EXO_DSV4_POOL_GROW_MAX_RATIO"
+  # EXO_DSV4_HC_EXPAND_KERNEL: fused Metal kernel for HyperConnection expand
+  # (layer.attn_residual / ffn_residual). Env-gated in mlx-lm/mlx_lm/models/
+  # hyper_connection.py; the kernel path itself is bit-identical to the op
+  # path when the kernel is disabled (verified max_abs=0.0 vs the pre-kernel
+  # code path when EXO_DSV4_HC_EXPAND_KERNEL is unset). DEFAULT FLIPPED TO
+  # 1 on 2026-08-24 after the live A/B measured +3.87% prefill @70.6K real
+  # tokens (arm A mean 359.89 tok/s, arm B mean 373.80 tok/s, 2 runs each,
+  # needle FALCON-MERCURY-7749 recovered exact on all 4 probes) -- see
+  # docs/hc-expand-kernel-ab-2026-08-24.md. Set EXO_DSV4_HC_EXPAND_KERNEL=0
+  # to revert to the pre-kernel op path (bit-identical, no perf gain).
+  : "${EXO_DSV4_HC_EXPAND_KERNEL:=1}"
+  [ -n "${EXO_DSV4_HC_EXPAND_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_EXPAND_KERNEL=$EXO_DSV4_HC_EXPAND_KERNEL"
+  # EXO_DSV4_HC_COLLAPSE_KERNEL: fused Metal precursor kernel for the
+  # HyperConnection collapse (layer.attn_hc / layer.ffn_hc), env-gated in
+  # mlx-lm/mlx_lm/models/hyper_connection.py. Default OFF is bit-identical to
+  # the classic astype+rms_norm+matmul precursor path (the gate is read once
+  # at import, so unset => the kernel is never even compiled). DEFAULT
+  # FLIPPED TO ON on 2026-08-25 after the live 2x2 A/B passed all
+  # pre-registered framings (+1.89% mean prefill @ ~70.5K real tokens).
+  # Set EXO_DSV4_HC_COLLAPSE_KERNEL=0 to revert to the classic
+  # astype+rms_norm+matmul precursor path; see
+  # docs/hc-collapse-kernel-ab-2026-08-25.md.
+  : "${EXO_DSV4_HC_COLLAPSE_KERNEL:=1}"
+  [ -n "${EXO_DSV4_HC_COLLAPSE_KERNEL:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_HC_COLLAPSE_KERNEL=$EXO_DSV4_HC_COLLAPSE_KERNEL"
+  # Stall sampler: cheap reboot-durable stack dumps when step() stops returning.
+  : "${EXO_STALL_SAMPLER_SECONDS:=10}"
+  [ -n "${EXO_STALL_SAMPLER_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_STALL_SAMPLER_SECONDS=$EXO_STALL_SAMPLER_SECONDS"
+  # PP-spec finish-decision diagnostic (2026-07-19, default off): logs
+  # [PP_SPEC_FINISH] lines (per-rank call_n + is_eos decision +
+  # runner status transitions) to investigate the stream-never-closed
+  # hang. Distinct from EXO_TRACING_ENABLED's much noisier per-cycle
+  # wire-protocol trace in pp_speculation.py. Set =1 only when actively
+  # chasing that bug -- see references/pp-chained-mtp-draft-and-dspark.md.
+  [ -n "${EXO_PP_SPEC_FINISH_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_SPEC_FINISH_LOG=$EXO_PP_SPEC_FINISH_LOG"
+  # MLX_JACCL_CONFIRMED_BARRIER: reliable ack barrier over the TCP coordinator
+  # instead of the UC ack exchange (which wedges on a lost completion).
+  # Deterministic recv-side wedge PREVENTION for c>=2. Default off (adds a
+  # coordinator round-trip per ack barrier); set =1 for c>=2 correctness.
+  [ -n "${MLX_JACCL_CONFIRMED_BARRIER:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER=$MLX_JACCL_CONFIRMED_BARRIER"
+  # Split gates to isolate pre vs post confirmed barrier (pre is entangled with
+  # RDMA data-recv ordering; post runs after data drains).
+  [ -n "${MLX_JACCL_CONFIRMED_BARRIER_PRE:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_PRE=$MLX_JACCL_CONFIRMED_BARRIER_PRE"
+  [ -n "${MLX_JACCL_CONFIRMED_BARRIER_POST:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_CONFIRMED_BARRIER_POST=$MLX_JACCL_CONFIRMED_BARRIER_POST"
+  # MLX_JACCL_SHARDING_MODE: tells jaccl's C++ MeshGroup ctor which sharding
+  # mode this runner is in, so it allocates only the QPs that mode actually
+  # uses. The Thunderbolt RDMA HCA reports max_qp=3 (verified via
+  # `ibv_devinfo -v` on both nodes); the ctor otherwise builds FOUR dedicated
+  # QP types per peer (data + ack + pool + p2p_retry) and the 4th
+  # ibv_create_qp always fails EBUSY, which _init_jaccl_with_backoff then
+  # retries forever (that backoff was written for transient leaked-QP EBUSY,
+  # not this structural cause) -- runners hang in PREPARING. PP drops the
+  # pool QP, TP drops the p2p_retry QP; each lands at exactly 3.
+  # Mirrors DSV4_SHARDING so there is a single source of truth for the mode.
+  EXO_ENV="$EXO_ENV MLX_JACCL_SHARDING_MODE=${DSV4_SHARDING:-Tensor}"
+  # MLX_JACCL_RELIABLE_DATA: reliable ARQ all_reduce data path (2-rank) — chunks
+  # carry a seq header, receiver assembles + dedups + defers the reduce, and a
+  # coordinator bitmask barrier retransmits missing chunks. Eliminates the
+  # data-phase all_reduce STALLED wedge. Gated (perf cost + core-path change).
+  : "${MLX_JACCL_RELIABLE_DATA:=1}" # validated prod default (task #23/24 wedge fix)
+  [ -n "${MLX_JACCL_RELIABLE_DATA:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_DATA=$MLX_JACCL_RELIABLE_DATA"
+  # MLX_JACCL_RELIABLE_MAX_SZ: cap reliable chunk size class (0=4KB..7=512KB).
+  # Larger => fewer chunks => faster, but must still reliably COMPLETE on
+  # librdma (large UC sends >=64KB/sz>=4 stick). Bisect for the sweet spot.
+  : "${MLX_JACCL_RELIABLE_MAX_SZ:=2}" # 16KB — MUST stay <=2 (>=sz4 UC sends stick)
+  [ -n "${MLX_JACCL_RELIABLE_MAX_SZ:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_MAX_SZ=$MLX_JACCL_RELIABLE_MAX_SZ"
+  # MLX_JACCL_RELIABLE_IDLE_US: sleep per idle drain poll (anti-CPU-spin).
+  [ -n "${MLX_JACCL_RELIABLE_IDLE_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_IDLE_US=$MLX_JACCL_RELIABLE_IDLE_US"
+  # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
+  # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
+  # waitUntilSignaledValue (which traps into an UNINTERRUPTIBLE kernel GPU-wait
+  # that ignores its timeout when a c>=2 collective is wedged). Polling lets a
+  # wedged PEER self-abort (surface a captured stream exception, or hit the
+  # total timeout) and reach group.reconnect() for in-place transport recovery
+  # instead of hanging until the _check_hang SIGKILL. TIMEOUT_MS default 20000
+  # (< the 45s watchdog and >> any healthy/warmup wait; keeps the primary's
+  # StallWatch->reconnect->coordinator-barrier wait for the peer well under the
+  # watchdog). POLL_US = sleep granularity (default 50), SPIN = spins before
+  # sleeping (default 2000). POLL_US=0 restores the legacy blocking wait.
+  : "${MLX_EVENT_WAIT_TIMEOUT_MS:=20000}"
+  # PP mode: the first decode step's p2p recv_like in PipelineLastLayer
+  # blocks waiting for rank 1 to finish draining the prefill pipeline +
+  # its decode forward. At high context (500K) this takes >20s (rank 1's
+  # last attention microbatches over the full KV cache). The coord
+  # collective fix (EXO_PP_NO_COORD_COLLECTIVE) removes the mx_any
+  # rendezvous, but the p2p handoff itself is an UNAVOIDABLE rendezvous —
+  # rank 0 can't proceed until rank 1 sends. Raise the event timeout to
+  # 120s for PP so the legitimate pipeline-drain skew doesn't self-abort.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    MLX_EVENT_WAIT_TIMEOUT_MS=1800000
+  fi
+  [ -n "${MLX_EVENT_WAIT_TIMEOUT_MS:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_TIMEOUT_MS=$MLX_EVENT_WAIT_TIMEOUT_MS"
+  # PP mode: disable coord collectives (mx_any / agree_on_*) by default. Under
+  # MlxRing (TCP backend), group.split() throws, so coord collectives would
+  # share the full PP group's TCP socket with the p2p send/recv. The mx_any
+  # gate is an unnecessary rendezvous for single-request PP (both ranks
+  # serve the same request; the p2p handoff already synchronizes them).
+  # Removing it eliminates one ~20s skew point; the 120s timeout above
+  # covers the remaining one (p2p recv).
+  #
+  # OVERRIDABLE 2026-07-31 (was unconditionally forced to 1): confirmed via
+  # direct source read that jaccl's group.split() is fully implemented
+  # (mlx/mlx/distributed/jaccl/lib/jaccl/mesh.cpp MeshGroup::split(), real
+  # QP allocation -- NOT a stub) -- only MlxRing's split() throws, contrary
+  # to what this comment originally implied about jaccl too. The cluster's
+  # DEFAULT transport (DSV4_INSTANCE_META unset -> MlxJaccl, see line 2297)
+  # is real RDMA, not the TCP fallback this gating was reasoned about for.
+  # Also confirmed the historical jaccl+PP p2p stall ("[jaccl] recv
+  # STALLED... UC completion lost") that would have made testing this
+  # dangerous was root-caused (UC send-before-recv-posted race) and fixed
+  # in mlx commit c168e2f4b, already deployed. Prerequisite work for
+  # supporting EXO_MAX_CONCURRENT_REQUESTS>1 under PP needs agree_on_tasks/
+  # agree_on_cancellations to actually run across ranks -- testing that
+  # requires the ability to turn this gate back on. Set
+  # EXO_PP_NO_COORD_COLLECTIVE=0 explicitly to test; unset/anything else
+  # keeps the safe default (1) for Pipeline mode.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    : "${EXO_PP_NO_COORD_COLLECTIVE:=1}"
+    EXO_ENV="$EXO_ENV EXO_PP_NO_COORD_COLLECTIVE=$EXO_PP_NO_COORD_COLLECTIVE"
+  fi
+  # Batched-PP sharding design, Phase 0.5 (docs/hybrid-pp-prefill-tp-
+  # decode-design-2026-08-04.md): opt-in metadata-framed PP transport
+  # (pp_metaframe.py), swapping today's ambient-mutable-state
+  # PipelineFirstLayer/PipelineLastLayer for MetaFramedPipelineFirstLayer/
+  # MetaFramedPipelineLastLayer. Validated LOCALLY (simulated 2-rank,
+  # exact parity, 9/9 tests) but NOT YET A/B'd on the real cluster --
+  # this launcher line exists so that A/B can happen, not because the
+  # flag is production-ready. Default OFF (unset/0 keeps today's
+  # trusted transport). MUST be set IDENTICALLY on both nodes --
+  # pp_metaframe.py's handshake_metaframe_protocol() fails loudly at
+  # warmup (not a silent hang) if the two ranks disagree, but that
+  # loud failure still means the launch failed, so get it right here.
+  # Does NOT change EXO_MAX_CONCURRENT_REQUESTS=1 below -- PP is
+  # single-request-only regardless of which transport is active.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    : "${EXO_PP_METAFRAME:=0}"
+    EXO_ENV="$EXO_ENV EXO_PP_METAFRAME=$EXO_PP_METAFRAME"
+  fi
+  # Phase 1 batched-decode (design doc, Section 9): opt-in scheduler
+  # (pp_batched_decode_glue.py/pp_batched_decode_runtime.py) with its
+  # own real, per-request slot-based state (BatchedCacheRouter,
+  # SchedulerCore) -- a STRUCTURALLY DIFFERENT design from the
+  # singular-instance-attribute hazard the concurrency gate directly
+  # below exists to prevent (see that gate's own comment). Verified
+  # this session via a real 2-OS-process test exercising exactly the
+  # N=2-concurrent-request scenario the gate below exists to block
+  # for the OTHER PP paths (test_pp_batched_decode_glue_subprocess.py:
+  # admit request A, admit request B mid-stream while A is already
+  # decoding, decode both together, evict A via a real wire round-
+  # trip, continue B solo -- matching two independent serial golden
+  # references exactly). Requires EXO_PP_METAFRAME=1 as a prerequisite
+  # (the batched layers are built on top of the metaframe transport,
+  # not a replacement for it -- see utils_mlx.py's own EXO_PP_
+  # BATCHED_DECODE branch, which only installs the batched layers
+  # when EXO_PP_METAFRAME=1 is also set). Default OFF -- this
+  # launcher line exists so a real cluster A/B CAN happen, not
+  # because the path is production-ready; requires the user's own
+  # separate explicit go-ahead per standing rule before actually
+  # setting it to 1 for a live run.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    : "${EXO_PP_BATCHED_DECODE:=0}"
+    EXO_ENV="$EXO_ENV EXO_PP_BATCHED_DECODE=$EXO_PP_BATCHED_DECODE"
+  fi
+  # Per-token decode phase attribution (Section 59/60). Diagnostic
+  # only, default off. Must be threaded explicitly: the runner
+  # environment is an ALLOWLIST, so a var that is merely exported in
+  # the launching shell silently never reaches the runner process --
+  # which is exactly how the first attempt to use this tracer produced
+  # a clean deploy with no trace output at all.
+  [ -n "${EXO_DECODE_PHASE_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DECODE_PHASE_TRACE=$EXO_DECODE_PHASE_TRACE"
+  # CORRECTNESS, not a perf tradeoff (2026-07-19, root-caused the
+  # 2026-07-18 stream-never-closed hang): PP mode's speculative decode
+  # path (pp_dspark_decode_loop and friends) stores its per-request
+  # generator/uid state in SINGULAR instance attributes on
+  # ExoBatchGenerator (self._pp_spec_gen, self._pp_spec_uid) with no
+  # per-task keying whatsoever. A second concurrent request silently
+  # OVERWRITES the first's in-flight generator reference -- the first
+  # request's task is orphaned forever (runner wedges at RunnerRunning
+  # permanently) and the second request's own output is corrupted
+  # (confirmed live: it inherited stale KV/pipeline state from the
+  # first request's already-advanced forward pass). EXO_PP_NO_COORD_
+  # COLLECTIVE=1 above has documented "PP is single-request-only" as a
+  # constraint for a long time, but nothing in the runner's dispatch
+  # path actually ENFORCED it -- EXO_MAX_CONCURRENT_REQUESTS defaults
+  # to 8 (shared/constants.py) and was never overridden here. Force it
+  # to 1 for Pipeline mode specifically; do NOT let a higher
+  # user-supplied value survive for this mode, since this is a data-
+  # corruption bug, not a throughput knob. Loud log line since this
+  # silently overrides whatever the caller passed in.
+  #
+  # EXCEPTION (2026-08-05, design doc Section 9): when
+  # EXO_PP_BATCHED_DECODE=1 is genuinely active, relax the cap to 2 --
+  # the batched-decode scheduler is the one PP path with real,
+  # verified N=2-safe per-request state (see the comment above this
+  # gate). Every OTHER Pipeline-mode path (PP-spec, plain serial PP)
+  # still gets the original cap=1 enforcement below, completely
+  # unchanged -- this exception applies ONLY when the batched-decode
+  # flag is explicitly on, never as a default relaxation for Pipeline
+  # mode generally.
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    if [ "${EXO_PP_BATCHED_DECODE:-0}" = "1" ]; then
+      if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "2" ]; then
+        echo "  ⚠️  DSV4_SHARDING=Pipeline + EXO_PP_BATCHED_DECODE=1 forces EXO_MAX_CONCURRENT_REQUESTS=2 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- the batched-decode scheduler's max_concurrency is 2 (see BatchedDecodeSession.new's default); do not let a higher value silently overshoot the scheduler's own real slot capacity."
+      fi
+      EXO_MAX_CONCURRENT_REQUESTS=2
     else
-        NODE_PEERS="/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID"
+      if [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && [ "${EXO_MAX_CONCURRENT_REQUESTS}" != "1" ]; then
+        echo "  ⚠️  DSV4_SHARDING=Pipeline forces EXO_MAX_CONCURRENT_REQUESTS=1 (was ${EXO_MAX_CONCURRENT_REQUESTS}) -- PP's shared per-rank decode-loop state cannot survive >1 concurrent request without data corruption/wedging."
+      fi
+      EXO_MAX_CONCURRENT_REQUESTS=1
     fi
-    # LAUNCH_TAIL is single-quote-assigned so $!/$EXO_PID stay LITERAL until the
-    # node's zsh runs them (double-quoted \$ escapes expanded locally when this
-    # string was interpolated into ssh args — caffeinate got an empty pid).
-    LAUNCH_TAIL='& EXO_PID=$!; caffeinate -s -w $EXO_PID 2>/dev/null & wait $EXO_PID'
-    LAUNCH_CMD="cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1 $LAUNCH_TAIL"
-    # Generate the file LOCALLY (printf does not expand $ in arguments) and scp
-    # it — a remote unquoted heredoc would expand $!/$EXO_PID a second time.
-    RELAUNCH_TMP=$(mktemp)
-    {
-        printf '#!/bin/zsh\n'
-        printf '# GENERATED by start_cluster.sh %s — do not hand-edit; env changes belong\n' "$(date +%Y-%m-%d)"
-        printf '# in start_cluster.sh (single source of truth). This script only restarts\n'
-        printf '# the exo PROCESS; it does NOT deploy code or place models (run\n'
-        printf '# start_cluster.sh for the full canonical bring-up incl. pinned DSv4).\n'
-        # Quoted heredoc: nothing expands locally; the body is literal zsh
-        # that runs on the node.
-        cat <<'RELAUNCH_BODY'
+  fi
+  [ -n "${EXO_MAX_CONCURRENT_REQUESTS:-}" ] && EXO_ENV="$EXO_ENV EXO_MAX_CONCURRENT_REQUESTS=$EXO_MAX_CONCURRENT_REQUESTS"
+  [ -n "${MLX_EVENT_WAIT_POLL_US:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_POLL_US=$MLX_EVENT_WAIT_POLL_US"
+  [ -n "${MLX_EVENT_WAIT_SPIN:-}" ] && EXO_ENV="$EXO_ENV MLX_EVENT_WAIT_SPIN=$MLX_EVENT_WAIT_SPIN"
+  # MLX_DIAG_HOLD_WEDGE: diagnostic only — hold a c>=2 wedge open (no
+  # reconnect/re-place) so the peer can be sampled in its real stuck location.
+  [ -n "${MLX_DIAG_HOLD_WEDGE:-}" ] && EXO_ENV="$EXO_ENV MLX_DIAG_HOLD_WEDGE=$MLX_DIAG_HOLD_WEDGE"
+  # MLX_STREAM_QOS: env-gated QoS pin for mlx stream worker threads
+  # (see scheduler.h). user_initiated mitigates the rank-0 comm-stream
+  # poll-stall under MTP load. Default off.
+  [ -n "${MLX_STREAM_QOS:-}" ] && EXO_ENV="$EXO_ENV MLX_STREAM_QOS=$MLX_STREAM_QOS"
+  # MLX_STREAM_RT[+_COMPUTATION_US/_CONSTRAINT_US/_PERIOD_US]: Mach
+  # real-time time-constraint policy on stream worker threads. Hard
+  # contract with the scheduler — kernel will not preempt during the
+  # computation window. Fix for the asymmetric JACCL poll-stall.
+  [ -n "${MLX_STREAM_RT:-}" ] && EXO_ENV="$EXO_ENV MLX_STREAM_RT=$MLX_STREAM_RT"
+  [ -n "${MLX_STREAM_RT_COMPUTATION_US:-}" ] && EXO_ENV="$EXO_ENV MLX_STREAM_RT_COMPUTATION_US=$MLX_STREAM_RT_COMPUTATION_US"
+  [ -n "${MLX_STREAM_RT_CONSTRAINT_US:-}" ] && EXO_ENV="$EXO_ENV MLX_STREAM_RT_CONSTRAINT_US=$MLX_STREAM_RT_CONSTRAINT_US"
+  [ -n "${MLX_STREAM_RT_PERIOD_US:-}" ] && EXO_ENV="$EXO_ENV MLX_STREAM_RT_PERIOD_US=$MLX_STREAM_RT_PERIOD_US"
+  # JACCL_POLL_INSTRUMENT: per-call wall + in-poll diagnostic for
+  # all_reduce stalls (see mesh_impl.h). Emits one stderr line per
+  # call whose total wall time exceeds the threshold (default 100ms).
+  [ -n "${JACCL_POLL_INSTRUMENT:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT=$JACCL_POLL_INSTRUMENT"
+  [ -n "${JACCL_POLL_INSTRUMENT_THRESHOLD_US:-}" ] && EXO_ENV="$EXO_ENV JACCL_POLL_INSTRUMENT_THRESHOLD_US=$JACCL_POLL_INSTRUMENT_THRESHOLD_US"
+  # MLX_SIGNAL_PROBE: per-Event::signal diagnostic on the GPU stream
+  # (see mlx/backend/metal/event.cpp). Emits two stderr lines per
+  # signal: SIGNAL_PROBE_ENC (ops at encode, t_enc_us) and
+  # SIGNAL_PROBE_DONE (t_done_us, gap_us = SharedEvent completion
+  # latency). Used to verify the γ=2 MTP bistable-stall hypothesis
+  # (decode-time signal lands at the tail of a deep command buffer).
+  # Diagnostic only; ZERO overhead when unset.
+  [ -n "${MLX_SIGNAL_PROBE:-}" ] && EXO_ENV="$EXO_ENV MLX_SIGNAL_PROBE=$MLX_SIGNAL_PROBE"
+  # EXO_CMDBUF_RING_DIAG: command-buffer commit/schedule/completion ring
+  # buffer diagnostic (see mlx/backend/metal/device.cpp +
+  # backend/metal/event.cpp). Dumps recent MTLCommandBuffer status +
+  # timestamps to stderr whenever Event::wait()'s existing slow-wait
+  # diagnostic fires (3+s stuck wait) -- answers whether the awaited
+  # event's command buffer was ever committed, and if so whether it's
+  # stuck at Committed (Metal driver never scheduled it), Scheduled (has
+  # it, GPU hasn't started), or genuinely mid-execution. Added 2026-07-21
+  # for the PP+DSpark decode-loop GPU-idle-stall investigation.
+  # Diagnostic only; ZERO overhead when unset (matches MLX_SIGNAL_PROBE's
+  # pattern one line above -- do NOT repeat the EXO_RUNNER_FAULTHANDLER
+  # marker-file lesson here; this one genuinely is a plain env var read
+  # via getenv() inside the mlx C++ library itself, not something
+  # bootstrap.py gates, so plain forwarding is the correct mechanism).
+  [ -n "${EXO_CMDBUF_RING_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_CMDBUF_RING_DIAG=$EXO_CMDBUF_RING_DIAG"
+  # EXO_SPEC_STATE_SPLIT_DIAG: splits RotatingKVCache.save_spec_state's
+  # keys-copy vs values-copy timing (see mlx-lm's cache.py). Part of the
+  # PP+DSpark snapshot_eval stall investigation -- the per-layer
+  # SNAPSHOT PER-LAYER DIAG (pp_speculation.py, always-on above 0.5s)
+  # already isolated the stall to one deterministic layer index; this
+  # splits that one layer's cost further into keys vs values. Read via
+  # plain os.environ.get() in Python, same forwarding pattern as
+  # EXO_CMDBUF_RING_DIAG above. Diagnostic only; ZERO overhead when unset.
+  [ -n "${EXO_SPEC_STATE_SPLIT_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_SPEC_STATE_SPLIT_DIAG=$EXO_SPEC_STATE_SPLIT_DIAG"
+  # EXO_MOE_EXPERT_HIST_DIAG: logs the per-token MoE expert-assignment
+  # histogram whenever switch_mlp (GatherQMM) exceeds 300ms. Tests the
+  # skewed-expert-routing hypothesis for the r0_fwd/spec_fwd GPU stall.
+  # Plain os.environ.get() in Python (deepseek_v4.py); zero cost when unset.
+  [ -n "${EXO_MOE_EXPERT_HIST_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_MOE_EXPERT_HIST_DIAG=$EXO_MOE_EXPERT_HIST_DIAG"
+  # EXO_MOE_GPUTRACE_DIAG: wraps the confirmed-stuck model() call in
+  # mx.metal start_capture/stop_capture, keeping only slow (>2s)
+  # cycles' .gputrace files. CAUTION: real per-call overhead (Metal
+  # debug instrumentation), unlike the other zero-cost diagnostics --
+  # deploy with a short test first, watch for jaccl distress.
+  [ -n "${EXO_MOE_GPUTRACE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_MOE_GPUTRACE_DIAG=$EXO_MOE_GPUTRACE_DIAG"
+  # MTL_CAPTURE_ENABLED: Apple's own gate for MTLCaptureManager /
+  # mx.metal.start_capture(). MUST be set in the process environment
+  # BEFORE Metal initializes -- confirmed live 2026-07-21: without it,
+  # every EXO_MOE_GPUTRACE_DIAG start_capture() call fails cleanly
+  # (caught by the diagnostic's own try/except) with "[metal::
+  # start_capture] Failed to start: Capture layer is not inserted." --
+  # no crash, just silently produces zero .gputrace files. Required
+  # alongside EXO_MOE_GPUTRACE_DIAG for that diagnostic to do anything.
+  [ -n "${MTL_CAPTURE_ENABLED:-}" ] && EXO_ENV="$EXO_ENV MTL_CAPTURE_ENABLED=$MTL_CAPTURE_ENABLED"
+  # MLX_JACCL_RECV_RETRY_DEADLINE_SECS: raises jaccl's TCP recv retry
+  # deadline above its 60s default (see mlx/distributed/jaccl/lib/jaccl/
+  # tcp.cpp). Added 2026-07-21 as a safety buffer for profiling-adjacent
+  # diagnostics (EXO_MOE_GPUTRACE_DIAG, any live xctrace/Instruments
+  # attach) whose overhead can push a stalled recv past the default
+  # deadline and trigger "no progress for Ns, retry deadline 60s
+  # exceeded" -- confirmed to have caused one real cluster crash and one
+  # self-recovered jaccl transport fault this investigation BEFORE this
+  # forwarding line existed (the env var was set in the launcher's shell
+  # but never reached the runner subprocess, so the raise silently had
+  # no effect). Plain std::getenv() in jaccl's C++ tcp.cpp; ZERO
+  # overhead when unset (falls back to the 60.0 default).
+  [ -n "${MLX_JACCL_RECV_RETRY_DEADLINE_SECS:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RECV_RETRY_DEADLINE_SECS=$MLX_JACCL_RECV_RETRY_DEADLINE_SECS"
+  # NOTE: the runner's SIGUSR1 faulthandler dumper (bootstrap.py) is now
+  # armed via a marker file (`touch /tmp/exo_faulthandler_enabled` on each
+  # node directly, over SSH) instead of an env var -- an earlier
+  # EXO_RUNNER_FAULTHANDLER=1 env-var forwarding attempt here silently
+  # never reached the runner subprocess despite looking structurally
+  # identical to the working MLX_SIGNAL_PROBE line above, so this launcher
+  # no longer participates in arming it at all. See bootstrap.py's comment
+  # at the marker-file check for the full rationale.
+  # MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE: when set to 1, mlx will
+  # force-commit the producing GPU stream's pending command buffer
+  # before a CPU primitive (e.g. AllReduce) waits on its event.
+  # Targets the bistable peer-CQE-arrival-latency stall under γ=2
+  # MTP-on. mlx commit 4d21baa2 / branch mtp-allreduce-eager-commit.
+  [ -n "${MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE:-}" ] && EXO_ENV="$EXO_ENV MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE=$MLX_EAGER_COMMIT_BEFORE_CPU_COLLECTIVE"
+  # Subgroup split init progress trace (logs per-rank to stderr at
+  # each QP-exchange step). Use to localize a deadlock during
+  # `MeshGroup::split` itself. Memory: dsv4_mtp_c2_split_attempt_2026_05_07.md.
+  [ -n "${JACCL_TRACE_SPLIT:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_SPLIT=$JACCL_TRACE_SPLIT"
+  # When set, MeshGroup::split opens a fresh ibv_context per
+  # subgroup instead of borrowing the parent's. Required on macOS
+  # librdma to fully isolate QPs across subgroups; without it both
+  # subgroups share the parent's context and post-init collectives
+  # deadlock after a few calls.
+  [ -n "${JACCL_SPLIT_FRESH_CTX:-}" ] && EXO_ENV="$EXO_ENV JACCL_SPLIT_FRESH_CTX=$JACCL_SPLIT_FRESH_CTX"
+  # When set, MeshGroup::split makes the subgroup share the parent
+  # group's CPU stream (cpu::CommandEncoder thread) instead of
+  # allocating its own. Funnels master + coord lambdas onto one
+  # FIFO encoder thread — needed on macOS where two distinct
+  # encoder threads dispatching concurrently into separate QP sets
+  # appears to deadlock at the librdma layer.
+  [ -n "${JACCL_SPLIT_PARENT_STREAM:-}" ] && EXO_ENV="$EXO_ENV JACCL_SPLIT_PARENT_STREAM=$JACCL_SPLIT_PARENT_STREAM"
+  # Per-step BatchGenerator state snapshot; writes JSONL to
+  # /tmp/jaccl_step_rank_${rank}_pid${pid}.log. Diff across ranks
+  # to find the first asymmetric Python state on the prefix-cache
+  # share path. Memory: next_session_plan_jaccl_c2_prefix_cache.md.
+  [ -n "${JACCL_TRACE_STEP:-}" ] && EXO_ENV="$EXO_ENV JACCL_TRACE_STEP=$JACCL_TRACE_STEP"
+  # Per-MTP-chain-step drift diagnostic; writes JSONL to
+  # /tmp/mtp_drift_rank_${rank}_pid${pid}.log. Cross-rank diff
+  # localises where in the unsharded MTP chain logits first
+  # drift across ranks. Memory: jaccl_phase_f_outcome_2026_05_06.md.
+  [ -n "${EXO_MTP_DRIFT_DUMP:-}" ] && EXO_ENV="$EXO_ENV EXO_MTP_DRIFT_DUMP=$EXO_MTP_DRIFT_DUMP"
+  # Per-cycle dsv4_mtp BS-transition trace. Writes JSONL to
+  # /tmp/dsv4_mtp_trace_rank_${rank}_pid${pid}.log. Used to
+  # localize cross-rank divergence at the c=2→c=1 transition.
+  [ -n "${EXO_DSV4_MTP_TRANSITION_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TRANSITION_TRACE=$EXO_DSV4_MTP_TRANSITION_TRACE"
+  # Opt-in k-token chained MTP draft + batched verify for PP mode
+  # (pp_chained_decode_loop in pp_speculation.py). k>1 enables it;
+  # unset/1 keeps the proven single-token pp_speculative_decode_loop
+  # path (default, unchanged behavior).
+  [ -n "${EXO_PP_MTP_CHAIN_K:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_MTP_CHAIN_K=$EXO_PP_MTP_CHAIN_K"
+  # PP + DSpark (rank1-owned draft+verify, pp_dspark_decode_loop) is
+  # SELECTED AUTOMATICALLY in Pipeline mode whenever DSpark is attached
+  # at model load (EXO_DSV4_DSPARK=1, set above) -- highest priority in
+  # batch_generate.py's dispatch when available. There used to be a
+  # second EXO_PP_DSPARK flag gating "use it as the PP decode loop", but
+  # it was never toggled independently of EXO_DSV4_DSPARK in practice
+  # (this comment used to say so itself), so it was removed 2026-07-26 as
+  # pure redundancy. If you need to attach DSpark but NOT have it
+  # selected for PP decode, that's not currently a supported combination
+  # -- open an issue if you have a real use case for it.
+  # One-shot forward-width scaling diagnostic (pp_dspark_decode_loop) --
+  # opt-in, off by default, no effect on production decode.
+  [ -n "${EXO_PP_DSPARK_WIDTH_SWEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_WIDTH_SWEEP=$EXO_PP_DSPARK_WIDTH_SWEEP"
+  # Verify-width truncation for pp_dspark_decode_loop -- real perf lever
+  # found via the width-scaling sweep above (forward cost scales
+  # ~linearly with width, not flat). Unset = verify the whole DSpark
+  # block (unchanged default behavior).
+  [ -n "${EXO_PP_DSPARK_VERIFY_WIDTH:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_WIDTH=$EXO_PP_DSPARK_VERIFY_WIDTH"
+  # Draft-ahead hit-rate diagnostic (2026-07-19, default off): logs how
+  # often a hypothetical one-block-ahead speculative forward on rank0
+  # (assuming full acceptance of the current verify block) would have
+  # hit -- pure measurement, zero wire/KV changes, scoping whether the
+  # "optimistic overlap" architecture (rank0 speculatively computes the
+  # NEXT block during its otherwise-idle ~61.6ms/cycle window) is worth
+  # building. See pp_speculation.py's DRAFT_AHEAD_LOG comment for the
+  # full rationale and the Fable-consult numbers (~14% E2E speedup at a
+  # 30% hit rate, ~22% at 50%, not worth building below ~15%).
+  [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_LOG=$EXO_PP_DSPARK_DRAFT_AHEAD_LOG"
+  # Verify-margin diagnostic (2026-07-31, EXO_PP_DSPARK_VERIFY_MARGIN_LOG=1,
+  # default OFF): direct, LOW-RISK root-cause test for the confirmed
+  # self-doubt infinite-loop bug (fact 1131 -- DSpark never converges
+  # on math_digit_sum at temp=0/8000 tokens, vs clean 629-token
+  # resolution with speculation off). Replaces the abandoned inline
+  # numerics-audit approach (EXO_PP_DSPARK_NUMERICS_AUDIT, 3 broken
+  # iterations -- fault, fault, unrecovered hang -- see fact 1134;
+  # extra forward passes on the live jaccl/RDMA critical path proved
+  # too fragile). This diagnostic reads values ALREADY COMPUTED by the
+  # real verify forward -- zero extra forward passes, zero cache
+  # snapshot/restore, zero spec-layer reconfiguration -- logging the
+  # top1-vs-top2 logit margin at every verify position. Tests whether
+  # the self-doubt loop correlates with low-confidence (near-tied)
+  # verify decisions. See pp_speculation.py's VERIFY-MARGIN DIAGNOSTIC
+  # comment for the full rationale.
+  [ -n "${EXO_PP_DSPARK_VERIFY_MARGIN_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_VERIFY_MARGIN_LOG=$EXO_PP_DSPARK_VERIFY_MARGIN_LOG"
+  # Draft-ahead STEP 1+2b diagnostic plumbing (2026-07-19, originally
+  # default off, commits 6aff7a5f/e6e10927/fe7bbfcb): gates a msg2
+  # spec-id tag exchange (rank1 builds a SpecId from the cycle's
+  # anchor/drafted/bonus tokens, rank0 independently reconstructs +
+  # validates a match) AND a msg1b deep-draft-extension send/recv (vw-1
+  # extra tokens DSpark's draft() already computed for free, round-trip
+  # shape-validated on rank0). BOTH branches are diagnostic-only --
+  # decode NEVER branches on the result, this only proves the
+  # wire/tagging mechanism is sound under real cross-rank timing. NOT
+  # the broken EXECUTE/YIELD speculative-forward mechanism below --
+  # this is just DRAFT_AHEAD's own diagnostic tagging, safe and part of
+  # the validated 2026-07-22 stress-sweep config. DEFAULT ON 2026-07-23
+  # alongside DSV4_SHARDING=Pipeline / DSpark auto-selection above.
+  # PP-only (pp_speculation.py DRAFT_AHEAD diagnostic tagging never
+  # engages under Tensor sharding -- gated 2026-08-16, TP-only pivot).
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    : "${EXO_PP_DSPARK_DRAFT_AHEAD:=1}"
+    [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD=$EXO_PP_DSPARK_DRAFT_AHEAD"
+  fi
+  # Draft-ahead STEP 3a (2026-07-19, commit 0ed76f74; CONFIRMED BROKEN
+  # 2026-07-22 -- see exo-stall-faulthandler-breakthrough-2026-07-21
+  # skill, update 14): rank0 actually runs a real speculative forward
+  # on the msg1b extension batch against the LIVE shared KV cache, then
+  # restores the pre-speculative snapshot / discards the buffer on a
+  # miss. This "speculate against live shared state, then roll back"
+  # design is confirmed via clean 2-for-2 A/B to cause severe (15-70s)
+  # GPU-confirmed-busy stalls -- a ~25-40x throughput regression --
+  # whenever enabled, vs. zero stalls with DRAFT_AHEAD alone (EXECUTE
+  # unset). Root cause not yet isolated as of 2026-07-22: the stall
+  # shows up in BOTH EXECUTE's own added forward call AND the
+  # unrelated, textually-unchanged shared forward call, pointing at
+  # state pollution (KV cache / allocator pool) rather than a single
+  # slow line -- likely needs a redesign (e.g. speculate against an
+  # isolated cache copy, not the live one) rather than a point fix.
+  # DEFAULT OFF, INTENTIONALLY NOT WIRED TO THE ENV VAR BELOW: set
+  # EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE_I_KNOW_THIS_IS_BROKEN=1 (exact
+  # value "1", any other value is silently ignored) to force it on for
+  # deliberate root-cause/redesign debugging ONLY. Do not enable for
+  # any real workload until re-validated.
+  if [ "${EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE_I_KNOW_THIS_IS_BROKEN:-}" = "1" ]; then
+    echo "  ⚠️  EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE force-enabled via the"
+    echo "      _I_KNOW_THIS_IS_BROKEN override -- confirmed broken"
+    echo "      2026-07-22 (severe GPU-confirmed-busy stalls, ~25-40x"
+    echo "      throughput regression). Debugging/redesign use only."
+    EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_EXECUTE=1"
+  fi
+  # Draft-ahead STEP 3b (2026-07-19, commit cca679ed): the actual perf
+  # lever, requires DRAFT_AHEAD_EXECUTE=1 above -- inherits the same
+  # confirmed-broken status and the same override gate (EXECUTE must
+  # be force-enabled via _I_KNOW_THIS_IS_BROKEN above for YIELD to do
+  # anything; YIELD itself is not separately gated since it's a no-op
+  # without EXECUTE).
+  [ -n "${EXO_PP_DSPARK_DRAFT_AHEAD_YIELD:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_DRAFT_AHEAD_YIELD=$EXO_PP_DSPARK_DRAFT_AHEAD_YIELD"
+  # Cache-eviction timing instrumentation (2026-07-19, default off,
+  # commit f1e23561): pins down whether the multi-hundred-second
+  # cluster-wide stalls seen in ~/exo_stall_dumps/ are caused by
+  # KVPrefixCache.get_memory_used_percentage()'s per-eviction-iteration
+  # cross-rank all-reduce. Emits [CACHE_EVICT_TIMING] evict_summary/
+  # get_mem_pct/add_kv_cache log lines when a call exceeds
+  # EXO_CACHE_EVICT_TIMING_MS (default 50ms). Diagnostic only, no
+  # behavior change.
+  [ -n "${EXO_CACHE_EVICT_TIMING_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_LOG=$EXO_CACHE_EVICT_TIMING_LOG"
+  [ -n "${EXO_CACHE_EVICT_TIMING_MS:-}" ] && EXO_ENV="$EXO_ENV EXO_CACHE_EVICT_TIMING_MS=$EXO_CACHE_EVICT_TIMING_MS"
+  [ -n "${EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL:-}" ] && EXO_ENV="$EXO_ENV EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL=$EXO_PP_DSPARK_BATCHED_SNAPSHOT_EVAL"
+
+  # Metal GPU timeout "mitigations" — VERIFIED INERT 2026-07-11: none of
+  # these three vars is read anywhere in exo or mlx source, and macOS 26.5
+  # exposes no iogpu watchdog-timeout sysctl (only wired-limit knobs). The
+  # kIOGPUCommandBufferCallbackErrorTimeout runner death at 19:42 on
+  # 2026-07-11 fired straight through them — the watchdog measures
+  # completion latency INCLUDING queue wait, so GPU oversubscription
+  # (spec-on c>=3 + Qwen co-host + concurrent prefill) is what actually
+  # trips it. Real levers: MLX_MAX_OPS_PER_BUFFER / MLX_MAX_MB_PER_BUFFER
+  # (bounded buffers), spec-off at c>=2 (EXO_DSV4_MTP_C2_MAX_CTX=1), and
+  # the supervisor self-heal (contains the death: instance re-place,
+  # field-proven 19:43:11). Kept only to avoid perturbing a known-good
+  # env set; do not rely on them.
+  if [ "$EXO_DISABLE_METAL_TIMEOUT" == "1" ]; then
+    EXO_ENV="$EXO_ENV MTL_DISABLE_TIMEOUT=1 MTL_COMMAND_BUFFER_TIMEOUT=0 EXO_DISABLE_METAL_TIMEOUT=1"
+  fi
+
+  # Rotate log: keep previous run as exo.log.prev, then append
+  ssh "$NODE" "cp ~/exo.log ~/exo.log.prev 2>/dev/null; : > ~/exo.log"
+
+  # caffeinate -s starts as a separate background process and uses -w to
+  # keep the system awake for as long as the exo process exists.
+  # IMPORTANT: don't `caffeinate -s python` because caffeinate is hardened
+  # and dyld strips DYLD_INSERT_LIBRARIES (and other DYLD_*) when exec-ing
+  # into a hardened binary, breaking our abort_tracer interposer.
+  # Regenerate the node-local relaunch script from THIS script's EXO_ENV so a
+  # quick node-side restart (~/relaunch_exo.sh) always uses the exact env that
+  # start_cluster.sh (the single source of truth) would launch with. Session
+  # 2026-07-07 lesson: the hand-edited relaunch scripts and this script had
+  # drifted apart (transport stack, prefill step, log level, ...); deriving
+  # one from the other closes that class of drift permanently.
+  if [ "$NODE" == "macstudio-m4-1" ]; then
+    NODE_PEERS="/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID"
+  elif [ "$NODE" == "macstudio-m4-2" ]; then
+    NODE_PEERS="/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID"
+  else
+    NODE_PEERS="/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID"
+  fi
+  # LAUNCH_TAIL is single-quote-assigned so $!/$EXO_PID stay LITERAL until the
+  # node's zsh runs them (double-quoted \$ escapes expanded locally when this
+  # string was interpolated into ssh args — caffeinate got an empty pid).
+  LAUNCH_TAIL='& EXO_PID=$!; caffeinate -s -w $EXO_PID 2>/dev/null & wait $EXO_PID'
+  LAUNCH_CMD="cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1 $LAUNCH_TAIL"
+  # Generate the file LOCALLY (printf does not expand $ in arguments) and scp
+  # it — a remote unquoted heredoc would expand $!/$EXO_PID a second time.
+  RELAUNCH_TMP=$(mktemp)
+  {
+    printf '#!/bin/zsh\n'
+    printf '# GENERATED by start_cluster.sh %s — do not hand-edit; env changes belong\n' "$(date +%Y-%m-%d)"
+    printf '# in start_cluster.sh (single source of truth). This script only restarts\n'
+    printf '# the exo PROCESS; it does NOT deploy code or place models (run\n'
+    printf '# start_cluster.sh for the full canonical bring-up incl. pinned DSv4).\n'
+    # Quoted heredoc: nothing expands locally; the body is literal zsh
+    # that runs on the node.
+    cat <<'RELAUNCH_BODY'
 # Graceful kill of any live exo FIRST. SIGTERM lets runners tear down their
 # RDMA QPs cleanly AND release their Metal buffers before exit. Never use
 # `screen -X quit` / `pkill -9` here: both skip the destructors, leaking QPs
@@ -2816,17 +2833,17 @@ while :; do
   sleep 5
 done
 RELAUNCH_BODY
-        printf "screen -dmS exorun zsh -l -c '%s'\n" "$LAUNCH_CMD"
-    } > "$RELAUNCH_TMP"
-    scp -q "$RELAUNCH_TMP" "$NODE:relaunch_exo.sh"
-    ssh "$NODE" "chmod +x ~/relaunch_exo.sh"
-    rm -f "$RELAUNCH_TMP"
+    printf "screen -dmS exorun zsh -l -c '%s'\n" "$LAUNCH_CMD"
+  } >"$RELAUNCH_TMP"
+  scp -q "$RELAUNCH_TMP" "$NODE:relaunch_exo.sh"
+  ssh "$NODE" "chmod +x ~/relaunch_exo.sh"
+  rm -f "$RELAUNCH_TMP"
 
-    if [ "$NODE" == "macstudio-m4-1" ] || [ "$NODE" == "macstudio-m4-2" ]; then
-         ssh "$NODE" "screen -dmS exorun zsh -l -c '$LAUNCH_CMD'"
-    else
-         ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
-    fi
+  if [ "$NODE" == "macstudio-m4-1" ] || [ "$NODE" == "macstudio-m4-2" ]; then
+    ssh "$NODE" "screen -dmS exorun zsh -l -c '$LAUNCH_CMD'"
+  else
+    ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
+  fi
 done
 
 # 4. Health Check / Topology Verification
@@ -2836,45 +2853,44 @@ API="http://$M4_1_IP:52415"
 echo -n "Waiting for cluster to stabilize..."
 CLUSTER_READY=false
 for i in {1..90}; do
-    response=$(curl -s "$API/state")
-    node_count=$(echo "$response" | jq '.topology.nodes | length' 2>/dev/null)
-    identity_count=$(echo "$response" | jq '.nodeIdentities | length' 2>/dev/null)
+  response=$(curl -s "$API/state")
+  node_count=$(echo "$response" | jq '.topology.nodes | length' 2>/dev/null)
+  identity_count=$(echo "$response" | jq '.nodeIdentities | length' 2>/dev/null)
 
-    # Handle null or empty counts
-    if [ -z "$node_count" ] || [ "$node_count" == "null" ]; then node_count=0; fi
-    if [ -z "$identity_count" ] || [ "$identity_count" == "null" ]; then identity_count=0; fi
+  # Handle null or empty counts
+  if [ -z "$node_count" ] || [ "$node_count" == "null" ]; then node_count=0; fi
+  if [ -z "$identity_count" ] || [ "$identity_count" == "null" ]; then identity_count=0; fi
 
-    if [ "$node_count" -ge ${#NODES[@]} ] && [ "$identity_count" -ge ${#NODES[@]} ]; then
-        echo " HEALTHY! (Nodes: $node_count, Identities: $identity_count)"
-        CLUSTER_READY=true
-        break
-    fi
-    echo -n "."
-    sleep 2
+  if [ "$node_count" -ge ${#NODES[@]} ] && [ "$identity_count" -ge ${#NODES[@]} ]; then
+    echo " HEALTHY! (Nodes: $node_count, Identities: $identity_count)"
+    CLUSTER_READY=true
+    break
+  fi
+  echo -n "."
+  sleep 2
 done
 
 if [ "$CLUSTER_READY" = false ]; then
+  echo ""
+  # Check for the specific pyo3 initialization panic that happens when uv.lock goes out of sync
+  PYO3_PANIC=$(ssh macstudio-m4-1 "grep -i 'The Python interpreter is not initialized' ~/exo.log" 2>/dev/null || true)
+
+  if [ -n "$PYO3_PANIC" ]; then
+    echo "CRITICAL ERROR: Detected a corrupted Rust pyo3 binding state on the primary node!"
+    echo "This usually happens when 'uv.lock' changes (e.g. from switching git branches) and the virtual environment gets out of sync."
     echo ""
-    # Check for the specific pyo3 initialization panic that happens when uv.lock goes out of sync
-    PYO3_PANIC=$(ssh macstudio-m4-1 "grep -i 'The Python interpreter is not initialized' ~/exo.log" 2>/dev/null || true)
-
-    if [ -n "$PYO3_PANIC" ]; then
-        echo "CRITICAL ERROR: Detected a corrupted Rust pyo3 binding state on the primary node!"
-        echo "This usually happens when 'uv.lock' changes (e.g. from switching git branches) and the virtual environment gets out of sync."
-        echo ""
-        echo "AUTOMATIC FIX: Run the following command on ALL nodes to repair the bindings:"
-        echo "  zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package exo_rs'"
-        echo ""
-        echo "Exiting."
-        exit 1
-    fi
-
-    echo "TIMEOUT: Cluster did not stabilize."
-    echo "Fetching logs from macstudio-m4-1:"
-    ssh macstudio-m4-1 "tail -n 20 ~/exo.log"
+    echo "AUTOMATIC FIX: Run the following command on ALL nodes to repair the bindings:"
+    echo "  zsh -l -c 'cd ~/repos/exo && uv sync --reinstall-package exo_rs'"
+    echo ""
+    echo "Exiting."
     exit 1
-fi
+  fi
 
+  echo "TIMEOUT: Cluster did not stabilize."
+  echo "Fetching logs from macstudio-m4-1:"
+  ssh macstudio-m4-1 "tail -n 20 ~/exo.log"
+  exit 1
+fi
 
 # 5. Create model instances on the Mac Studios
 
@@ -2884,99 +2900,99 @@ M4_1_NODE_ID=""
 M4_2_NODE_ID=""
 MBP_NODE_ID=""
 for i in {1..15}; do
-    NODE_STATE=$(curl -s "$API/state")
-    M4_1_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-1")) | .key')
-    M4_2_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-2")) | .key')
-    # MBP_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("MacBook")) | .key')
+  NODE_STATE=$(curl -s "$API/state")
+  M4_1_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-1")) | .key')
+  M4_2_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("Studio.*M4-2")) | .key')
+  # MBP_NODE_ID=$(echo "$NODE_STATE" | jq -r '.nodeIdentities | to_entries[] | select(.value.friendlyName | test("MacBook")) | .key')
 
-    if [ -n "$M4_1_NODE_ID" ] && [ -n "$M4_2_NODE_ID" ]; then
-        break
-    fi
-    echo "  Waiting for node identities to propagate..."
-    sleep 2
+  if [ -n "$M4_1_NODE_ID" ] && [ -n "$M4_2_NODE_ID" ]; then
+    break
+  fi
+  echo "  Waiting for node identities to propagate..."
+  sleep 2
 done
 
 echo "  Mac Studio M4-1: $M4_1_NODE_ID"
 echo "  Mac Studio M4-2: $M4_2_NODE_ID"
 
 if [ -z "$M4_1_NODE_ID" ] || [ -z "$M4_2_NODE_ID" ]; then
-    echo "ERROR: Could not resolve all node IDs. Skipping instance creation."
-    echo "Create instances manually from the dashboard."
-    exit 1
+  echo "ERROR: Could not resolve all node IDs. Skipping instance creation."
+  echo "Create instances manually from the dashboard."
+  exit 1
 fi
 
 create_instance_with_retry() {
-    # Two-step instance creation (same as dashboard):
-    #   1. GET /instance/placement — computes shard assignments (retries until state is ready)
-    #   2. POST /instance — creates the instance with the computed placement
-    local label="$1"
-    local model_id="$2"
-    local sharding="${3:-Pipeline}"
-    local instance_meta="${4:-MlxJaccl}"
-    local min_nodes="${5:-2}"
-    local def_temp="${6:-}"
-    local def_top_p="${7:-}"
-    local def_top_k="${8:-}"
-    local def_min_p="${9:-}"
-    local def_presence="${10:-}"
-    local def_repetition="${11:-}"
-    local max_kv_tokens="${12:-}"
-    local max_prefix_sessions="${13:-}"
-    local kv_cache_bits="${14:-}"
-    local max_prefix_bytes="${15:-}"
-    local prefill_step="${16:-}"
-    local max_attempts=30
+  # Two-step instance creation (same as dashboard):
+  #   1. GET /instance/placement — computes shard assignments (retries until state is ready)
+  #   2. POST /instance — creates the instance with the computed placement
+  local label="$1"
+  local model_id="$2"
+  local sharding="${3:-Pipeline}"
+  local instance_meta="${4:-MlxJaccl}"
+  local min_nodes="${5:-2}"
+  local def_temp="${6:-}"
+  local def_top_p="${7:-}"
+  local def_top_k="${8:-}"
+  local def_min_p="${9:-}"
+  local def_presence="${10:-}"
+  local def_repetition="${11:-}"
+  local max_kv_tokens="${12:-}"
+  local max_prefix_sessions="${13:-}"
+  local kv_cache_bits="${14:-}"
+  local max_prefix_bytes="${15:-}"
+  local prefill_step="${16:-}"
+  local max_attempts=30
 
-    for attempt in $(seq 1 $max_attempts); do
-        # Check if instance already exists
-        local existing
-        existing=$(curl -s "$API/state" | jq -r --arg m "$model_id" \
-            '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-        if [ -n "$existing" ] && [ "$existing" != "null" ] && [ "$existing" -ge 1 ] 2>/dev/null; then
-            echo "  Instance for $label already exists, skipping."
-            return 0
-        fi
+  for attempt in $(seq 1 $max_attempts); do
+    # Check if instance already exists
+    local existing
+    existing=$(curl -s "$API/state" | jq -r --arg m "$model_id" \
+      '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
+    if [ -n "$existing" ] && [ "$existing" != "null" ] && [ "$existing" -ge 1 ] 2>/dev/null; then
+      echo "  Instance for $label already exists, skipping."
+      return 0
+    fi
 
-        # Step 1: GET /instance/placement to compute shard assignments
-        local placement_response placement_code
-        placement_response=$(curl -s -w '\n%{http_code}' -G "$API/instance/placement" \
-            --data-urlencode "model_id=$model_id" \
-            --data-urlencode "sharding=$sharding" \
-            --data-urlencode "instance_meta=$instance_meta" \
-            --data-urlencode "min_nodes=$min_nodes")
-        placement_code=$(echo "$placement_response" | tail -1)
-        placement_response=$(echo "$placement_response" | sed '$d')
+    # Step 1: GET /instance/placement to compute shard assignments
+    local placement_response placement_code
+    placement_response=$(curl -s -w '\n%{http_code}' -G "$API/instance/placement" \
+      --data-urlencode "model_id=$model_id" \
+      --data-urlencode "sharding=$sharding" \
+      --data-urlencode "instance_meta=$instance_meta" \
+      --data-urlencode "min_nodes=$min_nodes")
+    placement_code=$(echo "$placement_response" | tail -1)
+    placement_response=$(echo "$placement_response" | sed '$d')
 
-        if [ -z "$placement_code" ] || [ "$placement_code" -lt 200 ] 2>/dev/null || [ "$placement_code" -ge 300 ] 2>/dev/null; then
-            local err_msg
-            err_msg=$(echo "$placement_response" | jq -r '.detail // .error.message // empty' 2>/dev/null)
-            if [ "$attempt" -lt "$max_attempts" ]; then
-                echo "  Attempt $attempt/$max_attempts: placement not ready ($err_msg), retrying in 5s..."
-                sleep 5
-                continue
-            else
-                echo "  ERROR: Placement failed after $max_attempts attempts: $err_msg"
-                return 1
-            fi
-        fi
+    if [ -z "$placement_code" ] || [ "$placement_code" -lt 200 ] 2>/dev/null || [ "$placement_code" -ge 300 ] 2>/dev/null; then
+      local err_msg
+      err_msg=$(echo "$placement_response" | jq -r '.detail // .error.message // empty' 2>/dev/null)
+      if [ "$attempt" -lt "$max_attempts" ]; then
+        echo "  Attempt $attempt/$max_attempts: placement not ready ($err_msg), retrying in 5s..."
+        sleep 5
+        continue
+      else
+        echo "  ERROR: Placement failed after $max_attempts attempts: $err_msg"
+        return 1
+      fi
+    fi
 
-        # Step 2: POST /instance with the placement result.
-        # Inject per-instance sampling defaults into the inner tagged object
-        # (TaggedModel wraps it as {"MlxJacclInstance": {...}}).
-        local create_payload
-        create_payload=$(echo "$placement_response" | jq -c \
-            --argjson temp "${def_temp:-null}" \
-            --argjson top_p "${def_top_p:-null}" \
-            --argjson top_k "${def_top_k:-null}" \
-            --argjson min_p "${def_min_p:-null}" \
-            --argjson presence "${def_presence:-null}" \
-            --argjson repetition "${def_repetition:-null}" \
-            --argjson kv "${max_kv_tokens:-null}" \
-            --argjson sessions "${max_prefix_sessions:-null}" \
-            --argjson kv_bits "${kv_cache_bits:-null}" \
-            --argjson bytes "${max_prefix_bytes:-null}" \
-            --argjson prefill_step "${prefill_step:-null}" \
-            '
+    # Step 2: POST /instance with the placement result.
+    # Inject per-instance sampling defaults into the inner tagged object
+    # (TaggedModel wraps it as {"MlxJacclInstance": {...}}).
+    local create_payload
+    create_payload=$(echo "$placement_response" | jq -c \
+      --argjson temp "${def_temp:-null}" \
+      --argjson top_p "${def_top_p:-null}" \
+      --argjson top_k "${def_top_k:-null}" \
+      --argjson min_p "${def_min_p:-null}" \
+      --argjson presence "${def_presence:-null}" \
+      --argjson repetition "${def_repetition:-null}" \
+      --argjson kv "${max_kv_tokens:-null}" \
+      --argjson sessions "${max_prefix_sessions:-null}" \
+      --argjson kv_bits "${kv_cache_bits:-null}" \
+      --argjson bytes "${max_prefix_bytes:-null}" \
+      --argjson prefill_step "${prefill_step:-null}" \
+      '
             . as $i
             | ($i | keys[0]) as $tag
             | {instance: ($i | .[$tag] |= (
@@ -2994,25 +3010,25 @@ create_instance_with_retry() {
               ) | {($tag): .[$tag]})}
         ')
 
-        local create_response create_code
-        create_response=$(curl -s -w '\n%{http_code}' -X POST "$API/instance" \
-            -H "Content-Type: application/json" \
-            -d "$create_payload")
-        create_code=$(echo "$create_response" | tail -1)
-        create_response=$(echo "$create_response" | sed '$d')
+    local create_response create_code
+    create_response=$(curl -s -w '\n%{http_code}' -X POST "$API/instance" \
+      -H "Content-Type: application/json" \
+      -d "$create_payload")
+    create_code=$(echo "$create_response" | tail -1)
+    create_response=$(echo "$create_response" | sed '$d')
 
-        if [ -n "$create_code" ] && [ "$create_code" -ge 200 ] 2>/dev/null && [ "$create_code" -lt 300 ] 2>/dev/null; then
-            local msg
-            msg=$(echo "$create_response" | jq -r '.message // empty' 2>/dev/null)
-            echo "  ${msg:-Instance created.}"
-            return 0
-        else
-            local err_msg
-            err_msg=$(echo "$create_response" | jq -r '.detail // .error.message // empty' 2>/dev/null)
-            echo "  ERROR creating instance (HTTP $create_code): $err_msg"
-            return 1
-        fi
-    done
+    if [ -n "$create_code" ] && [ "$create_code" -ge 200 ] 2>/dev/null && [ "$create_code" -lt 300 ] 2>/dev/null; then
+      local msg
+      msg=$(echo "$create_response" | jq -r '.message // empty' 2>/dev/null)
+      echo "  ${msg:-Instance created.}"
+      return 0
+    else
+      local err_msg
+      err_msg=$(echo "$create_response" | jq -r '.detail // .error.message // empty' 2>/dev/null)
+      echo "  ERROR creating instance (HTTP $create_code): $err_msg"
+      return 1
+    fi
+  done
 }
 
 EXPECTED_RUNNERS=0
@@ -3024,86 +3040,86 @@ EXPECTED_RUNNERS=0
 # Co-hosts with the much smaller Qwen3.6 aux model (see its block below); DSv4's
 # footprint is why Qwen3.6's prefix/KV cache is hard-capped.
 if [ "${DSV4_ENABLED:-0}" = "1" ]; then
+  echo ""
+  if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
+    echo "  ⚠️  PP mode (DSV4_SHARDING=Pipeline) — SINGLE-REQUEST-ONLY."
+    echo "      EXO_PP_NO_COORD_COLLECTIVE=1 disables coord collectives (mx_any,"
+    echo "      agree_on_tasks, agree_on_cancellations) to avoid TCP socket contention"
+    echo "      with the p2p send/recv. This means:"
+    echo "        - NO concurrent requests (c>=2 will deadlock — no task-set agreement)"
+    echo "        - NO mid-decode cancellation (rank 1 blocks on recv forever)"
+    echo "      DSpark speculation is ON by default (EXO_SPECULATIVE=1,"
+    echo "      EXO_DSV4_DSPARK=1) -- self-doubt-loop bug FIXED 2026-08-02 via"
+    echo "      EXO_DSV4_ROWSEQ_FULLBLOCK + _MOE (see EXO_SPECULATIVE's comment"
+    echo "      earlier in this file for the full root-cause writeup)."
+    echo "      Event::wait timeout raised to 300s for pipeline-drain skew at high context."
     echo ""
-    if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ]; then
-        echo "  ⚠️  PP mode (DSV4_SHARDING=Pipeline) — SINGLE-REQUEST-ONLY."
-        echo "      EXO_PP_NO_COORD_COLLECTIVE=1 disables coord collectives (mx_any,"
-        echo "      agree_on_tasks, agree_on_cancellations) to avoid TCP socket contention"
-        echo "      with the p2p send/recv. This means:"
-        echo "        - NO concurrent requests (c>=2 will deadlock — no task-set agreement)"
-        echo "        - NO mid-decode cancellation (rank 1 blocks on recv forever)"
-        echo "      DSpark speculation is ON by default (EXO_SPECULATIVE=1,"
-        echo "      EXO_DSV4_DSPARK=1) -- self-doubt-loop bug FIXED 2026-08-02 via"
-        echo "      EXO_DSV4_ROWSEQ_FULLBLOCK + _MOE (see EXO_SPECULATIVE's comment"
-        echo "      earlier in this file for the full root-cause writeup)."
-        echo "      Event::wait timeout raised to 300s for pipeline-drain skew at high context."
-        echo ""
-        echo "      REAL PP-vs-TP TRADEOFF (2026-07-31, confirmed against both this fork"
-        echo "      and upstream exo-explore/exo -- see docs/fork-notes.md 'PP vs TP:"
-        echo "      concurrency tradeoff' for the full investigation): PP = single request"
-        echo "      faster (~24-33 tok/s w/ DSpark, vs TP's ~15-20 tok/s"
-        echo "      baseline) but genuinely ONE AT A TIME. TP = supports real concurrent"
-        echo "      requests but is slower per-request. This is NOT a bug to fix -- PP's"
-        echo "      pipeline layers hold mutable per-request sequencing state"
-        echo "      (is_prefill/queue_sends/_pp_recv/_pp_send) representing the single"
-        echo "      physical rank0<->rank1 wire link, and MLX's send/recv has no"
-        echo "      request-tag concept to multiplex on. Real PP concurrency would need"
-        echo "      wire-level request tagging or cross-request micro-batching --"
-        echo "      genuine new engineering, not present in this fork OR upstream."
-        echo ""
-        if [ "${EXO_PP_METAFRAME:-0}" = "1" ]; then
-            echo "  ⚠️  EXO_PP_METAFRAME=1 -- metadata-framed PP transport ACTIVE"
-            echo "      (Phase 0.5, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md)."
-            echo "      Validated LOCALLY only (simulated 2-rank, exact parity, 9/9 tests)"
-            echo "      -- this is the FIRST real cluster run of this path. Still"
-            echo "      single-request-only, same as EXO_PP_METAFRAME=0."
-            echo ""
-        fi
+    echo "      REAL PP-vs-TP TRADEOFF (2026-07-31, confirmed against both this fork"
+    echo "      and upstream exo-explore/exo -- see docs/fork-notes.md 'PP vs TP:"
+    echo "      concurrency tradeoff' for the full investigation): PP = single request"
+    echo "      faster (~24-33 tok/s w/ DSpark, vs TP's ~15-20 tok/s"
+    echo "      baseline) but genuinely ONE AT A TIME. TP = supports real concurrent"
+    echo "      requests but is slower per-request. This is NOT a bug to fix -- PP's"
+    echo "      pipeline layers hold mutable per-request sequencing state"
+    echo "      (is_prefill/queue_sends/_pp_recv/_pp_send) representing the single"
+    echo "      physical rank0<->rank1 wire link, and MLX's send/recv has no"
+    echo "      request-tag concept to multiplex on. Real PP concurrency would need"
+    echo "      wire-level request tagging or cross-request micro-batching --"
+    echo "      genuine new engineering, not present in this fork OR upstream."
+    echo ""
+    if [ "${EXO_PP_METAFRAME:-0}" = "1" ]; then
+      echo "  ⚠️  EXO_PP_METAFRAME=1 -- metadata-framed PP transport ACTIVE"
+      echo "      (Phase 0.5, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md)."
+      echo "      Validated LOCALLY only (simulated 2-rank, exact parity, 9/9 tests)"
+      echo "      -- this is the FIRST real cluster run of this path. Still"
+      echo "      single-request-only, same as EXO_PP_METAFRAME=0."
+      echo ""
     fi
-    echo "Auto-placing DeepSeek V4 Flash ($DSV4_MODEL_ID) across both Studios via RDMA..."
+  fi
+  echo "Auto-placing DeepSeek V4 Flash ($DSV4_MODEL_ID) across both Studios via RDMA..."
 
-    EXISTING_DSV4=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" \
-        '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-    if [ -z "$EXISTING_DSV4" ] || [ "$EXISTING_DSV4" = "null" ]; then
-        EXISTING_DSV4=0
-    fi
+  EXISTING_DSV4=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" \
+    '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
+  if [ -z "$EXISTING_DSV4" ] || [ "$EXISTING_DSV4" = "null" ]; then
+    EXISTING_DSV4=0
+  fi
 
-    if [ "$EXISTING_DSV4" -ge 1 ]; then
-        echo "  DeepSeek V4 instance already running. Skipping."
-    else
-        create_instance_with_retry "DeepSeek V4 Flash" "$DSV4_MODEL_ID" "${DSV4_SHARDING:-Tensor}" "${DSV4_INSTANCE_META:-MlxJaccl}" 2 \
-            "$DSV4_TEMPERATURE" "$DSV4_TOP_P" "$DSV4_TOP_K" "$DSV4_MIN_P" \
-            "$DSV4_PRESENCE_PENALTY" "$DSV4_REPETITION_PENALTY" \
-            "$DSV4_MAX_KV_TOKENS" "$DSV4_MAX_PREFIX_SESSIONS" \
-            "$DSV4_KV_CACHE_BITS" "$DSV4_MAX_PREFIX_BYTES" \
-            "$DSV4_PREFILL_STEP_SIZE" || true
+  if [ "$EXISTING_DSV4" -ge 1 ]; then
+    echo "  DeepSeek V4 instance already running. Skipping."
+  else
+    create_instance_with_retry "DeepSeek V4 Flash" "$DSV4_MODEL_ID" "${DSV4_SHARDING:-Tensor}" "${DSV4_INSTANCE_META:-MlxJaccl}" 2 \
+      "$DSV4_TEMPERATURE" "$DSV4_TOP_P" "$DSV4_TOP_K" "$DSV4_MIN_P" \
+      "$DSV4_PRESENCE_PENALTY" "$DSV4_REPETITION_PENALTY" \
+      "$DSV4_MAX_KV_TOKENS" "$DSV4_MAX_PREFIX_SESSIONS" \
+      "$DSV4_KV_CACHE_BITS" "$DSV4_MAX_PREFIX_BYTES" \
+      "$DSV4_PREFILL_STEP_SIZE" || true
 
-        echo -n "Waiting for 2 DeepSeek V4 runner(s) to become Ready..."
-        READY=false
-        READY_COUNT=0
-        for i in {1..600}; do
-            READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" '
+    echo -n "Waiting for 2 DeepSeek V4 runner(s) to become Ready..."
+    READY=false
+    READY_COUNT=0
+    for i in {1..600}; do
+      READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$DSV4_MODEL_ID" '
                 . as $root
                 | ($root.instances | to_entries[]
                    | select(.value.MlxJacclInstance.shardAssignments.modelId == $m or .value.MlxRingInstance.shardAssignments.modelId == $m)
                    | (.value.MlxJacclInstance.shardAssignments.runnerToShard // .value.MlxRingInstance.shardAssignments.runnerToShard) | keys) as $rids
                 | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
             ' 2>/dev/null)
-            if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
-            if [ "$READY_COUNT" -ge 2 ]; then
-                echo " READY ($READY_COUNT/2)"
-                READY=true
-                break
-            fi
-            echo -n "."
-            sleep 2
-        done
-        if [ "$READY" = false ]; then
-            echo ""
-            echo "  WARNING: DeepSeek V4 only $READY_COUNT/2 runners reached Ready."
-            echo "  Check ~/exo.log on the Studios."
-        fi
+      if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
+      if [ "$READY_COUNT" -ge 2 ]; then
+        echo " READY ($READY_COUNT/2)"
+        READY=true
+        break
+      fi
+      echo -n "."
+      sleep 2
+    done
+    if [ "$READY" = false ]; then
+      echo ""
+      echo "  WARNING: DeepSeek V4 only $READY_COUNT/2 runners reached Ready."
+      echo "  Check ~/exo.log on the Studios."
     fi
+  fi
 fi
 
 # ── Auto-place Qwen3.6-35B-A3B with RDMA (co-hosted alongside DSv4) ──
@@ -3117,51 +3133,51 @@ fi
 # Qwen3.6 ships MTP weights, so self-speculation is auto-enabled per-instance
 # (independent of EXO_SPECULATIVE, which is the DSv4 knob).
 if [ "${QWEN36_ENABLED:-1}" = "1" ]; then
-    echo ""
-    echo "Auto-placing Qwen3.6 ($QWEN36_MODEL_ID) across both Studios via RDMA..."
+  echo ""
+  echo "Auto-placing Qwen3.6 ($QWEN36_MODEL_ID) across both Studios via RDMA..."
 
-    EXISTING_QWEN36=$(curl -s "$API/state" | jq -r --arg m "$QWEN36_MODEL_ID" \
-        '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
-    if [ -z "$EXISTING_QWEN36" ] || [ "$EXISTING_QWEN36" = "null" ]; then
-        EXISTING_QWEN36=0
-    fi
+  EXISTING_QWEN36=$(curl -s "$API/state" | jq -r --arg m "$QWEN36_MODEL_ID" \
+    '[.. | objects | select(has("shardAssignments")) | select(.shardAssignments.modelId == $m)] | length' 2>/dev/null)
+  if [ -z "$EXISTING_QWEN36" ] || [ "$EXISTING_QWEN36" = "null" ]; then
+    EXISTING_QWEN36=0
+  fi
 
-    if [ "$EXISTING_QWEN36" -ge 1 ]; then
-        echo "  Qwen3.6 instance already running. Skipping."
-    else
-        create_instance_with_retry "Qwen3.6 35B-A3B" "$QWEN36_MODEL_ID" "Tensor" "MlxJaccl" 2 \
-            "$QWEN36_TEMPERATURE" "$QWEN36_TOP_P" "$QWEN36_TOP_K" "$QWEN36_MIN_P" \
-            "$QWEN36_PRESENCE_PENALTY" "$QWEN36_REPETITION_PENALTY" \
-            "$QWEN36_MAX_KV_TOKENS" "$QWEN36_MAX_PREFIX_SESSIONS" \
-            "$QWEN36_KV_CACHE_BITS" "$QWEN36_MAX_PREFIX_BYTES" \
-            "$QWEN36_PREFILL_STEP_SIZE" || true
+  if [ "$EXISTING_QWEN36" -ge 1 ]; then
+    echo "  Qwen3.6 instance already running. Skipping."
+  else
+    create_instance_with_retry "Qwen3.6 35B-A3B" "$QWEN36_MODEL_ID" "Tensor" "MlxJaccl" 2 \
+      "$QWEN36_TEMPERATURE" "$QWEN36_TOP_P" "$QWEN36_TOP_K" "$QWEN36_MIN_P" \
+      "$QWEN36_PRESENCE_PENALTY" "$QWEN36_REPETITION_PENALTY" \
+      "$QWEN36_MAX_KV_TOKENS" "$QWEN36_MAX_PREFIX_SESSIONS" \
+      "$QWEN36_KV_CACHE_BITS" "$QWEN36_MAX_PREFIX_BYTES" \
+      "$QWEN36_PREFILL_STEP_SIZE" || true
 
-        echo -n "Waiting for 2 Qwen3.6 runner(s) to become Ready..."
-        READY=false
-        READY_COUNT=0
-        for i in {1..180}; do
-            READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$QWEN36_MODEL_ID" '
+    echo -n "Waiting for 2 Qwen3.6 runner(s) to become Ready..."
+    READY=false
+    READY_COUNT=0
+    for i in {1..180}; do
+      READY_COUNT=$(curl -s "$API/state" | jq -r --arg m "$QWEN36_MODEL_ID" '
                 . as $root
                 | [ $root.instances | to_entries[]
                     | select(.value.MlxJacclInstance.shardAssignments.modelId == $m)
                     | .value.MlxJacclInstance.shardAssignments.runnerToShard | keys[] ] as $rids
                 | [ $rids[] | $root.runners[.] | select(.RunnerReady? != null) ] | length
             ' 2>/dev/null)
-            if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
-            if [ "$READY_COUNT" -ge 2 ]; then
-                echo " READY ($READY_COUNT/2)"
-                READY=true
-                break
-            fi
-            echo -n "."
-            sleep 2
-        done
-        if [ "$READY" = false ]; then
-            echo ""
-            echo "  WARNING: Qwen3.6 only $READY_COUNT/2 runners reached Ready."
-            echo "  Check ~/exo.log on the Studios."
-        fi
+      if [ -z "$READY_COUNT" ] || [ "$READY_COUNT" = "null" ]; then READY_COUNT=0; fi
+      if [ "$READY_COUNT" -ge 2 ]; then
+        echo " READY ($READY_COUNT/2)"
+        READY=true
+        break
+      fi
+      echo -n "."
+      sleep 2
+    done
+    if [ "$READY" = false ]; then
+      echo ""
+      echo "  WARNING: Qwen3.6 only $READY_COUNT/2 runners reached Ready."
+      echo "  Check ~/exo.log on the Studios."
     fi
+  fi
 fi
 
 # Final environment export

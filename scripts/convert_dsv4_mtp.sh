@@ -27,22 +27,22 @@ set -euo pipefail
 OUT_DIR="${OUT_DIR:-$HOME/.exo/models/local--DeepSeek-V4-Flash-8bit-mtp}"
 HF_REPO="${HF_REPO:-deepseek-ai/DeepSeek-V4-Flash}"
 
-if [[ -d "$OUT_DIR" ]]; then
-    echo "Output dir already exists: $OUT_DIR"
-    echo "Delete it or pass OUT_DIR=... to convert into a different path."
-    exit 1
+if [[ -d $OUT_DIR ]]; then
+  echo "Output dir already exists: $OUT_DIR"
+  echo "Delete it or pass OUT_DIR=... to convert into a different path."
+  exit 1
 fi
 
 # Free-space check.
 AVAIL_KB=$(df -k "$(dirname "$OUT_DIR")" | awk 'NR==2 {print $4}')
 NEEDED_KB=$((320 * 1024 * 1024))
-if [[ "$AVAIL_KB" -lt "$NEEDED_KB" ]]; then
-    echo "Insufficient disk space at $(dirname "$OUT_DIR"):"
-    echo "  available: $((AVAIL_KB / 1024 / 1024)) GB"
-    echo "  needed:    320 GB"
-    echo "Free up space (e.g., delete unused models in ~/.exo/models/)"
-    echo "or run on the laptop where disk is roomier."
-    exit 1
+if [[ $AVAIL_KB -lt $NEEDED_KB ]]; then
+  echo "Insufficient disk space at $(dirname "$OUT_DIR"):"
+  echo "  available: $((AVAIL_KB / 1024 / 1024)) GB"
+  echo "  needed:    320 GB"
+  echo "Free up space (e.g., delete unused models in ~/.exo/models/)"
+  echo "or run on the laptop where disk is roomier."
+  exit 1
 fi
 
 # Activate the EXO_DSV4_MTP gate so sanitize() KEEPS the mtp.* weights

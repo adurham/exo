@@ -36,22 +36,31 @@ GO=0
 ONLY=""
 for arg in "$@"; do
   case "$arg" in
-    --go) GO=1 ;;
-    exo|mlx|mlx-lm) ONLY="$arg" ;;
-    *) echo "unknown arg: $arg" >&2; exit 2 ;;
+  --go) GO=1 ;;
+  exo | mlx | mlx-lm) ONLY="$arg" ;;
+  *)
+    echo "unknown arg: $arg" >&2
+    exit 2
+    ;;
   esac
 done
 
-c_bold=$'\e[1m'; c_grn=$'\e[32m'; c_yel=$'\e[33m'; c_red=$'\e[31m'; c_rst=$'\e[0m'
+c_bold=$'\e[1m'
+c_grn=$'\e[32m'
+c_yel=$'\e[33m'
+c_red=$'\e[31m'
+c_rst=$'\e[0m'
 
 for entry in "${REPOS[@]}"; do
   IFS=':' read -r label rel remote ubr <<<"$entry"
-  [[ -n "$ONLY" && "$ONLY" != "$label" ]] && continue
+  [[ -n $ONLY && $ONLY != "$label" ]] && continue
   dir="$EXO_ROOT/$rel"
   echo "${c_bold}======== $label  ($rel) ========${c_rst}"
 
   if ! git -C "$dir" remote get-url "$remote" >/dev/null 2>&1; then
-    echo "  ${c_red}no '$remote' remote — skipping${c_rst}"; echo; continue
+    echo "  ${c_red}no '$remote' remote — skipping${c_rst}"
+    echo
+    continue
   fi
 
   git -C "$dir" fetch "$remote" --quiet
@@ -59,29 +68,35 @@ for entry in "${REPOS[@]}"; do
   read -r ahead behind < <(git -C "$dir" rev-list --left-right --count "HEAD...$remote/$ubr")
   echo "  branch: ${c_bold}$cur${c_rst}   vs $remote/$ubr -> ${c_grn}ahead $ahead${c_rst} / ${c_yel}behind $behind${c_rst}"
 
-  if [[ "$behind" -eq 0 ]]; then
-    echo "  ${c_grn}up to date — nothing to pull${c_rst}"; echo; continue
+  if [[ $behind -eq 0 ]]; then
+    echo "  ${c_grn}up to date — nothing to pull${c_rst}"
+    echo
+    continue
   fi
 
   echo "  ${c_yel}$behind upstream commit(s) to pull:${c_rst}"
   git -C "$dir" log --format='    %h %s' "HEAD..$remote/$ubr" | head -15
-  [[ "$behind" -gt 15 ]] && echo "    ... ($((behind-15)) more)"
+  [[ $behind -gt 15 ]] && echo "    ... ($((behind - 15)) more)"
 
   # conflict preview (no working-tree changes)
   base="$(git -C "$dir" merge-base HEAD "$remote/$ubr")"
   conflicts="$(git -C "$dir" merge-tree --write-tree HEAD "$remote/$ubr" 2>/dev/null | grep -c '^CONFLICT' || true)"
-  if [[ "${conflicts:-0}" -gt 0 ]]; then
+  if [[ ${conflicts:-0} -gt 0 ]]; then
     echo "  ${c_yel}predicted conflicts: $conflicts (rerere will auto-resolve known ones)${c_rst}"
   else
     echo "  ${c_grn}predicted: clean merge${c_rst}"
   fi
 
-  if [[ "$GO" -eq 0 ]]; then
-    echo "  ${c_bold}(dry-run — pass --go to merge)${c_rst}"; echo; continue
+  if [[ $GO -eq 0 ]]; then
+    echo "  ${c_bold}(dry-run — pass --go to merge)${c_rst}"
+    echo
+    continue
   fi
 
   if ! git -C "$dir" diff --quiet || ! git -C "$dir" diff --cached --quiet; then
-    echo "  ${c_red}working tree dirty — commit/stash first, skipping merge${c_rst}"; echo; continue
+    echo "  ${c_red}working tree dirty — commit/stash first, skipping merge${c_rst}"
+    echo
+    continue
   fi
 
   echo "  ${c_bold}merging $remote/$ubr into $cur ...${c_rst}"
@@ -90,7 +105,7 @@ for entry in "${REPOS[@]}"; do
   else
     # rerere may have resolved everything; check for remaining unmerged paths
     unresolved="$(git -C "$dir" diff --name-only --diff-filter=U)"
-    if [[ -z "$unresolved" ]]; then
+    if [[ -z $unresolved ]]; then
       echo "  ${c_grn}rerere resolved all conflicts — staging + completing merge${c_rst}"
       git -C "$dir" add -A && git -C "$dir" commit --no-edit
     else

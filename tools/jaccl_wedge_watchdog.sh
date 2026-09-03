@@ -18,9 +18,9 @@
 
 set -u
 
-STALL_SECS="${STALL_SECS:-45}"      # log silent this long => suspect wedge
-POLL_SECS="${POLL_SECS:-10}"        # how often we check
-SAMPLE_SECS="${SAMPLE_SECS:-3}"     # sample duration when firing
+STALL_SECS="${STALL_SECS:-45}"  # log silent this long => suspect wedge
+POLL_SECS="${POLL_SECS:-10}"    # how often we check
+SAMPLE_SECS="${SAMPLE_SECS:-3}" # sample duration when firing
 STDERR_LOG="$HOME/.exo/exo_log/runner_log/stderr.log"
 DUMP_DIR="$HOME/.exo/wedge_dumps"
 HOSTTAG="$(hostname -s)"
@@ -31,14 +31,14 @@ HEARTBEAT_LOG="$DUMP_DIR/watchdog.log"
 log() {
   local line="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
   print -r -- "$line"
-  print -r -- "$line" >> "$HEARTBEAT_LOG"
+  print -r -- "$line" >>"$HEARTBEAT_LOG"
 }
 
 # Largest-footprint spawn_main child of `-m exo` = the model runner.
 find_runner_pid() {
-  ps axo pid,rss,command \
-    | grep 'spawn_main' | grep -v grep \
-    | sort -k2 -n | tail -1 | sed -E 's/^[[:space:]]*([0-9]+).*/\1/'
+  ps axo pid,rss,command |
+    grep 'spawn_main' | grep -v grep |
+    sort -k2 -n | tail -1 | sed -E 's/^[[:space:]]*([0-9]+).*/\1/'
 }
 
 mtime_of() { stat -f '%m' "$1" 2>/dev/null || echo 0; }
@@ -46,34 +46,37 @@ mtime_of() { stat -f '%m' "$1" 2>/dev/null || echo 0; }
 log "watchdog up on $HOSTTAG (stall=${STALL_SECS}s poll=${POLL_SECS}s sample=${SAMPLE_SECS}s)"
 log "watching $STDERR_LOG"
 
-last_episode_mtime=0   # debounce: don't re-dump the same stall episode
-last_heartbeat=0       # emit a liveness line at most every 5 min
+last_episode_mtime=0 # debounce: don't re-dump the same stall episode
+last_heartbeat=0     # emit a liveness line at most every 5 min
 
 while true; do
   sleep "$POLL_SECS"
   now_hb="$(date +%s)"
-  if (( now_hb - last_heartbeat >= 300 )); then
+  if ((now_hb - last_heartbeat >= 300)); then
     log "heartbeat: alive, watching (last_episode_mtime=$last_episode_mtime)"
     last_heartbeat="$now_hb"
   fi
   pid="$(find_runner_pid)"
-  [[ -z "$pid" ]] && { log "no runner pid (idle/restarting)"; continue; }
+  [[ -z $pid ]] && {
+    log "no runner pid (idle/restarting)"
+    continue
+  }
 
   lm="$(mtime_of "$STDERR_LOG")"
   now="$(date +%s)"
-  quiet=$(( now - lm ))
+  quiet=$((now - lm))
 
   # Only suspect a wedge when the log has been quiet AND there is an active
   # generation task on the cluster. Quiet-while-idle is normal.
-  if (( quiet >= STALL_SECS )); then
+  if ((quiet >= STALL_SECS)); then
     # Is a TextGeneration actually Running right now? (cheap local API hit)
-    running="$(curl -s --max-time 5 http://127.0.0.1:52415/state 2>/dev/null \
-      | grep -c '"TextGeneration"' )"
-    if (( running == 0 )); then
-      continue   # genuinely idle, not a wedge
+    running="$(curl -s --max-time 5 http://127.0.0.1:52415/state 2>/dev/null |
+      grep -c '"TextGeneration"')"
+    if ((running == 0)); then
+      continue # genuinely idle, not a wedge
     fi
     # Debounce: only one dump per episode (keyed on the frozen mtime).
-    if (( lm == last_episode_mtime )); then
+    if ((lm == last_episode_mtime)); then
       continue
     fi
     last_episode_mtime="$lm"
@@ -83,14 +86,14 @@ while true; do
     {
       echo "=== wedge dump $HOSTTAG pid=$pid quiet=${quiet}s at $ts ==="
       echo "--- /state task summary ---"
-      curl -s --max-time 5 http://127.0.0.1:52415/state 2>/dev/null \
-        | python3 -c 'import sys,json,collections;
+      curl -s --max-time 5 http://127.0.0.1:52415/state 2>/dev/null |
+        python3 -c 'import sys,json,collections;
 d=json.load(sys.stdin); c=collections.Counter();
 [c.update([(t,v.get("taskStatus"))]) for k,w in d["tasks"].items() for t,v in w.items()];
 print("\n".join(f"  {n}  {k}" for k,n in sorted(c.items())))' 2>/dev/null
       echo "--- sample $pid (${SAMPLE_SECS}s) ---"
       sample "$pid" "$SAMPLE_SECS" 2>&1
-    } > "$out"
-    log "wrote $out ($(wc -l < "$out") lines)"
+    } >"$out"
+    log "wrote $out ($(wc -l <"$out") lines)"
   fi
 done

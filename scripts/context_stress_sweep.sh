@@ -30,15 +30,15 @@ MODEL="mlx-community/DeepSeek-V4-Flash"
 NODE1="macstudio-m4-1"
 NODE2="macstudio-m4-2"
 LOG=/tmp/stress_sweep_results.log
-: > "$LOG"
+: >"$LOG"
 
 log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG"; }
 
 check_health() {
-    local label="$1"
-    log "--- health check: $label ---"
-    curl -s -m 10 "$BASE_URL/state" > /tmp/stress_state_check.json 2>&1
-    python3 -c "
+  local label="$1"
+  log "--- health check: $label ---"
+  curl -s -m 10 "$BASE_URL/state" >/tmp/stress_state_check.json 2>&1
+  python3 -c "
 import json
 try:
     d = json.load(open('/tmp/stress_state_check.json'))
@@ -50,35 +50,35 @@ try:
 except Exception as e:
     print('  STATE CHECK FAILED:', e)
 " | tee -a "$LOG"
-    # `top`'s PhysMem wired/unused split is a noisy proxy: macOS can
-    # transiently reclassify large Metal/IOSurface-backed GPU allocations
-    # between wired/purgeable/compressed during driver-internal housekeeping
-    # with no process-level event behind it, so a single `top -l 1` sample
-    # can catch mid-transition and show a multi-GB "drop" that isn't real
-    # (observed 2026-07-23: node2 wired read 84G -> 2.8G -> 63G across three
-    # consecutive health checks with zero corresponding runner restart/OOM/
-    # log signature). Keep it for a coarse system-level view, but treat exo's
-    # own [MEM] active= line -- read directly from MLX's actual allocator,
-    # logged at the end of every prefill -- as the authoritative number.
-    ssh "$NODE1" "top -l 1 -n 0 | grep -E 'PhysMem'" 2>&1 | sed 's/^/  node1 /' | tee -a "$LOG"
-    ssh "$NODE2" "top -l 1 -n 0 | grep -E 'PhysMem'" 2>&1 | sed 's/^/  node2 /' | tee -a "$LOG"
-    ssh "$NODE1" "grep '\[MEM\]' ~/exo.log 2>/dev/null | tail -1" 2>&1 | sed 's/^/  node1 exo-active /' | tee -a "$LOG"
-    ssh "$NODE2" "grep '\[MEM\]' ~/exo.log 2>/dev/null | tail -1" 2>&1 | sed 's/^/  node2 exo-active /' | tee -a "$LOG"
+  # `top`'s PhysMem wired/unused split is a noisy proxy: macOS can
+  # transiently reclassify large Metal/IOSurface-backed GPU allocations
+  # between wired/purgeable/compressed during driver-internal housekeeping
+  # with no process-level event behind it, so a single `top -l 1` sample
+  # can catch mid-transition and show a multi-GB "drop" that isn't real
+  # (observed 2026-07-23: node2 wired read 84G -> 2.8G -> 63G across three
+  # consecutive health checks with zero corresponding runner restart/OOM/
+  # log signature). Keep it for a coarse system-level view, but treat exo's
+  # own [MEM] active= line -- read directly from MLX's actual allocator,
+  # logged at the end of every prefill -- as the authoritative number.
+  ssh "$NODE1" "top -l 1 -n 0 | grep -E 'PhysMem'" 2>&1 | sed 's/^/  node1 /' | tee -a "$LOG"
+  ssh "$NODE2" "top -l 1 -n 0 | grep -E 'PhysMem'" 2>&1 | sed 's/^/  node2 /' | tee -a "$LOG"
+  ssh "$NODE1" "grep '\[MEM\]' ~/exo.log 2>/dev/null | tail -1" 2>&1 | sed 's/^/  node1 exo-active /' | tee -a "$LOG"
+  ssh "$NODE2" "grep '\[MEM\]' ~/exo.log 2>/dev/null | tail -1" 2>&1 | sed 's/^/  node2 exo-active /' | tee -a "$LOG"
 }
 
 check_log_signatures() {
-    # NOTE: this grep pattern includes "OUTLIER" which also matches
-    # exo's own pre-existing per-cycle stall-detection log line (that's
-    # intentional -- it's the signal you actually want here). It does
-    # NOT filter out benign noise like model_cards validation Tracebacks
-    # at startup -- inspect matches manually before treating a nonzero
-    # count as a real problem; compare against the baseline count taken
-    # before the sweep starts, not against zero.
-    local label="$1"
-    local n1_out n2_out
-    n1_out=$(ssh "$NODE1" "grep -icE 'OutOfMemory|out of memory|MemoryError|Metal.*allocat.*fail|SIGABRT|SIGKILL|Fatal|Traceback|RunnerFailed|OUTLIER' ~/exo.log" 2>&1)
-    n2_out=$(ssh "$NODE2" "grep -icE 'OutOfMemory|out of memory|MemoryError|Metal.*allocat.*fail|SIGABRT|SIGKILL|Fatal|Traceback|RunnerFailed|OUTLIER' ~/exo.log" 2>&1)
-    log "  [$label] cumulative log signature counts -- node1: $n1_out  node2: $n2_out"
+  # NOTE: this grep pattern includes "OUTLIER" which also matches
+  # exo's own pre-existing per-cycle stall-detection log line (that's
+  # intentional -- it's the signal you actually want here). It does
+  # NOT filter out benign noise like model_cards validation Tracebacks
+  # at startup -- inspect matches manually before treating a nonzero
+  # count as a real problem; compare against the baseline count taken
+  # before the sweep starts, not against zero.
+  local label="$1"
+  local n1_out n2_out
+  n1_out=$(ssh "$NODE1" "grep -icE 'OutOfMemory|out of memory|MemoryError|Metal.*allocat.*fail|SIGABRT|SIGKILL|Fatal|Traceback|RunnerFailed|OUTLIER' ~/exo.log" 2>&1)
+  n2_out=$(ssh "$NODE2" "grep -icE 'OutOfMemory|out of memory|MemoryError|Metal.*allocat.*fail|SIGABRT|SIGKILL|Fatal|Traceback|RunnerFailed|OUTLIER' ~/exo.log" 2>&1)
+  log "  [$label] cumulative log signature counts -- node1: $n1_out  node2: $n2_out"
 }
 
 log "=== STRESS SWEEP START ==="
@@ -92,31 +92,31 @@ check_log_signatures "baseline"
 # higher levels only with time budget to match -- this is not a hard
 # technical ceiling, just a session-length tradeoff from the original run.
 LEVELS=(
-    "2000 3 150"
-    "20000 3 150"
-    "75000 2 150"
-    "150000 2 150"
-    "250000 1 150"
+  "2000 3 150"
+  "20000 3 150"
+  "75000 2 150"
+  "150000 2 150"
+  "250000 1 150"
 )
 
 for entry in "${LEVELS[@]}"; do
-    read -r TOKENS ITERS MAXTOK <<< "$entry"
-    log "=== LEVEL: target_tokens=$TOKENS iters=$ITERS max_tokens=$MAXTOK ==="
-    .venv/bin/python bench/mtp_longctx_probe.py \
-        --base-url "$BASE_URL" \
-        --model "$MODEL" \
-        --target-tokens "$TOKENS" \
-        --chars-per-token 5.52 \
-        --iters "$ITERS" \
-        --max-tokens "$MAXTOK" \
-        --label "L${TOKENS}" \
-        --seed $((7749 + TOKENS)) \
-        2>&1 | tee -a "$LOG"
-    PROBE_EXIT=${PIPESTATUS[0]}
-    log "  probe exit code: $PROBE_EXIT"
-    check_health "after L${TOKENS}"
-    check_log_signatures "after L${TOKENS}"
-    sleep 20
+  read -r TOKENS ITERS MAXTOK <<<"$entry"
+  log "=== LEVEL: target_tokens=$TOKENS iters=$ITERS max_tokens=$MAXTOK ==="
+  .venv/bin/python bench/mtp_longctx_probe.py \
+    --base-url "$BASE_URL" \
+    --model "$MODEL" \
+    --target-tokens "$TOKENS" \
+    --chars-per-token 5.52 \
+    --iters "$ITERS" \
+    --max-tokens "$MAXTOK" \
+    --label "L${TOKENS}" \
+    --seed $((7749 + TOKENS)) \
+    2>&1 | tee -a "$LOG"
+  PROBE_EXIT=${PIPESTATUS[0]}
+  log "  probe exit code: $PROBE_EXIT"
+  check_health "after L${TOKENS}"
+  check_log_signatures "after L${TOKENS}"
+  sleep 20
 done
 
 log "=== STRESS SWEEP COMPLETE ==="
