@@ -3,18 +3,53 @@
 """REAL 2-rank distributed correctness check for the shared-scale int8
 quantized moe.all_sum replacement in mlx_lm/models/deepseek_v4.py.
 
-This is NOT a pytest file -- it's a standalone script meant to be run
-under `mlx.launch -n 2` so both `mx.distributed.all_sum` calls inside
-`_quantized_moe_all_sum_sharedscale` actually execute across two real
-processes/ranks. It deliberately uses ONLY all_sum-family collectives
-(verified by monkey-patching mx.distributed.all_gather to raise if
-called at all, proving the "no all_gather anywhere" requirement holds
-under real execution, not just by code inspection).
+STATUS (2026-09-03): manual-only repro, NOT collected by pytest.
 
-Usage:
+This is deliberately NOT a pytest file -- it's a standalone script meant
+to be run under `mlx.launch -n 2` so both `mx.distributed.all_sum` calls
+inside `_quantized_moe_all_sum_sharedscale` actually execute across two
+real processes/ranks. It deliberately uses ONLY all_sum-family
+collectives (verified by monkey-patching mx.distributed.all_gather to
+raise if called at all, proving the "no all_gather anywhere" requirement
+holds under real execution, not just by code inspection).
+
+It previously lived at
+`src/exo/worker/engines/mlx/tests/test_moe_allsum_sharedscale_distributed.py`,
+where its `test_*.py` filename caused pytest to collect (but never run
+any test in) the file -- it exposes no `test_`-prefixed functions, only
+`main()`. Moved here to `bench/` (matching the sibling
+`bench/moe_allsum_quant_repro.py` convention for 2-rank manual repros)
+so pytest no longer pretends to cover it.
+
+Why this can't run in CI: it requires a genuine 2-rank
+`mlx.core.distributed` group (`mlx.launch -n 2 --backend ring`), which
+CI does not provide, AND it imports
+`_quantized_moe_all_sum_sharedscale` from `mlx_lm.models.deepseek_v4` --
+a symbol that exists ONLY on the unmerged mlx-lm branch
+`feat/moe-allsum-sharedscale-2026-08-19` (fork: adurham/mlx-lm), not on
+the pinned mainline submodule commit (`37260bbd...`, see
+`.gitmodules`/`git submodule status`). Importing this script against the
+pinned submodule raises `ImportError: cannot import name
+'_quantized_moe_all_sum_sharedscale'`.
+
+Unlike the sibling `test_moe_allsum_quant.py` (deleted; the int8
+all_gather approach it tested was found "mathematically dead", see
+`docs/moe-allsum-quant-root-cause-and-closure-2026-08-19.md`), the
+shared-scale all_sum design this script validates is NOT dead: per
+`docs/moe-allsum-sharedscale-CORRECTED-final-2026-08-19.md` it is
+"correctness-validated" and closed only for the *prefill* use case it
+was built for (no wall-clock speedup at production shape); the doc
+explicitly leaves open that it "may be genuinely useful for DECODE...
+but that's a different, unexplored use case". Since the code is still a
+live, potentially-revivable branch (not proven infeasible), deleting
+this repro would destroy real validation value for zero benefit --
+manual-only + explicit docs is the correct disposition, not deletion.
+
+Usage (only meaningful after checking out the sharedscale mlx-lm branch,
+e.g. `cd mlx-lm && git checkout feat/moe-allsum-sharedscale-2026-08-19`):
   cd ~/repos/exo
   .venv/bin/mlx.launch -n 2 --backend ring \
-      -- .venv/bin/python src/exo/worker/engines/mlx/tests/test_moe_allsum_sharedscale_distributed.py
+      -- .venv/bin/python bench/moe_allsum_sharedscale_repro.py
 
 Exits 0 and prints PASS on success, exits 1 and prints FAIL with details
 on any mismatch.
