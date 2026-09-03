@@ -106,10 +106,45 @@
           };
           treefmt = {
             projectRootFile = "flake.nix";
+            # Scratch/vendored trees that NO formatter should touch. Keeping this
+            # at the top level (rather than repeating it per-formatter) makes the
+            # FORMAT scope match the LINT scope declared in pyproject.toml's
+            # `[tool.ruff] extend-exclude`, and applies to all seven formatters at
+            # once so the next throwaway probe script cannot break CI.
+            #
+            # This has to live here and not only in pyproject.toml: treefmt
+            # invokes `ruff format` with EXPLICIT file paths, and ruff ignores
+            # `exclude`/`extend-exclude` for explicitly-passed paths unless
+            # `--force-exclude` is given -- so pyproject's exclusion scopes
+            # `ruff check` but silently does nothing for `ruff format`. A single
+            # unparseable scratch file therefore made `ruff format` exit 2 and
+            # abort the entire treefmt run, so the other six formatters were
+            # never reached at all.
+            #
+            # Patterns are matched by treefmt against the repo-root-relative path
+            # using gobwas/glob compiled with no separator argument, so `**`
+            # crosses `/` and there is no leading slash.
+            settings.excludes = [
+              ".typings/**"
+              # Vendored third-party benchmark harness code -- not ours to restyle.
+              "bench/vendor/**"
+              # Vendored upstream dependencies, checked out as git submodules.
+              "mlx/**"
+              "mlx-lm/**"
+              # One-off performance/diagnostic probe scripts and shell drivers.
+              # Not shipped, not imported by `src/`, and already excluded from the
+              # pytest run. Some are not even syntactically valid.
+              "bench/**"
+              "tmp/**"
+            ];
             programs = {
               nixpkgs-fmt.enable = true;
               ruff-format = {
                 enable = true;
+                # Generated stub for the Rust extension module. Note that
+                # `rust/exo_rs/**` as a whole cannot go in the global excludes
+                # above, because rustfmt and taplo legitimately own the `.rs` and
+                # `.toml` files in that directory.
                 excludes = [ "rust/exo_rs/exo_rs.pyi" ];
               };
               rustfmt = {
