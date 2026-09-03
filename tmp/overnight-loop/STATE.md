@@ -8,7 +8,20 @@
 
 ## ROUND IN FLIGHT
 
-- **deleg_f38de5cd — Ask B: decode-wall instrumentation** (dispatched 20:31)
+- **deleg_fe55c2ab — FINAL decode round: bracket-OFF + cadence sweep + mx.eval audit** (dispatched 00:15)
+  - Every pre-registered band CLOSES the decode-wall thread. No further attribution work.
+  - Reviewer (opus-4-7, fable unavailable — version error) directive: run the pre-registered
+    contingency plus a dump-cadence sweep (the VOIDed cadence=1 run proved dump-writes pollute
+    wall; cadence=50 is cleaner but not zero, X was never bounded) plus an mx.eval close audit
+    (lazy-eval spillover could explain BOTH the 61% unattributed AND the flat per-call cost).
+  - Also required: recompute out-of-bracket DEDUPLICATED (coverage 101.4% means brackets
+    overcount 1.4%) and relabel G1 as "baseline-brackets-only", not "un-instrumented".
+  - Artifacts: `tmp/decode-close-20260903/`
+  - **AFTER THIS ROUND: campaign closes. Pivot to hardening** (regression guards for shipped
+    wins, reproducible perf-baseline harness, closed-thread consolidation; boot-variance
+    unparking rides along with the harness).
+
+- ~~deleg_f38de5cd — Ask B: decode-wall instrumentation~~ COMPLETE (de392010a)
   - G1 control run (bracket env ON, decode-profiling OFF, patch unapplied) then instrumented
     S1-S4, attribution of the ~5.0% out-of-bracket wall to candidate A (fenced coord collectives,
     `dsv4_mtp.py:2259-2310`) vs candidate B (`agree_on_tasks`/`agree_on_cancellations_fast`,
@@ -54,6 +67,7 @@
 
 ## OPEN QUESTIONS FEEDING FUTURE ROUNDS
 
-- The ~5.0% out-of-bracket decode wall (Ask B answers this).
+- The ~5.0% out-of-bracket decode wall: Ask B attributed only 38.6% (A=17.1%, B=21.5%);
+  61% unattributed -> FINAL round (deleg_fe55c2ab) closes it on any band.
 - Mild prefill depth degradation 426.0 -> 418.6 -> 406.6 t/s (fable: <1% ROI, low priority).
 - Whether anything else in the client serialization path can cost cache (contract now guards it).
