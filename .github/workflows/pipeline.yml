@@ -104,7 +104,7 @@ jobs:
         run: nix flake check
 
       - name: Run pytest (macOS only)
-        if: runner.os == 'macOS'
+        if: (success() || failure()) && runner.os == 'macOS'
         run: |
           # Build the test environment (requires relaxed sandbox for uv2nix on macOS)
           TEST_ENV=$(nix build '.#exo-test-env' --option sandbox relaxed --print-out-paths)
