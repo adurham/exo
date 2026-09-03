@@ -1768,6 +1768,12 @@ for NODE in "${NODES[@]}"; do
   # docs/pysampler-blocking-eval-root-cause-2026-08-22.md. Remove once
   # understood; not meant to be a permanent flag.
   [ -n "${EXO_DSV4_FENCE_GATE_DIAG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_GATE_DIAG=$EXO_DSV4_FENCE_GATE_DIAG"
+  # TEMP ROUND-4 PROBE (2026-09-03, EXO_DSV4_ALLSUM_IDENTITY_PROBE=1):
+  # pass-through ONLY for the perf-campaign-2 round-4 timing probes
+  # (tmp/perf-campaign-2/round4/). NO default above — this must never be
+  # set by default; output is NUMERICALLY WRONG when on (skips the per-layer
+  # MoE TP all_sum). Never ship enabled.
+  [ -n "${EXO_DSV4_ALLSUM_IDENTITY_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_IDENTITY_PROBE=$EXO_DSV4_ALLSUM_IDENTITY_PROBE"
   # c=2 decode levers.
   #
   # BS_MIN_ACCEPT DEFAULT 1 (2026-07-12, was 0). Per-stream acceptance
