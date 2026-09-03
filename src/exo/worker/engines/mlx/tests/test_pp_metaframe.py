@@ -423,7 +423,7 @@ def test_metaframe_protocol_version_mismatch_raises() -> None:
                 recv_metaframe(0, group=group1)
     finally:
         _MLX_CALL_LOCK.release()
-    assert _mod.METAFRAME_PROTOCOL_VERSION == 3
+    assert _mod.METAFRAME_PROTOCOL_VERSION == 4
 
 
 def test_metaframe_handshake_agrees_when_both_ranks_match() -> None:

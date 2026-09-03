@@ -3,6 +3,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Callable
 
+import mlx.core as mx
 import pytest
 
 import exo.worker.engines.mlx.builder as mlx_builder
@@ -125,7 +126,7 @@ class MockLoadOutput:
 @pytest.fixture
 def patch_out_mlx(monkeypatch: pytest.MonkeyPatch):
     # initialize_mlx returns a mock group
-    monkeypatch.setattr(mlx_builder, "initialize_mlx", make_nothin(MockGroup()))
+    monkeypatch.setattr(mlx_builder, "initialize_mlx", make_nothin(mx.distributed.init()))
 
     def lmi_gen():
         yield MockLoadOutput(1, 1)
@@ -134,7 +135,22 @@ def patch_out_mlx(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(mlx_builder, "load_mlx_items", make_nothin(lmi_gen()))
     monkeypatch.setattr(mlx_batch_generator, "warmup_inference", make_nothin(1))
     monkeypatch.setattr(mlx_batch_generator, "_check_for_debug_prompts", nothin)
-    monkeypatch.setattr(mlx_batch_generator, "mx_any", make_nothin(False))
+    # mx_any's real single-rank behavior is a pass-through of the local
+    # bool (an all_sum over a size-1 group is a no-op reduction) -- see
+    # utils_mlx.mx_any's `if group is None: return bool_` branch, and
+    # note get_coord_group returns the group itself (not None) whenever
+    # group.size() <= 1, so single-rank tests still exercise the
+    # `group is not None` arm. A constant-False stub was harmless only
+    # while every mx_any call site here happened to want False (no
+    # cancellations); it broke silently once step()'s has_work gate
+    # (66ec4667f, "make has_work check collective") started routing a
+    # TRUE value through the same mocked function -- the gate would then
+    # always take the empty-cancellations early return and never drive
+    # the fake generator's step(), hanging the runner loop forever
+    # polling an empty work queue.
+    monkeypatch.setattr(
+        mlx_batch_generator, "mx_any", lambda bool_, _group=None: bool_
+    )
 
     def fake_all_gather(
         tasks: list[TextGeneration], group: object
@@ -194,6 +210,15 @@ class FakeExoBatchGenerator:
         for uid in uids:
             self._pending.pop(uid, None)
 
+    def set_prefill_cancel_probe(
+        self, probe: "Callable[[], bool] | None"
+    ) -> None:
+        """Match ExoBatchGenerator.set_prefill_cancel_probe's interface
+        (called unconditionally by batch_generator.py's chunked-prefill
+        drive setup). This fake never actually drives a chunked prefill
+        loop, so storing-without-invoking is sufficient."""
+        self._prefill_cancel_probe = probe
+
     def close(self) -> None:
         pass
 
@@ -216,6 +241,21 @@ class EventCollector:
         pass
 
 
+class MockGroup:
+    """Kept for `test_concurrency_admission_gate.py`'s import (a plain
+    duck-type group, safe there because that test forces
+    EXO_DSV4_BATCHED_PREFILL=0 so the collective mx_min_int()/all_min()
+    path this fake can't satisfy is never reached). Do NOT reuse this in
+    THIS file's own fixture -- see patch_out_mlx's mx.distributed.init()
+    comment for why a real Group is required here."""
+
+    def rank(self) -> int:
+        return 0
+
+    def size(self) -> int:
+        return 1
+
+
 class MockTokenizer:
     tool_parser = None
     tool_call_start = None
@@ -234,13 +274,6 @@ class MockTokenizer:
     def encode(_text: str, add_special_tokens: bool = True) -> list[int]:
         return [0]
 
-
-class MockGroup:
-    def rank(self) -> int:
-        return 0
-
-    def size(self) -> int:
-        return 1
 
 
 def _run(tasks: Iterable[Task], send_after_ready: list[Task] | None = None):

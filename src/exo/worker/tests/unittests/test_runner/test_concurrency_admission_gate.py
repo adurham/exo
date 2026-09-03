@@ -170,6 +170,17 @@ class HoldingExoBatchGenerator:
             self._pending.pop(uid, None)
             self._held.pop(uid, None)
 
+    def set_prefill_cancel_probe(
+        self, probe: "Callable[[], bool] | None"
+    ) -> None:
+        """Match ExoBatchGenerator.set_prefill_cancel_probe's interface
+        (called unconditionally by batch_generator.py's chunked-prefill
+        drive setup). This fake's step() never actually drives a chunked
+        prefill loop, so storing-without-invoking is sufficient -- the
+        gate this test exercises is submission ORDER/timing, not the
+        prefill-cancel path."""
+        self._prefill_cancel_probe = probe
+
     def close(self) -> None:
         pass
 

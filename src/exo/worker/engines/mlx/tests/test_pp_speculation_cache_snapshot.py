@@ -291,7 +291,9 @@ def test_restored_cache_is_indistinguishable_from_a_cache_that_never_ran_spec_fw
 # the isinstance-fallthrough root cause): the FIRST fix attempt's
 # tree_map(mx.array, state) crashed both runners on the first live
 # request with "Invoked with types: mlx.core.array, NoneType", because
-# a fresh/untouched PoolingCache's .state is (None, None, None). This
+# a fresh/untouched PoolingCache's .state is (None, None, None, None, None)
+# (widened to a 5-tuple by the chunk-boundary overlap-carry fix; the
+# setter still accepts a legacy 3-tuple for backward compat). This
 # reproduces that exact crash directly, with no cluster needed.
 # ---------------------------------------------------------------------------
 
@@ -304,13 +306,13 @@ def test_pooling_cache_with_untouched_buffers_does_not_crash_snapshot() -> None:
     is in for the first several decode steps of any request) must
     snapshot and restore without crashing."""
     cache = PoolingCache(ratio=4)  # pyright: ignore
-    assert cache.state == (None, None, None)  # pyright: ignore
+    assert cache.state == (None, None, None, None, None)  # pyright: ignore
 
     snap = _snapshot_cache([cache])  # must NOT raise
 
     _restore_cache([cache], snap)  # must NOT raise either
 
-    assert cache.state == (None, None, None)  # pyright: ignore
+    assert cache.state == (None, None, None, None, None)  # pyright: ignore
 
 
 def test_pooling_cache_with_partial_remainder_round_trips() -> None:
