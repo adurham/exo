@@ -41,6 +41,15 @@ intervention needed")
 10. **Escalate to the user (stop the loop) only for:** hardware faults, data loss, a change that
     would need credentials/new hardware, or a genuine safety issue. Everything else: keep going.
 
+## GREP THE RECORD FIRST (added 2026-09-03 after campaign-2 round 1 repeated retracted work)
+
+Before ANY brief is written: grep `docs/PERFORMANCE_HISTORY.md` and `docs/*.md` for every
+hypothesis in it. For each, record: prior measurement, prior verdict, and what the new round does
+DIFFERENTLY. A brief that cannot name the difference is a repeat and must not be dispatched.
+Round 1 of campaign 2 reproduced the retracted 2026-08-22 serial-sync bandwidth artifact and
+nearly funded mlx kernel work off it — caught only because the user asked "not repeating things
+done before?" The PM must also add a "RECONCILIATION WITH PRIOR RECORD" section to every report.
+
 ## Cost discipline
 
 - fable consults: user granted runway; use freely but one consult per round (not per subagent).
