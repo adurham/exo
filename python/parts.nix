@@ -84,8 +84,12 @@ let
                 nanobind = pkgs.fetchFromGitHub {
                   owner = "wjakob";
                   repo = "nanobind";
-                  rev = "v2.10.2";
-                  hash = "sha256-io44YhN+VpfHFWyvvLWSanRgbzA0whK8WlDNRi3hahU=";
+                  # Must match the GIT_TAG in mlx's CMakeLists.txt (mlx commit
+                  # 5abdd04bc, "Update nanobind to 2.13.0"). mlx's array.cpp now
+                  # uses nb::pooled and the public ndarray data_handle()/
+                  # byte_offset accessors, which do not exist before 2.13.0.
+                  rev = "v2.13.0";
+                  hash = "sha256-YAqjcVBkuNsXvrAaVmDRLQ1F38UBqdnIf8+OseNBzG4=";
                   fetchSubmodules = true;
                 };
               in
