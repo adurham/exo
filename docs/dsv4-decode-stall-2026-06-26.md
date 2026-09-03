@@ -11,6 +11,62 @@ doesn't re-tread them.
 
 ---
 
+## CORRECTIONS (2026-09-03 — perf-campaign-2, rounds 2-3; see `tmp/perf-campaign-2/round2/MECHANISM.md` and `round3/FEASIBILITY.md`)
+
+Three claims in this document are **wrong or misleading** and each misdirected a later
+investigation. The body below is preserved unchanged for history; read it with these
+corrections in force.
+
+1. **"The overlap *primitive* exists" (below, "Key facts" bullet 1, and the TL;DR's
+   stream framing) — FALSE.** MLX has **no GPU collective at all**:
+   `AllReduce::eval_gpu` unconditionally throws
+   (`mlx/backend/metal/distributed.cpp:17-19`), and jaccl's `communication_stream` is a
+   **CPU** stream (`mlx/distributed/jaccl/jaccl.cpp:88`,
+   `communication_stream_(new_stream(Device::cpu))`). Every per-layer `all_sum` is a
+   GPU→CPU handoff — a whole-payload `input_coherent` kernel + encoder memoryBarrier on
+   the GPU side (`mlx/backend/metal/fence.cpp:128-158`) and a host busy-spin on the CPU
+   side (`fence.cpp:58-77`) — a true data dependency no stream-scoped event can overlap.
+   Round 2 source proof: `MECHANISM.md` Q1 (esp. lines 52-77, 187-196) and Q4. Round 3
+   additionally found the transport itself is a host bounce by construction (jaccl
+   `memcpy`s into its own `ibv_reg_mr`'d buffers — `FEASIBILITY.md` Q2).
+2. **"The `mx.eval(y)` fence … is required for cross-rank bit-equiv" and "the fence
+   position is load-bearing" (below, "Key facts" bullet 2, TL;DR attempt-2, and the
+   attempt-3 narrative) — WRONG ROOT CAUSE; settled experimentally 2026-09-03.** The
+   2026-06-26 attempt-3 failure (near-zero output at B=2 200K) was an **algebra bug**,
+   not a fence/ordering/determinism phenomenon: `shared_out` is a per-rank **partial
+   sum** (exo shards `shared_experts.down_proj` sharded-to-all,
+   `auto_parallel.py:1128`, and `shard_inplace` inserts no collective), so moving the
+   single `all_sum` before `_moe_post_combine` left the shared partial **never reduced
+   on all 43 layers**. Round 2 analysis: `MECHANISM.md` Q3 (lines 113-163, esp. 132-141).
+   Round 3 settled it live: re-applying the SAME reorder WITH a second `all_sum` on the
+   shared term produces **coherent, correct output** — the B=2 200K needle passes
+   (both streams recall `FALCON-MERCURY-7749`, zero special-token leak) and c=1
+   probes read normally, i.e. the 06-26 near-zero-garbage failure does NOT reproduce.
+   Bit-identity does NOT hold (the reorder reassociates the floating-point reduction —
+   `sum_r(y_r)·s` vs `sum_r(y_r·s)` — and c=1/c=2 outputs drift while staying
+   correct), so the reorder is not shippable as a bit-exact optimization; but the
+   *failure mechanism* is settled: **it was the algebra, not the fence.** The fence
+   retains only a call-ORDER pinning role whose failure mode is a loud `DESYNC` throw
+   (`mesh_impl.h:3573-3592`), not silent wrong numbers. Full gate data:
+   `round3/REPORT.md` Task 2.
+3. **The per-layer flow's "input collective" line and derived counts (below, "The MoE
+   flow", `sum_gradients(x) # comm stream (input collective)`) — MISLEADING.** The
+   apparent second per-layer collective is `sum_gradients`, which is **not** a
+   cross-rank collective in this configuration (round 1, `round1/REPORT.md:109-116`:
+   "I1b is therefore moot — there is no post-attention all_sum"). The decode-time
+   collective inventory is **one `moe.all_sum` per layer × 43 layers** (the "86
+   collectives" framing — 43 layers × 2 — double-counts). Cost framing also corrected:
+   the crossing cost is payload-proportional (~7 GB/s), NOT a fixed per-crossing fee, so
+   "86 × fixed cost" arithmetic does not hold (round 2, `MECHANISM.md` Q5, lines
+   204-231, falsifying the fixed-commit-fee reading).
+
+Also superseded: the doc's "someone with deeper MLX stream/fence understanding" framing —
+rounds 2-3 closed the stack-level question (no GPU-resident collective is feasible at
+the ≥40% materiality bar; the ~1400 µs/layer is dominated by local compute drain —
+`round3/FEASIBILITY.md` VERDICT).
+
+---
+
 ## TL;DR
 
 - Decode is **83% MoE** (`moe.switch_mlp` alone is 73%). Attention is 17%.
