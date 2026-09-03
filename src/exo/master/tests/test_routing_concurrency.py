@@ -20,7 +20,7 @@ import anyio
 import pytest
 
 from exo.master.main import Master
-from exo.routing.router import get_node_id_keypair
+from exo.routing.router import get_node_zid
 from exo.shared.models.model_cards import ModelCard, ModelTask
 from exo.shared.types.commands import (
     CommandId,
@@ -114,8 +114,7 @@ async def test_concurrent_text_generation_distributes_across_instances():
     """When M concurrent TextGeneration commands arrive for a model with N
     running instances, the master should route them so each instance receives
     exactly ceil(M/N) or floor(M/N) tasks — never all-to-one."""
-    keypair = get_node_id_keypair()
-    node_id = NodeId(keypair.to_node_id())
+    node_id = get_node_zid()
     session_id = SessionId(master_node_id=node_id, election_clock=0)
 
     ge_sender, global_event_receiver = channel[GlobalForwarderEvent]()
@@ -253,8 +252,7 @@ async def test_concurrent_text_generation_distributes_across_instances():
 async def test_text_generation_does_not_cross_model_boundaries():
     """Two models with overlapping instances must not route across each other.
     Requests for model A only go to instances of model A, and vice versa."""
-    keypair = get_node_id_keypair()
-    node_id = NodeId(keypair.to_node_id())
+    node_id = get_node_zid()
     session_id = SessionId(master_node_id=node_id, election_clock=0)
 
     ge_sender, global_event_receiver = channel[GlobalForwarderEvent]()
