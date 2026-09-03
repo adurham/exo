@@ -1311,6 +1311,7 @@ for NODE in "${NODES[@]}"; do
         --exclude '*.pyc' \
         --exclude 'dashboard/node_modules/' \
         --exclude '.pytest_cache/' \
+        --exclude 'tmp/' \
         "$HOME/repos/exo/" "$NODE:~/repos/exo/" \
         || { echo "Failed to rsync repo to $NODE"; exit 1; }
     
@@ -2097,6 +2098,8 @@ for NODE in "${NODES[@]}"; do
     # per cycle to /tmp/dsv4_spec_trace_pid<PID>.jsonl on rank 0. Diagnostic
     # only — pairs with a plain-greedy capture to find first divergence.
     [ -n "${EXO_DSV4_SPEC_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SPEC_TRACE=$EXO_DSV4_SPEC_TRACE"
+    [ -n "${EXO_DSV4_SDPA_CALL_PROFILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SDPA_CALL_PROFILE=$EXO_DSV4_SDPA_CALL_PROFILE"
+    [ -n "${EXO_DSV4_DECODE_COLLECTIVE_PROFILING:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DECODE_COLLECTIVE_PROFILING=$EXO_DSV4_DECODE_COLLECTIVE_PROFILING"
     # c>=2 degen-kill WEDGE tracer (2026-07-03). When 1, batch_generate.step
     # logs per-rank batch size + every generator eviction so a cross-rank diff
     # shows whether a mid-batch degen eviction (and its B-transition) is

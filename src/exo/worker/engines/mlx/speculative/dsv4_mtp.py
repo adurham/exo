@@ -3084,6 +3084,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     uid, [int(tid) for (tid, _lp) in all_tokens_per[n]]
                 )
 
+        # METHODOLOGY REQUIREMENT (perf campaign, see
+        # docs/PERFORMANCE_HISTORY.md and the worked-example patch at
+        # tmp/prefill-round4-exec-askb-20260902/revert/instrumentation_as_run.patch):
+        # any phase-attribution profiling added at this accept bracket
+        # close MUST force materialization via mx.eval() here, or MLX's
+        # lazy evaluation will attribute the deferred compute to
+        # whichever later phase happens to trigger materialization —
+        # this exact mistake produced a multi-round phantom during the
+        # perf campaign. Comment only; no mx.eval added here.
         if prof is not None:
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
@@ -3402,6 +3411,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 all_tokens_per,
             )
 
+        # METHODOLOGY REQUIREMENT (perf campaign, see
+        # docs/PERFORMANCE_HISTORY.md and the worked-example patch at
+        # tmp/prefill-round4-exec-askb-20260902/revert/instrumentation_as_run.patch):
+        # any phase-attribution profiling added at this rollback/total
+        # bracket close MUST force materialization via mx.eval() here,
+        # or MLX's lazy evaluation will attribute the deferred compute to
+        # whichever later phase happens to trigger materialization —
+        # this exact mistake produced a multi-round phantom during the
+        # perf campaign. Comment only; no mx.eval added here.
         if prof is not None:
             t_after_rollback = time.perf_counter()
             prof.record(
@@ -4937,6 +4955,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 except Exception as _audit_err:  # never break generation
                     logger.warning(f"verify-audit(temp>0) failed: {_audit_err}")
 
+        # METHODOLOGY REQUIREMENT (perf campaign, see
+        # docs/PERFORMANCE_HISTORY.md and the worked-example patch at
+        # tmp/prefill-round4-exec-askb-20260902/revert/instrumentation_as_run.patch):
+        # any phase-attribution profiling added at this accept bracket
+        # close MUST force materialization via mx.eval() here, or MLX's
+        # lazy evaluation will attribute the deferred compute to
+        # whichever later phase happens to trigger materialization —
+        # this exact mistake produced a multi-round phantom during the
+        # perf campaign. Comment only; no mx.eval added here.
         if prof is not None:
             t_after_accept = time.perf_counter()
             prof.record("accept", (t_after_accept - t_after_verify) * 1000.0)
@@ -5446,6 +5473,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 [all_tokens],
             )
 
+        # METHODOLOGY REQUIREMENT (perf campaign, see
+        # docs/PERFORMANCE_HISTORY.md and the worked-example patch at
+        # tmp/prefill-round4-exec-askb-20260902/revert/instrumentation_as_run.patch):
+        # any phase-attribution profiling added at this rollback/total
+        # bracket close MUST force materialization via mx.eval() here,
+        # or MLX's lazy evaluation will attribute the deferred compute to
+        # whichever later phase happens to trigger materialization —
+        # this exact mistake produced a multi-round phantom during the
+        # perf campaign. Comment only; no mx.eval added here.
         if prof is not None:
             t_after_rollback = time.perf_counter()
             prof.record(
