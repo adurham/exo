@@ -7817,3 +7817,21 @@ METHODOLOGY NOTES (all caught before or during, not rationalized after):
 - S2/S3 control dumps lost to a collection bug (zero-byte); they gate nothing (G1 rests on S4 by pre-registration) and the instrumented arm's fixed method recovered all four strata.
 
 REVERT VERIFIED: src/ + mlx-lm/ + submodule + staged all empty, sentinels 0. start_cluster.sh allow-list line survives as intended. Cluster up and idle.
+
+### DECODE-WALL THREAD: CLOSED — the ~5% gap is mostly a profiler accounting artifact (2026-09-03)
+
+Artifacts: tmp/decode-close-20260903/ (RESULTS.md, PRE-REGISTRATION.md, audit/, recompute/, tools/ 7-7 tests, arms/ 4 arms + raw). Zero patches applied (bracket-OFF + cadence are env-var only). ~85 min, inside the 2h box. 4 launches (3 arms + restore).
+
+**1. BRACKET-OFF: lands ON the 1.5% boundary, no clean fire claimed.** OFF 61.315 ms/cycle vs c200 62.380 / c1000 62.370. Median summary -1.707%/-1.692% (INSTRUMENTATION band); position-matched -1.09%/-1.15%/-1.47% (REAL WORK band). Direction unambiguous and reproducible (OFF faster in every matched pair) but magnitude straddles the threshold, and OFF's within-arm spread (3.0%) EXCEEDS the between-arm difference (1.7%) -> pre-registered resolution limit applies, no clean fire. Both candidate bands close the thread with the same implication: at most ~1.06 ms of a ~62 ms cycle is recoverable.
+
+**2. CADENCE SWEEP: hypothesis REFUTED.** c1000 vs c200 = -0.016% total wall; gap is flat-to-rising (6.06% -> 7.83%), NOT monotonic-decreasing. Dump-write is not the driver. Buffer-only mode needed a code change -> SKIPPED, no patch invented.
+
+**3. MX.EVAL AUDIT: SPILLOVER CONFIRMED — the mechanism.** draft/verify closes have unconditional mx.eval (dsv4_mtp.py:4098, :4240). accept (:4940, :3088) and rollback/total (:5449, :3406) DO NOT — the only reachable mx.synchronize sits inside the rollback>0 branch (:1253 via :5003), so it never runs on full-acceptance cycles. total telescopes onto rollback's close, inheriting it. Explains BOTH the 61%-unattributed AND the anomalously flat per-call collective cost.
+
+**COVERAGE CORRECTION:** 3.829 ms / 6.06% STANDS. bracket_gap.py:47 matches a single `B=1 total` bracket and never sums phases, so dedup is inapplicable; the 101.4% came from a different instrument (validity_gate.py, record-count / cycles) and does not propagate. G1 relabeled per its own env_gate.log (MTP_PROFILE=50 + RB_PROFILE=1 live): "baseline-brackets-only control (candidate probes OFF)".
+
+**CLOSING STATEMENT:** The ~5% out-of-bracket decode wall is not a hidden pool of removable work; it is predominantly a MEASUREMENT-ACCOUNTING ARTIFACT OF THE PHASE PROFILER ITSELF. The rollback/total bracket closes in both linear MTP decode paths lack forced materialization on the modal full-acceptance cycle, so MLX lazy evaluation defers kernels launched INSIDE the bracket until AFTER it closes, where they are booked as "outside". Live measurement bounds the real prize: with instrumentation removed entirely (= shipped production config), decode wall falls only ~1.1-1.7% (~1.06 ms of ~62 ms), against an apparent gap of ~5 ms/7.8% — at most a fifth of the gap is genuine overhead; the rest never existed as separable work. Dump-write refuted (5x cadence change = -0.016%). Candidates A and B are real but jointly minor (~1.48 ms/cycle, 38.6%). Residual is below viable-prize threshold on every band the data supports. **THREAD CLOSED.**
+
+**METHOD NOTES:** pre-registered Gate A voided on ms/token (acceptance drifted 4.41% between arms) rather than reporting its cleaner-looking -3.16%. Ask B's harness was found UNUSABLE (aggregate tok/s includes prefill; 3x intra-stratum swings); replacement's per-chunk median was ALSO invalid (timestamps ~7us apart = parse time, not arrival) — caught before use, switched to decode-only ms/token + the acceptance-independent [MTP] counter.
+
+**IMPLICATION FOR FUTURE PROFILING:** any future phase-attribution work on this codebase must force materialization at every bracket close, or repeat this exact artifact. Consider it a standing methodology requirement.
