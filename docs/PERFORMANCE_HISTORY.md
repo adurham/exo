@@ -7835,3 +7835,23 @@ Artifacts: tmp/decode-close-20260903/ (RESULTS.md, PRE-REGISTRATION.md, audit/, 
 **METHOD NOTES:** pre-registered Gate A voided on ms/token (acceptance drifted 4.41% between arms) rather than reporting its cleaner-looking -3.16%. Ask B's harness was found UNUSABLE (aggregate tok/s includes prefill; 3x intra-stratum swings); replacement's per-chunk median was ALSO invalid (timestamps ~7us apart = parse time, not arrival) — caught before use, switched to decode-only ms/token + the acceptance-independent [MTP] counter.
 
 **IMPLICATION FOR FUTURE PROFILING:** any future phase-attribution work on this codebase must force materialization at every bracket close, or repeat this exact artifact. Consider it a standing methodology requirement.
+
+### HARDENING ROUND 1 — tmp/ pruned 16GB->34MB, rsync exclude, guards audited (2026-09-03)
+
+Commit 67bac4498. Artifacts: tmp/hardening-round1-20260903/REPORT.md.
+
+- **tmp/: 16 GB -> 34 MB** (16.88 GB / 145 files removed, manifest-driven; all 84 .md, 18 REPORT/RESULTS/PRE-REGISTRATION, both .patch files preserved — counts verified identical before/after).
+- **Root-cause launch fix: rsync `--exclude 'tmp/'` at start_cluster.sh:1314** (verified nothing in the launch path reads tmp/). Robust to tmp/ regrowth; expect most of the ~8 min/launch to disappear (estimate — no relaunch performed). CAVEAT found by the PM's own verification: `--exclude` + `--delete` strands the existing 16 GB on BOTH nodes; needs a one-time manual `rm -rf ~/repos/exo/tmp` per node.
+- **mx.eval requirement recorded at all four bracket-close sites** (dsv4_mtp.py:3089, :3416, :4960, :5478), each naming the canonical patch + this doc. Proven COMMENT-ONLY by full-AST comparison (trees identical, mx.eval call sites 30->30). Also added to exo-cluster-operations skill (pitfall #51 + new reference file).
+- **Defective instrumentation patch REMOVED** (not repaired) — one canonical copy (instrumentation_as_run.patch, verified sound) plus a .REMOVED.md pointer. A second plausible-looking copy is worse than none.
+
+**GUARD TABLE (teeth = mutation-verified fail-on-revert, then restored + re-run green):**
+| Win | Guard | Teeth | CI |
+|---|---|---|---|
+| BatchPoolingCache overlap-carry | tests/test_batch_pooling_cache_overlap.py (mlx-lm) | YES (fix deletion -> 2/4 fail) | **NO — pipeline scopes pytest to src/, no recursive submodule checkout. HIGHEST-PRIORITY GAP** |
+| Canonical serializer + golden bytes | tests/agent/test_exo_canonical_serializer.py | YES (field-order mutation -> 4 failures incl. golden bytes) | yes |
+| Pad-strip | test_exo_reasoning_pad_omission.py (16 tests) — NOT the serializer suite as assumed | YES (narrow realistic mutation -> 2 failures) | yes |
+| Profiler unit metadata | none | **UNGUARDED** | — |
+| Telemetry runner filter | none | **UNGUARDED** (source lived under tmp/, now outside rsync AND test discovery) | — |
+
+**SECURITY FLAG RESOLVED — FALSE ALARM (supervisor-verified).** The PM flagged "HF token patterns in committed git history" in two blobs. Independent check of the actual blob contents: the hits are the bare variable NAME `api_key`/`API_KEY` (8 occurrences with null/empty values in the flagged file), and `grep -cE "(hf_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,})"` returns **0** in both blobs. No real credentials in history. NO history rewrite, NO token rotation needed. The conservative flag was correct behavior; the finding does not survive verification.
