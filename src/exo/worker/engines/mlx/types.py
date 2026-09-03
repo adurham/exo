@@ -2,6 +2,8 @@
 
 from collections.abc import Sequence
 
+from mlx import core as mx
+from mlx import nn as nn
 from mlx_lm.models.cache import (
     ArraysCache,
     BatchPoolingCache,
@@ -12,9 +14,6 @@ from mlx_lm.models.cache import (
     QuantizedKVCache,
     RotatingKVCache,
 )
-
-from mlx import core as mx
-from mlx import nn as nn
 
 # This list contains one cache entry per transformer layer.
 # DeepSeek-V4 layers no longer use a unified DeepseekV4Cache (removed in

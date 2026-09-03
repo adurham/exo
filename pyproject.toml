@@ -274,6 +274,19 @@ extend-exclude = [
 [tool.ruff.lint]
 extend-select = ["I", "N", "B", "A", "PIE", "SIM"]
 
+[tool.ruff.lint.isort]
+# Pin the first-party/third-party split so import ORDER does not depend on
+# whether the vendored submodules happen to be checked out.
+#
+# `mlx` is a third-party dependency, but a local dev checkout also has an
+# `mlx/` submodule directory at the repo root. Ruff's isort infers first-party
+# packages from the filesystem, so it classified `mlx` as FIRST-party locally
+# (submodule present) and THIRD-party in CI (actions/checkout@v4 does not fetch
+# submodules). That made a correctly-sorted file locally fail `checks.lint` in
+# CI and vice versa -- lint results that changed with checkout state.
+# Declaring these explicitly makes the classification deterministic everywhere.
+known-third-party = ["mlx", "mlx_lm", "mlx_vlm", "mflux"]
+
 [tool.ruff.lint.per-file-ignores]
 # Hand-written MLX/Metal GPU kernel shims. These use single-capital and
 # capitalized-compound identifiers (B, M, N, K, S_pre, H_q, H_kv, K_groups,
