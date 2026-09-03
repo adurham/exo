@@ -66,3 +66,22 @@ def test_ms_series_renders_with_ms_suffix(
     assert len(lines) == 1, text
     assert "ms" in lines[0], lines[0]
     assert "mean= 12.34ms" in lines[0], lines[0]
+
+
+def test_default_unit_renders_with_ms_suffix(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """record() without unit must default to 'ms' (backward compat).
+
+    The fix added ``unit`` as an ADDITIVE parameter defaulting to 'ms',
+    so the 23 pre-existing time call sites that pass no unit must keep
+    rendering with the 'ms' suffix exactly as before.
+    """
+    timer = _PhaseTimer()
+    timer.record("verify", 7.5)
+    text = _dump_and_capture(caplog, timer, batch_size=1)
+
+    lines = [line for line in text.splitlines() if "verify" in line]
+    assert len(lines) == 1, text
+    assert "ms" in lines[0], lines[0]
+    assert "mean=  7.50ms" in lines[0], lines[0]
