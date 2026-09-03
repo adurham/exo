@@ -7800,3 +7800,20 @@ STATE: Fix B dead (6 blocking variants; even perfect C1 would not unblock). SDPA
 3. ASK B pre-registrations (bake in before approval): (a) instrument validity gate — >=95% of decode steps in S1-S4 have non-null collective timings AND profiler overhead <2% wall vs no-profiling control; gate fail = stop and fix instrument, do not interpret the 5.0% from broken data; (b) no-profiling CONTROL FIRST — same S1-S4 with profiling off to confirm the 5.0% wall exists in this exact build before profiling it; (c) confirm EXO_RUNNER_HANG_TIMEOUT_SECONDS=300 > 2x the max observed single decode step; raise if any step >150s.
 4. PREFILL c=1: effectively EXHAUSTED. Residual mild depth degradation — optional 3-4 length compute-vs-memory classification, but <1% ROI; do not spend round 5 on it.
 5. SERIALIZATION CONTRACT: make it a CODE CONTRACT, not a defensive doc — canonical serializer + GOLDEN BYTE TEST (same logical prompt serialized twice = byte-identical; CI fails on field-order/whitespace drift). Document server cache key as near-exact-match with ~2 trailing-token tolerance; pad-strip becomes part of the canonical serializer, not optional post-processing.
+
+### ASK B EXECUTION — decode 5% wall: NEITHER collective candidate owns it (2026-09-02/03)
+
+Artifacts: tmp/prefill-round4-exec-askb-20260902/ (RESULTS.md + PRE-REGISTRATION-ASKB.md written before cluster contact).
+
+GATES: G3 PASS (max decode step 168.40ms vs 150s trigger, ~890x margin; 300s stands). G1 PASS (S4 out-of-bracket 3.83ms/cycle = 6.06%, n=22, inside pre-registered [3.5%,6.5%]; absolute gap reproduces the historical 3.55-3.71ms, higher % is just lower wall/cycle at 40K depth). G2 PASS (coverage 101.4% per rank on all four gated collectives; overhead +0.16% S1 / -1.80% S4, inside 2%).
+
+**ATTRIBUTION VERDICT: NEITHER CANDIDATE OWNS THE 5%.** A (fenced coord collectives) = 0.65ms/cycle (17.1%); B (agree_on_tasks/agree_on_cancellations_fast) = 0.82ms/cycle (21.5%); A+B = 38.6%. Both clear their us/call thresholds but miss %-of-wall by an order of magnitude (A 1.04% vs >=10% required; B 1.31% vs >=5%). Reductio passes (1.48ms <= 62.92ms). **~2.35ms/cycle (61%) UNATTRIBUTED** -> the pre-registered <60% contingency FIRES; registered next step is a bracket-OFF bounding arm (not run — extra arm).
+
+METHODOLOGY NOTES (all caught before or during, not rationalized after):
+- First G1 attempt VOIDed and re-run: EXO_DSV4_MTP_PROFILE's VALUE IS THE DUMP CADENCE (dsv4_mtp.py:242), so =1 dumped every cycle and polluted wall with dump-write overhead. Re-run at =50, cadence proven from data. No threshold changed.
+- The committed decode instrumentation patch is DEFECTIVE: raises NameError (orphaned _t0) and its six [PROF] calls use C-style %-args loguru does not interpolate. Caught by a fail-fast probe BEFORE the measured workload; fixed in place; corrected version preserved at revert/instrumentation_as_run.patch + revert/PATCH_DEFECTS.md. REPAIR THE ARTIFACT BEFORE REUSE.
+- Worker coverage numbers corrected 202.8% -> 101.4% (had summed both ranks against a single-rank denominator). Gate passes on the correct basis.
+- Collective-record `depth` field carries GENERATED TOKENS (max 1399), not context depth, so stratification by depth is inoperative. Bounded instead: per-call cost flat across 8 sequential requests spanning 1.5K->40K (369.8->368.0us, <2% spread) — exactly what a fixed-payload collective predicts.
+- S2/S3 control dumps lost to a collection bug (zero-byte); they gate nothing (G1 rests on S4 by pre-registration) and the instrumented arm's fixed method recovered all four strata.
+
+REVERT VERIFIED: src/ + mlx-lm/ + submodule + staged all empty, sentinels 0. start_cluster.sh allow-list line survives as intended. Cluster up and idle.
