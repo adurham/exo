@@ -7975,3 +7975,57 @@ fails there, so the job is still red overall and honest about it). ruff clean.
 
 Side-inventory `STATIC-HAZARDS.md` records latent-but-unimplicated hazards for future rounds (e.g.
 an unrestored `random.seed` in `test_loop_detection.py`).
+
+## CAMPAIGN 2 — ROUND 1: where the 1.75-2.16x decode headroom lives (2026-09-03)
+
+Commit a5de9172f. Report: tmp/perf-campaign-2/round1/REPORT.md. Ideas doc: tmp/perf-campaign-2/IDEAS.md.
+
+**SUPERVISOR CORRECTION FIRST.** IDEAS.md (50ed3b295) framed the 1.75-2.16x gap as "noted, never
+attacked." That was WRONG — I wrote the brief without grepping the full record. Campaign 1 DID
+attack it: kernel bandwidth was measured/retracted/re-measured at 74-87% of peak with a full
+ablation (2026-08-22, "no lever"), the jaccl/RDMA premise was falsified (poll = 1.9% of verify),
+and three fusion/reorder attempts failed. Round 1 initially REPRODUCED the retracted 2026-08-22
+serial-sync artifact (mx.eval inside the bench loop -> 52.7% "of peak" -> "FUND MLX KERNEL WORK").
+The user asked "not repeating things done before?" — the answer was partly yes. The steer caught
+it mid-round; the PM confirmed the artifact at i3_microbench_rerun.py:67-70 and reproduced 53.1%
+with a deliberate serial-sync control. **That kernel-work verdict is WITHDRAWN.** Process fix:
+the loop charter now requires grepping PERFORMANCE_HISTORY.md for every hypothesis before a
+brief is written.
+
+**THE ANSWER: the 2x is LOCAL GPU DRAIN + DISPATCH — not collectives, not kernels.**
+
+**I3 — CLOSED at 83.9% of peak** (458.0 GB/s at the M=4 verify shape, chained-graph method).
+M=1: 114.4us/call, matching the record's 116-117us at noise level. No kernel lever.
+
+**I1 — CLOSED, re-scoped rather than repeated.** The "collective share" relaunch was skipped as a
+repeat of the record. The genuinely open question — during the ~1400us/layer mx.eval wait, is the
+rank blocked on the PEER or on its OWN GPU? — resolves to LOCAL GPU: jaccl transport is 2.6% of
+the per-layer budget (36us median per rank) vs ~95% local drain. Decisive evidence is a NO-PEER
+CONTROL: the same 2.66x stream-boundary penalty reproduces on a non-collective op where no peer
+exists. The collective is where the sync LANDS, not what costs the time. Lever = overlap/
+pipelining of the drain, not comm. I1c (jaccl) closed; I1b (attention replication) MOOT —
+attention is ALREADY replicated (the `n_heads //= N` code path is dead). **Collective count is
+43 per forward, not 86** — `sum_gradients` forward is identity.
+
+**I6 — no per-row dedup, but it is NOT the 2x.** Shared-vs-distinct routing = 1.42x (a deduping
+cache would show ~4x). Worth ~4-8ms of the 56ms verify. Note: the serial-sync artifact compresses
+ratios toward 1.0, so the earlier 1.21x understated it.
+
+**I4 — blocker STANDS, Fix B NOT re-opened.** The round-4 test WAS invalid (sub-chunk prompt), but
+the conclusion holds on a valid test: a child called AMBIGUOUS by substituting runner-log
+`shared_prefix` for `cached_tokens`; independent audit refuted that (`shared_prefix` is the INSERT
+path, and the divergent request ran SLOWER than cold). Root cause located: cache.py:496 vs :356
+contradiction. Fix B stays closed.
+
+**I2 — 10-knob c=2-tax table, no changes made.** THREE knobs are DEAD CODE (wiring removed
+2026-06-24 / 06-18): start_cluster.sh's "set =1 to re-enable" comments are STALE. The live knobs
+with a documented c=1 cost remain candidates (fence 4->8, steel-BI, rendezvous 200ms).
+
+**Process:** independent verification refuted 2 of 5 headline claims mid-round and both changed a
+verdict. `i1_workload.py` has a live bug (reads only `delta.content`; DSv4 emits
+`reasoning_content` first) that would read as a serving failure on a healthy cluster — left
+unfixed, flagged.
+
+**NEXT ROUND MUST STATE WHAT IT DOES DIFFERENTLY:** the lever is overlap/pipelining of the local
+GPU drain, but the record holds THREE FAILED fusion/reordering attempts (§4.4). A fourth attempt
+without a new mechanism is a repeat.
