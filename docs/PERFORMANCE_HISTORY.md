@@ -7779,3 +7779,16 @@ Artifacts: tmp/prefill-round3-20260902/REPORT.md. hermes-agent commit bdc9b6f1fc
 **Decode instrumentation: ready** — patches unapplied, line ranges re-verified at HEAD. Key finding: every interval already ends at a production-unconditional sync, so NO forced mx.eval needed — sidesteps the perturbation risk entirely.
 
 **Process notes:** A1 worker misread its own clean single-token insertion as "60 differing positions" and skipped the live half (re-dispatched); A2 worker's anthropic-padding framing was wrong (corrected). exo src/ untouched; no exo commits.
+
+### PREFILL ROUND 4 EXECUTION (Ask A) — audit BLOCKS Fix B decisively; SDPA experiment self-gated; C1 instrument broken (2026-09-02)
+
+Artifacts: tmp/prefill-round4-exec-20260902/RESULTS.md (+ PRE-REGISTRATION.md from round 4 planning).
+
+1. GATE: PASS — sentinel in installed venv on both nodes (uv stale-wheel did not bite), both env vars live, 3452 [SDPA-CALL] lines, READY 2/2.
+2. SDPA: REJECTED per pre-registered "batched path only" rule — Starting batched prefill count = 0 both nodes; serial driver ran. CAUSE STRUCTURAL: batched prefill requires agreed_queue_len >= 2 (batch_generator.py:753; gates batch_generate.py:2836/2910) and the runbook sends one request per arm — the experiment could never satisfy its own gate. Data preserved, labeled serial-path. NOTE: production runs c=1 serial — the batched path (where the 4.06x anomaly lives) is NOT what production executes; the anomaly is moot for the current workload unless concurrency returns (V4-style).
+3. AUDIT: BLOCKING — 6 of 9 variants return cached=0 (run VALID: end-control 379 >= 341.1; oracle control fired). Decisive row: divergence at token 378/388 still returns 0 => cache is near-exact-match keyed (tolerance ~2 trailing tokens), NOT general prefix-keyed. ANY serialization delta beyond the trailing gap re-prefills the whole prompt. Fix B is BLOCKED decisively on the audit alone; the pad-strip win from round 3 stands independently (proven live cached 0->351).
+4. C1: INCONCLUSIVE by rule 1 (n_multi_invoke=0 < 3) AND instrument BROKEN: raw capture drops first token of every stream (207/166/166 vs 208/167/167; turn 1 starts mid-sentence at ' user') forcing raw_coverage=0.0 by construction; multi-invoke counter reads request history not own output (turn 2 emitted 2 tool calls). Fix B dead -> C1 purpose moot unless re-scoped.
+
+REVERT: HEAD 66f832554, src/ + mlx-lm/ clean, submodule diff empty, sentinel absent. Only intentional leftover: EXO_DSV4_SDPA_CALL_PROFILE allow-list line at start_cluster.sh:2100 (committed with this entry). Cluster left up and idle but still carrying the instrumented build until the next launch rsyncs it away.
+
+STATE: Fix B dead (6 blocking variants; even perfect C1 would not unblock). SDPA anomaly unresolved but MOOT for c=1 production (batched path only). C2 (fleet value) moot with Fix B. Remaining live thread: decode instrumentation (Ask B, ~2-2.5h, unaffected, applies cleanly) for the 5.0% out-of-bracket decode wall.
