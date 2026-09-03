@@ -8029,3 +8029,64 @@ unfixed, flagged.
 **NEXT ROUND MUST STATE WHAT IT DOES DIFFERENTLY:** the lever is overlap/pipelining of the local
 GPU drain, but the record holds THREE FAILED fusion/reordering attempts (§4.4). A fourth attempt
 without a new mechanism is a repeat.
+
+## CAMPAIGN 2 — ROUND 2: MoE decode stall is a TRUE DEPENDENCY; MLX has no GPU collective (2026-09-03)
+
+Artifacts: tmp/perf-campaign-2/round2/ (REPORT.md, MECHANISM.md, A1-A5 archaeology). Read-only
+round — no source, env, or cluster change; nothing to revert. Cluster verified healthy.
+
+**MECHANISM VERDICT: (a) TRUE DEPENDENCY — and its prescribed fix is independently blocked.**
+Two source facts, PM-verified line-by-line at primary source (mlx submodule e40a416b2, the
+DEPLOYED build):
+- `mlx/distributed/jaccl/jaccl.cpp:88` — the collective stream is `new_stream(Device::cpu)`. A
+  **CPU** stream, deliberately.
+- `mlx/backend/metal/distributed.cpp:17-19` — `AllReduce::eval_gpu` UNCONDITIONALLY THROWS.
+  **There is no GPU collective in this MLX at all.**
+Every one of the 43 per-layer `all_sum`s is therefore a real GPU->CPU handoff: a CPU thread must
+observe the GPU finish producing `y` before handing the buffer to RDMA. Implemented as a
+whole-payload `input_coherent` kernel + device-wide `memoryBarrier` (`fence.cpp:128-158`) and a
+**host busy-spin** (`fence.cpp:58-77`). That is the ~1400us/layer "local drain" round 1
+measured. It is a genuine data dependency on the collective's OWN INPUT; no fence rearrangement
+can overlap it — which is exactly why all three 2026-06-26 attempts failed.
+
+**(b) stream-scoped event — RULED OUT.** `Event` (real MTLSharedEvent/encodeWait) exists and MLX
+already inserts the cross-stream edge automatically; but the GPU-side wait branch is
+STRUCTURALLY UNREACHABLE for a GPU->CPU edge. The "they used eval where an event was needed"
+hypothesis is false at source level.
+**(c) stream-boundary churn — RULED OUT as dominant.** The 2.66x was measured at 16.8MB and is
+payload-LINEAR (~7 GB/s), falsifying the "86 x fixed commit" framing. At decode's real 32KiB
+payload it predicts 5-100us vs ~1400us measured: **<=7%**.
+**(a)'s escape hatch (cross-layer pipelining) — BLOCKED.** `hyper_connection.py:486-489` folds the
+MoE output into ALL 4 hyper-connection streams; no residual bypasses the FFN; layer N+1 depends
+fully on layer N's all_sum. No independent GPU work exists anywhere in the forward to fill the gap.
+
+**Convergence (strongest result):** Q5's payload-linear term and Q1's code read land on the SAME
+LINE (`input_coherent`).
+
+**RECORD CORRECTIONS (each PM-verified, not taken from workers):**
+1. **The fence is NOT load-bearing for bit-equiv.** The 06-26 attempt 3 failure was an ALGEBRA
+   BUG, not a fence-position issue: `shared_experts.down_proj` is sharded-to-all
+   (`auto_parallel.py:1128`), `shard_inplace` inserts no collective, biases are divided by n —
+   so `shared_out` is a PARTIAL SUM that the post-combine all_sum must reduce. Moving it earlier
+   left it unreduced on 43 layers -> garbage. HIGH confidence on the algebra; MEDIUM-HIGH that
+   the fence has zero residual role (inference-from-absence; settling experiment specified below).
+2. **~1400us is per VERIFY CYCLE, not per token** — x43 = 60.2ms matches the 56-57ms verify
+   bracket; as per-token it would exceed the real 27ms budget by 2.23x.
+3. **Three stale claims in docs/dsv4-decode-stall-2026-06-26.md** ("the overlap primitive
+   exists", the fence-is-load-bearing story, the 86-collective count) have each misdirected an
+   investigation — patch at source (next round).
+
+**PHASE B DELIBERATELY NOT EXECUTED.** Phase A left no Phase B the verdict authorizes. Declining
+to start research-grade backend work at the end of a 3h box was a stated judgment call.
+
+**WHAT SURVIVES — the ONE genuinely-untested root-cause fix: H-e, a GPU-RESIDENT COLLECTIVE.** If
+the all_reduce ran on the GPU (RDMA from GPU-visible memory, no CPU handoff), the 43 host
+busy-spins disappear. Gating question, to be answered BEFORE any code: **can Thunderbolt 5 RDMA
+DMA directly from a Metal (unified-memory) buffer on Apple Silicon without a host bounce?** On
+unified memory the buffer is physically host-visible, so the question is really about the RDMA
+registration path and coherence, not copies. This is the first proposal in this neighborhood
+that attacks the mechanism instead of rearranging around it.
+
+**Cheap settling experiment for correction #1 (specified, unrun):** re-apply attempt 3's reorder
+PLUS a second `all_sum` on `shared_experts(x)`. If bit-equiv holds, the fence story is dead and
+the reorder becomes a legitimate (small) overlap.
