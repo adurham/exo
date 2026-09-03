@@ -7899,3 +7899,21 @@ Commits: 09f9ea313, 1840c37ad, 874134e0b, e04c6b8bc, 71c8deedc, a9e56bed9, dcf07
 **BOTTOM LINE: CI cannot go green until the two infrastructure blockers are fixed, and until then every guard rounds 2-4 shipped remains unexecuted.** That is the next round's work.
 
 Process note: a worker violated the "never `git stash`" rule during verification and self-reported; PM confirmed no tree damage, only the 4 pre-existing stashes remain.
+
+### HARDENING ROUND 5 — both assigned blockers fixed; a third was hiding behind them (2026-09-03)
+
+Commits: a6204ffce, f37b4fd36, 707f23b86, f0b5c352c, b0ed43a1a, df3b98115, cb68628d8. Report: tmp/hardening-round5-20260903/REPORT.md.
+
+**BLOCKER 2 (macOS mlx patch) — FIXED, CI-verified.** `nix/darwin-build-fixes.patch` pins xcrun/sw_vers probes absent from the Nix sandbox. Three upstream commits had moved the file (4 damaged hunks, not the 2 CI reported). REBASED, not removed — mlx @ e40a416b2 still calls all four sites. A stacked nanobind pin mismatch (2.10.2 vs required 2.13.0) also fixed. `Build all Nix outputs => success` on aarch64-darwin.
+
+**BLOCKER 1 (ruff) — FIXED, 1551 -> 0. MY TASK-FILE PREMISE WAS WRONG and the PM verified the refutation:** `mlx/`/`mlx-lm/` are gitlinks with ZERO tracked files and CI never checks out submodules — they contributed **zero** to the count. Real composition: `bench/` 667, `tmp/` 499, `src/` 350. Post-exclusion count in owned code: 388; 116 fixed (including 2 latent `NameError` runtime bugs), only 2 justified ignores.
+
+**BLOCKER 1b (treefmt) — FIXED.** Adding `tmp/**` to `[tool.ruff] extend-exclude` did NOT fix treefmt: treefmt passes EXPLICIT PATHS, bypassing `extend-exclude` entirely. Fixed at the `flake.nix` layer instead. (Supervisor note: my steer directing the pyproject fix was both already-done in 707f23b86 and insufficient for this reason; my "1551 -> 1" read was also one run stale — that error was already fixed in f0b5c352c.)
+
+**BLOCKER 3 (NEW, now blocking): `checks.*.typecheck` = ~13,135 basedpyright errors.** Proven PRE-EXISTING: `bench/` alone is 8,188 errors with 0 files changed this round. Composition: src/exo/worker/engines/mlx/ = 4,841; owned code excluding bench/ still ~4,964.
+
+**GUARDS STILL NEVER EXECUTED** — pytest `skipped` in all 5 runs. Latest run 33753144852 (cb68628d8): steps 1-6 success, step 7 `nix flake check` FAILURE, step 8 pytest SKIPPED.
+
+**RECORD CORRECTION — the profiler guard was never committed.** Round 2's summary claimed "profiler unit guard added", but b5ee1a113 is DOCS-ONLY (1 file, the report). `git ls-files | grep -i profiler` returns nothing. Tracked guards that DO exist: src/exo/shared/tests/test_submodule_lock_pin_alignment.py, src/exo/worker/engines/mlx/tests/test_batch_pooling_cache_overlap.py, src/exo/worker/engines/mlx/tests/test_hc_expand_kernel.py. **A subagent's "shipped" claim went unverified into the record — verify file existence, not just the report.**
+
+**SUPERVISOR DECISION FOR ROUND 6 (the PM correctly refused to choose unilaterally):** do NOT fund a 13k-error typing campaign, and do NOT narrow basedpyright `include` to dodge it (excluding bench/ leaves 4,964 in owned code anyway). Root cause of "guards never execute" is that the pytest step is coupled to `nix flake check` by STEP ORDERING ALONE (workflow: pytest is a separate step, `if: runner.os == 'macOS'`, no real dependency on the check). Decouple them so independent checks report independently. The typecheck failure still fails the job and stays red — nothing is silenced; pytest simply stops being masked by unrelated pre-existing debt.
