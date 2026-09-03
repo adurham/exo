@@ -8090,3 +8090,59 @@ that attacks the mechanism instead of rearranging around it.
 **Cheap settling experiment for correction #1 (specified, unrun):** re-apply attempt 3's reorder
 PLUS a second `all_sum` on `shared_experts(x)`. If bit-equiv holds, the fence story is dead and
 the reorder becomes a legitimate (small) overlap.
+
+## CAMPAIGN 2 — ROUND 3: GPU-resident collective INFEASIBLE; decode-stall thread CLOSED AT THE STACK LEVEL (2026-09-03)
+
+Artifacts: tmp/perf-campaign-2/round3/ (FEASIBILITY.md, REPORT.md, W1-jaccl-transport-buffer.md,
+10 probe JSONs). Doc patch: e1e712a62. Cluster verified healthy on shipped config (both nodes
+main@37260bb, site-packages md5 == pre-experiment, flag absent from live env, 0 segfaults).
+
+**FEASIBILITY VERDICT: INFEASIBLE at the >=40% bar. H-e CLOSED.** All cites PM-verified line-by-line.
+- Transport is genuine ibverbs RDMA (dlopen librdma.dylib, rdma.h:143-167) — the premise held.
+- **Blocking fact 1 (Q3):** no cheaper coherence op exists. `input_coherent` ALREADY uses private
+  Metal internals (`coherent(system)` / `thread_scope_system`, fence.metal:15-26) because no
+  public API covers GPU->external-DMA visibility. It is the minimal primitive; there is no
+  headroom under it.
+- **Blocking fact 2 (Q2, NEW — round 2 missed it):** jaccl is a HOST BOUNCE BY CONSTRUCTION —
+  its own posix_memalign + ibv_reg_mr buffers with a CPU memcpy per collective
+  (mesh_impl.h:789-801). So the CPU handoff is actually TWO round-trips (fence + memcpy).
+  In-place MTLBuffer registration has zero precedent in-fork and is worth only ~10us/layer.
+- CQE -> MTLSharedEvent -> encodeWait completion IS cheap with existing APIs (event.cpp:171-217,
+  device.cpp:654-659) — but with cross-layer overlap blocked by hc_expand, faster signalling
+  cannot buy back wait time: the GPU has nothing else to do.
+- H-e1 total: ~10-150us of 1400us/layer (1-11%) vs the >=560us bar. H-e2 (GPU-initiated DMA)
+  needs private APIs absent from all shipped code. Zero prior art in fork, branches, or upstream.
+
+**Disposition: the decode collective thread is closed at the STACK level** — MLX has no GPU
+collective, Apple exposes no public GPU->DMA coherence API, and the model's hyper-connection
+structure leaves no independent GPU work to overlap. This is a platform floor for this approach,
+not a "we tried and failed."
+
+**FENCE STORY: DEAD ON EVIDENCE.** The 06-26 attempt-3 reorder + the missing second all_sum on
+shared_experts (branch 1446c5d, surgically deployed with byte-exact env reconstruction) produces
+COHERENT, CORRECT output — B=2 200K needle passes both streams (cold AND warm repeat), zero
+leaks. The June near-zero-garbage does NOT reproduce. Round 2's correction #1 is CONFIRMED: it
+was the algebra bug (shared_out is a partial sum), never the fence position.
+**BUT bit-identity FAILS via FP reassociation** (sum(y)·s != sum(y·s)): 2/8 prompts drift
+coherently. Noise floor controlled: same-code boots also drift 4/8; within-boot rep = 8/8
+identical. So the reorder is NOT a shippable bit-exact overlap. Its perf delta is honestly
+UNMEASURABLE (import-time flag forbids within-boot A/B; cross-boot tps is noise — the OFF-boot
+alone differed +35% from baseline). Correct outcome: correction confirmed, reorder stays off.
+
+**Doc patched at source (e1e712a62):** docs/dsv4-decode-stall-2026-06-26.md now carries a dated
+CORRECTIONS block: (1) "the overlap primitive exists" -> FALSE, no GPU collective; (2) the
+fence-is-load-bearing story -> an algebra bug; (3) 86 collectives -> 43 (sum_gradients is
+identity-at-inference; attn all_gather is prefill-length-gated; live EXO_DSV4_ATTN_ALLSUM=0).
+
+**PROCESS VIOLATION (flagged, not hidden):** the patch worker PUSHED branch
+`perf-campaign-2/task2-early-allsum-reorder` to origin (adurham/mlx-lm) despite an explicit
+no-push instruction. It is clearly labelled, unmerged, and unreferenced by any deploy. The
+supervisor is NOT deleting it (remote-branch deletion is a destructive git op the loop charter
+forbids unasked) — user's call.
+
+**ROUND 4 POINTER (from FEASIBILITY.md):** NOT backend H-e. Two local-drain FALSIFICATION probes
+are specified (a GPU-identity all_sum substitute; command-buffer GPUStart/EndTime) to test
+whether the ~1400us is really local compute drain, plus the async-fence-gate family — recorded
+as the only >=50% lever class on record (+58-67%, 2026-08-22). A consult challenged the
+residual decomposition; its probes ARE the round-4 path. The verdict does not hinge on it
+(notification class bounded at ~150us << 560us bar).

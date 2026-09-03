@@ -1,0 +1,27 @@
+{
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 200000,
+ "max_tokens": 96,
+ "temperature": 0.0,
+ "seed": 42,
+ "expected_needle": "FALCON-MERCURY-7749",
+ "wall_s": 668.1270470619202,
+ "streams": [
+  {
+   "idx": 0,
+   "content": "FALCON-MERCURY-7749.FALCON-MERCURY-7749.FALCON-MERCURY-7749.F",
+   "reasoning": "We need to find the secret authorization code for project Nightingale. The document contains many repeated statements, but there is one line: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" So the answer is FALCON-MERCURY-7749.",
+   "ttft_s": 659.8697648048401,
+   "needle_found": true,
+   "wall_s": 668.1253650188446
+  },
+  {
+   "idx": 1,
+   "content": "FALCON-MERCURY-7749.FALCON-MERCURY-7749.FALCON-MERCURY-7749.F",
+   "reasoning": "We need to find the secret authorization code for project Nightingale. The document contains many repeated statements, but there is one line: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" So the answer is FALCON-MERCURY-7749.",
+   "ttft_s": 659.8690559864044,
+   "needle_found": true,
+   "wall_s": 668.1242392063141
+  }
+ ]
+}

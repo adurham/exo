@@ -1,0 +1,153 @@
+{
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "max_tokens": 64,
+  "seed": 42,
+  "concurrency": 1,
+  "instance_count_at_start": 1,
+  "results": [
+    {
+      "prompt": "Write a one-paragraph technical explanation of how a CPU pipeline handles branch prediction.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "1.  **Analyze the Request**:\n    *   Topic: CPU pipeline and branch prediction.\n    *   Format: One paragraph.\n    *   Style: Technical explanation.\n\n2.  **Deconstruct the Topic**:\n    *   What is a CPU pipeline? (Fetch, Decode, Execute,",
+      "stats": {
+        "prompt_tps": 17.817859968119187,
+        "generation_tps": 45.53784821192952,
+        "prompt_tokens": 20,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94392386624
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 30,
+        "mtp_accepted_drafts_cumulative": 61
+      }
+    },
+    {
+      "prompt": "List the first 20 prime numbers, comma-separated.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "We need to list the first 20 prime numbers, comma-separated. Prime numbers are natural numbers greater than 1 that have no positive divisors other than 1 and itself. The first few primes: 2,3,5,7,11,13,17,19,23,29,31",
+      "stats": {
+        "prompt_tps": 34.19237216846681,
+        "generation_tps": 49.90380036872559,
+        "prompt_tokens": 17,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94392386624
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 48,
+        "mtp_accepted_drafts_cumulative": 107
+      }
+    },
+    {
+      "prompt": "Explain the difference between RDMA and TCP for cluster interconnect, in 3 short paragraphs.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "1.  **Analyze the User's Request**:\n    *   Topic: Difference between RDMA (Remote Direct Memory Access) and TCP (Transmission Control Protocol) for cluster interconnect.\n    *   Constraint: Exactly 3 short paragraphs.\n    *   Goal: Explain the core differences clearly and concis",
+      "stats": {
+        "prompt_tps": 41.28320320461855,
+        "generation_tps": 48.398731408353164,
+        "prompt_tokens": 22,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94392386624
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 67,
+        "mtp_accepted_drafts_cumulative": 152
+      }
+    },
+    {
+      "prompt": "Describe the M4 Max memory hierarchy: registers, L1, L2, system memory. One paragraph each.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "1.  **Analyze the User's Request**:\n    *   Topic: M4 Max memory hierarchy.\n    *   Specific components to cover: Registers, L1 cache, L2 cache, System memory.\n    *   Format: One paragraph *each* (so 4 paragraphs total).\n    *",
+      "stats": {
+        "prompt_tps": 50.4285253111084,
+        "generation_tps": 49.333669435394874,
+        "prompt_tokens": 27,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94393062064
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 86,
+        "mtp_accepted_drafts_cumulative": 197
+      }
+    },
+    {
+      "prompt": "Define tensor parallelism vs pipeline parallelism for LLM inference. Short and concrete.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "1.  **Analyze the Request**:\n    *   Topic: Tensor parallelism vs. pipeline parallelism.\n    *   Context: LLM inference.\n    *   Constraint: Short and concrete.\n\n2.  **Deconstruct the Concepts**:\n    *   *Tensor Parallelism (TP)*: Splits",
+      "stats": {
+        "prompt_tps": 36.87670373668973,
+        "generation_tps": 44.9743558548778,
+        "prompt_tokens": 19,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94396350945
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 108,
+        "mtp_accepted_drafts_cumulative": 240
+      }
+    },
+    {
+      "prompt": "Walk through how the Bully algorithm elects a leader in a distributed cluster.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "We need to walk through how the Bully algorithm elects a leader in a distributed cluster. The user asks for a walkthrough, so we should explain the algorithm step by step, including the scenario, messages, and outcomes. We should cover the basic idea, the process, and maybe an example. Also mention assumptions",
+      "stats": {
+        "prompt_tps": 35.304599725938004,
+        "generation_tps": 35.66905498503455,
+        "prompt_tokens": 20,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94396350945
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 137,
+        "mtp_accepted_drafts_cumulative": 274
+      }
+    },
+    {
+      "prompt": "Summarize how event sourcing differs from CRUD persistence, with one example each.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "1.  **Deconstruct the User's Request**:\n    *   Topic: Event sourcing vs. CRUD persistence.\n    *   Task: Summarize the differences.\n    *   Requirement: Provide one example for each.\n\n2.  **Define CRUD Persistence**:\n    *   Core concept: Create",
+      "stats": {
+        "prompt_tps": 38.10711911120891,
+        "generation_tps": 41.728256160202164,
+        "prompt_tokens": 20,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94396350945
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 159,
+        "mtp_accepted_drafts_cumulative": 318
+      }
+    },
+    {
+      "prompt": "Write a short proof that the square root of 2 is irrational.",
+      "max_tokens": 64,
+      "seed": 42,
+      "text": "We need to write a short proof that sqrt(2) is irrational. The classic proof by contradiction: assume sqrt(2) = a/b in lowest terms, then a^2 = 2b^2, so a^2 even => a even, let a=2k, then 4k^",
+      "stats": {
+        "prompt_tps": 35.271560346779225,
+        "generation_tps": 48.63206333855746,
+        "prompt_tokens": 18,
+        "generation_tokens": 64,
+        "peak_memory_usage": {
+          "inBytes": 94396350945
+        },
+        "prefix_cache_hit": "none",
+        "mtp_cycles_cumulative": 179,
+        "mtp_accepted_drafts_cumulative": 362
+      }
+    }
+  ]
+}
