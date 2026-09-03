@@ -123,19 +123,14 @@ def _compare_logits(
         diff = float(
             mx.max(
                 mx.abs(
-                    legacy[step].astype(mx.float32)
-                    - batched[step].astype(mx.float32)
+                    legacy[step].astype(mx.float32) - batched[step].astype(mx.float32)
                 )
             ).item()
         )
         max_diff = max(max_diff, diff)
-        if int(mx.argmax(legacy[step]).item()) != int(
-            mx.argmax(batched[step]).item()
-        ):
+        if int(mx.argmax(legacy[step]).item()) != int(mx.argmax(batched[step]).item()):
             mismatches += 1
-    print(
-        f"[{label}] max_diff={max_diff:.4e} mismatches={mismatches}/{len(legacy)}"
-    )
+    print(f"[{label}] max_diff={max_diff:.4e} mismatches={mismatches}/{len(legacy)}")
     return max_diff, mismatches
 
 
@@ -155,12 +150,8 @@ def _run_prefill_batched_vs_serial(
     # === Legacy path: serial prefill per stream, then merge for batched decode ===
     cache_a_legacy = make_kv_cache(model)
     cache_b_legacy = make_kv_cache(model)
-    prefill(
-        model, tokenizer, sampler, tokens_a[:-1], cache_a_legacy, None, None, None
-    )
-    prefill(
-        model, tokenizer, sampler, tokens_b[:-1], cache_b_legacy, None, None, None
-    )
+    prefill(model, tokenizer, sampler, tokens_a[:-1], cache_a_legacy, None, None, None)
+    prefill(model, tokenizer, sampler, tokens_b[:-1], cache_b_legacy, None, None, None)
     merged_legacy = _merge_caches([list(cache_a_legacy), list(cache_b_legacy)])
     for c in merged_legacy:
         c.prepare(lengths=[1, 1], right_padding=[0, 0])
@@ -226,12 +217,8 @@ def _run_prefill_batched_vs_serial(
         NUM_DECODE_STEPS,
     )
 
-    max_diff_a, mis_a = _compare_logits(
-        legacy_logits[0], batched_logits[0], "stream A"
-    )
-    max_diff_b, mis_b = _compare_logits(
-        legacy_logits[1], batched_logits[1], "stream B"
-    )
+    max_diff_a, mis_a = _compare_logits(legacy_logits[0], batched_logits[0], "stream A")
+    max_diff_b, mis_b = _compare_logits(legacy_logits[1], batched_logits[1], "stream B")
     return max(max_diff_a, max_diff_b), mis_a + mis_b
 
 

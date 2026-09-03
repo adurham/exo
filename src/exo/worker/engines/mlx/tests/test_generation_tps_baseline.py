@@ -123,9 +123,7 @@ def test_every_engine_task_sets_the_baseline_explicitly() -> None:
     source = _BATCH_GENERATE.read_text()
     blocks = _engine_task_constructor_blocks(source)
 
-    missing = [
-        block for block in blocks if "generation_time_at_start" not in block
-    ]
+    missing = [block for block in blocks if "generation_time_at_start" not in block]
 
     assert not missing, (
         f"{len(missing)} of {len(blocks)} _EngineTask(...) constructions omit "

@@ -103,6 +103,7 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
     """
     import gc
     from collections import defaultdict
+
     try:
         arrays = []
         total = 0
@@ -125,26 +126,30 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
         arrays.sort(key=lambda t: -t[0])
         # Top shape-groups by TOTAL bytes (these reveal accumulating small arrays).
         top_groups = sorted(by_shape.items(), key=lambda kv: -kv[1][1])[:12]
-        lines = [f"live mx.arrays: total={total/1024**3:.2f}GB, count={count}, big(>=16MB)={len(arrays)}"]
+        lines = [
+            f"live mx.arrays: total={total / 1024**3:.2f}GB, count={count}, big(>=16MB)={len(arrays)}"
+        ]
         lines.append("  top shape-groups by total bytes (count x shape dtype = GB):")
         for (shp, dt), (cnt, b) in top_groups:
-            lines.append(f"    {cnt:>5d} x {shp} {dt} = {b/1024**3:.2f}GB")
+            lines.append(f"    {cnt:>5d} x {shp} {dt} = {b / 1024**3:.2f}GB")
         # Name holders of the SUSPECT accumulating class: (1, 7936/var, 512|128) bf16.
         # Walk the referrer chain UP TO ROOT (until we hit a frame, module, or a
         # named object) so we identify the EXACT owner, not just the immediate
         # list. Stops at the first frame (names the function) or repeats.
         lines.append("  holder trace-to-root for ONE suspect bf16 (1,*,512/128) array:")
         import types as _types
+
         def _describe(o):
             t = type(o).__name__
             if isinstance(o, _types.FrameType):
                 return f"FRAME[{o.f_code.co_name}@{o.f_code.co_filename.split('/')[-1]}:{o.f_lineno}]"
             if isinstance(o, _types.ModuleType):
-                return f"MODULE[{getattr(o,'__name__','?')}]"
+                return f"MODULE[{getattr(o, '__name__', '?')}]"
             if t not in ("list", "tuple", "dict", "cell"):
                 mod = getattr(type(o), "__module__", "")
                 return f"{mod}.{t}" if mod else t
             return t
+
         traced = 0
         for obj in gc.get_objects():
             if traced >= 3:
@@ -153,16 +158,23 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
                 if not isinstance(obj, mx.array):
                     continue
                 shp = tuple(obj.shape)
-                if not (len(shp) == 3 and shp[0] == 1 and shp[2] in (512, 128)
-                        and str(obj.dtype) == "mlx.core.bfloat16"):
+                if not (
+                    len(shp) == 3
+                    and shp[0] == 1
+                    and shp[2] in (512, 128)
+                    and str(obj.dtype) == "mlx.core.bfloat16"
+                ):
                     continue
                 # BFS up the referrer graph to the first frame/module/named obj.
                 chain = []
                 cur = obj
                 visited = set()
                 for _hop in range(10):
-                    refs = [r for r in gc.get_referrers(cur)
-                            if id(r) not in visited and r is not chain]
+                    refs = [
+                        r
+                        for r in gc.get_referrers(cur)
+                        if id(r) not in visited and r is not chain
+                    ]
                     visited.update(id(r) for r in refs)
                     # prefer a frame/module/named owner; else follow the first container
                     pick = None
@@ -170,7 +182,13 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
                         if isinstance(r, (_types.FrameType, _types.ModuleType)):
                             pick = r
                             break
-                        if type(r).__name__ not in ("list", "tuple", "dict", "cell", "list_iterator"):
+                        if type(r).__name__ not in (
+                            "list",
+                            "tuple",
+                            "dict",
+                            "cell",
+                            "list_iterator",
+                        ):
                             pick = r
                             break
                     if pick is None:
@@ -210,7 +228,7 @@ def _heap_census_mx_arrays(top_n: int = 15) -> str:
                         break
             except Exception:
                 pass
-            lines.append(f"  {nb/1024**2:.0f}MB shape={shp} {dt} <- {holders[:3]}")
+            lines.append(f"  {nb / 1024**2:.0f}MB shape={shp} {dt} <- {holders[:3]}")
         return "\n".join(lines)
     except Exception as e:
         return f"heap census failed: {e}"
@@ -248,8 +266,11 @@ def _profile_cache_bytes(cache_list: Any) -> dict[str, float]:
             return
         cls = type(obj).__name__
         for attr in (
-            "keys", "values",
-            "_pool_storage", "buf_kv", "buf_gate",
+            "keys",
+            "values",
+            "_pool_storage",
+            "buf_kv",
+            "buf_gate",
         ):
             _add(cls, _arr_bytes(getattr(obj, attr, None)))
         st = getattr(obj, "state", None)
@@ -277,11 +298,13 @@ def _log_cache_profile(tag: str, cache_list: Any) -> None:
             return
         total = sum(prof.values())
         parts = ", ".join(
-            f"{k}={v/1024:.2f}GB" for k, v in sorted(prof.items(), key=lambda kv: -kv[1])
+            f"{k}={v / 1024:.2f}GB"
+            for k, v in sorted(prof.items(), key=lambda kv: -kv[1])
         )
-        logger.info(f"[MEMPROF] {tag}: total_cache={total/1024:.2f}GB | {parts}")
+        logger.info(f"[MEMPROF] {tag}: total_cache={total / 1024:.2f}GB | {parts}")
     except Exception as e:
         logger.info(f"[MEMPROF] {tag}: profile failed: {e}")
+
 
 # 2026-08-16 (design doc Section 101): use mlx_lm's generation stream, do
 # NOT mint a second one here.
@@ -571,7 +594,9 @@ def _pipeline_parallel_prefill_steps(
                 else:
                     model(chunk_tokens, cache=_prompt_cache)
                 quantize_cache_fn(_prompt_cache)
-                request_trace.record(f"prefill.chunk{i}.forward({chunk_size}tok)", _t_fwd)
+                request_trace.record(
+                    f"prefill.chunk{i}.forward({chunk_size}tok)", _t_fwd
+                )
                 processed += chunk_size
 
                 if distributed_prompt_progress_callback is not None:
@@ -596,7 +621,9 @@ def _pipeline_parallel_prefill_steps(
                 _t_contig = time.perf_counter()
                 for _c in _prompt_cache:
                     if isinstance(_c, ArraysCache):
-                        _c.cache = [mx.contiguous(x) if x is not None else x for x in _c.cache]
+                        _c.cache = [
+                            mx.contiguous(x) if x is not None else x for x in _c.cache
+                        ]
                         mx.eval(*[x for x in _c.cache if x is not None])
                 request_trace.record(f"prefill.chunk{i}.contiguous", _t_contig)
 
@@ -635,7 +662,9 @@ def _pipeline_parallel_prefill_steps(
                 if i % 5 == 0 or i == n_real - 1:
                     active_gb = mx.metal.get_active_memory() / 1024**3
                     peak_gb = mx.metal.get_peak_memory() / 1024**3
-                    logger.info(f"[MEM] prefill chunk {i+1}/{n_real} ({processed} tokens): active={active_gb:.2f} GB, peak={peak_gb:.2f} GB")
+                    logger.info(
+                        f"[MEM] prefill chunk {i + 1}/{n_real} ({processed} tokens): active={active_gb:.2f} GB, peak={peak_gb:.2f} GB"
+                    )
 
                 prompt_progress_callback(processed, total)
 
@@ -864,7 +893,9 @@ def prefill(
         active_gb = mx.metal.get_active_memory() / 1024**3
         peak_gb = mx.metal.get_peak_memory() / 1024**3
         cache_gb = mx.metal.get_cache_memory() / 1024**3
-    logger.info(f"[MEM] before prefill ({num_tokens} tokens): active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB")
+    logger.info(
+        f"[MEM] before prefill ({num_tokens} tokens): active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB"
+    )
     logger.info("Starting prefill")
 
     is_pipeline = _has_pipeline_communication_layer(model)
@@ -952,7 +983,9 @@ def prefill(
         logger.info(f"[MEM] after prefill ({num_tokens} tok): active={_a:.2f} GB")
         _log_cache_profile(f"after prefill ({num_tokens} tok)", cache)
         if os.environ.get("EXO_DSV4_HEAPCENSUS") == "1":
-            logger.info(f"[HEAPCENSUS] after prefill ({num_tokens} tok):\n{_heap_census_mx_arrays()}")
+            logger.info(
+                f"[HEAPCENSUS] after prefill ({num_tokens} tok):\n{_heap_census_mx_arrays()}"
+            )
     except Exception:
         pass
     # Emit the per-chunk span timeline (no-op unless EXO_TRACING_ENABLED). This
@@ -1453,7 +1486,10 @@ def prefill_batched(
             while offset < max_length:
                 n_to_process = min(prefill_step_size, max_length - offset)
                 _t_fwd = time.perf_counter()
-                model(padded_tokens[:, offset : offset + n_to_process], cache=batched_cache)
+                model(
+                    padded_tokens[:, offset : offset + n_to_process],
+                    cache=batched_cache,
+                )
                 from exo.worker.engines.mlx.trace import request_trace
 
                 request_trace.record(
@@ -1572,9 +1608,13 @@ def prefill_batched(
         for i in range(n_streams):
             per_stream = [c.extract(i) for c in batched_cache]
             per_stream_caches.append(per_stream)
-        mx.eval([
-            c.state for stream_cache in per_stream_caches for c in stream_cache  # type: ignore
-        ])
+        mx.eval(
+            [
+                c.state  # type: ignore
+                for stream_cache in per_stream_caches
+                for c in stream_cache
+            ]
+        )
 
     # Release the merged batched cache + Metal allocator pool. batched_cache
     # holds the FULL merged KV (B streams × full_length × hidden) — after
@@ -1589,9 +1629,7 @@ def prefill_batched(
         mx.clear_cache()
 
     elapsed = time.perf_counter() - start_time
-    per_stream_tps = [
-        (length / elapsed) if elapsed > 0 else 0.0 for length in lengths
-    ]
+    per_stream_tps = [(length / elapsed) if elapsed > 0 else 0.0 for length in lengths]
     # Empty SSM snapshots — DSv4 doesn't use ArraysCache. Maintained for
     # API parity with ``prefill()``'s return signature.
     per_stream_snapshots: list[list[CacheSnapshot]] = [[] for _ in range(n_streams)]
@@ -1885,7 +1923,7 @@ def make_reasoning_budget_limiter(
             # GENERATED token, not token 0 of the whole prompt+completion
             # sequence, so a long prompt doesn't eat into the budget.
             start_idx = max(prompt_token_count - 1, -1)
-        if think_end_id in ids[start_idx + 1:]:
+        if think_end_id in ids[start_idx + 1 :]:
             _start_wall.clear()  # closed -- reset clock for any re-entry
             return logits  # already closed after that open -- no-op
         elapsed = (len(ids) - 1) - start_idx
@@ -2212,7 +2250,9 @@ def mlx_generate(
     active_gb = mx.metal.get_active_memory() / 1024**3
     peak_gb = mx.metal.get_peak_memory() / 1024**3
     cache_gb = mx.metal.get_cache_memory() / 1024**3
-    logger.info(f"[MEM] after prefill, before decode: active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB")
+    logger.info(
+        f"[MEM] after prefill, before decode: active={active_gb:.2f} GB, peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB"
+    )
     with contextlib.suppress(Exception):
         _log_cache_profile("after prefill (serial cache)", caches)
     logger.info("Starting decode")
@@ -2225,19 +2265,19 @@ def mlx_generate(
     # Both ranks must enter the speculation loop — check env var, not model attribute
     # (draft model is only on rank 0, but rank 1 must participate in the protocol)
     _has_pp_draft = bool(os.environ.get("EXO_PP_DRAFT_MODEL", ""))
-    logger.info(f"PP spec check: is_warmup={is_warmup}, has_draft_env={_has_pp_draft}, "
-                f"draft_model={'yes' if _pp_draft else 'no'}, "
-                f"group={'size=' + str(group.size()) if group else 'None'}")
-    if (not is_warmup
-        and _has_pp_draft
-        and group is not None
-        and group.size() > 1):
+    logger.info(
+        f"PP spec check: is_warmup={is_warmup}, has_draft_env={_has_pp_draft}, "
+        f"draft_model={'yes' if _pp_draft else 'no'}, "
+        f"group={'size=' + str(group.size()) if group else 'None'}"
+    )
+    if not is_warmup and _has_pp_draft and group is not None and group.size() > 1:
         try:
             from ..pp_speculation import (
                 _install_spec_layers,
                 get_pipeline_info,
                 pp_speculative_decode_loop,
             )
+
             pp_info = get_pipeline_info(model)
             logger.info(f"PP spec: get_pipeline_info returned {pp_info}")
             if pp_info is not None:
@@ -2248,20 +2288,38 @@ def mlx_generate(
                 # Prefill draft cache with tail of prompt (rank 0 only, instant — no PP needed)
                 # The draft model uses a RotatingKVCache, so only recent tokens matter.
                 if pp_rank == 0 and _pp_draft is not None:
-                    _draft_kv_window = int(os.environ.get("EXO_DRAFT_KV_WINDOW", "4096"))
+                    _draft_kv_window = int(
+                        os.environ.get("EXO_DRAFT_KV_WINDOW", "4096")
+                    )
                     _draft_prompt = all_prompt_tokens[-_draft_kv_window:]
                     _draft_chunk = 512
                     for i in range(0, len(_draft_prompt), _draft_chunk):
-                        _pp_draft(_draft_prompt[i:i + _draft_chunk][None], cache=_pp_draft_cache)
-                        mx.eval([c.state if hasattr(c, 'state') else c for c in _pp_draft_cache])
-                    logger.info(f"Draft model prefilled with {len(_draft_prompt)} tokens (of {len(all_prompt_tokens)} total)")
+                        _pp_draft(
+                            _draft_prompt[i : i + _draft_chunk][None],
+                            cache=_pp_draft_cache,
+                        )
+                        mx.eval(
+                            [
+                                c.state if hasattr(c, "state") else c
+                                for c in _pp_draft_cache
+                            ]
+                        )
+                    logger.info(
+                        f"Draft model prefilled with {len(_draft_prompt)} tokens (of {len(all_prompt_tokens)} total)"
+                    )
 
                 # First token via standard PP (both ranks, synchronized)
                 _first_gen = stream_generate(
-                    model=model, tokenizer=tokenizer, prompt=last_token,
-                    max_tokens=1, sampler=sampler, logits_processors=logits_processors,
-                    prompt_cache=caches, prefill_step_size=1,
-                    kv_group_size=KV_GROUP_SIZE, kv_bits=KV_BITS,
+                    model=model,
+                    tokenizer=tokenizer,
+                    prompt=last_token,
+                    max_tokens=1,
+                    sampler=sampler,
+                    logits_processors=logits_processors,
+                    prompt_cache=caches,
+                    prefill_step_size=1,
+                    kv_group_size=KV_GROUP_SIZE,
+                    kv_bits=KV_BITS,
                 )
                 _first_out = next(_first_gen)
                 first_y = mx.array([_first_out.token])
@@ -2271,12 +2329,15 @@ def mlx_generate(
 
                 def _spec_token_gen():
                     from mlx_lm.generate import GenerationResponse
+
                     _detok = tokenizer.detokenizer
                     gen_start = time.perf_counter()
                     # Clear finish_reason from max_tokens=1 — this is just the first token
                     _first_fixed = GenerationResponse(
-                        text=_first_out.text, token=_first_out.token,
-                        logprobs=_first_out.logprobs, from_draft=False,
+                        text=_first_out.text,
+                        token=_first_out.token,
+                        logprobs=_first_out.logprobs,
+                        from_draft=False,
                         prompt_tokens=_first_out.prompt_tokens,
                         prompt_tps=_first_out.prompt_tps,
                         generation_tokens=_first_out.generation_tokens,
@@ -2287,30 +2348,46 @@ def mlx_generate(
                     yield _first_fixed
 
                     for tok_id, lp in pp_speculative_decode_loop(
-                        model=model, draft_model=_pp_draft,
-                        prompt_cache=caches, draft_cache=_pp_draft_cache,
-                        sampler=sampler, logits_processors=logits_processors,
-                        first_y=first_y, first_logprobs=mx.zeros(1),
+                        model=model,
+                        draft_model=_pp_draft,
+                        prompt_cache=caches,
+                        draft_cache=_pp_draft_cache,
+                        sampler=sampler,
+                        logits_processors=logits_processors,
+                        first_y=first_y,
+                        first_logprobs=mx.zeros(1),
                         max_tokens=max_tokens - 1,
-                        pp_rank=pp_rank, pp_world_size=pp_world_size,
+                        pp_rank=pp_rank,
+                        pp_world_size=pp_world_size,
                         pp_group=pp_group,
                     ):
                         if tok_id in tokenizer.eos_token_ids:
                             elapsed = time.perf_counter() - gen_start
                             yield GenerationResponse(
-                                text="", token=tok_id, logprobs=lp, from_draft=False,
-                                prompt_tokens=len(last_token), prompt_tps=prefill_tps or 0.0,
-                                generation_tokens=1, generation_tps=1.0/elapsed if elapsed > 0 else 0,
-                                peak_memory=mx.get_peak_memory()/1e9, finish_reason="stop",
+                                text="",
+                                token=tok_id,
+                                logprobs=lp,
+                                from_draft=False,
+                                prompt_tokens=len(last_token),
+                                prompt_tps=prefill_tps or 0.0,
+                                generation_tokens=1,
+                                generation_tps=1.0 / elapsed if elapsed > 0 else 0,
+                                peak_memory=mx.get_peak_memory() / 1e9,
+                                finish_reason="stop",
                             )
                             return
                         _detok.add_token(tok_id)
                         elapsed = time.perf_counter() - gen_start
                         yield GenerationResponse(
-                            text=_detok.last_segment, token=tok_id, logprobs=lp, from_draft=False,
-                            prompt_tokens=len(last_token), prompt_tps=prefill_tps or 0.0,
-                            generation_tokens=1, generation_tps=1.0/elapsed if elapsed > 0 else 0,
-                            peak_memory=mx.get_peak_memory()/1e9,
+                            text=_detok.last_segment,
+                            token=tok_id,
+                            logprobs=lp,
+                            from_draft=False,
+                            prompt_tokens=len(last_token),
+                            prompt_tps=prefill_tps or 0.0,
+                            generation_tokens=1,
+                            generation_tps=1.0 / elapsed if elapsed > 0 else 0,
+                            peak_memory=mx.get_peak_memory() / 1e9,
                         )
 
                 _pp_spec_gen = _spec_token_gen()
@@ -2319,17 +2396,21 @@ def mlx_generate(
             sys.stderr.flush()
             _pp_spec_gen = None
 
-    _decode_gen = _pp_spec_gen if _pp_spec_gen is not None else stream_generate(
-        model=model,
-        tokenizer=tokenizer,
-        prompt=last_token,
-        max_tokens=max_tokens,
-        sampler=sampler,
-        logits_processors=logits_processors,
-        prompt_cache=caches,
-        prefill_step_size=1,
-        kv_group_size=KV_GROUP_SIZE,
-        kv_bits=KV_BITS,
+    _decode_gen = (
+        _pp_spec_gen
+        if _pp_spec_gen is not None
+        else stream_generate(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=last_token,
+            max_tokens=max_tokens,
+            sampler=sampler,
+            logits_processors=logits_processors,
+            prompt_cache=caches,
+            prefill_step_size=1,
+            kv_group_size=KV_GROUP_SIZE,
+            kv_bits=KV_BITS,
+        )
     )
 
     # EXO_DECODE_PROBE: aggregate wall + GPU time over windows of N tokens.
@@ -2359,6 +2440,7 @@ def mlx_generate(
                 _per_gpu = _gpu_ms / _exo_probe_every
                 _pct = _per_gpu / _per_wall * 100 if _per_wall > 0 else 0.0
                 import sys as _sys
+
                 _sys.stderr.write(
                     f"[EXO_DECODE_PROBE pid={os.getpid()}] tokens={_exo_cnt} "
                     f"wall_ms={_per_wall:.2f} gpu_ms={_per_gpu:.2f} gpu_pct={_pct:.1f}\n"

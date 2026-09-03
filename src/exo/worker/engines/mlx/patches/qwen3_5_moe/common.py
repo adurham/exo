@@ -115,20 +115,26 @@ def _patch_shared_expert(moe):
     # QuantizedLinear: weight is (out_features, in_features/pack_factor) uint32
     # For 8-bit: pack_factor = 4, so in_features = weight.shape[1] * 4
     moe._shared_inter = gp.weight.shape[0]  # SHARED_INTER (= out_features)
-    moe._shared_gs = gp.group_size           # gs (64)
+    moe._shared_gs = gp.group_size  # gs (64)
 
-    mx.eval(moe._shared_w_gu, moe._shared_s_gu, moe._shared_b_gu,
-            moe._shared_down_w, moe._shared_down_s, moe._shared_down_b)
+    mx.eval(
+        moe._shared_w_gu,
+        moe._shared_s_gu,
+        moe._shared_b_gu,
+        moe._shared_down_w,
+        moe._shared_down_s,
+        moe._shared_down_b,
+    )
 
 
 def _patch_down_proj(moe):
     """Extract down_proj weights for merged 8-bit kernel dispatch."""
     dp = moe.switch_mlp.down_proj
-    moe._down_w = dp.weight       # (E, K_OUT, N_IN/4) uint32
-    moe._down_s = dp.scales       # (E, K_OUT, N_IN/gs) bf16
-    moe._down_b = dp.biases       # (E, K_OUT, N_IN/gs) bf16
+    moe._down_w = dp.weight  # (E, K_OUT, N_IN/4) uint32
+    moe._down_s = dp.scales  # (E, K_OUT, N_IN/gs) bf16
+    moe._down_b = dp.biases  # (E, K_OUT, N_IN/gs) bf16
     moe._down_K = dp.output_dims  # K = 4096
-    moe._down_N = dp.input_dims   # N = 1024
+    moe._down_N = dp.input_dims  # N = 1024
     moe._down_gs = dp.group_size  # gs = 64
     mx.eval(moe._down_w, moe._down_s, moe._down_b)
 
@@ -142,10 +148,13 @@ def dequantize_shared_expert(moe):
     shared = moe.shared_expert
     for proj_name in ["gate_proj", "up_proj", "down_proj"]:
         proj = getattr(shared, proj_name)
-        if hasattr(proj, 'scales') and hasattr(proj, 'biases'):
+        if hasattr(proj, "scales") and hasattr(proj, "biases"):
             w_bf16 = mx.dequantize(
-                proj.weight, proj.scales, proj.biases,
-                group_size=proj.group_size, bits=proj.bits,
+                proj.weight,
+                proj.scales,
+                proj.biases,
+                group_size=proj.group_size,
+                bits=proj.bits,
             ).astype(COMPUTE_DTYPE)
             mx.eval(w_bf16)
             setattr(shared, proj_name, SimpleNamespace(weight=w_bf16))
@@ -182,13 +191,19 @@ def _patch_oproj_gate_rms(layer, gate_bm=8):
     # Eval incrementally to limit peak memory (E=512: dequant temps are ~140 MB)
     gate = moe.gate
     W_gate_f32 = mx.dequantize(
-        gate.weight, gate.scales, gate.biases,
-        group_size=gate.group_size, bits=gate.bits,
+        gate.weight,
+        gate.scales,
+        gate.biases,
+        group_size=gate.group_size,
+        bits=gate.bits,
     ).astype(mx.float32)
 
     W_oproj_f32 = mx.dequantize(
-        oproj.weight, oproj.scales, oproj.biases,
-        group_size=oproj.group_size, bits=oproj.bits,
+        oproj.weight,
+        oproj.scales,
+        oproj.biases,
+        group_size=oproj.group_size,
+        bits=oproj.bits,
     ).astype(mx.float32)
     mx.eval(W_gate_f32, W_oproj_f32)
 
@@ -207,34 +222,33 @@ def _patch_oproj_gate_rms(layer, gate_bm=8):
     del W_oproj_f32  # free ~128 MB
 
     # Store on moe block
-    moe._oproj_M1 = M1              # (E, K_attn) bf16
-    moe._oproj_W_fused = W_fused    # (E, K) bf16
+    moe._oproj_M1 = M1  # (E, K_attn) bf16
+    moe._oproj_W_fused = W_fused  # (E, K) bf16
     moe._oproj_rms_weight = rms_weight  # (K,) bf16
 
     # ── O_proj quantized weights (for 8-bit GEMV in Dispatch 1) ──
-    moe._oproj_w = oproj.weight      # (K, K_attn/4) uint32
-    moe._oproj_s = oproj.scales      # (K, K_attn/gs) bf16
-    moe._oproj_b = oproj.biases      # (K, K_attn/gs) bf16
+    moe._oproj_w = oproj.weight  # (K, K_attn/4) uint32
+    moe._oproj_s = oproj.scales  # (K, K_attn/gs) bf16
+    moe._oproj_b = oproj.biases  # (K, K_attn/gs) bf16
     moe._oproj_K_attn = oproj.weight.shape[1] * 4  # 8192 (8-bit: pack_factor=4)
 
     # ── Shared expert gate weights (for TG(0,0,0) fusion in Dispatch 2) ──
     seg = moe.shared_expert_gate
-    moe._seg_w = seg.weight    # (1, K/4) uint32
-    moe._seg_s = seg.scales    # (1, K/gs) bf16
-    moe._seg_b = seg.biases    # (1, K/gs) bf16
+    moe._seg_w = seg.weight  # (1, K/4) uint32
+    moe._seg_s = seg.scales  # (1, K/gs) bf16
+    moe._seg_b = seg.biases  # (1, K/gs) bf16
 
     # ── Dimensions ──
-    M = oproj.weight.shape[0]                    # 4096 (hidden_size)
-    K_hidden = W_fused.shape[1]                   # 4096 (same as M for Qwen)
-    n_experts = W_fused.shape[0]                  # E
+    M = oproj.weight.shape[0]  # 4096 (hidden_size)
+    K_hidden = W_fused.shape[1]  # 4096 (same as M for Qwen)
+    n_experts = W_fused.shape[0]  # E
     moe._oproj_M = M
     moe._oproj_K_hidden = K_hidden
     moe._oproj_n_experts = n_experts
-    moe._oproj_n_tg = ceil_div(M, 32)            # 128 for M=4096
+    moe._oproj_n_tg = ceil_div(M, 32)  # 128 for M=4096
     moe._oproj_gate_bm = gate_bm
 
     mx.eval(moe._oproj_rms_weight)
-
 
 
 def _patch_gdn_proj_weights(attn):
@@ -244,39 +258,54 @@ def _patch_gdn_proj_weights(attn):
     contiguous arrays for better memory locality in the fused GEMV kernel.
     Stored on the GatedDeltaNet module as _merged_proj_*.
     """
-    W_merged = mx.concatenate([
-        attn.in_proj_qkv.weight,
-        attn.in_proj_z.weight,
-        attn.in_proj_b.weight,
-        attn.in_proj_a.weight,
-    ], axis=0)
-    S_merged = mx.concatenate([
-        attn.in_proj_qkv.scales,
-        attn.in_proj_z.scales,
-        attn.in_proj_b.scales,
-        attn.in_proj_a.scales,
-    ], axis=0)
-    B_merged = mx.concatenate([
-        attn.in_proj_qkv.biases,
-        attn.in_proj_z.biases,
-        attn.in_proj_b.biases,
-        attn.in_proj_a.biases,
-    ], axis=0)
+    W_merged = mx.concatenate(
+        [
+            attn.in_proj_qkv.weight,
+            attn.in_proj_z.weight,
+            attn.in_proj_b.weight,
+            attn.in_proj_a.weight,
+        ],
+        axis=0,
+    )
+    S_merged = mx.concatenate(
+        [
+            attn.in_proj_qkv.scales,
+            attn.in_proj_z.scales,
+            attn.in_proj_b.scales,
+            attn.in_proj_a.scales,
+        ],
+        axis=0,
+    )
+    B_merged = mx.concatenate(
+        [
+            attn.in_proj_qkv.biases,
+            attn.in_proj_z.biases,
+            attn.in_proj_b.biases,
+            attn.in_proj_a.biases,
+        ],
+        axis=0,
+    )
     attn._merged_proj_w = W_merged
     attn._merged_proj_s = S_merged
     attn._merged_proj_b = B_merged
     attn._merged_proj_dims = (
         attn.in_proj_qkv.weight.shape[0],  # N_QKV = 8192
-        attn.in_proj_z.weight.shape[0],     # N_Z = 4096
-        attn.in_proj_b.weight.shape[0],     # N_B = 32
-        attn.in_proj_a.weight.shape[0],     # N_A = 32
+        attn.in_proj_z.weight.shape[0],  # N_Z = 4096
+        attn.in_proj_b.weight.shape[0],  # N_B = 32
+        attn.in_proj_a.weight.shape[0],  # N_A = 32
     )
     mx.eval(W_merged, S_merged, B_merged)
 
     # Merged b+a for prefill (N_B+N_A=64 instead of two N=32 dispatches)
-    attn._prefill_ba_w = mx.concatenate([attn.in_proj_b.weight, attn.in_proj_a.weight], axis=0)
-    attn._prefill_ba_s = mx.concatenate([attn.in_proj_b.scales, attn.in_proj_a.scales], axis=0)
-    attn._prefill_ba_b = mx.concatenate([attn.in_proj_b.biases, attn.in_proj_a.biases], axis=0)
+    attn._prefill_ba_w = mx.concatenate(
+        [attn.in_proj_b.weight, attn.in_proj_a.weight], axis=0
+    )
+    attn._prefill_ba_s = mx.concatenate(
+        [attn.in_proj_b.scales, attn.in_proj_a.scales], axis=0
+    )
+    attn._prefill_ba_b = mx.concatenate(
+        [attn.in_proj_b.biases, attn.in_proj_a.biases], axis=0
+    )
     attn._prefill_ba_gs = attn.in_proj_b.group_size
     attn._prefill_ba_bits = attn.in_proj_b.bits
     attn._prefill_ba_n_b = attn.in_proj_b.weight.shape[0]  # N_B
@@ -319,18 +348,24 @@ def _patch_gqa_proj_weights(attn):
     B_gate = B_q[:, D:, :].reshape(H_q * D, -1)
 
     # Merge: [queries, gate, keys, values]
-    W_merged = mx.contiguous(mx.concatenate([W_queries, W_gate, k.weight, v.weight], axis=0))
-    S_merged = mx.contiguous(mx.concatenate([S_queries, S_gate, k.scales, v.scales], axis=0))
-    B_merged = mx.contiguous(mx.concatenate([B_queries, B_gate, k.biases, v.biases], axis=0))
+    W_merged = mx.contiguous(
+        mx.concatenate([W_queries, W_gate, k.weight, v.weight], axis=0)
+    )
+    S_merged = mx.contiguous(
+        mx.concatenate([S_queries, S_gate, k.scales, v.scales], axis=0)
+    )
+    B_merged = mx.contiguous(
+        mx.concatenate([B_queries, B_gate, k.biases, v.biases], axis=0)
+    )
 
     attn._merged_proj_w = W_merged
     attn._merged_proj_s = S_merged
     attn._merged_proj_b = B_merged
     attn._merged_proj_dims = (
-        H_q * D,           # N_Q = 4096 (queries)
-        H_q * D,           # N_GATE = 4096 (gate)
-        k.weight.shape[0], # N_K = 512
-        v.weight.shape[0], # N_V = 512
+        H_q * D,  # N_Q = 4096 (queries)
+        H_q * D,  # N_GATE = 4096 (gate)
+        k.weight.shape[0],  # N_K = 512
+        v.weight.shape[0],  # N_V = 512
     )
     mx.eval(W_merged, S_merged, B_merged)
 
@@ -340,35 +375,36 @@ def _patch_gqa_proj_weights(attn):
     K = q.weight.shape[1] * 4  # 8-bit: pack_factor=4
     attn._kernel_scalars = {
         # Dispatch 1: fused_gqa_projections
-        'K': mx.array(K, dtype=mx.int32),
-        'N_Q': mx.array(N_Q, dtype=mx.int32),
-        'N_GATE': mx.array(N_GATE, dtype=mx.int32),
-        'N_K': mx.array(N_K, dtype=mx.int32),
-        'N_TOTAL': mx.array(N_TOTAL, dtype=mx.int32),
-        'N_Q_TG': mx.array(ceil_div(N_Q, 8), dtype=mx.int32),
-        'N_GATE_TG': mx.array(ceil_div(N_GATE, 8), dtype=mx.int32),
-        'N_K_TG': mx.array(ceil_div(N_K, 8), dtype=mx.int32),
+        "K": mx.array(K, dtype=mx.int32),
+        "N_Q": mx.array(N_Q, dtype=mx.int32),
+        "N_GATE": mx.array(N_GATE, dtype=mx.int32),
+        "N_K": mx.array(N_K, dtype=mx.int32),
+        "N_TOTAL": mx.array(N_TOTAL, dtype=mx.int32),
+        "N_Q_TG": mx.array(ceil_div(N_Q, 8), dtype=mx.int32),
+        "N_GATE_TG": mx.array(ceil_div(N_GATE, 8), dtype=mx.int32),
+        "N_K_TG": mx.array(ceil_div(N_K, 8), dtype=mx.int32),
         # Dispatch 4-5: custom SDPA
-        'scale': mx.array(attn.head_dim ** -0.5, dtype=mx.float32),
-        'H_Q': mx.array(attn.num_attention_heads, dtype=mx.int32),
-        'H_KV': mx.array(attn.num_key_value_heads, dtype=mx.int32),
-        'N_blocks': mx.array(128, dtype=mx.int32),
+        "scale": mx.array(attn.head_dim**-0.5, dtype=mx.float32),
+        "H_Q": mx.array(attn.num_attention_heads, dtype=mx.int32),
+        "H_KV": mx.array(attn.num_key_value_heads, dtype=mx.int32),
+        "N_blocks": mx.array(128, dtype=mx.int32),
     }
     mx.eval(*attn._kernel_scalars.values())
 
     # Precompute grid/TG dims for Dispatch 1
     N_V_TG = ceil_div(N_V, 8)
-    attn._d1_total_tg = ceil_div(N_Q, 8) + ceil_div(N_GATE, 8) + ceil_div(N_K, 8) + N_V_TG
+    attn._d1_total_tg = (
+        ceil_div(N_Q, 8) + ceil_div(N_GATE, 8) + ceil_div(N_K, 8) + N_V_TG
+    )
 
     # Precompute RoPE inv_freq for fused norm+rope kernel (Dispatch 2)
     # inv_freq[d] = theta^(-d / half_dims) for d in {0, ..., half_dims-1}
-    rope_dims = attn.rope.dims           # 64 (partial_rotary_factor * head_dim)
-    half_dims = rope_dims // 2            # 32
-    theta = attn.rope.base                # 10000000
+    rope_dims = attn.rope.dims  # 64 (partial_rotary_factor * head_dim)
+    half_dims = rope_dims // 2  # 32
+    theta = attn.rope.base  # 10000000
     d_indices = mx.arange(half_dims, dtype=mx.float32)
     attn._rope_inv_freq = theta ** (-d_indices / half_dims)
     mx.eval(attn._rope_inv_freq)
-
 
 
 def make_qwen_random_cache(layer, config, prefill_len):
@@ -384,6 +420,7 @@ def make_qwen_random_cache(layer, config, prefill_len):
     """
     if layer.is_linear:
         from mlx_lm.models.cache import ArraysCache
+
         cache = ArraysCache(size=2)
         attn = layer.linear_attn
         cache[0] = mx.random.normal(
@@ -395,6 +432,7 @@ def make_qwen_random_cache(layer, config, prefill_len):
         return cache
     else:
         from mlx_lm.models.cache import KVCache
+
         cache = KVCache()
         n_steps = (prefill_len + KVCache.step - 1) // KVCache.step
         alloc_len = n_steps * KVCache.step
@@ -406,12 +444,20 @@ def make_qwen_random_cache(layer, config, prefill_len):
         return cache
 
 
-def build_model(n_experts=16, n_layers=1, top_k=4,
-                hidden_size=4096, moe_intermediate_size=1024,
-                shared_expert_intermediate_size=2048, tp=1,
-                n_attn_heads=32, n_kv_heads=2,
-                lin_v_heads=64, lin_k_heads=16,
-                head_dim=256):
+def build_model(
+    n_experts=16,
+    n_layers=1,
+    top_k=4,
+    hidden_size=4096,
+    moe_intermediate_size=1024,
+    shared_expert_intermediate_size=2048,
+    tp=1,
+    n_attn_heads=32,
+    n_kv_heads=2,
+    lin_v_heads=64,
+    lin_k_heads=16,
+    head_dim=256,
+):
     """Build Qwen3.5 MoE decoder layers with 8-bit gs=64 quantization.
 
     Matches real mlx-community Qwen3.5 quantization:
@@ -475,8 +521,10 @@ def build_model(n_experts=16, n_layers=1, top_k=4,
     )
 
     tp_str = f" (TP={tp})" if tp > 1 else ""
-    print(f"  Config: {n_layers} layer(s), {n_experts} experts, top_k={top_k}, "
-          f"hidden={hidden_size}, inter={moe_inter}, shared={shared_inter}{tp_str}")
+    print(
+        f"  Config: {n_layers} layer(s), {n_experts} experts, top_k={top_k}, "
+        f"hidden={hidden_size}, inter={moe_inter}, shared={shared_inter}{tp_str}"
+    )
     print(f"  Quant: {BITS}-bit gs={GROUP_SIZE} (all weights)")
 
     layers = [DecoderLayer(config, idx) for idx in range(n_layers)]
@@ -504,8 +552,12 @@ def build_model(n_experts=16, n_layers=1, top_k=4,
         mx.eval(attn_mod.parameters())
 
         # RMSNorm to COMPUTE_DTYPE (norms are never quantized)
-        layer.input_layernorm.weight = layer.input_layernorm.weight.astype(COMPUTE_DTYPE)
-        layer.post_attention_layernorm.weight = layer.post_attention_layernorm.weight.astype(COMPUTE_DTYPE)
+        layer.input_layernorm.weight = layer.input_layernorm.weight.astype(
+            COMPUTE_DTYPE
+        )
+        layer.post_attention_layernorm.weight = (
+            layer.post_attention_layernorm.weight.astype(COMPUTE_DTYPE)
+        )
         mx.eval(layer.input_layernorm.weight, layer.post_attention_layernorm.weight)
 
         # MoE block: quantize everything to 8-bit gs=64
@@ -514,11 +566,12 @@ def build_model(n_experts=16, n_layers=1, top_k=4,
             # Gate: random init (zeros get optimized away), then quantize.
             # nn.quantize on a leaf nn.Linear is a no-op (walks children, finds none).
             # Use QuantizedLinear.from_linear directly.
-            moe.gate.weight = (
-                mx.random.normal(moe.gate.weight.shape) * 0.01
-            ).astype(mx.float32)
+            moe.gate.weight = (mx.random.normal(moe.gate.weight.shape) * 0.01).astype(
+                mx.float32
+            )
             moe.gate = nn.QuantizedLinear.from_linear(
-                moe.gate, group_size=GROUP_SIZE, bits=BITS)
+                moe.gate, group_size=GROUP_SIZE, bits=BITS
+            )
             mx.eval(moe.gate.parameters())
 
             # Routed experts: quantize per-projection to limit peak memory
@@ -533,10 +586,11 @@ def build_model(n_experts=16, n_layers=1, top_k=4,
 
             # shared_expert_gate: quantize to 8-bit gs=64 (leaf nn.Linear fix)
             moe.shared_expert_gate = nn.QuantizedLinear.from_linear(
-                moe.shared_expert_gate, group_size=GROUP_SIZE, bits=BITS)
+                moe.shared_expert_gate, group_size=GROUP_SIZE, bits=BITS
+            )
             mx.eval(moe.shared_expert_gate.parameters())
 
         if (li + 1) % 10 == 0 or li == 0:
-            print(f"  Layer {li+1}/{n_layers} ready")
+            print(f"  Layer {li + 1}/{n_layers} ready")
 
     return layers, config, GROUP_SIZE

@@ -21,6 +21,7 @@ Body (after TG barrier):
   Routed: 8-bit gate+up+SwiGLU with h_scaled[batch_id] input
   Shared: register-level weight sharing for B batch elements
 """
+
 import mlx.core as mx
 
 from ..common import METAL_HALF_TYPE
@@ -31,8 +32,15 @@ def ceil_div(a, b):
 
 
 def _gen_batched_softmax_topk_swiglu_source(
-    N_INTER, SHARED_INTER, K, n_active, B,
-    n_experts=256, top_k=10, norm_topk=True, group_size=64,
+    N_INTER,
+    SHARED_INTER,
+    K,
+    n_active,
+    B,
+    n_experts=256,
+    top_k=10,
+    norm_topk=True,
+    group_size=64,
     n_oproj_tg=64,
 ):
     """Generate Metal source for batched softmax + top-k + SwiGLU.
@@ -53,28 +61,38 @@ def _gen_batched_softmax_topk_swiglu_source(
     SPT = (E + 63) // 64
 
     # ── Shared expert body: unrolled per-batch code ──
-    shared_x_load = "\n".join(f"""
+    shared_x_load = "\n".join(
+        f"""
             float x{b}_thread[VALUES_PER_THREAD];
             float xsum{b} = 0;
             for (int i = 0; i < VALUES_PER_THREAD; i++) {{
                 float xi = float(X[{b} * K_DIM + x_base + i]);
                 x{b}_thread[i] = xi;
                 xsum{b} += xi;
-            }}""" for b in range(B))
+            }}"""
+        for b in range(B)
+    )
 
-    shared_gate_qdot = "\n".join(f"""
+    shared_gate_qdot = "\n".join(
+        f"""
                 float accum_g{b} = 0;
                 for (int i = 0; i < VALUES_PER_THREAD; i++) accum_g{b} += x{b}_thread[i] * wg_vals[i];
-                gate{b}[row] += sg * accum_g{b} + xsum{b} * bg;""" for b in range(B))
+                gate{b}[row] += sg * accum_g{b} + xsum{b} * bg;"""
+        for b in range(B)
+    )
 
-    shared_up_qdot = "\n".join(f"""
+    shared_up_qdot = "\n".join(
+        f"""
                 float accum_u{b} = 0;
                 for (int i = 0; i < VALUES_PER_THREAD; i++) accum_u{b} += x{b}_thread[i] * wu_vals[i];
-                up{b}[row] += su * accum_u{b} + xsum{b} * bu;""" for b in range(B))
+                up{b}[row] += su * accum_u{b} + xsum{b} * bu;"""
+        for b in range(B)
+    )
 
     shared_result_decls = "\n        ".join(
         f"float gate{b}[RESULTS_PER_SG] = {{0,0,0,0}}; float up{b}[RESULTS_PER_SG] = {{0,0,0,0}};"
-        for b in range(B))
+        for b in range(B)
+    )
 
     shared_write_lines = []
     for b in range(B):
@@ -103,11 +121,12 @@ def _gen_batched_softmax_topk_swiglu_source(
 
     # Shared expert gate GEMV accumulator declarations
     seg_acc_decls = "\n        ".join(
-        f"float seg_gate_acc{b} = 0.0f;" for b in range(B))
+        f"float seg_gate_acc{b} = 0.0f;" for b in range(B)
+    )
 
     seg_write = "\n".join(
-        f"            gate_raw[{b}] = seg_gate_acc{b} * inv_rms_{b};"
-        for b in range(B))
+        f"            gate_raw[{b}] = seg_gate_acc{b} * inv_rms_{b};" for b in range(B)
+    )
 
     return f"""
     const int RESULTS_PER_SG = 4;
@@ -245,7 +264,9 @@ def _gen_batched_softmax_topk_swiglu_source(
                 for (int a = 0; a < {K_TOP}; a++) total_score += tg_selected_scores[a];
                 float inv_total = {"1.0f / total_score" if norm_topk else "1.0f"};
                 for (int a = 0; a < {K_TOP}; a++) {{
-                    norm_scores[batch_id * {K_TOP} + a] = tg_selected_scores[a] * inv_total;
+                    norm_scores[batch_id * {
+        K_TOP
+    } + a] = tg_selected_scores[a] * inv_total;
                     out_inds[batch_id * {K_TOP} + a] = (uint)tg_inds[a];
                 }}
             }}
@@ -264,16 +285,24 @@ def _gen_batched_softmax_topk_swiglu_source(
         const device uint8_t* ws_gate = (const device uint8_t*)W
             + (long)expert * N_TOTAL * K_DIM + out_row * K_DIM + slid * VALUES_PER_THREAD;
         const device bfloat16_t* sc_gate = (const device bfloat16_t*)S
-            + (long)expert * N_TOTAL * K_GROUPS + out_row * K_GROUPS + slid / {slid_divisor};
+            + (long)expert * N_TOTAL * K_GROUPS + out_row * K_GROUPS + slid / {
+        slid_divisor
+    };
         const device bfloat16_t* bi_gate = (const device bfloat16_t*)B_q
-            + (long)expert * N_TOTAL * K_GROUPS + out_row * K_GROUPS + slid / {slid_divisor};
+            + (long)expert * N_TOTAL * K_GROUPS + out_row * K_GROUPS + slid / {
+        slid_divisor
+    };
 
         const device uint8_t* ws_up = (const device uint8_t*)W
             + (long)expert * N_TOTAL * K_DIM + (out_row + N_INTER_DIM) * K_DIM + slid * VALUES_PER_THREAD;
         const device bfloat16_t* sc_up = (const device bfloat16_t*)S
-            + (long)expert * N_TOTAL * K_GROUPS + (out_row + N_INTER_DIM) * K_GROUPS + slid / {slid_divisor};
+            + (long)expert * N_TOTAL * K_GROUPS + (out_row + N_INTER_DIM) * K_GROUPS + slid / {
+        slid_divisor
+    };
         const device bfloat16_t* bi_up = (const device bfloat16_t*)B_q
-            + (long)expert * N_TOTAL * K_GROUPS + (out_row + N_INTER_DIM) * K_GROUPS + slid / {slid_divisor};
+            + (long)expert * N_TOTAL * K_GROUPS + (out_row + N_INTER_DIM) * K_GROUPS + slid / {
+        slid_divisor
+    };
 
         int x_base = batch_id * K_DIM + slid * VALUES_PER_THREAD;
 
@@ -357,7 +386,9 @@ def _gen_batched_softmax_topk_swiglu_source(
                 float seg_bi_val = float(*seg_bi);
 
                 // Compute B dot products from the same weight registers
-{chr(10).join(f'''                {{
+{
+        chr(10).join(
+            f'''                {{
                     float xsum{b} = 0.0f, wacc{b} = 0.0f;
                     for (int i = 0; i < VPT; i++) {{
                         float xi = float(X[{b} * K_DIM + seg_xb + i]);
@@ -365,7 +396,10 @@ def _gen_batched_softmax_topk_swiglu_source(
                         wacc{b} += xi * seg_w_regs[i];
                     }}
                     seg_gate_acc{b} += seg_sc_val * wacc{b} + xsum{b} * seg_bi_val;
-                }}''' for b in range(B))}
+                }}'''
+            for b in range(B)
+        )
+    }
 
                 seg_w_ptr += SEG_BLOCK;
                 seg_sc += {sc_stride};
@@ -374,7 +408,12 @@ def _gen_batched_softmax_topk_swiglu_source(
             }}
 
             // Reduce across SG and write gate_raw[B]
-{chr(10).join(f"            seg_gate_acc{b} = simd_sum(seg_gate_acc{b});" for b in range(B))}
+{
+        chr(10).join(
+            f"            seg_gate_acc{b} = simd_sum(seg_gate_acc{b});"
+            for b in range(B)
+        )
+    }
             if (slid == 0) {{
 {seg_write}
             }}
@@ -398,9 +437,13 @@ def _gen_batched_softmax_topk_swiglu_source(
         const device uint8_t* ws_up = (const device uint8_t*)W_shared
             + (long)(out_row + SHARED_INTER_DIM) * K_DIM + slid * VALUES_PER_THREAD;
         const device bfloat16_t* sc_up = (const device bfloat16_t*)S_shared
-            + (long)(out_row + SHARED_INTER_DIM) * {SHARED_K_groups} + slid / {slid_divisor};
+            + (long)(out_row + SHARED_INTER_DIM) * {SHARED_K_groups} + slid / {
+        slid_divisor
+    };
         const device bfloat16_t* bi_up = (const device bfloat16_t*)B_shared
-            + (long)(out_row + SHARED_INTER_DIM) * {SHARED_K_groups} + slid / {slid_divisor};
+            + (long)(out_row + SHARED_INTER_DIM) * {SHARED_K_groups} + slid / {
+        slid_divisor
+    };
 
         int x_base = slid * VALUES_PER_THREAD;
         {shared_result_decls}
@@ -442,51 +485,103 @@ def _gen_batched_softmax_topk_swiglu_source(
     }}
 """
 
+
 _batched_softmax_topk_swiglu_cache = {}
 
 
 def _get_batched_softmax_topk_swiglu_kernel(
-    N_INTER, SHARED_INTER, K, n_active, B,
-    n_experts=256, top_k=10, norm_topk=True, group_size=64,
+    N_INTER,
+    SHARED_INTER,
+    K,
+    n_active,
+    B,
+    n_experts=256,
+    top_k=10,
+    norm_topk=True,
+    group_size=64,
     n_oproj_tg=64,
 ):
-    key = (N_INTER, SHARED_INTER, K, n_active, B, n_experts, top_k, norm_topk, group_size, n_oproj_tg)
+    key = (
+        N_INTER,
+        SHARED_INTER,
+        K,
+        n_active,
+        B,
+        n_experts,
+        top_k,
+        norm_topk,
+        group_size,
+        n_oproj_tg,
+    )
     if key not in _batched_softmax_topk_swiglu_cache:
         nt_tag = "_nt" if norm_topk else ""
         _batched_softmax_topk_swiglu_cache[key] = mx.fast.metal_kernel(
-            name=(f"batched_softmax_topk_swiglu_8bit"
-                  f"_NI{N_INTER}_SI{SHARED_INTER}_K{K}"
-                  f"_na{n_active}_B{B}_E{n_experts}_k{top_k}"
-                  f"_gs{group_size}{nt_tag}"),
+            name=(
+                f"batched_softmax_topk_swiglu_8bit"
+                f"_NI{N_INTER}_SI{SHARED_INTER}_K{K}"
+                f"_na{n_active}_B{B}_E{n_experts}_k{top_k}"
+                f"_gs{group_size}{nt_tag}"
+            ),
             input_names=[
-                "W", "S", "B_q",                    # routed expert weights
-                "W_shared", "S_shared", "B_shared",  # shared expert weights
-                "W_seg", "S_seg", "B_seg",            # shared_expert_gate weights
-                "X",                                  # h_scaled (B, K) bf16
-                "gate_part_a", "gate_part_b",         # (B, E) f32
-                "x2_partials",                        # (B, N_OPROJ_TG) f32
+                "W",
+                "S",
+                "B_q",  # routed expert weights
+                "W_shared",
+                "S_shared",
+                "B_shared",  # shared expert weights
+                "W_seg",
+                "S_seg",
+                "B_seg",  # shared_expert_gate weights
+                "X",  # h_scaled (B, K) bf16
+                "gate_part_a",
+                "gate_part_b",  # (B, E) f32
+                "x2_partials",  # (B, N_OPROJ_TG) f32
             ],
-            output_names=["Y_routed", "Y_shared", "out_inds",
-                          "norm_scores", "gate_raw"],
+            output_names=[
+                "Y_routed",
+                "Y_shared",
+                "out_inds",
+                "norm_scores",
+                "gate_raw",
+            ],
             source=_gen_batched_softmax_topk_swiglu_source(
-                N_INTER, SHARED_INTER, K, n_active, B,
-                n_experts, top_k, norm_topk, group_size, n_oproj_tg,
+                N_INTER,
+                SHARED_INTER,
+                K,
+                n_active,
+                B,
+                n_experts,
+                top_k,
+                norm_topk,
+                group_size,
+                n_oproj_tg,
             ).replace("bfloat16_t", METAL_HALF_TYPE),
         )
     return _batched_softmax_topk_swiglu_cache[key]
 
 
 def batched_softmax_topk_swiglu_8bit(
-    w_gu, s_gu, b_gu,               # routed gate+up weights (E, 2*N_INTER, K/4)
-    w_shared, s_shared, b_shared,    # shared gate+up weights (2*SHARED_INTER, K/4)
-    w_seg, s_seg, b_seg,             # shared_expert_gate weights (1, K/4)
-    h_scaled,                        # (B, K) bf16 — from Dispatch 1
-    gate_part_a,                     # (B, E) f32 — from Dispatch 1
-    gate_part_b,                     # (B, E) f32 — from Dispatch 1
-    x2_partials,                     # (B, N_OPROJ_TG) f32 — from Dispatch 1
-    n_inter, k_hidden, batch_size, n_active,
-    n_oproj_tg, n_experts=256,
-    shared_inter=None, group_size=64,
+    w_gu,
+    s_gu,
+    b_gu,  # routed gate+up weights (E, 2*N_INTER, K/4)
+    w_shared,
+    s_shared,
+    b_shared,  # shared gate+up weights (2*SHARED_INTER, K/4)
+    w_seg,
+    s_seg,
+    b_seg,  # shared_expert_gate weights (1, K/4)
+    h_scaled,  # (B, K) bf16 — from Dispatch 1
+    gate_part_a,  # (B, E) f32 — from Dispatch 1
+    gate_part_b,  # (B, E) f32 — from Dispatch 1
+    x2_partials,  # (B, N_OPROJ_TG) f32 — from Dispatch 1
+    n_inter,
+    k_hidden,
+    batch_size,
+    n_active,
+    n_oproj_tg,
+    n_experts=256,
+    shared_inter=None,
+    group_size=64,
 ):
     """Batched Dispatch 2: softmax + top-k + merged 8-bit SwiGLU with oproj prologue.
 
@@ -538,8 +633,16 @@ def batched_softmax_topk_swiglu_8bit(
     n_oproj_tg_val = int(n_oproj_tg)
 
     kern = _get_batched_softmax_topk_swiglu_kernel(
-        n_inter_val, shared_inter_val, k_val, n_active_val, B,
-        E, top_k, True, int(group_size), n_oproj_tg_val,
+        n_inter_val,
+        shared_inter_val,
+        k_val,
+        n_active_val,
+        B,
+        E,
+        top_k,
+        True,
+        int(group_size),
+        n_oproj_tg_val,
     )
 
     max_inter = max(n_inter_val, shared_inter_val)
@@ -547,26 +650,33 @@ def batched_softmax_topk_swiglu_8bit(
 
     results = kern(
         inputs=[
-            w_gu, s_gu, b_gu,
-            w_shared, s_shared, b_shared,
-            w_seg, s_seg, b_seg,
+            w_gu,
+            s_gu,
+            b_gu,
+            w_shared,
+            s_shared,
+            b_shared,
+            w_seg,
+            s_seg,
+            b_seg,
             h_scaled,
-            gate_part_a, gate_part_b,
+            gate_part_a,
+            gate_part_b,
             x2_partials,
         ],
         output_shapes=[
-            (total_routed * n_inter_val,),        # Y_routed flat
-            (B * shared_inter_val,),               # Y_shared flat
-            (total_routed,),                       # out_inds
-            (total_routed,),                       # norm_scores
-            (B,),                                  # gate_raw
+            (total_routed * n_inter_val,),  # Y_routed flat
+            (B * shared_inter_val,),  # Y_shared flat
+            (total_routed,),  # out_inds
+            (total_routed,),  # norm_scores
+            (B,),  # gate_raw
         ],
         output_dtypes=[
-            mx.float32,    # Y_routed
-            mx.float32,    # Y_shared
-            mx.uint32,     # out_inds
-            mx.float32,    # norm_scores
-            mx.float32,    # gate_raw
+            mx.float32,  # Y_routed
+            mx.float32,  # Y_shared
+            mx.uint32,  # out_inds
+            mx.float32,  # norm_scores
+            mx.float32,  # gate_raw
         ],
         grid=(32, ceil_div(max_inter, 8) * 2, total_routed + 1),
         threadgroup=(32, 2, 1),

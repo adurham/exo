@@ -355,7 +355,8 @@ def _allocate_and_validate_layers(
         layer_allocations = allocate_layers_proportionally(
             total_layers=model_card.n_layers,
             memory_fractions=[
-                node_memory[node_id].ram_available / total_memory for node_id in node_ids
+                node_memory[node_id].ram_available / total_memory
+                for node_id in node_ids
             ],
         )
 

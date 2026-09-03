@@ -127,9 +127,7 @@ def abort_prefill_chunk_boundary_if_requested(
     """
     if rank != 0:
         return
-    if not should_abort_all_streams(
-        batch_request_uids, set(_cancel_requested_uids)
-    ):
+    if not should_abort_all_streams(batch_request_uids, set(_cancel_requested_uids)):
         return
     if group is not None and world_size > 1:
         send_cancel_metaframe(batch_request_uids[0], 1, group=group)

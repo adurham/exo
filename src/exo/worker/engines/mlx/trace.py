@@ -69,7 +69,9 @@ class RequestTrace:
         """Record a span from explicit start/end perf_counter values."""
         if not self._active:
             return
-        self._spans.append(_Span(name, start, end if end is not None else time.perf_counter()))
+        self._spans.append(
+            _Span(name, start, end if end is not None else time.perf_counter())
+        )
 
     def mark(self, name: str) -> None:
         """Record a zero-duration marker at the current time."""

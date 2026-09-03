@@ -500,14 +500,10 @@ class SpecPipelineLastLayer(PipelineLastLayer):
                             _counts: dict[int, int] = {}
                             for _e_int in _inds_list:
                                 _counts[_e_int] = _counts.get(_e_int, 0) + 1
-                            _sorted_counts = sorted(
-                                _counts.values(), reverse=True
-                            )
+                            _sorted_counts = sorted(_counts.values(), reverse=True)
                             _n_tokens = len(_inds_list)
                             _n_experts_hit = len(_counts)
-                            _max_count = (
-                                _sorted_counts[0] if _sorted_counts else 0
-                            )
+                            _max_count = _sorted_counts[0] if _sorted_counts else 0
                             _top5 = _sorted_counts[:5]
                             _log(
                                 f"[MOE_EXPERT_HIST_DIAG] layer={_layer_idx} "
@@ -2610,7 +2606,9 @@ def pp_dspark_decode_loop(
                     _t_before_cache_preflight = time.perf_counter()
                     mx.eval(prompt_cache)
                     _t_after_cache_preflight = time.perf_counter()
-                    _log(f"n={n} r0_spec_forward_model_call PRE (speculative, no auto-send)")
+                    _log(
+                        f"n={n} r0_spec_forward_model_call PRE (speculative, no auto-send)"
+                    )
                     # exo-stall-diag (2026-07-21): gated by
                     # EXO_MOE_GPUTRACE_DIAG=1. Wraps this exact call --
                     # the confirmed site of the r0_fwd/spec_fwd stall,
@@ -2634,9 +2632,7 @@ def pp_dspark_decode_loop(
                     # and DELETED unless this call took >2s (to avoid
                     # filling disk with routine fast-cycle captures) --
                     # only the slow/stalled cycles are worth keeping.
-                    _gputrace_enabled = (
-                        os.environ.get("EXO_MOE_GPUTRACE_DIAG") == "1"
-                    )
+                    _gputrace_enabled = os.environ.get("EXO_MOE_GPUTRACE_DIAG") == "1"
                     _gputrace_path = f"/tmp/gputrace_n{n}.gputrace"
                     if _gputrace_enabled:
                         try:
@@ -2672,9 +2668,7 @@ def pp_dspark_decode_loop(
                         else:
                             import shutil as _shutil_gputrace
 
-                            _shutil_gputrace.rmtree(
-                                _gputrace_path, ignore_errors=True
-                            )
+                            _shutil_gputrace.rmtree(_gputrace_path, ignore_errors=True)
                     # Failure mode #3: force materialisation NOW so the
                     # forward's KV writes and the buffered hidden are
                     # committed on the timeline before we enter the
@@ -2753,7 +2747,9 @@ def pp_dspark_decode_loop(
                         _consume_verify_positions = vw - 1
                     out = model(_verify_input, cache=prompt_cache)
                     mx.eval(out)
-                    _log(f"n={n} r1_verify_model_call POST (consume={_consume_this_cycle})")
+                    _log(
+                        f"n={n} r1_verify_model_call POST (consume={_consume_this_cycle})"
+                    )
                     all_next = mx.argmax(out[0], axis=-1)
                     mx.eval(all_next)
                     _all_next_list = [int(v) for v in all_next.tolist()]

@@ -1171,7 +1171,8 @@ class API:
             # already uses, rather than building that shape twice.
             try:
                 response_json = [
-                    part async for part in collect_chat_response(
+                    part
+                    async for part in collect_chat_response(
                         command.command_id,
                         self._token_chunk_stream(command.command_id),
                     )
@@ -1397,7 +1398,9 @@ class API:
                 remaining = deadline - anyio.current_time()
                 if remaining <= 0:
                     first = first_blocker if first_blocker is not None else exc.detail
-                    detail = f"Cannot JIT-load model {model_card.model_id}: {exc.detail}"
+                    detail = (
+                        f"Cannot JIT-load model {model_card.model_id}: {exc.detail}"
+                    )
                     if wait_seconds > 0:
                         detail += (
                             f" (still blocked after waiting {wait_seconds:.0f}s "
@@ -1482,9 +1485,7 @@ class API:
             except ValueError as exc:
                 last_error = str(exc)
                 continue
-            new_ids = [
-                iid for iid in placements if iid not in self.state.instances
-            ]
+            new_ids = [iid for iid in placements if iid not in self.state.instances]
             if len(new_ids) == 1:
                 return (sharding, instance_meta, min_nodes)
 

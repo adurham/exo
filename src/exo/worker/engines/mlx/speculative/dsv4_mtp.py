@@ -26,6 +26,7 @@ the per-uid pre-norm capture). The DSv4-specific pieces are:
 
 BS>1 batched-MTP is NOT yet enabled here — that's Phase 5.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -67,6 +68,7 @@ def _tree_alpha_probe_write(record: dict) -> None:
         path = f"/tmp/dsv4_tree_alpha_probe_pid{os.getpid()}.jsonl"
         _TREE_ALPHA_PROBE_HANDLE = open(path, "ab", buffering=0)  # noqa: SIM115
     import json as _json
+
     line = (_json.dumps(record) + "\n").encode("utf-8")
     _TREE_ALPHA_PROBE_HANDLE.write(line)
     _TREE_ALPHA_PROBE_RECS += 1
@@ -107,6 +109,7 @@ def _upgrade_cache_to_per_stream(cache_obj: Any) -> None:
         # consistent values (rather than the lazy-fallback that mistook the
         # physical buffer index for the logical offset).
         cache_obj._bootstrap_per_stream_ring()
+
 
 logger = logging.getLogger(__name__)
 
@@ -214,13 +217,13 @@ def _build_tree_mask_and_positions(
         sub_mask[i][i] = 0.0
         for a in ancestors[i]:
             sub_mask[i][a] = 0.0
-    sub_arr = mx.array(sub_mask, dtype=dtype)             # (L_q, L_q)
+    sub_arr = mx.array(sub_mask, dtype=dtype)  # (L_q, L_q)
 
     # Splice: leftmost kv_window cols from base (the prefill attend pattern),
     # rightmost L_q cols replaced by tree sub-mask.
     kv_window = mask_add.shape[1] - n_nodes
     left = mask_add[:, :kv_window]
-    mask = mx.concatenate([left, sub_arr], axis=1)         # (L_q, kv_window + L_q)
+    mask = mx.concatenate([left, sub_arr], axis=1)  # (L_q, kv_window + L_q)
 
     # mlx-lm RotatingKVCache.make_mask can return a sequence dimension > max_size
     # when offset < max_size but offset + L_q > max_size. Force clamp the
@@ -230,11 +233,9 @@ def _build_tree_mask_and_positions(
     if max_s is not None and mask.shape[1] > max_s:
         mask = mask[:, -max_s:]
 
-
-    positions = mx.array(
-        [real_offset + d for d in depth], dtype=mx.int32
-    )
+    positions = mx.array([real_offset + d for d in depth], dtype=mx.int32)
     return mask, positions
+
 
 # Per-cycle phase timing. When EXO_DSV4_MTP_PROFILE > 0, brackets the
 # draft / verify / accept phases with mx.eval + perf_counter, summarising
@@ -315,6 +316,7 @@ def _warn_min_accept_off(n_streams: int) -> None:
         "hundred tokens at temp>0). Set EXO_DSV4_BS_MIN_ACCEPT=1 or "
         "disable c>=2 spec (EXO_DSV4_MTP_C2_MAX_CTX=1)."
     )
+
 
 # GREEDY ACCEPT-RULE ALIGNMENT (2026-07-10, default OFF until the
 # byte-equality gate passes). At temp=0 the plain (MTP-off) generator picks
@@ -679,9 +681,7 @@ class _ShadowStats:
 # whenever the verify's commit_pending applies a PRIOR staged bump).
 # Pair with EXO_DSV4_POOL_RESTORE_AFTER_TRIM=1: activating snapshots with
 # the legacy restore-then-trim order would re-introduce the double-rollback.
-_POOL_SNAPSHOT_BATCH = (
-    os.environ.get("EXO_DSV4_POOL_SNAPSHOT_BATCH", "0") == "1"
-)
+_POOL_SNAPSHOT_BATCH = os.environ.get("EXO_DSV4_POOL_SNAPSHOT_BATCH", "0") == "1"
 
 # UNIFIED SPEC-STATE ROLLBACK (2026-07-10, default OFF until gates pass).
 # trim() is NOT rollback-safe on a ROTATED ring: the verify's draft writes
@@ -702,9 +702,7 @@ _POOL_SNAPSHOT_BATCH = (
 # regime-a/-b distinction entirely in this mode. Cost: ring-donation
 # blocking during verify + pool buf copies per cycle + one commit-forward
 # per rejection — the price of exactness; default path unchanged.
-_SPEC_STATE_RESTORE = (
-    os.environ.get("EXO_DSV4_SPEC_STATE_RESTORE", "0") == "1"
-)
+_SPEC_STATE_RESTORE = os.environ.get("EXO_DSV4_SPEC_STATE_RESTORE", "0") == "1"
 
 # EXO_DSV4_SPEC_CACHE_ROLLBACK=1 (requires _SPEC_STATE_RESTORE): replace the
 # per-rejection commit-forward with cache-level exact undo. The verify's
@@ -718,9 +716,7 @@ _SPEC_STATE_RESTORE = (
 # cannot roll back cache-level (B>1, or multi-flush at gamma+1 > ratio)
 # report spec_can_rollback=False and the whole rejection falls back to the
 # commit-forward path.
-_SPEC_CACHE_ROLLBACK = (
-    os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK", "0") == "1"
-)
+_SPEC_CACHE_ROLLBACK = os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK", "0") == "1"
 
 # EXO_DSV4_SPEC_CACHE_ROLLBACK_C2=1 (default OFF): cache-level pool undo
 # for the BS>1 min-acceptance path. With POOL_SNAPSHOT_BATCH now active,
@@ -735,9 +731,7 @@ _SPEC_CACHE_ROLLBACK = (
 # tokens instead of commit-forward recomputes — the same batched-M
 # approximation class (c>=2 has no bitwise gate; the bar is
 # no-contamination, which the pool undo preserves exactly).
-_SPEC_CACHE_ROLLBACK_C2 = (
-    os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK_C2", "0") == "1"
-)
+_SPEC_CACHE_ROLLBACK_C2 = os.environ.get("EXO_DSV4_SPEC_CACHE_ROLLBACK_C2", "0") == "1"
 
 
 def _pool_flushed_since(pc: Any, snap: Any) -> bool:
@@ -805,9 +799,7 @@ class _PhaseTimer:
         self.samples: dict[int, dict[str, list[tuple[float, _ProfUnit]]]] = {}
         self._pending: dict[str, tuple[float, _ProfUnit]] = {}
 
-    def record(
-        self, phase: str, value: float, unit: _ProfUnit = "ms"
-    ) -> None:
+    def record(self, phase: str, value: float, unit: _ProfUnit = "ms") -> None:
         self._pending[phase] = (value, unit)
 
     def end_cycle(self, batch_size: int) -> None:
@@ -821,9 +813,7 @@ class _PhaseTimer:
             self.dump()
 
     def dump(self) -> None:
-        bs_summary = ",".join(
-            f"B={b}:{c}" for b, c in sorted(self.cycles_by_b.items())
-        )
+        bs_summary = ",".join(f"B={b}:{c}" for b, c in sorted(self.cycles_by_b.items()))
         logger.warning(f"[MTP-PROF] cycles={self.cycles} {bs_summary}")
         known = ("draft", "verify", "accept", "commit", "rollback", "total")
         for b in sorted(self.samples.keys()):
@@ -943,9 +933,7 @@ def _degen_probe_write(record: dict[str, Any]) -> None:
             "pid": os.getpid(),
             "ts_open_ns": time.perf_counter_ns(),
             "env": {
-                "EXO_SPECULATIVE_GAMMA": os.environ.get(
-                    "EXO_SPECULATIVE_GAMMA", "?"
-                ),
+                "EXO_SPECULATIVE_GAMMA": os.environ.get("EXO_SPECULATIVE_GAMMA", "?"),
                 "EXO_DSV4_MTP": os.environ.get("EXO_DSV4_MTP", "?"),
                 "EXO_SPECULATIVE": os.environ.get("EXO_SPECULATIVE", "?"),
             },
@@ -978,6 +966,7 @@ def _c2_trace_write(record: dict) -> None:
         _C2_TRACE_HANDLE = open(path, "ab", buffering=0)  # noqa: SIM115
         # Write a header record so consumers can identify schema.
         import json as _json
+
         header = {
             "type": "header",
             "schema_version": 1,
@@ -985,23 +974,18 @@ def _c2_trace_write(record: dict) -> None:
             "rank": _c2_trace_rank(),
             "ts_open_ns": time.perf_counter_ns(),
             "env": {
-                "EXO_SPECULATIVE_GAMMA": os.environ.get(
-                    "EXO_SPECULATIVE_GAMMA", "?"
-                ),
+                "EXO_SPECULATIVE_GAMMA": os.environ.get("EXO_SPECULATIVE_GAMMA", "?"),
                 "EXO_DSV4_FENCE_EVERY_N_LAYERS": os.environ.get(
                     "EXO_DSV4_FENCE_EVERY_N_LAYERS", "?"
                 ),
-                "EXO_DSV4_MTP_EAGLE_K": os.environ.get(
-                    "EXO_DSV4_MTP_EAGLE_K", "?"
-                ),
+                "EXO_DSV4_MTP_EAGLE_K": os.environ.get("EXO_DSV4_MTP_EAGLE_K", "?"),
                 "EXO_DSV4_MTP": os.environ.get("EXO_DSV4_MTP", "?"),
-                "EXO_DSV4_INDEX_TOPK": os.environ.get(
-                    "EXO_DSV4_INDEX_TOPK", "?"
-                ),
+                "EXO_DSV4_INDEX_TOPK": os.environ.get("EXO_DSV4_INDEX_TOPK", "?"),
             },
         }
         _C2_TRACE_HANDLE.write((_json.dumps(header) + "\n").encode("utf-8"))
     import json as _json
+
     _C2_TRACE_HANDLE.write((_json.dumps(record) + "\n").encode("utf-8"))
     _C2_TRACE_RECS += 1
 
@@ -1203,6 +1187,7 @@ class DSv4MTPPredictor:
         tree-verify channel.
         """
         from mlx_lm.models.deepseek_v4 import _set_eagle_soft_emb
+
         _set_eagle_soft_emb(emb)
 
     def reset_cache(self, batch_size: int = 1) -> None:
@@ -1381,17 +1366,20 @@ class DSv4MTPPredictor:
                 _s: Any = _s_any
                 try:
                     _phys = (
-                        int(_s.keys.shape[2]) if getattr(_s, "keys", None)
-                        is not None else 0
+                        int(_s.keys.shape[2])
+                        if getattr(_s, "keys", None) is not None
+                        else 0
                     )
                     _sz = int(_s.size()) if hasattr(_s, "size") else -1
-                    _singles_meta.append({
-                        "phys_rows": _phys,
-                        "size": _sz,
-                        "consistent": bool(_phys == _sz),
-                        "idx": int(getattr(_s, "_idx", -1)),
-                        "rotated": bool(getattr(_s, "rotated", False)),
-                    })
+                    _singles_meta.append(
+                        {
+                            "phys_rows": _phys,
+                            "size": _sz,
+                            "consistent": bool(_phys == _sz),
+                            "idx": int(getattr(_s, "_idx", -1)),
+                            "rotated": bool(getattr(_s, "rotated", False)),
+                        }
+                    )
                 except Exception:
                     _singles_meta.append({"meta_err": True})
             for _u in uids_t:
@@ -1405,17 +1393,19 @@ class DSv4MTPPredictor:
             for _stale in list(_DEGEN_LAST_TRANSITION.keys()):
                 if _stale not in uids_t:
                     _DEGEN_LAST_TRANSITION.pop(_stale, None)
-            _degen_probe_write({
-                "event": "bs_transition",
-                "wall_ns": _now_ns,
-                "from_uids": list(_prev),
-                "to_uids": list(uids_t),
-                "bs_gt1": _is_bs_gt1,
-                "extracted_singles": _singles_meta,
-                "any_inconsistent": any(
-                    not m.get("consistent", True) for m in _singles_meta
-                ),
-            })
+            _degen_probe_write(
+                {
+                    "event": "bs_transition",
+                    "wall_ns": _now_ns,
+                    "from_uids": list(_prev),
+                    "to_uids": list(uids_t),
+                    "bs_gt1": _is_bs_gt1,
+                    "extracted_singles": _singles_meta,
+                    "any_inconsistent": any(
+                        not m.get("consistent", True) for m in _singles_meta
+                    ),
+                }
+            )
 
         self._active_uids = uids_t
 
@@ -1572,9 +1562,12 @@ def dsv4_speculative_forward(
             mx.eval(logits)
         except Exception:
             import traceback as _tb
+
             with open("/tmp/dsv4_verify_crash.txt", "a") as _f:
-                _f.write("=== verify forward crash: inputs shape=%s dtype=%s ===\n"
-                         % (tuple(inputs.shape), inputs.dtype))
+                _f.write(
+                    "=== verify forward crash: inputs shape=%s dtype=%s ===\n"
+                    % (tuple(inputs.shape), inputs.dtype)
+                )
                 _f.write(_tb.format_exc() + "\n")
             raise
     else:
@@ -1666,9 +1659,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # divergence trace for the system-prompt degeneration hunt
         # (2026-05-29). One JSONL record per spec cycle on rank 0. Cost
         # when OFF: a single env.get + bool check per cycle.
-        self._spec_trace_enabled: bool = (
-            os.environ.get("EXO_DSV4_SPEC_TRACE") == "1"
-        )
+        self._spec_trace_enabled: bool = os.environ.get("EXO_DSV4_SPEC_TRACE") == "1"
         self._spec_trace_handle: Optional[BinaryIO] = None
         self._spec_trace_cycle: int = 0
         # MTP SAMPLING-PARITY (2026-06-18): the MTP speculative path historically
@@ -1694,18 +1685,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # decode budget, while min_p already provides a confidence-adaptive tail
         # clip and the rep/freq penalties handle loops. Set EXO_DSV4_MTP_TOP_P<1
         # to re-enable for quality A/B.
-        self._mtp_top_p: float = float(
-            os.environ.get("EXO_DSV4_MTP_TOP_P", "1.0")
-        )
-        self._mtp_rep_pen: float = float(
-            os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.3")
-        )
+        self._mtp_top_p: float = float(os.environ.get("EXO_DSV4_MTP_TOP_P", "1.0"))
+        self._mtp_rep_pen: float = float(os.environ.get("EXO_DSV4_MTP_REP_PEN", "1.3"))
         self._mtp_freq_pen: float = float(
             os.environ.get("EXO_DSV4_MTP_FREQ_PEN", "1.0")
         )
-        self._mtp_rep_ctx: int = int(
-            os.environ.get("EXO_DSV4_MTP_REP_CTX", "64")
-        )
+        self._mtp_rep_ctx: int = int(os.environ.get("EXO_DSV4_MTP_REP_CTX", "64"))
         # Confidence-gated greedy commit for the MTP bonus/correction. When the
         # TARGET distribution's max prob >= this, commit argmax instead of
         # sampling — protects rigid structured output (DSML tool-call tags,
@@ -1716,10 +1701,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         )
         # min_p precomputed (value + its log) so the per-token filter avoids an
         # os.environ.get + mx.log every call.
-        self._mtp_min_p: float = float(
-            os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05")
-        )
+        self._mtp_min_p: float = float(os.environ.get("EXO_DSV4_MTP_MIN_P", "0.05"))
         import math as _math
+
         self._mtp_log_min_p: float = (
             _math.log(self._mtp_min_p) if self._mtp_min_p > 0.0 else 0.0
         )
@@ -1752,6 +1736,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         fp = self._mtp_freq_pen
         if recent and ((rp and rp != 1.0) or (fp and fp != 0.0)):
             from collections import Counter as _Counter
+
             counts = _Counter(recent)
             uniq = sorted(counts)
             idx = mx.array(uniq, dtype=mx.int32)
@@ -1793,9 +1778,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             lg = mx.where(mask, lg, -float("inf"))
         return lg
 
-    def _mtp_confident_argmax(
-        self, target_logits1d: mx.array
-    ) -> Optional[int]:
+    def _mtp_confident_argmax(self, target_logits1d: mx.array) -> Optional[int]:
         """Return the argmax token id IFF the target distribution is highly
         confident (max softmax prob >= EXO_DSV4_MTP_GREEDY_P, default 0.85),
         else None.
@@ -1854,11 +1837,14 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         """
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
             gen_batch = self._generation_batch
-            self._mtp_trace_log("filter_finished_uid", {
-                "filter_uid": uid,
-                "uids_before": list(gen_batch.uids),
-                "num_tokens": list(gen_batch._num_tokens),
-            })
+            self._mtp_trace_log(
+                "filter_finished_uid",
+                {
+                    "filter_uid": uid,
+                    "uids_before": list(gen_batch.uids),
+                    "num_tokens": list(gen_batch._num_tokens),
+                },
+            )
         if _CYCLE_STATS:
             _st = getattr(self, "_cycle_stats", {}).pop(uid, None)
             if _st is not None:
@@ -1890,6 +1876,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             path = f"/tmp/dsv4_mtp_trace_rank_{rank}_pid{os.getpid()}.log"
             self._mtp_trace_handle = open(path, "ab", buffering=0)  # noqa: SIM115
         import json as _json
+
         self._mtp_trace_seq += 1
         rec = {"seq": self._mtp_trace_seq, "event": event, **data}
         line = (_json.dumps(rec, default=str) + "\n").encode("utf-8")
@@ -1930,6 +1917,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         ``.offset`` (or a getter) is reported as None. Used only by the
         EXO_DSV4_SPEC_TRACE path; never on the hot path when OFF.
         """
+
         def _off(c: Any) -> Any:
             o: Any = getattr(c, "offset", None)
             if o is not None:
@@ -1993,6 +1981,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 path, "ab", buffering=0
             )
         import json as _json
+
         self._spec_trace_cycle += 1
         try:
             vi = cast(list[list[int]], verify_input.tolist())
@@ -2008,14 +1997,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # committed[n] = the ordered token ids yielded this cycle for
             # stream n: [next_token, accepted drafts..., bonus]. This is
             # the sequence that MUST match plain greedy.
-            "committed": [
-                [int(tid) for (tid, _lp) in row] for row in all_tokens_per
-            ],
+            "committed": [[int(tid) for (tid, _lp) in row] for row in all_tokens_per],
             "n_accepted": list(n_accepted_per),
             "bonus": [int(b) for b in bonus_vals],
-            "draft": dc,            # (N, gamma) the drafted ids
-            "target_argmax": tt,    # (N, gamma) verify argmax over drafts
-            "verify_input": vi,     # (N, gamma+1)
+            "draft": dc,  # (N, gamma) the drafted ids
+            "target_argmax": tt,  # (N, gamma) verify argmax over drafts
+            "verify_input": vi,  # (N, gamma+1)
             "offsets": self._spec_trace_offsets(gen_batch),
         }
         self._spec_trace_handle.write(
@@ -2070,17 +2057,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Materialise so .item() / .tolist() reads don't pay async-eval
         # roundtrips at cluster scale; the dump is opt-in so the cost
         # only matters when it's enabled.
-        hidden_hash_arr = mx.sum(
-            hidden_pre.astype(mx.float32) * 1e6
-        ).astype(mx.int64)
+        hidden_hash_arr = mx.sum(hidden_pre.astype(mx.float32) * 1e6).astype(mx.int64)
         top_logits, top_idx = mx.topk(logits.astype(mx.float32), k=16, axis=-1)
         # Range of top-16 logits as a proxy for "how tied was the argmax".
-        logit_spread = (top_logits[..., 0] - top_logits[..., 15]).astype(
-            mx.float32
-        )
-        mx.eval(
-            hidden_hash_arr, top_idx, logit_spread, tok_pre_sync, tok_post_sync
-        )
+        logit_spread = (top_logits[..., 0] - top_logits[..., 15]).astype(mx.float32)
+        mx.eval(hidden_hash_arr, top_idx, logit_spread, tok_pre_sync, tok_post_sync)
 
         rec = {
             "cycle": cycle_n,
@@ -2145,9 +2126,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         if self._cached_sharding_group is not None:
             return self._cached_sharding_group
         model: Any = self.model  # type: ignore[reportUnknownMemberType]
-        inner: Any = (
-            getattr(model, "model", None)
-            or getattr(model, "language_model", None)
+        inner: Any = getattr(model, "model", None) or getattr(
+            model, "language_model", None
         )
         if inner is None:
             return None
@@ -2189,9 +2169,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             return
         if self._spec_cycles % _LOG_INTERVAL == 0:
             mean = self._spec_total_accepted / self._spec_cycles
-            hist = ",".join(
-                f"{i}:{c}" for i, c in enumerate(self._spec_accept_hist)
-            )
+            hist = ",".join(f"{i}:{c}" for i, c in enumerate(self._spec_accept_hist))
             logger.warning(
                 f"[MTP] cycles={self._spec_cycles} "
                 f"mean_accept={mean:.3f}/{self.gamma} "
@@ -2217,16 +2195,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # hits EOS, other keeps going). Memory:
         # jaccl_ack_qp_fix_2026_05_07.md — open issue at session end.
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
-            self._mtp_trace_log("_next ENTER", {
-                "uids": list(gen_batch.uids),
-                "num_tokens": list(gen_batch._num_tokens),
-                "buffered_uids": [
-                    u for u, b in self._token_buffer.items() if b
-                ],
-                "prefilled": sorted(self._mtp_prefilled),
-                "unprocessed": len(self._unprocessed_sequences),
-                "prompt_batch": len(self._prompt_batch),
-            })
+            self._mtp_trace_log(
+                "_next ENTER",
+                {
+                    "uids": list(gen_batch.uids),
+                    "num_tokens": list(gen_batch._num_tokens),
+                    "buffered_uids": [u for u, b in self._token_buffer.items() if b],
+                    "prefilled": sorted(self._mtp_prefilled),
+                    "unprocessed": len(self._unprocessed_sequences),
+                    "prompt_batch": len(self._prompt_batch),
+                },
+            )
 
         # Collective gen_batch sync. Empirically (Phase E.1 trace
         # comparison 2026-05-05) MTP draft state diverges across ranks
@@ -2285,16 +2264,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
                 # Counted entries that were non-zero (peer thought uid
                 # was alive at any point). Helps spot rank divergence.
-                nonzero_uids = {
-                    _u: _c for _u, _c in enumerate(counted_lst) if _c > 0
-                }
-                self._mtp_trace_log("upstream_sync", {
-                    "local_uids": list(gen_batch.uids),
-                    "counted_uids": nonzero_uids,
-                    "n_ranks": n_ranks,
-                    "keep_uids": sorted(keep_uids),
-                    "will_filter": len(keep_indices) < len(gen_batch.uids),
-                })
+                nonzero_uids = {_u: _c for _u, _c in enumerate(counted_lst) if _c > 0}
+                self._mtp_trace_log(
+                    "upstream_sync",
+                    {
+                        "local_uids": list(gen_batch.uids),
+                        "counted_uids": nonzero_uids,
+                        "n_ranks": n_ranks,
+                        "keep_uids": sorted(keep_uids),
+                        "will_filter": len(keep_indices) < len(gen_batch.uids),
+                    },
+                )
             if len(keep_indices) < len(gen_batch.uids):
                 drop_uids = [u for u in gen_batch.uids if u not in keep_uids]
                 gen_batch.filter(keep_indices)
@@ -2450,14 +2430,17 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if _max_ctx_allc > _allc_max:
                     spec_eligible = False
         if os.environ.get("EXO_DSV4_MTP_TRANSITION_TRACE") == "1":
-            self._mtp_trace_log("dispatch_decision", {
-                "spec_eligible": spec_eligible,
-                "gamma": self.gamma,
-                "n_uids": len(gen_batch),
-                "n_prompt_batch": len(self._prompt_batch),
-                "n_unprocessed": len(self._unprocessed_sequences),
-                "uids": list(gen_batch.uids),
-            })
+            self._mtp_trace_log(
+                "dispatch_decision",
+                {
+                    "spec_eligible": spec_eligible,
+                    "gamma": self.gamma,
+                    "n_uids": len(gen_batch),
+                    "n_prompt_batch": len(self._prompt_batch),
+                    "n_unprocessed": len(self._unprocessed_sequences),
+                    "uids": list(gen_batch.uids),
+                },
+            )
         if spec_eligible:
             # All uids must be prefilled (have a captured pre_norm).
             uids = list(gen_batch.uids)
@@ -2486,9 +2469,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             self._mtp_prefilled.discard(uid)
         return result
 
-    def _first_step_and_capture_batch(
-        self, uids: "Sequence[int]"
-    ):
+    def _first_step_and_capture_batch(self, uids: "Sequence[int]"):
         """Run a standard decode step at BS=N and stash per-uid pre_norms.
 
         The wrapped final-norm captures ``(B, L, hidden)``; we slice
@@ -2503,9 +2484,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         per-stream — what makes spec at BS>1 actually work without
         the min-strategy regression.
         """
-        prompt_responses, generation_responses = super(
-            MTPBatchGenerator, self
-        )._next()
+        prompt_responses, generation_responses = super(MTPBatchGenerator, self)._next()
         if not generation_responses:
             return prompt_responses, generation_responses
 
@@ -2532,46 +2511,47 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         # all layers share offset/_idx bookkeeping).
                         _layer0: Any = gen_batch.prompt_cache[0]
                         _sub: Any = (
-                            _layer0.caches[0]
-                            if hasattr(_layer0, "caches") else _layer0
+                            _layer0.caches[0] if hasattr(_layer0, "caches") else _layer0
                         )
                         _off_arr = getattr(_sub, "offset", None)
                         try:
                             _off = (
                                 int(_off_arr[_bi].item())
-                                if _off_arr is not None else -1
+                                if _off_arr is not None
+                                else -1
                             )
                         except Exception:
                             _off = -1
                         _maxsz = int(getattr(_sub, "max_size", -1))
-                        _valid = (
-                            min(_off, _maxsz)
-                            if _off >= 0 and _maxsz > 0 else -1
-                        )
+                        _valid = min(_off, _maxsz) if _off >= 0 and _maxsz > 0 else -1
                         _keys = getattr(_sub, "keys", None)
-                        _phys = (
-                            int(_keys.shape[2]) if _keys is not None else 0
+                        _phys = int(_keys.shape[2]) if _keys is not None else 0
+                        _mc_meta.append(
+                            {
+                                "uid": int(_u),
+                                "batch_idx": _bi,
+                                "offset": _off,
+                                "valid_expected": _valid,
+                                "ring_phys": _phys,
+                                "rotated": bool(getattr(_sub, "rotated", False)),
+                                "perstream_idx": int(getattr(_sub, "_idx", -1)),
+                            }
                         )
-                        _mc_meta.append({
-                            "uid": int(_u),
-                            "batch_idx": _bi,
-                            "offset": _off,
-                            "valid_expected": _valid,
-                            "ring_phys": _phys,
-                            "rotated": bool(getattr(_sub, "rotated", False)),
-                            "perstream_idx": int(getattr(_sub, "_idx", -1)),
-                        })
-                    _degen_probe_write({
-                        "event": "main_cache_bs_transition",
-                        "wall_ns": time.perf_counter_ns(),
-                        "uids": _uids_now,
-                        "main_cache": _mc_meta,
-                    })
+                    _degen_probe_write(
+                        {
+                            "event": "main_cache_bs_transition",
+                            "wall_ns": time.perf_counter_ns(),
+                            "uids": _uids_now,
+                            "main_cache": _mc_meta,
+                        }
+                    )
                 except Exception as _mc_err:
-                    _degen_probe_write({
-                        "event": "main_cache_probe_err",
-                        "err": str(_mc_err),
-                    })
+                    _degen_probe_write(
+                        {
+                            "event": "main_cache_probe_err",
+                            "err": str(_mc_err),
+                        }
+                    )
 
         decode_pre_norm = self._captured.get("pre_norm")
         if decode_pre_norm is not None:
@@ -2687,8 +2667,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # cheap (a few list copies + the small ratio-wide buf tensors).
         _pool_caches = self._collect_pooling_caches(gen_batch)
         _pool_snaps = [
-            pc.save_meta() if hasattr(pc, "save_meta") else None
-            for pc in _pool_caches
+            pc.save_meta() if hasattr(pc, "save_meta") else None for pc in _pool_caches
         ]
         if _SPEC_CACHE_ROLLBACK_C2:
             for pc in _pool_caches:
@@ -2706,10 +2685,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # batched path's per-row accepted-draft argmax and the per-uid bonus
         # argmax both derive from raw ``verify_logits`` and can select EOS,
         # firing ``finish=stop`` early. Apply BEFORE any argmax/logsumexp. ─
-        if (
-            self._spec_eos_ids
-            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"
-        ):
+        if self._spec_eos_ids and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1":
             _eos_ban = ban_token_ids(self._spec_eos_ids)
             verify_logits = _eos_ban(mx.array([]), verify_logits)
         # verify_pre_norm: (N, γ+1, hidden), verify_logits: (N, γ+1, vocab)
@@ -2727,9 +2703,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             prof.record("verify", (t_after_verify - t_after_draft) * 1000.0)
 
         # 3. Per-uid acceptance check (min-strategy).
-        target_tokens = mx.argmax(
-            verify_logits[:, :gamma, :], axis=-1
-        )  # (N, γ)
+        target_tokens = mx.argmax(verify_logits[:, :gamma, :], axis=-1)  # (N, γ)
 
         if all_greedy:
             logprobs_all = verify_logits - mx.logsumexp(
@@ -2786,9 +2760,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _all_next_full: list[list[int]] = []
             else:
                 _all_next_row = []
-                _all_next_full = cast(
-                    list[list[int]], all_next.tolist()
-                )  # (N, γ+1)
+                _all_next_full = cast(list[list[int]], all_next.tolist())  # (N, γ+1)
             next_tokens_int = next_tokens_arr.reshape(N).tolist()
             bonus_vals: list[int] = []
             bonus_lps: list[Any] = []
@@ -2928,34 +2900,44 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     if _sg is None or _sg.rank() == 0:
                         for i in range(gamma):
                             _di = int(draft_concat[n, i].item())
-                            _probe_rows.append({
-                                "uid": int(uid),
-                                "n": n,
-                                "i": i,
-                                "draft_tok": _di,
-                                "p_di": float(
-                                    mx.softmax(
-                                        verify_logits[n, i] / _tn,
-                                        axis=-1,
-                                    )[draft_concat[n, i]].item()
-                                ),
-                                "q_di": float(
-                                    draft_probs_list[i][n, draft_concat[n, i]].item()
-                                ),
-                                "accept_ratio": float(accept_ratios[i].item()),
-                                "uniform": float(uniforms[i].item()),
-                                "accepted": i < k,
-                            })
+                            _probe_rows.append(
+                                {
+                                    "uid": int(uid),
+                                    "n": n,
+                                    "i": i,
+                                    "draft_tok": _di,
+                                    "p_di": float(
+                                        mx.softmax(
+                                            verify_logits[n, i] / _tn,
+                                            axis=-1,
+                                        )[draft_concat[n, i]].item()
+                                    ),
+                                    "q_di": float(
+                                        draft_probs_list[i][
+                                            n, draft_concat[n, i]
+                                        ].item()
+                                    ),
+                                    "accept_ratio": float(accept_ratios[i].item()),
+                                    "uniform": float(uniforms[i].item()),
+                                    "accepted": i < k,
+                                }
+                            )
             if _accept_probe and _probe_rows:
                 try:
                     import json as _json
+
                     _ap_path = f"/tmp/dsv4_accept_probe_pid{os.getpid()}.jsonl"
                     with open(_ap_path, "ab") as _apf:
                         _apf.write(
-                            (_json.dumps({
-                                "cycle": int(self._spec_cycles),
-                                "rows": _probe_rows,
-                            }) + "\n").encode("utf-8")
+                            (
+                                _json.dumps(
+                                    {
+                                        "cycle": int(self._spec_cycles),
+                                        "rows": _probe_rows,
+                                    }
+                                )
+                                + "\n"
+                            ).encode("utf-8")
                         )
                 except Exception:
                     pass
@@ -3026,9 +3008,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         # keeps the residual's shape; the filter re-weights/masks.
                         _rl = mx.log(residual + 1e-10)
                         _rl = self._mtp_filter_logits(_rl, uid_n)
-                        bonus_local.append(
-                            int(mx.random.categorical(_rl).item())
-                        )
+                        bonus_local.append(int(mx.random.categorical(_rl).item()))
                 bonus_lps.append(logprobs_all[n, k])
 
             if sync_drafts:
@@ -3069,9 +3049,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     (int(next_tokens_int_t[n]), y_logprobs_list[n])
                 ]
                 for kk in range(k):
-                    row.append(
-                        (int(draft_concat_int[n][kk]), logprobs_all[n, kk])
-                    )
+                    row.append((int(draft_concat_int[n][kk]), logprobs_all[n, kk]))
                 all_tokens_per.append(row)
 
         # Record per-stream MTP acceptance for telemetry. One sample
@@ -3254,8 +3232,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # finished and removed at the next filter, so the padding is
             # never attended by a live stream.
             commit_rows = [
-                [int(tid) for (tid, _lp) in all_tokens_per[n]]
-                for n in range(N)
+                [int(tid) for (tid, _lp) in all_tokens_per[n]] for n in range(N)
             ]
             _commit_w = max(len(r) for r in commit_rows)
             commit_rows = [
@@ -3263,9 +3240,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 for r in commit_rows
             ]
             commit_input = mx.array(commit_rows, dtype=mx.int32)  # (N, n_min+1)
-            _commit_logits = self.model(
-                commit_input, cache=gen_batch.prompt_cache
-            )
+            _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
             mx.eval(_commit_logits)
             del _commit_logits
 
@@ -3345,19 +3320,24 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _rc_t2 = cast(list[list[float]], _rc_top2.tolist())
                     _v_t2 = cast(list[list[float]], _v_top2.tolist())
                     with open(_refcheck_batch_path, "a") as _rcf:
-                        _rcf.write(json.dumps({
-                            "cycle": _rc_cyc,
-                            "uids": list(uids),
-                            "n_accepted": list(n_accepted_per),
-                            "verify_argmax": _v_arg_l,
-                            "ref_argmax": _rc_arg_l,
-                            "agree": _rc_arg_l == _v_arg_l,
-                            # mx.topk value order is not guaranteed
-                            "v_margin": [abs(r[0] - r[1]) for r in _v_t2],
-                            "r_margin": [abs(r[0] - r[1]) for r in _rc_t2],
-                            "bonus_vals": [int(b) for b in bonus_vals],
-                            "pool_flushed": bool(pool_flushed),
-                        }) + "\n")
+                        _rcf.write(
+                            json.dumps(
+                                {
+                                    "cycle": _rc_cyc,
+                                    "uids": list(uids),
+                                    "n_accepted": list(n_accepted_per),
+                                    "verify_argmax": _v_arg_l,
+                                    "ref_argmax": _rc_arg_l,
+                                    "agree": _rc_arg_l == _v_arg_l,
+                                    # mx.topk value order is not guaranteed
+                                    "v_margin": [abs(r[0] - r[1]) for r in _v_t2],
+                                    "r_margin": [abs(r[0] - r[1]) for r in _rc_t2],
+                                    "bonus_vals": [int(b) for b in bonus_vals],
+                                    "pool_flushed": bool(pool_flushed),
+                                }
+                            )
+                            + "\n"
+                        )
             except Exception as _rc_err:  # diagnostics must never kill decode
                 if not getattr(self, "_refcheck_batch_err_logged", False):
                     self._refcheck_batch_err_logged = True
@@ -3399,11 +3379,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # Post-rollback so cache offsets reflect committed state. target_tokens
         # exists only on the temp=0 path; pass a zero placeholder at temp>0.
         if self._spec_trace_enabled:
-            _tt = (
-                target_tokens
-                if all_greedy
-                else mx.zeros_like(draft_concat)
-            )
+            _tt = target_tokens if all_greedy else mx.zeros_like(draft_concat)
             self._spec_trace_cycle_dump(
                 uids,
                 gen_batch,
@@ -3427,12 +3403,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # perf campaign. Comment only; no mx.eval added here.
         if prof is not None:
             t_after_rollback = time.perf_counter()
-            prof.record(
-                "rollback", (t_after_rollback - t_after_accept) * 1000.0
-            )
-            prof.record(
-                "total", (t_after_rollback - t_cycle_start) * 1000.0
-            )
+            prof.record("rollback", (t_after_rollback - t_after_accept) * 1000.0)
+            prof.record("total", (t_after_rollback - t_cycle_start) * 1000.0)
             prof.end_cycle(N)
 
         # 7. Bookkeeping.
@@ -3571,9 +3543,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # built from the previous step's logits. Soft-emb shape here is
         # (N, 1, hidden) since logits is (N, vocab) squeezed.
         _eagle_k = int(getattr(self.mtp, "eagle_k", 0) or 0)
-        _eagle_embed = (
-            getattr(self.mtp, "embed_tokens", None) if _eagle_k > 0 else None
-        )
+        _eagle_embed = getattr(self.mtp, "embed_tokens", None) if _eagle_k > 0 else None
         _eagle_active = _eagle_k > 0 and _eagle_embed is not None
         prev_logits: Optional[mx.array] = None
 
@@ -3633,23 +3603,15 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     )
                     _probs = mx.softmax(_logits3d, axis=-1)
                     _topk_ids = mx.argsort(-_logits3d, axis=-1)[..., :_eagle_k]
-                    _topk_probs = mx.take_along_axis(
-                        _probs, _topk_ids, axis=-1
-                    )
-                    _topk_probs = _topk_probs / _topk_probs.sum(
-                        axis=-1, keepdims=True
-                    )
+                    _topk_probs = mx.take_along_axis(_probs, _topk_ids, axis=-1)
+                    _topk_probs = _topk_probs / _topk_probs.sum(axis=-1, keepdims=True)
                     if sync_drafts:
                         _topk_ids = broadcast_from_canonical(
                             _topk_ids.astype(mx.int32), coord_group
                         )
-                        _topk_probs = broadcast_from_canonical(
-                            _topk_probs, coord_group
-                        )
+                        _topk_probs = broadcast_from_canonical(_topk_probs, coord_group)
                     _topk_embs = _eagle_embed(_topk_ids)
-                    soft_emb = (_topk_embs * _topk_probs[..., None]).sum(
-                        axis=-2
-                    )
+                    soft_emb = (_topk_embs * _topk_probs[..., None]).sum(axis=-2)
                 self.mtp.set_eagle_soft_emb(soft_emb)
             # C2 trace: post-eagle-install boundary. We mx.eval the
             # soft_emb (if installed) so the time spent in the assembly +
@@ -3662,10 +3624,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _c2_t_after_eagle_install_ns = time.perf_counter_ns()
             try:
                 logits, h = self.mtp.predict(
-                    h, tok_arr, return_hidden=True,
-                    draft_mode=(
-                        getattr(self.mtp, "draft_lm_head", None) is not None
-                    ),
+                    h,
+                    tok_arr,
+                    return_hidden=True,
+                    draft_mode=(getattr(self.mtp, "draft_lm_head", None) is not None),
                 )
             finally:
                 if _eagle_installed:
@@ -3712,9 +3674,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # normally — within the same batched draw. q is returned per
                 # stream and reused in the accept ratio (same temp → valid).
                 q = mx.softmax(logits / tvec, axis=-1)  # (N, vocab)
-                tok_pre_sync = mx.random.categorical(
-                    logits / tvec
-                ).reshape(-1, 1)  # (N, 1)
+                tok_pre_sync = mx.random.categorical(logits / tvec).reshape(
+                    -1, 1
+                )  # (N, 1)
                 if sync_drafts:
                     tok_arr = broadcast_from_canonical(
                         tok_pre_sync.astype(mx.int32), coord_group
@@ -3772,64 +3734,56 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 # is shape (N, 1) int32 post-broadcast. tok_pre_sync is
                 # the rank-local arg before broadcast.
                 try:
-                    _c2_tok_post = [
-                        int(x) for x in tok_arr.reshape(-1).tolist()
-                    ]
+                    _c2_tok_post = [int(x) for x in tok_arr.reshape(-1).tolist()]
                 except Exception:
                     _c2_tok_post = []
                 try:
-                    _c2_tok_pre = [
-                        int(x) for x in tok_pre_sync.reshape(-1).tolist()
-                    ]
+                    _c2_tok_pre = [int(x) for x in tok_pre_sync.reshape(-1).tolist()]
                 except Exception:
                     _c2_tok_pre = []
                 _c2_active_mb_end, _c2_peak_mb_end = _c2_trace_metal_mb()
-                step_wall_ms = (
-                    _c2_t_step_end_ns - _c2_t_step_start_ns
-                ) / 1e6
+                step_wall_ms = (_c2_t_step_end_ns - _c2_t_step_start_ns) / 1e6
                 _c2_step_walls_ms.append(step_wall_ms)
-                _c2_per_step_records.append({
-                    "type": "step",
-                    "cycle": _c2_cycle_n,
-                    "step": int(i),
-                    "B": _c2_b_size,
-                    "gamma": int(gamma),
-                    "pid": os.getpid(),
-                    "ts_step_start_ns": _c2_t_step_start_ns,
-                    "ts_after_eagle_install_ns": (
-                        _c2_t_after_eagle_install_ns
-                    ),
-                    "ts_after_predict_ns": _c2_t_after_predict_ns,
-                    "ts_step_end_ns": _c2_t_step_end_ns,
-                    "wall_step_ms": step_wall_ms,
-                    "wall_eagle_install_ms": (
-                        _c2_t_after_eagle_install_ns - _c2_t_step_start_ns
-                    ) / 1e6,
-                    "wall_predict_ms": (
-                        _c2_t_after_predict_ns
-                        - _c2_t_after_eagle_install_ns
-                    ) / 1e6,
-                    "wall_argmax_broadcast_ms": (
-                        _c2_t_step_end_ns - _c2_t_after_predict_ns
-                    ) / 1e6,
-                    "eagle_installed": bool(_eagle_installed),
-                    "temp_zero": bool(all_greedy),
-                    "tok_post_broadcast_per_stream": _c2_tok_post,
-                    "tok_pre_broadcast_per_stream": _c2_tok_pre,
-                    "metal_active_mb_start": (
-                        _c2_metal_active_at_start
-                    ),
-                    "metal_peak_mb_start": _c2_metal_peak_at_start,
-                    "metal_active_mb_end": _c2_active_mb_end,
-                    "metal_peak_mb_end": _c2_peak_mb_end,
-                })
+                _c2_per_step_records.append(
+                    {
+                        "type": "step",
+                        "cycle": _c2_cycle_n,
+                        "step": int(i),
+                        "B": _c2_b_size,
+                        "gamma": int(gamma),
+                        "pid": os.getpid(),
+                        "ts_step_start_ns": _c2_t_step_start_ns,
+                        "ts_after_eagle_install_ns": (_c2_t_after_eagle_install_ns),
+                        "ts_after_predict_ns": _c2_t_after_predict_ns,
+                        "ts_step_end_ns": _c2_t_step_end_ns,
+                        "wall_step_ms": step_wall_ms,
+                        "wall_eagle_install_ms": (
+                            _c2_t_after_eagle_install_ns - _c2_t_step_start_ns
+                        )
+                        / 1e6,
+                        "wall_predict_ms": (
+                            _c2_t_after_predict_ns - _c2_t_after_eagle_install_ns
+                        )
+                        / 1e6,
+                        "wall_argmax_broadcast_ms": (
+                            _c2_t_step_end_ns - _c2_t_after_predict_ns
+                        )
+                        / 1e6,
+                        "eagle_installed": bool(_eagle_installed),
+                        "temp_zero": bool(all_greedy),
+                        "tok_post_broadcast_per_stream": _c2_tok_post,
+                        "tok_pre_broadcast_per_stream": _c2_tok_pre,
+                        "metal_active_mb_start": (_c2_metal_active_at_start),
+                        "metal_peak_mb_start": _c2_metal_peak_at_start,
+                        "metal_active_mb_end": _c2_active_mb_end,
+                        "metal_peak_mb_end": _c2_peak_mb_end,
+                    }
+                )
 
         # C2 trace: per-cycle summary + flush per-step records.
         if _c2_trace:
             _c2_cycle_end_ns = time.perf_counter_ns()
-            _c2_cycle_wall_ms = (
-                _c2_cycle_end_ns - _c2_cycle_start_ns
-            ) / 1e6
+            _c2_cycle_wall_ms = (_c2_cycle_end_ns - _c2_cycle_start_ns) / 1e6
             # Bistability heuristic: any step > 2× the median step wall.
             # At γ=3 a normal cycle should have all 3 steps within ~30%
             # of each other; a step taking 2×+ the others is the iter-N+1
@@ -3838,29 +3792,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _c2_walls_sorted = sorted(_c2_step_walls_ms)
                 _c2_median_ms = _c2_walls_sorted[len(_c2_walls_sorted) // 2]
                 _c2_max_ms = _c2_walls_sorted[-1]
-                _c2_bistability = (
-                    _c2_max_ms > 2.0 * max(_c2_median_ms, 1e-3)
-                )
+                _c2_bistability = _c2_max_ms > 2.0 * max(_c2_median_ms, 1e-3)
             else:
                 _c2_median_ms = 0.0
                 _c2_max_ms = 0.0
                 _c2_bistability = False
             for rec in _c2_per_step_records:
                 _c2_trace_write(rec)
-            _c2_trace_write({
-                "type": "cycle",
-                "cycle": _c2_cycle_n,
-                "pid": os.getpid(),
-                "B": _c2_b_size,
-                "gamma": int(gamma),
-                "ts_cycle_start_ns": _c2_cycle_start_ns,
-                "ts_cycle_end_ns": _c2_cycle_end_ns,
-                "cycle_wall_ms": _c2_cycle_wall_ms,
-                "per_step_wall_ms": list(_c2_step_walls_ms),
-                "median_step_wall_ms": _c2_median_ms,
-                "max_step_wall_ms": _c2_max_ms,
-                "bistability_flag": bool(_c2_bistability),
-            })
+            _c2_trace_write(
+                {
+                    "type": "cycle",
+                    "cycle": _c2_cycle_n,
+                    "pid": os.getpid(),
+                    "B": _c2_b_size,
+                    "gamma": int(gamma),
+                    "ts_cycle_start_ns": _c2_cycle_start_ns,
+                    "ts_cycle_end_ns": _c2_cycle_end_ns,
+                    "cycle_wall_ms": _c2_cycle_wall_ms,
+                    "per_step_wall_ms": list(_c2_step_walls_ms),
+                    "median_step_wall_ms": _c2_median_ms,
+                    "max_step_wall_ms": _c2_max_ms,
+                    "bistability_flag": bool(_c2_bistability),
+                }
+            )
 
         return draft_ids, draft_probs
 
@@ -3986,9 +3940,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             else:
                 t = mx.argmax(step_logits, axis=-1)
             if sync_drafts:
-                t = broadcast_from_canonical(
-                    t.astype(mx.int32), coord_group
-                )
+                t = broadcast_from_canonical(t.astype(mx.int32), coord_group)
             return t
 
         if _dspark is not None:
@@ -4019,13 +3971,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # ever disagree (e.g. tie-reverify changed the committed
             # bonus after the epilogue cached the draft), drop the cache
             # and recompute inline — correctness over speed.
-            _cached = self._dspark_next_draft.pop(uid, None) if _DRAFT_EPILOGUE else None
+            _cached = (
+                self._dspark_next_draft.pop(uid, None) if _DRAFT_EPILOGUE else None
+            )
             _consumed_epilogue = False
-            if (
-                _cached is not None
-                and _cached[4] == gamma
-                and _cached[5] == y_val
-            ):
+            if _cached is not None and _cached[4] == gamma and _cached[5] == y_val:
                 # Unpack the cached draft tensors; the confidence prune
                 # below + the draft_ids/draft_probs construction after it
                 # consume these exactly as the inline path would.
@@ -4074,9 +4024,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # cycle's prune a no-op (too few positions) and silently
             # cap acceptance.
             _gamma_pre_prune = gamma
-            _conf_tau = float(
-                os.environ.get("EXO_DSV4_DSPARK_CONF_TAU", "0.5")
-            )
+            _conf_tau = float(os.environ.get("EXO_DSV4_DSPARK_CONF_TAU", "0.5"))
             if _conf_tau > 0.0:
                 _conf_vals = _dspark_conf[0].tolist()
                 _kept = 0
@@ -4107,7 +4055,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 _sh_block_size = int(_dspark.block_size)
         else:
             draft_ids, draft_probs = draft_tokens(
-                self.mtp, pre_norm, next_token_arr, gamma, temp,
+                self.mtp,
+                pre_norm,
+                next_token_arr,
+                gamma,
+                temp,
                 fast_lm_head=getattr(self.mtp, "draft_lm_head", None) is not None,
                 sync_group=coord_group,
             )
@@ -4181,9 +4133,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             ]
         if _rbp and prof is not None:
             mx.synchronize()
-            prof.record(
-                "rb_snap", (time.perf_counter() - _t_rb_snap0) * 1000.0
-            )
+            prof.record("rb_snap", (time.perf_counter() - _t_rb_snap0) * 1000.0)
 
         # SHADOW: open the verify bracket immediately before the forward so
         # the snapshot/arm bookkeeping above is NOT charged to D. This is
@@ -4237,10 +4187,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # (Stage 2b) was 7/7 clean and byte-identical to baseline on the short
         # prompts; the ban ON config (Stage 2c) degenerated 2/7. Keep the
         # ban OFF by default; the env override remains for experiments.
-        if (
-            self._spec_eos_ids
-            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"
-        ):
+        if self._spec_eos_ids and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1":
             _eos_ban = ban_token_ids(self._spec_eos_ids)
             verify_logits = _eos_ban(mx.array([]), verify_logits)
 
@@ -4305,9 +4252,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # to 100% (matches MTP-off) on the aistupid suite with no leaks /
             # no repetition. Set EXO_DSV4_MTP_TIEBREAK_FIX=0 to opt out.
             if os.environ.get("EXO_DSV4_MTP_TIEBREAK_FIX", "1") != "0":
-                _tb_eps = float(
-                    os.environ.get("EXO_DSV4_MTP_TIEBREAK_EPS", "0.5")
-                )
+                _tb_eps = float(os.environ.get("EXO_DSV4_MTP_TIEBREAK_EPS", "0.5"))
                 _vl0 = verify_logits[0]  # (gamma+1, vocab)
                 _maxlogit = mx.max(_vl0, axis=-1, keepdims=True)
                 # Mask: tokens within eps of the per-position max are "tied".
@@ -4336,9 +4281,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     # target_tokens shape: (1, gamma) -- argmax of verify
                     # logits at the gamma draft positions. We materialise
                     # it (and the top-5 arrays) once, then iterate.
-                    tgt_list = cast(
-                        list[int], target_tokens.reshape(-1).tolist()
-                    )
+                    tgt_list = cast(list[int], target_tokens.reshape(-1).tolist())
                     for rec in steps:
                         step_i = rec["step"]
                         if step_i >= len(tgt_list):
@@ -4349,19 +4292,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         # version corrupted the MTP forward — do NOT revive.
                         top5_list = cast(list[int], rec["top5_ids"])
                         target_tok = tgt_list[step_i]
-                        _tree_alpha_probe_write({
-                            "uid": int(uid),
-                            "cycle": int(self._spec_cycles),
-                            "step": int(step_i),
-                            "gamma": int(gamma),
-                            "mtp_top5": top5_list,
-                            "target": int(target_tok),
-                            "match_top1": bool(target_tok == top5_list[0]),
-                            "match_top2": bool(target_tok in top5_list[:2]),
-                            "match_top3": bool(target_tok in top5_list[:3]),
-                            "match_top4": bool(target_tok in top5_list[:4]),
-                            "match_top5": bool(target_tok in top5_list[:5]),
-                        })
+                        _tree_alpha_probe_write(
+                            {
+                                "uid": int(uid),
+                                "cycle": int(self._spec_cycles),
+                                "step": int(step_i),
+                                "gamma": int(gamma),
+                                "mtp_top5": top5_list,
+                                "target": int(target_tok),
+                                "match_top1": bool(target_tok == top5_list[0]),
+                                "match_top2": bool(target_tok in top5_list[:2]),
+                                "match_top3": bool(target_tok in top5_list[:3]),
+                                "match_top4": bool(target_tok in top5_list[:4]),
+                                "match_top5": bool(target_tok in top5_list[:5]),
+                            }
+                        )
                 # Drain unconditionally so a subsequent cycle starts fresh,
                 # even on non-rank-0 ranks (no-op there since draft_tokens
                 # appends on all ranks but only rank 0 writes).
@@ -4382,25 +4327,33 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                 if self._spec_trace_enabled:
                     _sg2 = self._get_sharding_group()
                     if _sg2 is None or _sg2.rank() == 0:
-                        _su_probe_rows.append({
-                            "uid": int(uid),
-                            "i": i,
-                            "draft_tok": int(draft_ids[i].squeeze().item()),
-                            "p_di": float(p_di.item()),
-                            "q_di": float(q_di.item()),
-                            "accept_ratio": float(accept_ratios[i].item()),
-                        })
+                        _su_probe_rows.append(
+                            {
+                                "uid": int(uid),
+                                "i": i,
+                                "draft_tok": int(draft_ids[i].squeeze().item()),
+                                "p_di": float(p_di.item()),
+                                "q_di": float(q_di.item()),
+                                "accept_ratio": float(accept_ratios[i].item()),
+                            }
+                        )
             if self._spec_trace_enabled and _su_probe_rows:
                 try:
                     import json as _json
+
                     with open(
                         f"/tmp/dsv4_accept_probe_b1_pid{os.getpid()}.jsonl", "ab"
                     ) as _apf:
                         _apf.write(
-                            (_json.dumps({
-                                "cycle": int(self._spec_cycles),
-                                "rows": _su_probe_rows,
-                            }) + "\n").encode("utf-8")
+                            (
+                                _json.dumps(
+                                    {
+                                        "cycle": int(self._spec_cycles),
+                                        "rows": _su_probe_rows,
+                                    }
+                                )
+                                + "\n"
+                            ).encode("utf-8")
                         )
                 except Exception:
                     pass
@@ -4528,9 +4481,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             _sh_ctx = 0
             try:
                 _sh_c0 = gen_batch.prompt_cache[0]
-                _sh_sub = (
-                    _sh_c0.caches[0] if hasattr(_sh_c0, "caches") else _sh_c0
-                )
+                _sh_sub = _sh_c0.caches[0] if hasattr(_sh_c0, "caches") else _sh_c0
                 _sh_ctx = int(getattr(_sh_sub, "offset", 0))
             except Exception:
                 _sh_ctx = 0
@@ -4571,18 +4522,23 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             if _SPEC_SHADOW_LOG and _sh_rank0:
                 try:
                     with open(_SPEC_SHADOW_LOG, "a") as _sh_f:
-                        _sh_f.write(json.dumps({
-                            "cycle": int(_sh_stats.cycles),
-                            "uid": int(uid),
-                            "ctx": _sh_ctx,
-                            "block_size": _sh_block_size,
-                            "gamma": int(gamma),
-                            "would_accept": int(_sh_would_accept),
-                            "match_flags": _sh_match_flags,
-                            "draft": _draft_ids_flat,
-                            "draft_ms": _sh_draft_ms,
-                            "verify_ms": _sh_verify_ms,
-                        }) + "\n")
+                        _sh_f.write(
+                            json.dumps(
+                                {
+                                    "cycle": int(_sh_stats.cycles),
+                                    "uid": int(uid),
+                                    "ctx": _sh_ctx,
+                                    "block_size": _sh_block_size,
+                                    "gamma": int(gamma),
+                                    "would_accept": int(_sh_would_accept),
+                                    "match_flags": _sh_match_flags,
+                                    "draft": _draft_ids_flat,
+                                    "draft_ms": _sh_draft_ms,
+                                    "verify_ms": _sh_verify_ms,
+                                }
+                            )
+                            + "\n"
+                        )
                 except Exception as _sh_err:  # never break generation
                     logger.warning(f"dspark-shadow log failed: {_sh_err}")
             # THE SUPPRESSION.
@@ -4607,18 +4563,12 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # into the existing canonical broadcast (no extra round-trip); the
         # extra 1-token forward runs only on tie cycles.
         _tie_reverify = 0
-        if temp == 0 and os.environ.get(
-            "EXO_DSV4_MTP_TIE_REVERIFY", "0"
-        ) == "1":
-            _trv_eps = float(
-                os.environ.get("EXO_DSV4_MTP_TIE_REVERIFY_EPS", "1.0")
-            )
+        if temp == 0 and os.environ.get("EXO_DSV4_MTP_TIE_REVERIFY", "0") == "1":
+            _trv_eps = float(os.environ.get("EXO_DSV4_MTP_TIE_REVERIFY_EPS", "1.0"))
             _trv_rows = verify_logits[0, : n_accepted + 1]
             _trv_top2 = mx.topk(_trv_rows, 2, axis=-1)
             _trv_gaps = mx.abs(_trv_top2[..., -1] - _trv_top2[..., -2])
-            for _trv_i, _trv_g in enumerate(
-                cast(list[float], _trv_gaps.tolist())
-            ):
+            for _trv_i, _trv_g in enumerate(cast(list[float], _trv_gaps.tolist())):
                 if _trv_g < _trv_eps:
                     _tie_reverify = 1
                     if _trv_i < n_accepted:
@@ -4664,9 +4614,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # divergent branch around the re-verify forward would deadlock
             # the TP collective. Same 1-broadcast budget as before.
             combined_arr = broadcast_from_canonical(
-                mx.array(
-                    [n_accepted, bonus_val, _tie_reverify], dtype=mx.int32
-                ),
+                mx.array([n_accepted, bonus_val, _tie_reverify], dtype=mx.int32),
                 coord_group,
             )
             combined = cast(list[int], combined_arr.tolist())
@@ -4687,9 +4635,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
             _ctx_cat = get_dspark_ctx(_dspark.target_layer_ids)
             if _ctx_cat is not None:
-                _dspark.append_ctx(
-                    _ctx_cat[:, : n_accepted + 1], self._dspark_caches
-                )
+                _dspark.append_ctx(_ctx_cat[:, : n_accepted + 1], self._dspark_caches)
 
             # EXO_DSV4_DRAFT_EPILOGUE: pre-compute the NEXT cycle's draft
             # here in the current cycle's epilogue, so the next cycle's
@@ -4763,7 +4709,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             _is_rank0 = sync_group is None or sync_group.rank() == 0
             if _is_rank0:
                 try:
-                    _special = {128822, 128821}  #  , 
+                    _special = {128822, 128821}  #  ,
                     _draft_list = [int(v) for v in draft_concat[0].tolist()]
                     _tgt_list = [int(v) for v in target_tokens[0].tolist()]
                     _all_next_list = [int(v) for v in all_next.tolist()]
@@ -4786,7 +4732,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         if isinstance(_bv, list):
                             _bv = _bv[0] if _bv else -1
                             continue
-                        if hasattr(_bv, "item") and callable(getattr(_bv, "item", None)):
+                        if hasattr(_bv, "item") and callable(
+                            getattr(_bv, "item", None)
+                        ):
                             _bv = cast("Any", _bv).item()
                             continue
                         break
@@ -4805,24 +4753,29 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         _top2v = [float(x) for x in _top2.tolist()]
                         _argmax_bonus = int(mx.argmax(_vl).item())
                         _margin = (
-                            abs(_top2v[-1] - _top2v[-2])
-                            if len(_top2v) >= 2 else None
+                            abs(_top2v[-1] - _top2v[-2]) if len(_top2v) >= 2 else None
                         )
                         # Top-3 at the bonus position — reveals whether the
                         # model's true argmax was EOS (token 1) that the ban
                         # suppressed, with 128822 as the forced next-best.
                         _top3 = mx.topk(_vl, 3)
                         _top3_ids: list[int] = cast("list[int]", _top3.tolist())
-                        _top3_logits: list[float] = [float(_vl[i].item()) for i in _top3_ids]
+                        _top3_logits: list[float] = [
+                            float(_vl[i].item()) for i in _top3_ids
+                        ]
                         _pools = []
                         for _pc, _snap in zip(_pool_caches, _pool_snaps, strict=True):
-                            _pools.append({
-                                "off": int(getattr(_pc, "_pool_offset", -1)),
-                                "rem": int(getattr(_pc, "remainder", -1)),
-                                "pend": int(getattr(_pc, "_pending_offset_bump", 0)),
-                                "ratio": int(getattr(_pc, "ratio", -1)),
-                                "snap": _snap is not None,
-                            })
+                            _pools.append(
+                                {
+                                    "off": int(getattr(_pc, "_pool_offset", -1)),
+                                    "rem": int(getattr(_pc, "remainder", -1)),
+                                    "pend": int(
+                                        getattr(_pc, "_pending_offset_bump", 0)
+                                    ),
+                                    "ratio": int(getattr(_pc, "ratio", -1)),
+                                    "snap": _snap is not None,
+                                }
+                            )
                         _rec = {
                             "cycle": int(self._spec_cycles),
                             "uid": int(uid),
@@ -4907,7 +4860,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     _p_bonus = float(mx.exp(mx.array(_bonus_logit - _vl_lse)).item())
                     _argmax_bonus = int(mx.argmax(_vl).item())
                     _p_argmax = float(
-                        mx.exp(mx.array(float(_vl[_argmax_bonus].item()) - _vl_lse)).item()
+                        mx.exp(
+                            mx.array(float(_vl[_argmax_bonus].item()) - _vl_lse)
+                        ).item()
                     )
                     # MECHANISM CONFIRMATION: on a rejection the correction is
                     # sampled from residual = max(p - q, 0) via categorical(
@@ -5014,9 +4969,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             _rbt1 = _rbt2 = _rbt3 = _rbt4 = _rbt0
             _cache_level = (
                 _SPEC_CACHE_ROLLBACK
-                and all(
-                    rc.spec_pushed_rows() == _verify_len for rc in _ring_caches
-                )
+                and all(rc.spec_pushed_rows() == _verify_len for rc in _ring_caches)
                 and all(
                     pc.spec_can_rollback(psnap, _keep, _verify_len)
                     for pc, psnap in zip(_pool_caches, _pool_snaps, strict=True)
@@ -5060,9 +5013,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                             if not all(ft == fc for ft, fc in _rb_per):
                                 _rb_pool_restores += 1
                         elif hasattr(pc, "_spec_flush_counts"):
-                            _, _rb_ft, _rb_fc = pc._spec_flush_counts(
-                                psnap[2], _keep
-                            )
+                            _, _rb_ft, _rb_fc = pc._spec_flush_counts(psnap[2], _keep)
                             if _rb_fc != _rb_ft:
                                 _rb_pool_restores += 1
                     pc.spec_rollback(psnap, _keep)
@@ -5070,7 +5021,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     mx.synchronize()
                     _rbt4 = time.perf_counter()
                     prof.record("rb_pool", (_rbt4 - _rbt3) * 1000.0)
-                    prof.record("rb_pool_restores", float(_rb_pool_restores), unit="count")
+                    prof.record(
+                        "rb_pool_restores", float(_rb_pool_restores), unit="count"
+                    )
             else:
                 for rc, rsnap in zip(_ring_caches, _ring_snaps, strict=True):
                     rc.restore_spec_state(rsnap)
@@ -5078,12 +5031,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     if psnap is not None:
                         pc.restore_meta(psnap)
                 commit_tokens = [y_val] + draft_int_values[:n_accepted]
-                commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(
-                    1, -1
-                )
-                _commit_logits = self.model(
-                    commit_input, cache=gen_batch.prompt_cache
-                )
+                commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
+                _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
                 mx.eval(_commit_logits)
                 del _commit_logits
                 if _rbp and prof is not None:
@@ -5101,9 +5050,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             self.mtp._set_fence_async(True)
             if _rbp and prof is not None and _cache_level:
                 mx.synchronize()
-                prof.record(
-                    "rb_tail", (time.perf_counter() - _rbt4) * 1000.0
-                )
+                prof.record("rb_tail", (time.perf_counter() - _rbt4) * 1000.0)
         elif rollback > 0:
             # Detect whether any pool flushed a NEW entry during verify.
             # Use the TOTAL (visible offset + staged pending bump): the
@@ -5154,12 +5101,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         if snap is not None:
                             pc.restore_meta(snap)
                 commit_tokens = [y_val] + draft_int_values[:n_accepted]
-                commit_input = mx.array(
-                    commit_tokens, dtype=mx.int32
-                ).reshape(1, -1)
-                _commit_logits = self.model(
-                    commit_input, cache=gen_batch.prompt_cache
-                )
+                commit_input = mx.array(commit_tokens, dtype=mx.int32).reshape(1, -1)
+                _commit_logits = self.model(commit_input, cache=gen_batch.prompt_cache)
                 mx.eval(_commit_logits)
                 del _commit_logits
 
@@ -5231,13 +5174,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     mx.array([_trv_pick], dtype=mx.int32), coord_group
                 )
                 _trv_pick = int(cast(list[int], _trv_arr.tolist())[0])
-            self._tie_reverify_cycles = (
-                getattr(self, "_tie_reverify_cycles", 0) + 1
-            )
+            self._tie_reverify_cycles = getattr(self, "_tie_reverify_cycles", 0) + 1
             if _trv_pick != bonus_val:
-                self._tie_reverify_flips = (
-                    getattr(self, "_tie_reverify_flips", 0) + 1
-                )
+                self._tie_reverify_flips = getattr(self, "_tie_reverify_flips", 0) + 1
             # Flip instrument: stdlib logger INFO is swallowed in the runner
             # (no handler; only loguru sinks reach exo.log — the reason the
             # refcheck writes JSONL). Same idiom here, opt-in via env path.
@@ -5245,16 +5184,21 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             if _trv_log and (sync_group is None or sync_group.rank() == 0):
                 try:
                     with open(_trv_log, "a") as _trv_f:
-                        _trv_f.write(json.dumps({
-                            "cycle": int(self._spec_cycles),
-                            "uid": int(uid),
-                            "n_accepted": int(n_accepted),
-                            "verify_pick": int(bonus_val),
-                            "clean_pick": int(_trv_pick),
-                            "flipped": bool(_trv_pick != bonus_val),
-                            "reverified": self._tie_reverify_cycles,
-                            "flips": getattr(self, "_tie_reverify_flips", 0),
-                        }) + "\n")
+                        _trv_f.write(
+                            json.dumps(
+                                {
+                                    "cycle": int(self._spec_cycles),
+                                    "uid": int(uid),
+                                    "n_accepted": int(n_accepted),
+                                    "verify_pick": int(bonus_val),
+                                    "clean_pick": int(_trv_pick),
+                                    "flipped": bool(_trv_pick != bonus_val),
+                                    "reverified": self._tie_reverify_cycles,
+                                    "flips": getattr(self, "_tie_reverify_flips", 0),
+                                }
+                            )
+                            + "\n"
+                        )
                 except Exception as _trv_err:
                     logger.warning(f"tie-reverify log failed: {_trv_err}")
             bonus_val = _trv_pick
@@ -5331,12 +5275,19 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                     self._refcheck_live_logged = True
                     if sync_group is None or sync_group.rank() == 0:
                         with open(_refcheck_path, "a") as _f:
-                            _f.write(json.dumps({
-                                "marker": "INSTRUMENT_ACTIVE",
-                                "cycle": int(self._spec_cycles),
-                                "all_mode": os.environ.get(
-                                    "EXO_DSV4_MTP_REFCHECK_ALL") == "1",
-                            }) + "\n")
+                            _f.write(
+                                json.dumps(
+                                    {
+                                        "marker": "INSTRUMENT_ACTIVE",
+                                        "cycle": int(self._spec_cycles),
+                                        "all_mode": os.environ.get(
+                                            "EXO_DSV4_MTP_REFCHECK_ALL"
+                                        )
+                                        == "1",
+                                    }
+                                )
+                                + "\n"
+                            )
                 _special = {128822, 128821}  # </think>, <think>
                 _committed = [y_val] + draft_int_values[:n_accepted]
                 # EVERY-CYCLE mode: a losslessness break is, by definition,
@@ -5367,12 +5318,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                             _c.offset -= 1
                     # Clean single-token reference forward — ALL ranks. This
                     # re-adds the last committed token, restoring the cache.
-                    _ref_in = mx.array(
-                        [_last_committed], dtype=mx.int32
-                    ).reshape(1, 1)
-                    _ref_out = self.model(
-                        _ref_in, cache=gen_batch.prompt_cache
-                    )
+                    _ref_in = mx.array([_last_committed], dtype=mx.int32).reshape(1, 1)
+                    _ref_out = self.model(_ref_in, cache=gen_batch.prompt_cache)
                     _ref_row = _ref_out[0, 0]
                     mx.eval(_ref_row, _verify_row)
                     # Rank-0-only logging; the forward above already ran on
@@ -5400,12 +5347,10 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
                         # sparse heartbeat every 500 cycles so we can confirm
                         # the instrument is live. In special-token mode log
                         # every triggered cycle as before.
-                        _heartbeat = (
-                            _refcheck_all and (int(self._spec_cycles) % 500 == 0)
+                        _heartbeat = _refcheck_all and (
+                            int(self._spec_cycles) % 500 == 0
                         )
-                        _should_log = (
-                            (not _refcheck_all) or (not _agree) or _heartbeat
-                        )
+                        _should_log = (not _refcheck_all) or (not _agree) or _heartbeat
                         if _should_log:
                             _rec = {
                                 "cycle": int(self._spec_cycles),
@@ -5455,11 +5400,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # all_tokens into the (N=1) list shapes the dumper expects, and
         # build target_tokens as (1, gamma) for parity with the batch path.
         if self._spec_trace_enabled:
-            _tt = (
-                target_tokens
-                if temp == 0
-                else mx.zeros_like(draft_concat)
-            )
+            _tt = target_tokens if temp == 0 else mx.zeros_like(draft_concat)
             self._spec_trace_cycle_dump(
                 [uid],
                 gen_batch,
@@ -5483,12 +5424,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # perf campaign. Comment only; no mx.eval added here.
         if prof is not None:
             t_after_rollback = time.perf_counter()
-            prof.record(
-                "rollback", (t_after_rollback - t_after_accept) * 1000.0
-            )
-            prof.record(
-                "total", (t_after_rollback - t_cycle_start) * 1000.0
-            )
+            prof.record("rollback", (t_after_rollback - t_after_accept) * 1000.0)
+            prof.record("total", (t_after_rollback - t_cycle_start) * 1000.0)
             prof.end_cycle(1)
 
         # 10. Bookkeeping.
@@ -5558,7 +5495,11 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # parent_idx, depth. Length n_nodes = 1 + K + K^2 (for g=2).
         next_token_arr = y.reshape(1, 1)
         tree_tokens, parent_idx, depth_list = draft_tokens_topk(
-            self.mtp, pre_norm, next_token_arr, gamma, K,
+            self.mtp,
+            pre_norm,
+            next_token_arr,
+            gamma,
+            K,
             sync_group=coord_group,
         )
         n_nodes = len(tree_tokens)
@@ -5573,14 +5514,16 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # DSv4 local-attention SDPA scores can't broadcast against it.
         first_cache = gen_batch.prompt_cache[0]
         from mlx_lm.models.cache import CacheList
+
         mask_cache = (
-            first_cache[0] if isinstance(first_cache, CacheList)
-            else first_cache
+            first_cache[0] if isinstance(first_cache, CacheList) else first_cache
         )
 
         verify_input = mx.array(tree_tokens, dtype=mx.int32).reshape(1, n_nodes)
         tree_mask, tree_positions = _build_tree_mask_and_positions(
-            parent_idx, depth_list, mask_cache,
+            parent_idx,
+            depth_list,
+            mask_cache,
         )
 
         # Install the tree-verify side channel for the upcoming model
@@ -5614,10 +5557,7 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # ...)`` below) and bonus selection (``bonus_val =
         # all_next_list[best_end_node]``) can both be EOS without this ban,
         # firing ``finish=stop`` early. Apply BEFORE any argmax/logsumexp. ─
-        if (
-            self._spec_eos_ids
-            and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1"
-        ):
+        if self._spec_eos_ids and os.environ.get("EXO_DSV4_SPEC_EOS_BAN", "0") == "1":
             _eos_ban = ban_token_ids(self._spec_eos_ids)
             verify_logits = _eos_ban(mx.array([]), verify_logits)
 
@@ -5660,7 +5600,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # rank-0 all_next vector so all ranks agree on the accept walk.
         if sync_drafts:
             all_next = broadcast_from_canonical(
-                all_next.astype(mx.int32), coord_group,
+                all_next.astype(mx.int32),
+                coord_group,
             )
 
         mx.async_eval(all_next, logprobs_all, verify_pre_norm)
@@ -5803,7 +5744,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # 6. Update MTP pre_norm seed for the next cycle. Use the verify
         # pre_norm at the bonus node's position (where the next cycle's
         # draft will start from).
-        self._mtp_pre_norm[uid] = verify_pre_norm[:, best_end_node : best_end_node + 1, :]
+        self._mtp_pre_norm[uid] = verify_pre_norm[
+            :, best_end_node : best_end_node + 1, :
+        ]
         mx.eval(self._mtp_pre_norm[uid])
 
         # 7. Build yielded tokens: [y, accepted-path drafts...].
@@ -5825,12 +5768,8 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             # "rollback" here excludes the commit forward (separately
             # recorded above as "commit") so the buckets don't double-
             # count. End-to-end wall is "total".
-            prof.record(
-                "rollback", (t_after_rollback - t_after_commit) * 1000.0
-            )
-            prof.record(
-                "total", (t_after_rollback - t_cycle_start) * 1000.0
-            )
+            prof.record("rollback", (t_after_rollback - t_after_commit) * 1000.0)
+            prof.record("total", (t_after_rollback - t_cycle_start) * 1000.0)
             prof.end_cycle(1)
 
         # 9. Bookkeeping + state machine.

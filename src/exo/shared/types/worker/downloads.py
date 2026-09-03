@@ -53,7 +53,11 @@ class DownloadPaused(BaseDownloadProgress):
 
 
 DownloadProgress = (
-    DownloadPending | DownloadCompleted | DownloadFailed | DownloadOngoing | DownloadPaused
+    DownloadPending
+    | DownloadCompleted
+    | DownloadFailed
+    | DownloadOngoing
+    | DownloadPaused
 )
 
 

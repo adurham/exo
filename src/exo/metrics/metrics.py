@@ -347,9 +347,7 @@ def record_mtp_cycle(model_id: str, n_accepted: int) -> None:
     _mtp_cycles.labels(model_id=model_id).inc()
     if n_accepted > 0:
         _mtp_accepted_drafts.labels(model_id=model_id).inc(n_accepted)
-    _mtp_acceptance_bucket.labels(
-        model_id=model_id, accepted=str(n_accepted)
-    ).inc()
+    _mtp_acceptance_bucket.labels(model_id=model_id, accepted=str(n_accepted)).inc()
 
 
 # Per-instance state: last seen MTP cumulative counters from each

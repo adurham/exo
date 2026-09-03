@@ -84,16 +84,18 @@ _SEQ_LEN = 6
 _POOL_DIM = 5
 
 
-def _fixed(shape: tuple[int, ...], seed: int, dtype: mx.Dtype = mx.bfloat16) -> mx.array:
+def _fixed(
+    shape: tuple[int, ...], seed: int, dtype: mx.Dtype = mx.bfloat16
+) -> mx.array:
     mx.random.seed(seed)
     return (mx.random.uniform(shape=shape) * 10).astype(dtype)
 
 
-def _make_pooling_cache(ratio: int, pooled_len: int, remainder: int, seed: int) -> PoolingCache:
+def _make_pooling_cache(
+    ratio: int, pooled_len: int, remainder: int, seed: int
+) -> PoolingCache:
     pooled = _fixed((1, pooled_len, _POOL_DIM), seed) if pooled_len > 0 else None
-    buffered_kv = (
-        _fixed((1, remainder, _POOL_DIM), seed + 1) if remainder > 0 else None
-    )
+    buffered_kv = _fixed((1, remainder, _POOL_DIM), seed + 1) if remainder > 0 else None
     buffered_gate = (
         _fixed((1, remainder, _POOL_DIM), seed + 2) if remainder > 0 else None
     )
@@ -289,7 +291,9 @@ def test_arity_mismatch_raises() -> None:
 
 
 def test_non_descriptor_payload_raises() -> None:
-    plain = [TensorBlob(dtype="float32", shape=(2,), data=np.zeros(2, np.float32).tobytes())]
+    plain = [
+        TensorBlob(dtype="float32", shape=(2,), data=np.zeros(2, np.float32).tobytes())
+    ]
     with pytest.raises(UnsupportedCacheStateError):
         decode_composite_cache(_make_empty_dsv4_layer_cache(), plain)
 

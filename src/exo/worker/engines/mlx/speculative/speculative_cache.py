@@ -10,7 +10,6 @@ state to the correct intermediate position.
 """
 
 
-
 class SpeculativeArraysCache:
     """Wrapper around ArraysCache that supports rollback for speculative decode.
 
@@ -22,8 +21,8 @@ class SpeculativeArraysCache:
         self.base = base_cache
         self._S = S
         self.n_keep = conv_kernel_size - 1  # typically 3
-        self.all_states = None    # [B, T, Hv, Dv, Dk] from speculative kernel
-        self.conv_input = None    # [B, n_keep+S, conv_dim] for conv rollback
+        self.all_states = None  # [B, T, Hv, Dv, Dk] from speculative kernel
+        self.conv_input = None  # [B, n_keep+S, conv_dim] for conv rollback
 
     # Delegate cache operations
     def __getitem__(self, idx):
@@ -90,7 +89,9 @@ class SpeculativeArraysCache:
 
         # Conv state: slice conv_input to the correct window
         if self.conv_input is not None:
-            self.base.cache[0] = self.conv_input[:, n_accepted + 1: n_accepted + 1 + self.n_keep, :]
+            self.base.cache[0] = self.conv_input[
+                :, n_accepted + 1 : n_accepted + 1 + self.n_keep, :
+            ]
 
         # Clear stored states
         self.all_states = None

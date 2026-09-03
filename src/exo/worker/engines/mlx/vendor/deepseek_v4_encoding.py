@@ -512,7 +512,9 @@ def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 text_blocks = []
                 for part in content:
                     if isinstance(part, dict) and part.get("type") == "text":
-                        text_blocks.append({"type": "text", "text": part.get("text", "")})
+                        text_blocks.append(
+                            {"type": "text", "text": part.get("text", "")}
+                        )
                 if not text_blocks:
                     text_blocks = [{"type": "text", "text": ""}]
             else:

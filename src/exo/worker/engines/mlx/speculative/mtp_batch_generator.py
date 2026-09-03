@@ -287,22 +287,28 @@ class MTPBatchGenerator(BatchGenerator):
         # key signal for tuning gamma (deeper chain only helps while the extra
         # accepted tokens outweigh the added draft+verify cost). (2026-06-08)
         import time as _t
+
         _acc = getattr(self, "_accept_stats", None)
         if _acc is None:
             _now0 = _t.perf_counter()
-            _acc = self._accept_stats = {"cycles": 0, "accepted": 0,
-                                          "proposed": 0, "yielded": 0,
-                                          "t0": _now0,
-                                          # Per-window markers: token count and
-                                          # wall-clock at the last log point, so
-                                          # decode_tok/s is the rate over the
-                                          # LAST 64 cycles, not a lifetime
-                                          # average diluted by idle gaps between
-                                          # requests (the old `yielded / (now -
-                                          # t0)` read ~1 tok/s on a mostly-idle
-                                          # runner and was useless for spotting
-                                          # a real-time slowdown).
-                                          "win_yielded": 0, "win_t0": _now0}
+            _acc = self._accept_stats = {
+                "cycles": 0,
+                "accepted": 0,
+                "proposed": 0,
+                "yielded": 0,
+                "t0": _now0,
+                # Per-window markers: token count and
+                # wall-clock at the last log point, so
+                # decode_tok/s is the rate over the
+                # LAST 64 cycles, not a lifetime
+                # average diluted by idle gaps between
+                # requests (the old `yielded / (now -
+                # t0)` read ~1 tok/s on a mostly-idle
+                # runner and was useless for spotting
+                # a real-time slowdown).
+                "win_yielded": 0,
+                "win_t0": _now0,
+            }
         _acc["cycles"] += 1
         _acc["accepted"] += n_accepted
         _acc["proposed"] += gamma

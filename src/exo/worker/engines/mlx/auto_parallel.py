@@ -32,6 +32,7 @@ from mlx_lm.models.switch_layers import (
 
 try:
     from mlx_lm.models.gemma4 import Model as Gemma4Model
+
     _HAS_GEMMA4 = True
 except ImportError:
     Gemma4Model = None  # type: ignore[assignment, misc]
@@ -247,10 +248,13 @@ class PipelineFirstLayer(CustomMlxLayer):
         import os as _pf_os
         import sys as _pf_sys
         import time as _pf_time
+
         _pf_dbg = _pf_os.environ.get("EXO_PP_DEBUG") == "1"
         if self.r != 0:
             if _pf_dbg:
-                _pf_sys.stderr.write(f"[PP FIRST-RECV-PRE r={self.r} t={_pf_time.perf_counter():.3f} shape={x.shape}]\n")
+                _pf_sys.stderr.write(
+                    f"[PP FIRST-RECV-PRE r={self.r} t={_pf_time.perf_counter():.3f} shape={x.shape}]\n"
+                )
                 _pf_sys.stderr.flush()
             # We want to avoid GPU timeout errors by evalling the distributed operation
             # so that it stays on CPU, which does not have a timeout.
@@ -264,7 +268,9 @@ class PipelineFirstLayer(CustomMlxLayer):
             if x_dtype != mx.bfloat16:
                 x = x.astype(x_dtype)
             if _pf_dbg:
-                _pf_sys.stderr.write(f"[PP FIRST-RECV-POST r={self.r} t={_pf_time.perf_counter():.3f} sum={float(mx.abs(x).sum()):.4f}]\n")
+                _pf_sys.stderr.write(
+                    f"[PP FIRST-RECV-POST r={self.r} t={_pf_time.perf_counter():.3f} sum={float(mx.abs(x).sum()):.4f}]\n"
+                )
                 _pf_sys.stderr.flush()
         return self.original_layer(x, *args, **kwargs)
 
@@ -298,7 +304,9 @@ class PipelineLastLayer(CustomMlxLayer):
 
         if self.r != self.s - 1:
             # JACCL/RDMA requires bf16 for transport — cast before send.
-            output_to_send = output.astype(mx.bfloat16) if output.dtype != mx.bfloat16 else output
+            output_to_send = (
+                output.astype(mx.bfloat16) if output.dtype != mx.bfloat16 else output
+            )
             if self.queue_sends:
                 _pending_prefill_sends.append(
                     (output_to_send, (self.r + 1) % self.s, self.group)
@@ -333,6 +341,7 @@ class PipelineLastLayer(CustomMlxLayer):
         import os as _pp_os
         import sys as _pp_sys
         import time as _pp_time
+
         _pp_dbg = _pp_os.environ.get("EXO_PP_DEBUG") == "1"
         if _pp_dbg and not hasattr(self, "_pp_cnt"):
             self._pp_cnt = 0
@@ -345,23 +354,31 @@ class PipelineLastLayer(CustomMlxLayer):
                 # Last rank: send to rank 0
                 mx.eval(output)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP SEND #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape} sum={float(mx.abs(output).sum()):.4f}]\n")
+                    _pp_sys.stderr.write(
+                        f"[PP SEND #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape} sum={float(mx.abs(output).sum()):.4f}]\n"
+                    )
                     _pp_sys.stderr.flush()
                 sent = mx.distributed.send(output, 0, group=self.group)
                 mx.eval(sent)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP SEND-DONE #{self._pp_cnt} t={_pp_time.perf_counter():.3f}]\n")
+                    _pp_sys.stderr.write(
+                        f"[PP SEND-DONE #{self._pp_cnt} t={_pp_time.perf_counter():.3f}]\n"
+                    )
                     _pp_sys.stderr.flush()
                     self._pp_cnt += 1
             elif self.r == 0:
                 # Rank 0: receive from last rank
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP RECV-PRE #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape}]\n")
+                    _pp_sys.stderr.write(
+                        f"[PP RECV-PRE #{self._pp_cnt} r={self.r} t={_pp_time.perf_counter():.3f} shape={output.shape}]\n"
+                    )
                     _pp_sys.stderr.flush()
                 output = mx.distributed.recv_like(output, self.s - 1, group=self.group)
                 mx.eval(output)
                 if _pp_dbg:
-                    _pp_sys.stderr.write(f"[PP RECV-POST #{self._pp_cnt} t={_pp_time.perf_counter():.3f} sum={float(mx.abs(output).sum()):.4f}]\n")
+                    _pp_sys.stderr.write(
+                        f"[PP RECV-POST #{self._pp_cnt} t={_pp_time.perf_counter():.3f} sum={float(mx.abs(output).sum()):.4f}]\n"
+                    )
                     _pp_sys.stderr.flush()
                     self._pp_cnt += 1
             # Middle ranks (if any): no-op, pass through
@@ -1219,16 +1236,12 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
         # partially-sharded head attached would desync collectives on the
         # first draft cycle — worse than falling back to the MTP-1 draft
         # path. This never crashes model load.
-        _dspark_tp_shard = (
-            os.environ.get("EXO_DSV4_DSPARK_TP_SHARD", "0") == "1"
-        )
+        _dspark_tp_shard = os.environ.get("EXO_DSV4_DSPARK_TP_SHARD", "0") == "1"
         _dspark: object = (
             getattr(model.model, "dspark", None) if _dspark_tp_shard else None
         )
         if _dspark is not None:
-            _fuse_gate_up = (
-                os.environ.get("EXO_DSV4_MOE_FUSED_GATE_UP", "0") == "1"
-            )
+            _fuse_gate_up = os.environ.get("EXO_DSV4_MOE_FUSED_GATE_UP", "0") == "1"
 
             def _shard_stage(stage: object, idx: int) -> None:
                 # Local helper: attribute chains reach into mlx_lm modules
@@ -1242,10 +1255,12 @@ class DeepseekV4ShardingStrategy(TensorParallelShardingStrategy):
                 mx.eval(cast(nn.Module, stage).parameters())
                 ffn: nn.Module = cast(nn.Module, getattr(stage, "ffn"))  # noqa: B009
                 _shared: nn.Module = cast(
-                    nn.Module, getattr(ffn, "shared_experts")  # noqa: B009
+                    nn.Module,
+                    getattr(ffn, "shared_experts"),  # noqa: B009
                 )
                 _switch: nn.Module = cast(
-                    nn.Module, getattr(ffn, "switch_mlp")  # noqa: B009
+                    nn.Module,
+                    getattr(ffn, "switch_mlp"),  # noqa: B009
                 )
                 # Assign the sharding_group used by DeepseekV4MoE.__call__
                 # for its sum_gradients/all_sum collectives.
@@ -1412,7 +1427,9 @@ def _fused_sharded_qk_norm(
     if not _MINIMAX_NOOP_ALLSUM:
         combined_ss = mx.distributed.all_sum(combined_ss, group=group)
     else:
-        combined_ss = combined_ss * float(group.size())  # crude pretend-sum so magnitudes stay comparable
+        combined_ss = combined_ss * float(
+            group.size()
+        )  # crude pretend-sum so magnitudes stay comparable
 
     dim_q = queries.shape[-1] * group.size()
     dim_k = keys.shape[-1] * group.size()
@@ -1493,10 +1510,12 @@ def _install_fused_gate_up(switch_mlp: nn.Module) -> None:
     up_bits = getattr(up, "bits", None)
     gp_group = getattr(gp, "group_size", None)
     up_group = getattr(up, "group_size", None)
-    assert gp_bits is not None and gp_bits == up_bits, \
+    assert gp_bits is not None and gp_bits == up_bits, (
         f"gate/up bits mismatch: {gp_bits} vs {up_bits}"
-    assert gp_group is not None and gp_group == up_group, \
+    )
+    assert gp_group is not None and gp_group == up_group, (
         f"gate/up group_size mismatch: {gp_group} vs {up_group}"
+    )
     gp_mode = getattr(gp, "mode", "affine")
     up_mode = getattr(up, "mode", "affine")
     assert gp_mode == up_mode, f"gate/up mode mismatch: {gp_mode} vs {up_mode}"
@@ -1555,103 +1574,103 @@ class WrappedMiniMaxAttention(CustomMlxLayer):
         mask: mx.array | None = None,
         cache: "Cache | None" = None,
     ) -> mx.array:
-      with _minimax_span("attn"):
-        batch_dim, seq_dim, _ = x.shape
+        with _minimax_span("attn"):
+            batch_dim, seq_dim, _ = x.shape
 
-        self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
+            self._original_layer = cast(MiniMaxAttention, self.original_layer)  # type: ignore
 
-        with _minimax_span("attn.qkv_proj"):
-            if fused_qkv_is_installed(self._original_layer):
-                queries, keys, values = fused_qkv_proj(self._original_layer, x)
-            else:
-                queries = self._original_layer.q_proj(x)
-                keys = self._original_layer.k_proj(x)
-                values = self._original_layer.v_proj(x)
-            queries = _minimax_finalize(queries)
-            keys = _minimax_finalize(keys)
-            values = _minimax_finalize(values)
-
-        # qk_norm is mathematically an RMSNorm over the joined
-        # head-stack. q_norm / k_norm have been rewritten to
-        # ShardedRMSNorm at shard time (see MiniMaxShardingStrategy),
-        # and here we pack both partial sum-of-squares into a single
-        # cross-rank all_sum — matching the pre-sharded-norm baseline's
-        # collective count (1 per layer) instead of the 2 that separate
-        # norm calls would fire.
-        if getattr(self, "use_qk_norm", False):
-            with _minimax_span("attn.qk_norm"):
-                queries, keys = _fused_sharded_qk_norm(
-                    queries,
-                    keys,
-                    self._original_layer.q_norm,  # type: ignore[arg-type]
-                    self._original_layer.k_norm,  # type: ignore[arg-type]
-                    self.group,
-                )
+            with _minimax_span("attn.qkv_proj"):
+                if fused_qkv_is_installed(self._original_layer):
+                    queries, keys, values = fused_qkv_proj(self._original_layer, x)
+                else:
+                    queries = self._original_layer.q_proj(x)
+                    keys = self._original_layer.k_proj(x)
+                    values = self._original_layer.v_proj(x)
                 queries = _minimax_finalize(queries)
                 keys = _minimax_finalize(keys)
+                values = _minimax_finalize(values)
 
-        with _minimax_span("attn.reshape_rope_cache"):
-            n_q_heads = self._original_layer.num_attention_heads
-            n_kv_heads = self._original_layer.num_key_value_heads
-            queries = queries.reshape(
-                batch_dim, seq_dim, n_q_heads, -1
-            ).transpose(0, 2, 1, 3)
-            keys = keys.reshape(
-                batch_dim, seq_dim, n_kv_heads, -1
-            ).transpose(0, 2, 1, 3)
-            values = values.reshape(
-                batch_dim, seq_dim, n_kv_heads, -1
-            ).transpose(0, 2, 1, 3)
+            # qk_norm is mathematically an RMSNorm over the joined
+            # head-stack. q_norm / k_norm have been rewritten to
+            # ShardedRMSNorm at shard time (see MiniMaxShardingStrategy),
+            # and here we pack both partial sum-of-squares into a single
+            # cross-rank all_sum — matching the pre-sharded-norm baseline's
+            # collective count (1 per layer) instead of the 2 that separate
+            # norm calls would fire.
+            if getattr(self, "use_qk_norm", False):
+                with _minimax_span("attn.qk_norm"):
+                    queries, keys = _fused_sharded_qk_norm(
+                        queries,
+                        keys,
+                        self._original_layer.q_norm,  # type: ignore[arg-type]
+                        self._original_layer.k_norm,  # type: ignore[arg-type]
+                        self.group,
+                    )
+                    queries = _minimax_finalize(queries)
+                    keys = _minimax_finalize(keys)
 
-            offset = cache.offset if cache is not None else 0
-            if _MINIMAX_FUSED_ATTN:
-                # Concat Q and K along the head axis and run a single RoPE
-                # call across both. The concat costs 1 dispatch and
-                # replaces 2 separate RoPE calls (2 dispatches each) with
-                # one (2 dispatches), saving 1 dispatch per layer at zero
-                # numerical cost — RoPE rotates each head independently
-                # in the last dim. Splitting back is a free view.
-                qk_joined = mx.concatenate([queries, keys], axis=1)
-                qk_rotated = self._original_layer.rope(qk_joined, offset=offset)
-                queries = qk_rotated[:, :n_q_heads]
-                keys = qk_rotated[:, n_q_heads:]
-            else:
-                queries = self._original_layer.rope(queries, offset=offset)
-                keys = self._original_layer.rope(keys, offset=offset)
-
-            if cache is not None:
-                keys, values = cache.update_and_fetch(keys, values)
-            queries = _minimax_finalize(queries)
-            keys = _minimax_finalize(keys)
-            values = _minimax_finalize(values)
-
-        with _minimax_span("attn.sdpa"):
-            if _MINIMAX_NOOP_ATTN:
-                # Diagnostic noop: replace SDPA output with zeros of the same
-                # shape / dtype. Wall time with this flag set reveals how much
-                # of decode was spent inside attention (kernel + KV cache
-                # update + the Q/K/V projection reads feeding it).
-                output = mx.zeros(queries.shape, dtype=queries.dtype)
-            elif _MINIMAX_NOOP_SDPA:
-                # Narrower diagnostic: skip only the SDPA call itself. Q/K/V
-                # projections, RoPE, KV cache update all still run. Difference
-                # vs NOOP_ATTN reveals the SDPA kernel's isolated share of the
-                # attention budget.
-                output = mx.zeros(queries.shape, dtype=queries.dtype)
-            else:
-                output = scaled_dot_product_attention(
-                    queries,
-                    keys,
-                    values,
-                    cache=cache,
-                    scale=self._original_layer.scale,  # type: ignore
-                    mask=mask,
+            with _minimax_span("attn.reshape_rope_cache"):
+                n_q_heads = self._original_layer.num_attention_heads
+                n_kv_heads = self._original_layer.num_key_value_heads
+                queries = queries.reshape(batch_dim, seq_dim, n_q_heads, -1).transpose(
+                    0, 2, 1, 3
                 )
-            output = _minimax_finalize(output)
+                keys = keys.reshape(batch_dim, seq_dim, n_kv_heads, -1).transpose(
+                    0, 2, 1, 3
+                )
+                values = values.reshape(batch_dim, seq_dim, n_kv_heads, -1).transpose(
+                    0, 2, 1, 3
+                )
 
-        with _minimax_span("attn.o_proj"):
-            output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
-            return _minimax_finalize(self._original_layer.o_proj(output))
+                offset = cache.offset if cache is not None else 0
+                if _MINIMAX_FUSED_ATTN:
+                    # Concat Q and K along the head axis and run a single RoPE
+                    # call across both. The concat costs 1 dispatch and
+                    # replaces 2 separate RoPE calls (2 dispatches each) with
+                    # one (2 dispatches), saving 1 dispatch per layer at zero
+                    # numerical cost — RoPE rotates each head independently
+                    # in the last dim. Splitting back is a free view.
+                    qk_joined = mx.concatenate([queries, keys], axis=1)
+                    qk_rotated = self._original_layer.rope(qk_joined, offset=offset)
+                    queries = qk_rotated[:, :n_q_heads]
+                    keys = qk_rotated[:, n_q_heads:]
+                else:
+                    queries = self._original_layer.rope(queries, offset=offset)
+                    keys = self._original_layer.rope(keys, offset=offset)
+
+                if cache is not None:
+                    keys, values = cache.update_and_fetch(keys, values)
+                queries = _minimax_finalize(queries)
+                keys = _minimax_finalize(keys)
+                values = _minimax_finalize(values)
+
+            with _minimax_span("attn.sdpa"):
+                if _MINIMAX_NOOP_ATTN:
+                    # Diagnostic noop: replace SDPA output with zeros of the same
+                    # shape / dtype. Wall time with this flag set reveals how much
+                    # of decode was spent inside attention (kernel + KV cache
+                    # update + the Q/K/V projection reads feeding it).
+                    output = mx.zeros(queries.shape, dtype=queries.dtype)
+                elif _MINIMAX_NOOP_SDPA:
+                    # Narrower diagnostic: skip only the SDPA call itself. Q/K/V
+                    # projections, RoPE, KV cache update all still run. Difference
+                    # vs NOOP_ATTN reveals the SDPA kernel's isolated share of the
+                    # attention budget.
+                    output = mx.zeros(queries.shape, dtype=queries.dtype)
+                else:
+                    output = scaled_dot_product_attention(
+                        queries,
+                        keys,
+                        values,
+                        cache=cache,
+                        scale=self._original_layer.scale,  # type: ignore
+                        mask=mask,
+                    )
+                output = _minimax_finalize(output)
+
+            with _minimax_span("attn.o_proj"):
+                output = output.transpose(0, 2, 1, 3).reshape(batch_dim, seq_dim, -1)
+                return _minimax_finalize(self._original_layer.o_proj(output))
 
 
 class MiniMaxShardingStrategy(TensorParallelShardingStrategy):

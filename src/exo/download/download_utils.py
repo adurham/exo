@@ -633,7 +633,15 @@ async def download_file_with_retry(
     for attempt in range(n_attempts):
         try:
             return await _download_file(
-                model_id, revision, path, target_dir, on_progress, skip_internet, repo_url=repo_url, session=session, expected_size=expected_size
+                model_id,
+                revision,
+                path,
+                target_dir,
+                on_progress,
+                skip_internet,
+                repo_url=repo_url,
+                session=session,
+                expected_size=expected_size,
             )
         except HuggingFaceAuthenticationError:
             raise
@@ -795,8 +803,13 @@ async def _download_file_from_peer(
 
     # Build curl command: -C - for auto-resume, -f for fail on HTTP errors
     cmd = [
-        "curl", "-f", "-s", "-C", "-",
-        "-o", str(partial_path),
+        "curl",
+        "-f",
+        "-s",
+        "-C",
+        "-",
+        "-o",
+        str(partial_path),
         url,
     ]
 
@@ -1103,7 +1116,9 @@ async def download_shard(
         )
 
     # P2P can handle more parallelism than HF CDN, but don't spawn too many processes
-    effective_parallelism = min(16, len(filtered_file_list)) if repo_url else max_parallel_downloads
+    effective_parallelism = (
+        min(16, len(filtered_file_list)) if repo_url else max_parallel_downloads
+    )
     semaphore = asyncio.Semaphore(effective_parallelism)
 
     def schedule_progress(

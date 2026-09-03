@@ -584,8 +584,7 @@ class Master:
                 # request can slip in after this guard. This plus the per-pass
                 # decision is the in-flight race guard.
                 if any(
-                    task.instance_id == instance_id
-                    and task.task_status in in_flight
+                    task.instance_id == instance_id and task.task_status in in_flight
                     for task in self.state.tasks.values()
                 ):
                     self._jit_instance_last_use[instance_id] = now
@@ -610,9 +609,7 @@ class Master:
                     await self._index_apply_broadcast(event)
                 for cmd in download_cancels:
                     await self.download_command_sender.send(
-                        ForwarderDownloadCommand(
-                            origin=self._system_id, command=cmd
-                        )
+                        ForwarderDownloadCommand(origin=self._system_id, command=cmd)
                     )
                 self._jit_instance_last_use.pop(instance_id, None)
 

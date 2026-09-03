@@ -524,9 +524,7 @@ class InfoGatherer:
                         assert data is not None
 
                         idents = [
-                            it
-                            for i in data
-                            if (it := i.ident(iface_map)) is not None
+                            it for i in data if (it := i.ident(iface_map)) is not None
                         ]
                         await self.info_sender.send(
                             MacThunderboltIdentifiers(idents=idents)
@@ -550,17 +548,12 @@ class InfoGatherer:
                         f"same exception): {type(e).__name__}: {e}"
                     )
                 else:
-                    if (
-                        key == last_tb_exception_key
-                        and repeat_count > 0
-                    ):
+                    if key == last_tb_exception_key and repeat_count > 0:
                         logger.warning(
                             f"Error gathering Thunderbolt data: {repeat_count} "
                             "suppressed repeat traceback(s) since last full log"
                         )
-                    logger.opt(exception=e).warning(
-                        "Error gathering Thunderbolt data"
-                    )
+                    logger.opt(exception=e).warning("Error gathering Thunderbolt data")
                     last_tb_exception_key = key
                     last_tb_traceback_monotonic = now
                     repeat_count = 0

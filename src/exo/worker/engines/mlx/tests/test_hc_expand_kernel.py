@@ -117,18 +117,14 @@ def test_hc_expand_kernel_realistic_production_shape() -> None:
     batch, length, num_hc, dim = 1, 2048, 4, 4096
     scale = 2.2
     mx.random.seed(0)
-    x = (mx.random.normal(shape=(batch, length, dim)) * scale).astype(
+    x = (mx.random.normal(shape=(batch, length, dim)) * scale).astype(mx.bfloat16)
+    residual = (mx.random.normal(shape=(batch, length, num_hc, dim)) * scale).astype(
         mx.bfloat16
     )
-    residual = (
-        mx.random.normal(shape=(batch, length, num_hc, dim)) * scale
-    ).astype(mx.bfloat16)
-    post = mx.random.uniform(-1, 1, shape=(batch, length, num_hc)).astype(
+    post = mx.random.uniform(-1, 1, shape=(batch, length, num_hc)).astype(mx.float32)
+    comb = mx.random.uniform(-1, 1, shape=(batch, length, num_hc, num_hc)).astype(
         mx.float32
     )
-    comb = mx.random.uniform(
-        -1, 1, shape=(batch, length, num_hc, num_hc)
-    ).astype(mx.float32)
 
     ref = _hc_expand_op(x, residual, post, comb)
     got = _kernel_call(x, residual, post, comb)
@@ -139,17 +135,13 @@ def test_hc_expand_kernel_realistic_production_shape() -> None:
     assert not _has_nan_inf(got), "kernel output contains NaN/Inf"
 
 
-def test_hc_expand_kernel_asymmetric_deterministic_catches_transpose_bugs() -> (
-    None
-):
+def test_hc_expand_kernel_asymmetric_deterministic_catches_transpose_bugs() -> None:
     """Asymmetric deterministic input (distinct strides per axis) --
     catches transpose/axis-order bugs that random symmetric inputs miss."""
     _require_metal()
     batch, length, num_hc, dim = 1, 3, 4, 8
     x = (
-        mx.arange(batch * length * dim, dtype=mx.float32).reshape(
-            batch, length, dim
-        )
+        mx.arange(batch * length * dim, dtype=mx.float32).reshape(batch, length, dim)
         * 0.01
     ).astype(mx.bfloat16)
     residual = (
@@ -165,9 +157,9 @@ def test_hc_expand_kernel_asymmetric_deterministic_catches_transpose_bugs() -> (
         * 0.1
     )
     comb = (
-        mx.arange(
-            batch * length * num_hc * num_hc, dtype=mx.float32
-        ).reshape(batch, length, num_hc, num_hc)
+        mx.arange(batch * length * num_hc * num_hc, dtype=mx.float32).reshape(
+            batch, length, num_hc, num_hc
+        )
         * 0.05
     )
 
@@ -188,9 +180,7 @@ def test_hc_expand_kernel_hc_equals_two_template_generality() -> None:
     dim = 4096
     scale = 2.2
     x = (mx.random.normal(shape=(1, 64, dim)) * scale).astype(mx.bfloat16)
-    residual = (mx.random.normal(shape=(1, 64, 2, dim)) * scale).astype(
-        mx.bfloat16
-    )
+    residual = (mx.random.normal(shape=(1, 64, 2, dim)) * scale).astype(mx.bfloat16)
     post = mx.random.uniform(-1, 1, shape=(1, 64, 2)).astype(mx.float32)
     comb = mx.random.uniform(-1, 1, shape=(1, 64, 2, 2)).astype(mx.float32)
 
@@ -208,18 +198,14 @@ def test_hc_expand_kernel_decode_length_one_small_input_build_path() -> None:
     _require_metal()
     batch, length, num_hc, dim = 1, 1, 4, 4096
     scale = 2.2
-    x = (mx.random.normal(shape=(batch, length, dim)) * scale).astype(
+    x = (mx.random.normal(shape=(batch, length, dim)) * scale).astype(mx.bfloat16)
+    residual = (mx.random.normal(shape=(batch, length, num_hc, dim)) * scale).astype(
         mx.bfloat16
     )
-    residual = (
-        mx.random.normal(shape=(batch, length, num_hc, dim)) * scale
-    ).astype(mx.bfloat16)
-    post = mx.random.uniform(-1, 1, shape=(batch, length, num_hc)).astype(
+    post = mx.random.uniform(-1, 1, shape=(batch, length, num_hc)).astype(mx.float32)
+    comb = mx.random.uniform(-1, 1, shape=(batch, length, num_hc, num_hc)).astype(
         mx.float32
     )
-    comb = mx.random.uniform(
-        -1, 1, shape=(batch, length, num_hc, num_hc)
-    ).astype(mx.float32)
 
     ref = _hc_expand_op(x, residual, post, comb)
     got = _kernel_call(x, residual, post, comb)

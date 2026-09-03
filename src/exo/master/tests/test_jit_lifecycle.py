@@ -152,9 +152,7 @@ def test_cycle_admits_with_reserve_both_nodes_pass() -> None:
     node_memory: Mapping[NodeId, MemoryUsage] = {a: _mem(40), b: _mem(40)}
     weights = {a: Memory.from_gb(10), b: Memory.from_gb(10)}
     # 40 - 10 = 30 free >= 18 reserve on both nodes.
-    assert cycle_admits_with_reserve(
-        cycle, node_memory, weights, Memory.from_gb(18)
-    )
+    assert cycle_admits_with_reserve(cycle, node_memory, weights, Memory.from_gb(18))
 
 
 def test_cycle_admits_with_reserve_lopsided_one_node_fails() -> None:
@@ -202,9 +200,7 @@ def test_cycle_admits_with_reserve_missing_node_memory_fails() -> None:
     cycle = Cycle(node_ids=[a, b])
     node_memory: Mapping[NodeId, MemoryUsage] = {a: _mem(40)}  # b missing
     weights = {a: Memory.from_gb(10), b: Memory.from_gb(10)}
-    assert not cycle_admits_with_reserve(
-        cycle, node_memory, weights, Memory.from_gb(1)
-    )
+    assert not cycle_admits_with_reserve(cycle, node_memory, weights, Memory.from_gb(1))
 
 
 # --------------------------------------------------------------------------- #
@@ -524,9 +520,7 @@ def test_reap_skips_instance_without_last_use_record() -> None:
     inst = _instance(jit=True)
     instances = {inst.instance_id: inst}
     # No last-use record yet (placed but never observed) → not reaped this pass.
-    reap = jit_instances_to_reap(
-        instances, {}, {}, now=10_000.0, idle_window=300.0
-    )
+    reap = jit_instances_to_reap(instances, {}, {}, now=10_000.0, idle_window=300.0)
     assert reap == []
 
 
@@ -559,4 +553,3 @@ def test_reap_mixed_only_eligible_jit() -> None:
         instances, inflight, last_use, now=10_000.0, idle_window=300.0
     )
     assert reap == [idle_jit.instance_id]
-

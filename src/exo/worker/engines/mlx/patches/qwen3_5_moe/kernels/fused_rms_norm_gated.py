@@ -84,7 +84,9 @@ def _get_fused_rms_norm_gated_kernel():
             name="fused_rms_norm_gated",
             input_names=["gdn_out", "z_silu", "weight"],
             output_names=["out"],
-            source=_gen_fused_rms_norm_gated_source().replace("bfloat16_t", METAL_HALF_TYPE),
+            source=_gen_fused_rms_norm_gated_source().replace(
+                "bfloat16_t", METAL_HALF_TYPE
+            ),
         )
     return _fused_rms_norm_gated_kernel
 

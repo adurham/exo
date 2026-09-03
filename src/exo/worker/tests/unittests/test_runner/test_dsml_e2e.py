@@ -1292,11 +1292,34 @@ class TestE2EDeepseekV4ToolCallParsing:
         # response carries finish_reason + usage, mirroring exo's real SSE
         # ordering for a tool call.
         text_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
-            "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
-            DSML_TOKEN, "parameter", ' name="filePath" string="true"', ">",
-            "/tmp/x", "</", DSML_TOKEN, "parameter", ">\n</",
-            DSML_TOKEN, "invoke", ">\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n<",
+            DSML_TOKEN,
+            "invoke",
+            ' name="read"',
+            ">\n<",
+            DSML_TOKEN,
+            "parameter",
+            ' name="filePath" string="true"',
+            ">",
+            "/tmp/x",
+            "</",
+            DSML_TOKEN,
+            "parameter",
+            ">\n</",
+            DSML_TOKEN,
+            "invoke",
+            ">\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
 
         def _tokens() -> Generator[GenerationResponse]:
@@ -1306,8 +1329,10 @@ class TestE2EDeepseekV4ToolCallParsing:
                 )
             # Terminal response: no text, carries finish_reason + usage.
             yield GenerationResponse(
-                text="", token=len(text_tokens),
-                finish_reason="tool_calls", usage=usage,
+                text="",
+                token=len(text_tokens),
+                finish_reason="tool_calls",
+                usage=usage,
             )
 
         results = list(parse_deepseek_v4(_tokens()))
@@ -1550,9 +1575,7 @@ class TestE2EDeepseekV4QuotedMarkerDetection:
                     usage=None,
                 )
 
-        results = list(
-            parse_deepseek_v4(_tokens(), frozenset({_DSML_SPECIAL_ID}))
-        )
+        results = list(parse_deepseek_v4(_tokens(), frozenset({_DSML_SPECIAL_ID})))
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
         full_text = "".join(r.text for r in text_results)
@@ -1569,11 +1592,34 @@ class TestE2EDeepseekV4QuotedMarkerDetection:
         """The genuine path: when the ｜DSML｜ sentinel arrives as its special
         vocab token, the block parses to a ToolCallResponse as before."""
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
-            "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
-            DSML_TOKEN, "parameter", ' name="filePath" string="true"', ">",
-            "/tmp/x", "</", DSML_TOKEN, "parameter", ">\n</",
-            DSML_TOKEN, "invoke", ">\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n<",
+            DSML_TOKEN,
+            "invoke",
+            ' name="read"',
+            ">\n<",
+            DSML_TOKEN,
+            "parameter",
+            ' name="filePath" string="true"',
+            ">",
+            "/tmp/x",
+            "</",
+            DSML_TOKEN,
+            "parameter",
+            ">\n</",
+            DSML_TOKEN,
+            "invoke",
+            ">\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
 
         results = list(
@@ -1587,9 +1633,7 @@ class TestE2EDeepseekV4QuotedMarkerDetection:
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
         assert len(tool_results) == 1, f"real tool call not parsed: {results!r}"
         assert tool_results[0].tool_calls[0].name == "read"
-        args = cast(
-            dict[str, str], json.loads(tool_results[0].tool_calls[0].arguments)
-        )
+        args = cast(dict[str, str], json.loads(tool_results[0].tool_calls[0].arguments))
         assert args == {"filePath": "/tmp/x"}
 
     def test_legacy_fallback_without_ids_unchanged(self):
@@ -1597,11 +1641,34 @@ class TestE2EDeepseekV4QuotedMarkerDetection:
         resolve them), the parser falls back to the legacy text-only behavior —
         a clean DSML block still parses to a tool call."""
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
-            "\n<", DSML_TOKEN, "invoke", ' name="read"', ">\n<",
-            DSML_TOKEN, "parameter", ' name="filePath" string="true"', ">",
-            "/tmp/x", "</", DSML_TOKEN, "parameter", ">\n</",
-            DSML_TOKEN, "invoke", ">\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n<",
+            DSML_TOKEN,
+            "invoke",
+            ' name="read"',
+            ">\n<",
+            DSML_TOKEN,
+            "parameter",
+            ' name="filePath" string="true"',
+            ">",
+            "/tmp/x",
+            "</",
+            DSML_TOKEN,
+            "parameter",
+            ">\n</",
+            DSML_TOKEN,
+            "invoke",
+            ">\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
         # No ids -> legacy text-only path (today's behavior).
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
@@ -1627,18 +1694,39 @@ class TestE2EDeepseekV4GarbledInvokeFailsCleanly:
         # The exact production shape: correct wrapper (special token), garbled
         # invoke open tag as ordinary text, valid parameters, correct closers.
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
             "\n ",
             # GARBLED invoke open tag (model emitted this instead of
             # <｜DSML｜invoke name="session_search">):
             "feather_rpc_session_search>",
             "\n",
-            DSML_TOKEN, 'parameter name="session_id" string="true">',
-            "20260615_123445_c2b91c", "</", DSML_TOKEN, "parameter>",
-            "\n", DSML_TOKEN, 'parameter name="window" string="false">', "20",
-            "</", DSML_TOKEN, "parameter>",
-            "\n</", DSML_TOKEN, "invoke>",
-            "\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            DSML_TOKEN,
+            'parameter name="session_id" string="true">',
+            "20260615_123445_c2b91c",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n",
+            DSML_TOKEN,
+            'parameter name="window" string="false">',
+            "20",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n</",
+            DSML_TOKEN,
+            "invoke>",
+            "\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
         results = list(
             parse_deepseek_v4(
@@ -1672,12 +1760,30 @@ class TestE2EDeepseekV4GarbledInvokeFailsCleanly:
         can't confirm it's a real call, so we don't fail the turn; we just
         ensure no raw DSML tokens leak."""
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">",
-            "\n ", "feather_rpc_session_search>", "\n",
-            DSML_TOKEN, 'parameter name="session_id" string="true">',
-            "20260615_123445_c2b91c", "</", DSML_TOKEN, "parameter>",
-            "\n</", DSML_TOKEN, "invoke>",
-            "\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n ",
+            "feather_rpc_session_search>",
+            "\n",
+            DSML_TOKEN,
+            'parameter name="session_id" string="true">',
+            "20260615_123445_c2b91c",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n</",
+            DSML_TOKEN,
+            "invoke>",
+            "\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
         # No ids -> legacy path -> strip, do NOT emit error.
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
@@ -1709,12 +1815,26 @@ class TestE2EDeepseekV4UnterminatedToolCallFailsCleanly:
         # Confirmed-real wrapper + invoke + command param + timeout value, then
         # the stream ENDS (no closing tags). finish_reason=stop on last chunk.
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">", "\n<",
-            DSML_TOKEN, 'invoke name="terminal">', "\n<",
-            DSML_TOKEN, 'parameter name="command" string="true">',
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n<",
+            DSML_TOKEN,
+            'invoke name="terminal">',
+            "\n<",
+            DSML_TOKEN,
+            'parameter name="command" string="true">',
             'pwd && echo "---" && ps aux | grep -i "exo" | grep -v grep | head -10',
-            "</", DSML_TOKEN, "parameter>", "\n<",
-            DSML_TOKEN, 'parameter name="timeout" string="false">', "10",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n<",
+            DSML_TOKEN,
+            'parameter name="timeout" string="false">',
+            "10",
             # stream ends — no </parameter></invoke></tool_calls>
         ]
         results = list(
@@ -1744,11 +1864,26 @@ class TestE2EDeepseekV4UnterminatedToolCallFailsCleanly:
         block keeps the original safe strip-to-content behavior — no error, and
         no raw DSML sentinel leak."""
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">", "\n<",
-            DSML_TOKEN, 'invoke name="terminal">', "\n<",
-            DSML_TOKEN, 'parameter name="command" string="true">',
-            "git log -20", "</", DSML_TOKEN, "parameter>", "\n<",
-            DSML_TOKEN, 'parameter name="timeout" string="false">', "10",
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n<",
+            DSML_TOKEN,
+            'invoke name="terminal">',
+            "\n<",
+            DSML_TOKEN,
+            'parameter name="command" string="true">',
+            "git log -20",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n<",
+            DSML_TOKEN,
+            'parameter name="timeout" string="false">',
+            "10",
         ]
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
@@ -1778,8 +1913,18 @@ class TestE2EDeepseekV4OrphanCloseTagsStripped:
         # emits to escape a repetition loop. Token-id mode (confirmed-real).
         model_tokens = [
             "Some reasoning about the dashboard. ",
-            "</", DSML_TOKEN, "parameter>", "\n</", DSML_TOKEN, "invoke>",
-            "\n</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n</",
+            DSML_TOKEN,
+            "invoke>",
+            "\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
         results = list(
             parse_deepseek_v4(
@@ -1805,8 +1950,15 @@ class TestE2EDeepseekV4OrphanCloseTagsStripped:
         leak the sentinel (strip is unconditional in the final stage)."""
         model_tokens = [
             "Recovered text. ",
-            "</", DSML_TOKEN, "parameter>", "\n</", DSML_TOKEN, "tool", "_c",
-            "alls", ">",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
@@ -1853,6 +2005,7 @@ class TestE2EDeepseekV4SentinellessToolCallFailsCleanly:
         call = tool_results[0].tool_calls[0]
         assert call.name == "memory"
         import json as _json
+
         assert _json.loads(call.arguments) == {
             "action": "add",
             "content": "never pre-load context",
@@ -1989,10 +2142,21 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         2026-07-28) since it is a BARE tail after real content, the content
         is delivered with the closers stripped."""
         model_tokens = [
-            "    return", " -1", "\n",
-            "</", "parameter", ">", "\n",
-            "</", "invoke", ">", "\n",
-            "</", "tool", "_calls", ">",
+            "    return",
+            " -1",
+            "\n",
+            "</",
+            "parameter",
+            ">",
+            "\n",
+            "</",
+            "invoke",
+            ">",
+            "\n",
+            "</",
+            "tool",
+            "_calls",
+            ">",
         ]
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
@@ -2019,9 +2183,7 @@ class TestE2EDeepseekV4OrphanToolCallTail:
             ]
             results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
             text_results = [r for r in results if isinstance(r, GenerationResponse)]
-            error_responses = [
-                r for r in text_results if r.finish_reason == "error"
-            ]
+            error_responses = [r for r in text_results if r.finish_reason == "error"]
             full_text = "".join(r.text for r in text_results)
             assert not error_responses, (
                 f"expected delivery for trailing {closer!r}, got {results!r}"
@@ -2128,7 +2290,8 @@ class TestE2EDeepseekV4OrphanToolCallTail:
         still count — the fixup decision depends on fence parity."""
         model_tokens = [
             "Answer:\n",
-            "``", "`python\n",
+            "``",
+            "`python\n",
             "x = 1\n",
             "</parameter>\n",
             "</invoke>\n",
@@ -2550,19 +2713,49 @@ class TestE2EDeepseekV4StructuralTagGarbleRepair:
         ToolCallResponse (not an error). This is the full production path."""
         # The exact 22:43 production shape, as token chunks.
         model_tokens = [
-            "<", DSML_TOKEN, "tool", "_c", "alls", ">", "\n",
-            "<", DSML_TOKEN, 'invoke name="terminal">', "\n",
-            "<", DSML_TOKEN, 'parameter name="command" string="true">',
+            "<",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
+            "\n",
+            "<",
+            DSML_TOKEN,
+            'invoke name="terminal">',
+            "\n",
+            "<",
+            DSML_TOKEN,
+            'parameter name="command" string="true">',
             'curl -s "https://wttr.in/Paris"',
-            "</", DSML_TOKEN, "parameter>", "\n",
-            "<", DSML_TOKEN, 'parameter name="timeout" string="false">', "15",
-            "</", DSML_TOKEN, "parameter>", "\n",
-            "</", DSML_TOKEN, "invinvoke>", "\n",
-            "</", DSML_TOKEN, "tool", "_c", "alls", ">",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n",
+            "<",
+            DSML_TOKEN,
+            'parameter name="timeout" string="false">',
+            "15",
+            "</",
+            DSML_TOKEN,
+            "parameter>",
+            "\n",
+            "</",
+            DSML_TOKEN,
+            "invinvoke>",
+            "\n",
+            "</",
+            DSML_TOKEN,
+            "tool",
+            "_c",
+            "alls",
+            ">",
         ]
         results = list(
             parse_deepseek_v4(
-                _simulate_tokens_with_special(model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID),
+                _simulate_tokens_with_special(
+                    model_tokens, DSML_TOKEN, _DSML_SPECIAL_ID
+                ),
                 frozenset({_DSML_SPECIAL_ID}),
             )
         )
@@ -2639,10 +2832,27 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         the Nones wiped the buffer each token, the signature never confirmed,
         and the raw tags flushed into user-visible content."""
         model_tokens = [
-            "<", "invoke", ' name="', "memory", '">', "\n",
-            "<", "parameter", ' name="', "action", '" string="', "true", '">',
-            "add", "</", "parameter", ">", "\n",
-            "</", "invoke", ">",
+            "<",
+            "invoke",
+            ' name="',
+            "memory",
+            '">',
+            "\n",
+            "<",
+            "parameter",
+            ' name="',
+            "action",
+            '" string="',
+            "true",
+            '">',
+            "add",
+            "</",
+            "parameter",
+            ">",
+            "\n",
+            "</",
+            "invoke",
+            ">",
         ]
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         tool_results = [r for r in results if isinstance(r, ToolCallResponse)]
@@ -2668,9 +2878,19 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         Contract updated 2026-07-28: as a bare tail after real content it is
         stripped and the content delivered."""
         model_tokens = [
-            "        return", " self", ".cache", "[key]", "\n",
-            "</", "parameter", ">", "\n",
-            "</", "invoke", ">", "\n",
+            "        return",
+            " self",
+            ".cache",
+            "[key]",
+            "\n",
+            "</",
+            "parameter",
+            ">",
+            "\n",
+            "</",
+            "invoke",
+            ">",
+            "\n",
         ]
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
@@ -2697,11 +2917,19 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         capture). Like the Nones, they carry no signal and must not wipe a
         forming pattern — here one lands mid-``</parameter>``."""
         model_tokens = [
-            "        return", " x", "\n",
-            "</", "param",
+            "        return",
+            " x",
+            "\n",
+            "</",
+            "param",
             "",  # empty-text detokenizer chunk mid-pattern
-            "eter", ">", "\n",
-            "</", "invoke", ">", "\n",
+            "eter",
+            ">",
+            "\n",
+            "</",
+            "invoke",
+            ">",
+            "\n",
         ]
         results = list(parse_deepseek_v4(_simulate_tokens(model_tokens)))
         text_results = [r for r in results if isinstance(r, GenerationResponse)]
@@ -2717,7 +2945,9 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         the terminal chunk — the safe-prefix flush keeps detection context
         without stalling streaming for thousands of tokens."""
         pushes = [
-            GenerationResponse(text="The answer", token=0, finish_reason=None, usage=None),
+            GenerationResponse(
+                text="The answer", token=0, finish_reason=None, usage=None
+            ),
             GenerationResponse(text=" is", token=1, finish_reason=None, usage=None),
             GenerationResponse(text=" 42.", token=2, finish_reason=None, usage=None),
             GenerationResponse(text="", token=3, finish_reason="stop", usage=None),
@@ -2745,8 +2975,10 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         bare-tail contract."""
         texts = [
             "    return -1\n",
-            "</parameter>", "\n",
-            "</invoke>", "\n",
+            "</parameter>",
+            "\n",
+            "</invoke>",
+            "\n",
             "</tool_calls>",
         ]
         pushes = [
@@ -2754,7 +2986,9 @@ class TestE2EDeepseekV4InterleavedNoneStream:
             for i, t in enumerate(texts)
         ]
         pushes.append(
-            GenerationResponse(text="", token=len(texts), finish_reason="stop", usage=None)
+            GenerationResponse(
+                text="", token=len(texts), finish_reason="stop", usage=None
+            )
         )
         per_push = _drive_production_drain(pushes)
         all_items = [item for step in per_push for item in step]
@@ -2774,15 +3008,19 @@ class TestE2EDeepseekV4InterleavedNoneStream:
         texts = [
             "        node = self._Node(key, value)\n",
             "        self.cache[key] = node\n",
-            "</parameter>", "\n",
-            "</invoke>", "\n",
+            "</parameter>",
+            "\n",
+            "</invoke>",
+            "\n",
         ]
         pushes = [
             GenerationResponse(text=t, token=i, finish_reason=None, usage=None)
             for i, t in enumerate(texts)
         ]
         pushes.append(
-            GenerationResponse(text="", token=len(texts), finish_reason="stop", usage=None)
+            GenerationResponse(
+                text="", token=len(texts), finish_reason="stop", usage=None
+            )
         )
         per_push = _drive_production_drain(pushes)
         all_items = [item for step in per_push for item in step]

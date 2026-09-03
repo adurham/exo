@@ -26,11 +26,12 @@ from mlx_lm.models.cache import _BaseCache, create_attention_mask
 # Projection: random rotation via sign-flip + permutation
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class ProjectionSpec:
-    signs: mx.array       # (dim,) random ±1
-    perm: mx.array        # (dim,) random permutation indices
-    inv_perm: mx.array    # (dim,) inverse permutation for dequant path
+    signs: mx.array  # (dim,) random ±1
+    perm: mx.array  # (dim,) random permutation indices
+    inv_perm: mx.array  # (dim,) inverse permutation for dequant path
     sketch_idx: mx.array  # (sketch_dim,) indices for residual sketch
     sketch_signs: mx.array  # (sketch_dim,) random ±1 for sketch
 
@@ -44,9 +45,19 @@ def make_projection(dim: int, sketch_dim: int, seed: int) -> ProjectionSpec:
     perm = mx.array(perm_np)
     inv_perm = mx.array(inv_perm_np)
     sketch_dim = min(sketch_dim, dim)
-    sketch_idx = mx.array(rng.choice(dim, size=(sketch_dim,), replace=False).astype(np.int32))
-    sketch_signs = mx.array(rng.choice([-1.0, 1.0], size=(sketch_dim,)).astype(np.float32))
-    return ProjectionSpec(signs=signs, perm=perm, inv_perm=inv_perm, sketch_idx=sketch_idx, sketch_signs=sketch_signs)
+    sketch_idx = mx.array(
+        rng.choice(dim, size=(sketch_dim,), replace=False).astype(np.int32)
+    )
+    sketch_signs = mx.array(
+        rng.choice([-1.0, 1.0], size=(sketch_dim,)).astype(np.float32)
+    )
+    return ProjectionSpec(
+        signs=signs,
+        perm=perm,
+        inv_perm=inv_perm,
+        sketch_idx=sketch_idx,
+        sketch_signs=sketch_signs,
+    )
 
 
 def apply_rotation(x: mx.array, spec: ProjectionSpec) -> mx.array:
@@ -70,7 +81,11 @@ def apply_sketch(x: mx.array, spec: ProjectionSpec) -> mx.array:
     ``NameError``. The default is ``use_residual=False`` (``EXO_TURBOQUANT_RESIDUAL``
     is unset), which is why the break went unnoticed.
     """
-    sketch_signs = spec.sketch_signs.astype(x.dtype) if spec.sketch_signs.dtype != x.dtype else spec.sketch_signs
+    sketch_signs = (
+        spec.sketch_signs.astype(x.dtype)
+        if spec.sketch_signs.dtype != x.dtype
+        else spec.sketch_signs
+    )
     return mx.take(x, spec.sketch_idx, axis=-1) * sketch_signs
 
 
@@ -78,11 +93,12 @@ def apply_sketch(x: mx.array, spec: ProjectionSpec) -> mx.array:
 # Config
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class TurboQuantConfig:
-    bits: int = 3           # key bits — rotation allows lower bits than affine-only
+    bits: int = 3  # key bits — rotation allows lower bits than affine-only
     group_size: int = 64
-    value_bits: int = 4     # value bits — keep higher for weighted sum accuracy
+    value_bits: int = 4  # value bits — keep higher for weighted sum accuracy
     quantize_values: bool = True
     sketch_dim: int = 4
     residual_scale: float = 1.0
@@ -93,6 +109,7 @@ class TurboQuantConfig:
 # ---------------------------------------------------------------------------
 # TurboQuantKVCache
 # ---------------------------------------------------------------------------
+
 
 class TurboQuantKVCache(_BaseCache):
     """KV cache with rotation-aware quantization and residual correction.
@@ -116,7 +133,9 @@ class TurboQuantKVCache(_BaseCache):
 
     def _init_params(self, dim: int) -> None:
         if self.projection is None:
-            self.projection = make_projection(dim, self.config.sketch_dim, self.config.seed)
+            self.projection = make_projection(
+                dim, self.config.sketch_dim, self.config.seed
+            )
             self.group_size = self._effective_group_size(dim)
 
     def _effective_group_size(self, dim: int) -> int:
@@ -134,7 +153,9 @@ class TurboQuantKVCache(_BaseCache):
     ) -> tuple[mx.array, ...]:
         if current is None:
             return update
-        return tuple(mx.concatenate([c, u], axis=2) for c, u in zip(current, update, strict=True))
+        return tuple(
+            mx.concatenate([c, u], axis=2) for c, u in zip(current, update, strict=True)
+        )
 
     def _append_array(self, current: mx.array | None, update: mx.array) -> mx.array:
         return update if current is None else mx.concatenate([current, update], axis=2)
@@ -142,24 +163,36 @@ class TurboQuantKVCache(_BaseCache):
     def _append_residual(self, current: mx.array | None, update: mx.array) -> mx.array:
         return update if current is None else mx.concatenate([current, update], axis=-1)
 
-    def _quantize_keys(self, keys: mx.array) -> tuple[tuple[mx.array, mx.array, mx.array], mx.array | None]:
+    def _quantize_keys(
+        self, keys: mx.array
+    ) -> tuple[tuple[mx.array, mx.array, mx.array], mx.array | None]:
         assert self.projection is not None
         rotated = apply_rotation(keys.astype(mx.bfloat16), self.projection)
         q_keys = mx.quantize(rotated, group_size=self.group_size, bits=self.config.bits)
         if self.config.use_residual:
-            dequant = mx.dequantize(*q_keys, group_size=self.group_size, bits=self.config.bits)
+            dequant = mx.dequantize(
+                *q_keys, group_size=self.group_size, bits=self.config.bits
+            )
             residual = rotated.astype(mx.float32) - dequant.astype(mx.float32)
             proj = apply_sketch(residual, self.projection).astype(mx.bfloat16)
             signs = mx.where(proj >= 0, 1.0, -1.0).astype(mx.bfloat16)
-            rms = mx.sqrt(mx.mean(mx.square(residual), axis=-1, keepdims=True)).astype(mx.bfloat16)
+            rms = mx.sqrt(mx.mean(mx.square(residual), axis=-1, keepdims=True)).astype(
+                mx.bfloat16
+            )
             residual_t = mx.swapaxes(signs * rms, -1, -2)
             return q_keys, residual_t
         return q_keys, None
 
-    def _quantize_values(self, values: mx.array) -> tuple[mx.array, mx.array, mx.array] | mx.array:
+    def _quantize_values(
+        self, values: mx.array
+    ) -> tuple[mx.array, mx.array, mx.array] | mx.array:
         self.value_group_size = self._effective_group_size(values.shape[-1])
         if self.config.quantize_values:
-            return mx.quantize(values.astype(mx.bfloat16), group_size=self.value_group_size, bits=self.config.value_bits)
+            return mx.quantize(
+                values.astype(mx.bfloat16),
+                group_size=self.value_group_size,
+                bits=self.config.value_bits,
+            )
         return values
 
     def update_and_fetch(
@@ -200,22 +233,27 @@ class TurboQuantKVCache(_BaseCache):
     @property
     def meta_state(self) -> tuple[str, ...]:
         return tuple(
-            map(str, (
-                self.offset,
-                self.config.bits,
-                self.config.group_size,
-                self.config.value_bits,
-                int(self.config.quantize_values),
-                self.config.sketch_dim,
-                self.config.seed,
-            ))
+            map(
+                str,
+                (
+                    self.offset,
+                    self.config.bits,
+                    self.config.group_size,
+                    self.config.value_bits,
+                    int(self.config.quantize_values),
+                    self.config.sketch_dim,
+                    self.config.seed,
+                ),
+            )
         )
 
     @meta_state.setter
     def meta_state(self, v: tuple[str, ...]) -> None:
         offset, bits, group_size, value_bits, qv, sketch_dim, seed = map(int, v)
         self.offset = offset
-        self.config = TurboQuantConfig(bits, group_size, value_bits, bool(qv), sketch_dim, 1.0, seed)
+        self.config = TurboQuantConfig(
+            bits, group_size, value_bits, bool(qv), sketch_dim, 1.0, seed
+        )
         self.bits = bits
         self.group_size = group_size
 
@@ -253,8 +291,8 @@ class TurboQuantKVCache(_BaseCache):
         tq = cls(config)
         if cache.keys is not None:
             tq.update_and_fetch(
-                cache.keys[..., :cache.offset, :],
-                cache.values[..., :cache.offset, :],
+                cache.keys[..., : cache.offset, :],
+                cache.values[..., : cache.offset, :],
             )
         return tq
 
@@ -262,6 +300,7 @@ class TurboQuantKVCache(_BaseCache):
 # ---------------------------------------------------------------------------
 # Custom attention: quantized_matmul + residual correction
 # ---------------------------------------------------------------------------
+
 
 def turboquant_scaled_dot_product_attention(
     queries: mx.array,
@@ -285,13 +324,21 @@ def turboquant_scaled_dot_product_attention(
 
     # Dequantize values (no rotation on values)
     if cache.config.quantize_values:
-        dv = mx.dequantize(*value_state, group_size=cache.value_group_size, bits=cache.config.value_bits)
+        dv = mx.dequantize(
+            *value_state,
+            group_size=cache.value_group_size,
+            bits=cache.config.value_bits,
+        )
     else:
         dv = value_state
 
     # Use fused FlashAttention SDPA — the fast path
     return mx.fast.scaled_dot_product_attention(
-        queries, dk, dv, scale=scale, mask=mask,
+        queries,
+        dk,
+        dv,
+        scale=scale,
+        mask=mask,
     )
 
 
@@ -319,9 +366,16 @@ def patch_attention_dispatch() -> None:
     def _dispatched(queries, keys, values, cache, scale, mask, sinks=None):
         if isinstance(cache, TurboQuantKVCache):
             return turboquant_scaled_dot_product_attention(
-                queries, keys, values, cache, scale, mask,
+                queries,
+                keys,
+                values,
+                cache,
+                scale,
+                mask,
             )
-        return _original(queries, keys, values, cache, scale=scale, mask=mask, sinks=sinks)
+        return _original(
+            queries, keys, values, cache, scale=scale, mask=mask, sinks=sinks
+        )
 
     base_mod.scaled_dot_product_attention = _dispatched
     qwen3_next_mod.scaled_dot_product_attention = _dispatched

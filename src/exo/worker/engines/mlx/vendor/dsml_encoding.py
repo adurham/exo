@@ -195,9 +195,7 @@ def _repair_dsml_tag_garbles(text: str) -> str:
     # Match any DSML tag (open or close) with a word-like name. Group 1 is the
     # leading ``</?`` and group 2 is the tag name (everything between the
     # sentinel and the closing ``>`` or the first attribute).
-    tag_pattern = re.compile(
-        rf"(</?){re.escape(DSML_TOKEN)}(\w+)([^>]*>)"
-    )
+    tag_pattern = re.compile(rf"(</?){re.escape(DSML_TOKEN)}(\w+)([^>]*>)")
 
     def _repair_one(match: re.Match[str]) -> str:
         slash = match.group(1)
@@ -219,9 +217,7 @@ def _repair_dsml_tag_garbles(text: str) -> str:
 # a stray ``<｜DSML｜`` glued to arbitrary prose (e.g. the model parroting
 # ``<｜DSML｜_cli.py | 6 files changed…``) — that residue is readable text and
 # is preserved; only its leaked sentinel is removed by _DSML_ORPHAN_PATTERN.
-_DSML_TAG_PATTERN = re.compile(
-    rf"</?{re.escape(DSML_TOKEN)}\w+(?:\s+[^>]*)?>"
-)
+_DSML_TAG_PATTERN = re.compile(rf"</?{re.escape(DSML_TOKEN)}\w+(?:\s+[^>]*)?>")
 # Matches an orphaned DSML sentinel left behind when a malformed block emitted
 # ``｜DSML｜`` without forming a valid tag. The leading ``<`` / ``</`` is
 # optional so a bare sentinel (no angle bracket) is stripped too — the
@@ -383,8 +379,6 @@ def parse_sentinelless_tool_call(text: str) -> list[ToolCallItem] | None:
             except (json.JSONDecodeError, ValueError):
                 args[pm.group(1)] = pm.group(2)
 
-        tool_calls.append(
-            ToolCallItem(name=func_name, arguments=json.dumps(args))
-        )
+        tool_calls.append(ToolCallItem(name=func_name, arguments=json.dumps(args)))
 
     return tool_calls if tool_calls else None

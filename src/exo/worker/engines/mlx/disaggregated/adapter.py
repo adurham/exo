@@ -213,7 +213,9 @@ def _decode_meta_state(words: list[int], pos: int) -> tuple[object, int]:
             raise UnsupportedCacheStateError(f"Bad meta_state tag {tag}")
 
 
-def _encode_state_tree(state: object, words: list[int], blobs: list[TensorBlob]) -> None:
+def _encode_state_tree(
+    state: object, words: list[int], blobs: list[TensorBlob]
+) -> None:
     match state:
         case None:
             words.append(_STATE_NONE)

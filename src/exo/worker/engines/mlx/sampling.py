@@ -7,6 +7,7 @@ Covers both `make_sampler` fields (temp, top_p, top_k, min_p) and
 `make_logits_processors` fields (presence_penalty, repetition_penalty,
 frequency_penalty).
 """
+
 import os
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -19,31 +20,38 @@ _T = TypeVar("_T")
 # --- Per-cluster defaults (env vars). None = fall through to hardcoded. ---
 CLUSTER_DEFAULT_TEMPERATURE: float | None = (
     float(os.environ["EXO_DEFAULT_TEMPERATURE"])
-    if os.environ.get("EXO_DEFAULT_TEMPERATURE") else None
+    if os.environ.get("EXO_DEFAULT_TEMPERATURE")
+    else None
 )
 CLUSTER_DEFAULT_TOP_P: float | None = (
     float(os.environ["EXO_DEFAULT_TOP_P"])
-    if os.environ.get("EXO_DEFAULT_TOP_P") else None
+    if os.environ.get("EXO_DEFAULT_TOP_P")
+    else None
 )
 CLUSTER_DEFAULT_TOP_K: int | None = (
     int(os.environ["EXO_DEFAULT_TOP_K"])
-    if os.environ.get("EXO_DEFAULT_TOP_K") else None
+    if os.environ.get("EXO_DEFAULT_TOP_K")
+    else None
 )
 CLUSTER_DEFAULT_MIN_P: float | None = (
     float(os.environ["EXO_DEFAULT_MIN_P"])
-    if os.environ.get("EXO_DEFAULT_MIN_P") else None
+    if os.environ.get("EXO_DEFAULT_MIN_P")
+    else None
 )
 CLUSTER_DEFAULT_PRESENCE_PENALTY: float | None = (
     float(os.environ["EXO_DEFAULT_PRESENCE_PENALTY"])
-    if os.environ.get("EXO_DEFAULT_PRESENCE_PENALTY") else None
+    if os.environ.get("EXO_DEFAULT_PRESENCE_PENALTY")
+    else None
 )
 CLUSTER_DEFAULT_REPETITION_PENALTY: float | None = (
     float(os.environ["EXO_DEFAULT_REPETITION_PENALTY"])
-    if os.environ.get("EXO_DEFAULT_REPETITION_PENALTY") else None
+    if os.environ.get("EXO_DEFAULT_REPETITION_PENALTY")
+    else None
 )
 CLUSTER_DEFAULT_FREQUENCY_PENALTY: float | None = (
     float(os.environ["EXO_DEFAULT_FREQUENCY_PENALTY"])
-    if os.environ.get("EXO_DEFAULT_FREQUENCY_PENALTY") else None
+    if os.environ.get("EXO_DEFAULT_FREQUENCY_PENALTY")
+    else None
 )
 
 # --- Hardcoded last-resort fallbacks (existing Exo behavior). ---
@@ -96,32 +104,53 @@ def resolve_sampling(
     """
     return {
         "temp": _first_non_none(
-            request_temperature, instance_temperature, card_temperature,
-            CLUSTER_DEFAULT_TEMPERATURE, HARDCODED_TEMPERATURE,
+            request_temperature,
+            instance_temperature,
+            card_temperature,
+            CLUSTER_DEFAULT_TEMPERATURE,
+            HARDCODED_TEMPERATURE,
         ),
         "top_p": _first_non_none(
-            request_top_p, instance_top_p, card_top_p,
-            CLUSTER_DEFAULT_TOP_P, HARDCODED_TOP_P,
+            request_top_p,
+            instance_top_p,
+            card_top_p,
+            CLUSTER_DEFAULT_TOP_P,
+            HARDCODED_TOP_P,
         ),
         "top_k": _first_non_none(
-            request_top_k, instance_top_k, card_top_k,
-            CLUSTER_DEFAULT_TOP_K, HARDCODED_TOP_K,
+            request_top_k,
+            instance_top_k,
+            card_top_k,
+            CLUSTER_DEFAULT_TOP_K,
+            HARDCODED_TOP_K,
         ),
         "min_p": _first_non_none(
-            request_min_p, instance_min_p, card_min_p,
-            CLUSTER_DEFAULT_MIN_P, HARDCODED_MIN_P,
+            request_min_p,
+            instance_min_p,
+            card_min_p,
+            CLUSTER_DEFAULT_MIN_P,
+            HARDCODED_MIN_P,
         ),
         "presence_penalty": _first_non_none(
-            request_presence_penalty, instance_presence_penalty, card_presence_penalty,
-            CLUSTER_DEFAULT_PRESENCE_PENALTY, HARDCODED_PRESENCE_PENALTY,
+            request_presence_penalty,
+            instance_presence_penalty,
+            card_presence_penalty,
+            CLUSTER_DEFAULT_PRESENCE_PENALTY,
+            HARDCODED_PRESENCE_PENALTY,
         ),
         "repetition_penalty": _first_non_none(
-            request_repetition_penalty, instance_repetition_penalty, card_repetition_penalty,
-            CLUSTER_DEFAULT_REPETITION_PENALTY, HARDCODED_REPETITION_PENALTY,
+            request_repetition_penalty,
+            instance_repetition_penalty,
+            card_repetition_penalty,
+            CLUSTER_DEFAULT_REPETITION_PENALTY,
+            HARDCODED_REPETITION_PENALTY,
         ),
         "frequency_penalty": _first_non_none(
-            request_frequency_penalty, instance_frequency_penalty, card_frequency_penalty,
-            CLUSTER_DEFAULT_FREQUENCY_PENALTY, HARDCODED_FREQUENCY_PENALTY,
+            request_frequency_penalty,
+            instance_frequency_penalty,
+            card_frequency_penalty,
+            CLUSTER_DEFAULT_FREQUENCY_PENALTY,
+            HARDCODED_FREQUENCY_PENALTY,
         ),
     }
 

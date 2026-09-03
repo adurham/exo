@@ -194,7 +194,9 @@ class DownloadCoordinator:
                 NodeDownloadProgress(download_progress=pending)
             )
 
-    async def _start_download(self, shard: ShardMetadata, repo_url: str | None = None) -> None:
+    async def _start_download(
+        self, shard: ShardMetadata, repo_url: str | None = None
+    ) -> None:
         model_id = shard.model_card.model_id
 
         # Check if already downloading, complete, or recently failed
@@ -274,7 +276,10 @@ class DownloadCoordinator:
         self._start_download_task(shard, initial_progress, repo_url=repo_url)
 
     def _start_download_task(
-        self, shard: ShardMetadata, initial_progress: RepoDownloadProgress, repo_url: str | None = None
+        self,
+        shard: ShardMetadata,
+        initial_progress: RepoDownloadProgress,
+        repo_url: str | None = None,
     ) -> None:
         model_id = shard.model_card.model_id
 

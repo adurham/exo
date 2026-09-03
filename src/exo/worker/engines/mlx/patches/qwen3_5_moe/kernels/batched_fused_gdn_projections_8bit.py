@@ -36,24 +36,33 @@ def _gen_batched_fused_gdn_proj_source(K, N_QKV, N_Z, N_B, N_A, B, group_size=64
     N_B_TG = ceil_div(N_B, 8)
 
     # Per-batch x loading (B unrolled)
-    x_load = "\n".join(f"""
+    x_load = "\n".join(
+        f"""
         float x{b}_thread[VALUES_PER_THREAD]; float xsum{b} = 0;
         for (int i = 0; i < VALUES_PER_THREAD; i++) {{
             float xi = float(x[{b} * K + x_base + i]); x{b}_thread[i] = xi; xsum{b} += xi;
-        }}""" for b in range(B))
+        }}"""
+        for b in range(B)
+    )
 
     # Per-batch dot product with weights in registers
-    qdot = "\n".join(f"""
+    qdot = "\n".join(
+        f"""
             float accum{b} = 0;
             for (int i = 0; i < VALUES_PER_THREAD; i++) accum{b} += x{b}_thread[i] * w_vals[i];
-            result{b}[row] += s_val * accum{b} + xsum{b} * b_val;""" for b in range(B))
+            result{b}[row] += s_val * accum{b} + xsum{b} * b_val;"""
+        for b in range(B)
+    )
 
     result_decls = " ".join(f"float result{b}[4] = {{0,0,0,0}};" for b in range(B))
     simd_reduce = "\n    ".join(
-        f"for (int row = 0; row < 4; row++) result{b}[row] = simd_sum(result{b}[row]);" for b in range(B))
+        f"for (int row = 0; row < 4; row++) result{b}[row] = simd_sum(result{b}[row]);"
+        for b in range(B)
+    )
 
     # QKV epilogue: conv1d + SiLU + cache update, per batch
-    qkv_write = "\n".join(f"""
+    qkv_write = "\n".join(
+        f"""
             if (slid < 4u && c < N_QKV) {{
                 float qkv_val = result{b}[slid];
                 long cs_base = (long){b} * 3 * conv_dim;
@@ -69,23 +78,32 @@ def _gen_batched_fused_gdn_proj_source(K, N_QKV, N_Z, N_B, N_A, B, group_size=64
                 conv_state_out[cs_base + 1 * conv_dim + c] = static_cast<bfloat16_t>(s2);
                 conv_state_out[cs_base + 2 * conv_dim + c] = static_cast<bfloat16_t>(qkv_val);
                 qkv_out[{b} * conv_dim + c] = static_cast<bfloat16_t>(silu_out);
-            }}""" for b in range(B))
+            }}"""
+        for b in range(B)
+    )
 
     # Z epilogue: SiLU per batch
-    z_write = "\n".join(f"""
+    z_write = "\n".join(
+        f"""
             if (slid < 4u && z_row < N_Z) {{
                 float val = result{b}[slid];
                 z_silu_out[{b} * N_Z + z_row] = val / (1.0f + metal::exp(-val));
-            }}""" for b in range(B))
+            }}"""
+        for b in range(B)
+    )
 
     # B epilogue: sigmoid per batch
-    b_write = "\n".join(f"""
+    b_write = "\n".join(
+        f"""
             if (slid < 4u && b_row < N_B) {{
                 b_out[{b} * N_B + b_row] = 1.0f / (1.0f + metal::exp(-result{b}[slid]));
-            }}""" for b in range(B))
+            }}"""
+        for b in range(B)
+    )
 
     # A epilogue: g computation per batch
-    a_write = "\n".join(f"""
+    a_write = "\n".join(
+        f"""
             if (slid < 4u && a_row < N_A_val) {{
                 float a_val = result{b}[slid];
                 float dt = float(dt_bias_arr[a_row]);
@@ -93,7 +111,9 @@ def _gen_batched_fused_gdn_proj_source(K, N_QKV, N_Z, N_B, N_A, B, group_size=64
                 float sp = (x_g > 20.0f) ? x_g : metal::log(1.0f + metal::exp(x_g));
                 float g_val = metal::exp(-metal::exp(float(A_log_arr[a_row])) * sp);
                 a_out[{b} * N_A_val + a_row] = g_val;
-            }}""" for b in range(B))
+            }}"""
+        for b in range(B)
+    )
 
     return f"""
     const int RESULTS_PER_SG = 4;
@@ -184,22 +204,32 @@ def _get_batched_gdn_proj_kernel(K, N_QKV, N_Z, N_B, N_A, B, group_size=64):
             name=f"batched_fused_gdn_proj_K{K}_NQKV{N_QKV}_B{B}",
             input_names=[
                 "x",
-                "W_merged", "S_merged", "B_merged",
-                "conv_state", "conv_w",
-                "A_log_arr", "dt_bias_arr",
+                "W_merged",
+                "S_merged",
+                "B_merged",
+                "conv_state",
+                "conv_w",
+                "A_log_arr",
+                "dt_bias_arr",
             ],
             output_names=["qkv_out", "z_silu_out", "b_out", "a_out", "conv_state_out"],
-            source=_gen_batched_fused_gdn_proj_source(K, N_QKV, N_Z, N_B, N_A, B, group_size).replace("bfloat16_t", METAL_HALF_TYPE),
+            source=_gen_batched_fused_gdn_proj_source(
+                K, N_QKV, N_Z, N_B, N_A, B, group_size
+            ).replace("bfloat16_t", METAL_HALF_TYPE),
         )
     return _batched_gdn_proj_cache[key]
 
 
 def batched_fused_gdn_projections(
     x,
-    W_merged, S_merged, B_merged,
+    W_merged,
+    S_merged,
+    B_merged,
     proj_dims,
-    conv_state, conv_weights,
-    A_log, dt_bias,
+    conv_state,
+    conv_weights,
+    A_log,
+    dt_bias,
     batch_size=1,
 ):
     """Batched fused GDN projections with register-level weight sharing.
@@ -236,15 +266,21 @@ def batched_fused_gdn_projections(
     N_A_TG = ceil_div(N_A, 8)
     total_tg = N_QKV_TG + N_Z_TG + N_B_TG + N_A_TG
 
-    conv_w_flat = conv_weights.reshape(-1, 4) if conv_weights.ndim == 3 else conv_weights
+    conv_w_flat = (
+        conv_weights.reshape(-1, 4) if conv_weights.ndim == 3 else conv_weights
+    )
     x_flat = x.reshape(B, K)
 
     results = kern(
         inputs=[
             x_flat,
-            W_merged, S_merged, B_merged,
-            conv_state, conv_w_flat,
-            A_log, dt_bias,
+            W_merged,
+            S_merged,
+            B_merged,
+            conv_state,
+            conv_w_flat,
+            A_log,
+            dt_bias,
         ],
         output_shapes=[
             (B * N_QKV,),
@@ -253,8 +289,14 @@ def batched_fused_gdn_projections(
             (B * N_A,),
             (B * 3 * N_QKV,),
         ],
-        output_dtypes=[COMPUTE_DTYPE, mx.float32, mx.float32, mx.float32, COMPUTE_DTYPE],
-        grid=(32, total_tg * 2, 1),   # No grid z — batch in registers
+        output_dtypes=[
+            COMPUTE_DTYPE,
+            mx.float32,
+            mx.float32,
+            mx.float32,
+            COMPUTE_DTYPE,
+        ],
+        grid=(32, total_tg * 2, 1),  # No grid z — batch in registers
         threadgroup=(32, 2, 1),
     )
 

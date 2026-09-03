@@ -151,7 +151,9 @@ def test_signature_has_no_per_rank_mutable_state_input() -> None:
     )
 
 
-def test_two_simulated_ranks_compute_identical_verdicts_regardless_of_per_rank_state() -> None:
+def test_two_simulated_ranks_compute_identical_verdicts_regardless_of_per_rank_state() -> (
+    None
+):
     """Simulates the bug #6 scenario: two ranks with genuinely divergent
     per-rank state (e.g. different KVPrefixCache trie contents leading
     to different local hit lengths) MUST now compute identical batched-

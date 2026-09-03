@@ -11,6 +11,7 @@ Grid z-dimension: B * n_active + 1
 
 All constants baked into Metal source (no scalar kernel inputs).
 """
+
 import mlx.core as mx
 
 from ..common import METAL_HALF_TYPE
@@ -20,7 +21,9 @@ def ceil_div(a, b):
     return (a + b - 1) // b
 
 
-def _gen_batched_merged_down_8bit_source(K_OUT, N_IN, SHARED_N_IN, n_active, B, group_size=64):
+def _gen_batched_merged_down_8bit_source(
+    K_OUT, N_IN, SHARED_N_IN, n_active, B, group_size=64
+):
     gs = int(group_size)
     sc_stride = 256 // gs
     slid_divisor = gs // 8
@@ -52,8 +55,7 @@ def _gen_batched_merged_down_8bit_source(K_OUT, N_IN, SHARED_N_IN, n_active, B, 
     shared_qdot = "\n".join(shared_qdot_lines)
 
     shared_result_decls = "\n        ".join(
-        f"float result{b}[RESULTS_PER_SG] = {{0, 0, 0, 0}};"
-        for b in range(B)
+        f"float result{b}[RESULTS_PER_SG] = {{0, 0, 0, 0}};" for b in range(B)
     )
 
     shared_write_lines = []
@@ -193,23 +195,47 @@ def _get_batched_down_kernel(K_OUT, N_IN, SHARED_N_IN, n_active, B, group_size=6
     if key not in _batched_down_cache:
         _batched_down_cache[key] = mx.fast.metal_kernel(
             name=f"batched_down_K{K_OUT}_N{N_IN}_SN{SHARED_N_IN}_na{n_active}_B{B}",
-            input_names=["W", "S", "B_q",
-                         "W_shared_down", "S_shared_down", "B_shared_down",
-                         "X_routed", "X_shared", "inds"],
+            input_names=[
+                "W",
+                "S",
+                "B_q",
+                "W_shared_down",
+                "S_shared_down",
+                "B_shared_down",
+                "X_routed",
+                "X_shared",
+                "inds",
+            ],
             output_names=["Y_routed", "Y_shared"],
             source=_gen_batched_merged_down_8bit_source(
-                K_OUT, N_IN, SHARED_N_IN, n_active, B, group_size,
+                K_OUT,
+                N_IN,
+                SHARED_N_IN,
+                n_active,
+                B,
+                group_size,
             ).replace("bfloat16_t", METAL_HALF_TYPE),
         )
     return _batched_down_cache[key]
 
 
-def batched_merged_down_proj_8bit(w_q, s, b_q,
-                                   w_shared_down, s_shared_down, b_shared_down,
-                                   x_routed, x_shared, inds,
-                                   k_out, n_in, batch_size,
-                                   n_active, group_size=64,
-                                   shared_n_in=None):
+def batched_merged_down_proj_8bit(
+    w_q,
+    s,
+    b_q,
+    w_shared_down,
+    s_shared_down,
+    b_shared_down,
+    x_routed,
+    x_shared,
+    inds,
+    k_out,
+    n_in,
+    batch_size,
+    n_active,
+    group_size=64,
+    shared_n_in=None,
+):
     """Batched merged down_proj for 8-bit routed + shared experts.
 
     Args:
@@ -243,9 +269,17 @@ def batched_merged_down_proj_8bit(w_q, s, b_q,
     total_routed = B * n_active
 
     Y = kern(
-        inputs=[w_q, s, b_q,
-                w_shared_down, s_shared_down, b_shared_down,
-                x_routed, x_shared, inds],
+        inputs=[
+            w_q,
+            s,
+            b_q,
+            w_shared_down,
+            s_shared_down,
+            b_shared_down,
+            x_routed,
+            x_shared,
+            inds,
+        ],
         output_shapes=[(total_routed * k_out_val,), (B * k_out_val,)],
         output_dtypes=[mx.float32, mx.float32],
         grid=(32, y_groups * 2, total_routed + 1),

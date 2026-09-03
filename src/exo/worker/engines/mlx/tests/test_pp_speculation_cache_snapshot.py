@@ -112,7 +112,8 @@ def test_rotating_kv_cache_restore_undoes_speculative_write_post_wrap() -> None:
     ignored."""
     cache = RotatingKVCache(max_size=8)
     k_fill, v_fill = _kv(8, fill=2.0)
-    cache.update_and_fetch(k_fill, v_fill)  # fills to max_size, ring active  # pyright: ignore[reportUnknownMemberType]
+    # fills to max_size, ring active
+    cache.update_and_fetch(k_fill, v_fill)  # pyright: ignore[reportUnknownMemberType]
     assert cache.offset == 8
 
     snap = _snapshot_cache([cache])
@@ -277,12 +278,17 @@ def test_restored_cache_is_indistinguishable_from_a_cache_that_never_ran_spec_fw
 
     snap = _snapshot_cache([executed])
     spec_k, spec_v = _kv(2, fill=999.0)
-    executed.update_and_fetch(spec_k, spec_v)  # the "speculative forward"  # pyright: ignore[reportUnknownMemberType]
+    # the "speculative forward"
+    executed.update_and_fetch(spec_k, spec_v)  # pyright: ignore[reportUnknownMemberType]
     _restore_cache([executed], snap)  # step 3a's restore-on-both-paths
 
     assert executed.offset == baseline.offset
-    assert bool(mx.array_equal(_keys(executed)[0, 0, :6, :], _keys(baseline)[0, 0, :6, :]))
-    assert bool(mx.array_equal(_values(executed)[0, 0, :6, :], _values(baseline)[0, 0, :6, :]))
+    assert bool(
+        mx.array_equal(_keys(executed)[0, 0, :6, :], _keys(baseline)[0, 0, :6, :])
+    )
+    assert bool(
+        mx.array_equal(_values(executed)[0, 0, :6, :], _values(baseline)[0, 0, :6, :])
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +332,8 @@ def test_pooling_cache_with_partial_remainder_round_trips() -> None:
     mx.eval(kv, gate)
     cache.accumulate_windows(kv, gate, offset=2)  # pyright: ignore[reportUnknownMemberType]
     assert cache.remainder == 2  # pyright: ignore
-    assert cache.pooled is None  # ratio=4 not yet reached -- still None  # pyright: ignore
+    # ratio=4 not yet reached -- still None
+    assert cache.pooled is None  # pyright: ignore
 
     snap = _snapshot_cache([cache])
 
@@ -437,7 +444,9 @@ def test_pooling_cache_growth_after_reject_does_not_corrupt_offset() -> None:
         f"restore+commit -- this is the exact corrupted state that crashed "
         f"the next deferred write with [broadcast_shapes] at ~500K context"
     )
-    assert cache._pool_offset == 7, "restore must fully undo the rejected draft's staged bump"  # pyright: ignore
+    assert cache._pool_offset == 7, (  # pyright: ignore
+        "restore must fully undo the rejected draft's staged bump"
+    )
 
     # The real committed continuation must write cleanly (this is the
     # exact call that crashed live before the fix).
@@ -508,4 +517,3 @@ def test_batch_pooling_cache_snapshot_preserves_pending_bumps() -> None:
         "stream PoolingCache path at ~500K context"
     )
     assert cache._pool_lengths == [7]  # pyright: ignore
-

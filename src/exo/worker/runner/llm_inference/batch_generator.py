@@ -445,9 +445,7 @@ class BatchGenerator(Engine):
     # subsequent request for that runner rejected with
     # PPSpecAlreadyActiveError. Maps uid -> the TaskId to report once the
     # generator actually closes.
-    _pending_pp_spec_cancel: dict[int, TaskId] = field(
-        default_factory=dict, init=False
-    )
+    _pending_pp_spec_cancel: dict[int, TaskId] = field(default_factory=dict, init=False)
     # Section 46 (2026-08-15): the batched-decode FOLLOWER analogue of
     # _pending_pp_spec_cancel. A cancelled uid whose per-request state can
     # only be released by the DRIVER's incoming EvictMessage is parked here
@@ -530,8 +528,11 @@ class BatchGenerator(Engine):
         self._queue.extend(agreed)
         self._maybe_queue = list(different)
         _dt = time.perf_counter() - _t0
-        if _dt > 0.005 and os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1"):
-            logger.info(f"[PROF] agree_on_tasks={_dt*1000:.1f}ms")
+        if _dt > 0.005 and os.environ.get("EXO_TRACING_ENABLED", "false").lower() in (
+            "true",
+            "1",
+        ):
+            logger.info(f"[PROF] agree_on_tasks={_dt * 1000:.1f}ms")
 
     def agree_on_cancellations(self) -> None:
         """Agree between all ranks about which tasks to cancel.
@@ -555,8 +556,13 @@ class BatchGenerator(Engine):
         self._cancelled_tasks.update(task.task_id for task in agreed)
         self._maybe_cancel = list(different)
         _dt = time.perf_counter() - _t0
-        if _dt > 0.005 and os.environ.get("EXO_TRACING_ENABLED", "false").lower() in ("true", "1"):
-            logger.info(f"[PROF] agree_on_cancellations={_dt*1000:.1f}ms (mx_any + 2x all_gather)")
+        if _dt > 0.005 and os.environ.get("EXO_TRACING_ENABLED", "false").lower() in (
+            "true",
+            "1",
+        ):
+            logger.info(
+                f"[PROF] agree_on_cancellations={_dt * 1000:.1f}ms (mx_any + 2x all_gather)"
+            )
 
     def agree_on_cancellations_fast(self) -> None:
         """Lightweight cancellation check for use during prefill.
@@ -635,9 +641,7 @@ class BatchGenerator(Engine):
             rec["unprocessed_count"] = (
                 len(unprocessed) if unprocessed is not None else 0
             )
-            prompt_batch = cast(
-                "Sized | None", getattr(mlx_gen, "_prompt_batch", None)
-            )
+            prompt_batch = cast("Sized | None", getattr(mlx_gen, "_prompt_batch", None))
             rec["prompt_batch_len"] = (
                 len(prompt_batch) if prompt_batch is not None else 0
             )
@@ -994,9 +998,7 @@ class BatchGenerator(Engine):
         if not getattr(self, "_pending_batched_decode_evict", None):
             return iter([])
 
-        still_held = getattr(
-            self._gen, "batched_decode_follower_awaiting_evict", None
-        )
+        still_held = getattr(self._gen, "batched_decode_follower_awaiting_evict", None)
         results: list[tuple[TaskId, CancelledResponse]] = []
         for uid, task_id in list(self._pending_batched_decode_evict.items()):
             # Finalize once the follower no longer holds the request -- i.e.
@@ -1284,9 +1286,7 @@ class BatchGenerator(Engine):
                 on_generation_token=on_generation_token,
             )
 
-    def _batched_start_task(
-        self, tasks: list[TextGeneration]
-    ) -> list[int]:
+    def _batched_start_task(self, tasks: list[TextGeneration]) -> list[int]:
         """Build per-task callbacks and run a SINGLE batched prefill across tasks.
 
         Mirrors ``_start_task`` per task (chat template, prefill-progress event,
@@ -1297,13 +1297,15 @@ class BatchGenerator(Engine):
         """
         from exo.worker.engines.mlx.trace import T, request_trace
 
-        bundle: list[tuple[
-            TextGenerationTaskParams,
-            str,
-            "object",
-            "object",
-            "object",
-        ]] = []
+        bundle: list[
+            tuple[
+                TextGenerationTaskParams,
+                str,
+                "object",
+                "object",
+                "object",
+            ]
+        ] = []
 
         for task in tasks:
             _check_for_debug_prompts(task.task_params)
@@ -1342,9 +1344,7 @@ class BatchGenerator(Engine):
                     # recorded in ``_cancelled_tasks`` and applied after
                     # prefill completes via ``_apply_cancellations``.
                     self.agree_on_cancellations_fast()
-                    request_trace.record(
-                        "prefill_batched.distributed_callback", t0
-                    )
+                    request_trace.record("prefill_batched.distributed_callback", t0)
 
                 return distributed_prompt_progress_callback
 
@@ -1361,19 +1361,19 @@ class BatchGenerator(Engine):
                         if self.should_cancel(_task.task_id):
                             self._cancelled_tasks.add(_task.task_id)
                         self.agree_on_tasks()
-                        request_trace.record(
-                            "decode.agree_on_cancel_and_tasks", t0
-                        )
+                        request_trace.record("decode.agree_on_cancel_and_tasks", t0)
 
                 return on_generation_token
 
-            bundle.append((
-                task.task_params,
-                prompt,
-                _make_on_prefill_progress(task),
-                _make_distributed_callback(task),
-                _make_on_generation_token(task),
-            ))
+            bundle.append(
+                (
+                    task.task_params,
+                    prompt,
+                    _make_on_prefill_progress(task),
+                    _make_distributed_callback(task),
+                    _make_on_generation_token(task),
+                )
+            )
 
         with T("batched_start_task.mlx_gen_submit_batched"):
             return self._gen.submit_batched(bundle)  # type: ignore[arg-type]

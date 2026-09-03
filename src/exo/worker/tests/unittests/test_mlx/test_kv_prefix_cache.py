@@ -1468,8 +1468,7 @@ class TestCacheListStructuralNonTrimmable:
         # exactly the composition that made has_non_kv_caches() silently
         # return False before this fix.
         cache = [
-            CacheList(RotatingKVCache(max_size=128), PoolingCache(4))
-            for _ in range(21)
+            CacheList(RotatingKVCache(max_size=128), PoolingCache(4)) for _ in range(21)
         ]
         assert has_non_kv_caches(cache) is True
 
@@ -1834,9 +1833,7 @@ class TestPrefillSnapshotOffset:
             # contract for `for _ in _sg: break`.
             yield MagicMock(text="x", token=0)
 
-        monkeypatch.setattr(
-            generate_mod, "stream_generate", fake_stream_generate
-        )
+        monkeypatch.setattr(generate_mod, "stream_generate", fake_stream_generate)
         monkeypatch.setattr(
             generate_mod, "_has_pipeline_communication_layer", lambda model: False
         )

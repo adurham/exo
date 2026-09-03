@@ -85,12 +85,76 @@ TIERS = [(4, 20_000), (4, 40_000), (4, 80_000)]
 
 ARMS = ("flag0", "flag1", "flag0_repeat")
 
-WORDS = ["system", "config", "module", "handler", "request", "buffer", "thread", "socket", "packet", "kernel", "daemon", "cache", "index", "pointer", "segment", "registry", "cluster", "node", "payload", "session", "token", "vector", "matrix", "gradient", "tensor", "pipeline", "queue", "scheduler", "allocator", "mutex", "semaphore", "latency", "throughput", "bandwidth", "protocol", "adapter", "interface", "schema", "migration", "rollback", "checkpoint", "ledger", "shard", "replica", "quorum", "lease"]
+WORDS = [
+    "system",
+    "config",
+    "module",
+    "handler",
+    "request",
+    "buffer",
+    "thread",
+    "socket",
+    "packet",
+    "kernel",
+    "daemon",
+    "cache",
+    "index",
+    "pointer",
+    "segment",
+    "registry",
+    "cluster",
+    "node",
+    "payload",
+    "session",
+    "token",
+    "vector",
+    "matrix",
+    "gradient",
+    "tensor",
+    "pipeline",
+    "queue",
+    "scheduler",
+    "allocator",
+    "mutex",
+    "semaphore",
+    "latency",
+    "throughput",
+    "bandwidth",
+    "protocol",
+    "adapter",
+    "interface",
+    "schema",
+    "migration",
+    "rollback",
+    "checkpoint",
+    "ledger",
+    "shard",
+    "replica",
+    "quorum",
+    "lease",
+]
 
 CODEWORDS = [
-    "ZEPHYR", "OBSIDIAN", "MARLIN", "QUARTZ", "NIMBUS", "FALCON", "BASALT",
-    "LANTERN", "COBALT", "TAMARIN", "VESPER", "GRANITE", "HALCYON", "PELICAN",
-    "IRIDIUM", "SABLE", "THISTLE", "MERIDIAN", "ONYX", "KESTREL",
+    "ZEPHYR",
+    "OBSIDIAN",
+    "MARLIN",
+    "QUARTZ",
+    "NIMBUS",
+    "FALCON",
+    "BASALT",
+    "LANTERN",
+    "COBALT",
+    "TAMARIN",
+    "VESPER",
+    "GRANITE",
+    "HALCYON",
+    "PELICAN",
+    "IRIDIUM",
+    "SABLE",
+    "THISTLE",
+    "MERIDIAN",
+    "ONYX",
+    "KESTREL",
 ]
 
 # --------------------------------------------------------------- tokenizer
@@ -151,10 +215,7 @@ def make_secret(rng: random.Random, used: set[str]) -> str:
     only PART of the string, so scoring must be field-aware.
     """
     while True:
-        s = (
-            f"{rng.choice(CODEWORDS)}-{rng.randint(1000, 9999)}-"
-            f"{rng.choice(CODEWORDS)}"
-        )
+        s = f"{rng.choice(CODEWORDS)}-{rng.randint(1000, 9999)}-{rng.choice(CODEWORDS)}"
         if s not in used:
             used.add(s)
             return s
@@ -171,7 +232,9 @@ def needle_sentence(slot: int, secret: str) -> str:
     )
 
 
-def plan_offsets(tier_tokens: int, rng: random.Random) -> list[tuple[str, int | None, int]]:
+def plan_offsets(
+    tier_tokens: int, rng: random.Random
+) -> list[tuple[str, int | None, int]]:
     """Choose (kind, boundary_k, target_offset) for 8 needles.
 
     6 boundary needles spread across the available chunk boundaries
@@ -185,7 +248,11 @@ def plan_offsets(tier_tokens: int, rng: random.Random) -> list[tuple[str, int | 
     candidates = list(range(2, n_chunks))
     if len(candidates) < 6:
         candidates = candidates * ((6 // max(1, len(candidates))) + 1)
-    ks = sorted(rng.sample(candidates, 6)) if len(set(candidates)) >= 6 else candidates[:6]
+    ks = (
+        sorted(rng.sample(candidates, 6))
+        if len(set(candidates)) >= 6
+        else candidates[:6]
+    )
 
     plan: list[tuple[str, int | None, int]] = []
     kinds = ["straddle", "before", "after", "straddle", "before", "after"]
@@ -203,7 +270,9 @@ def plan_offsets(tier_tokens: int, rng: random.Random) -> list[tuple[str, int | 
 
     # 2 interior controls: mid-chunk, maximally far from any boundary
     used_k = set(ks)
-    interior_ks = [k for k in range(2, n_chunks) if k not in used_k] or list(range(2, n_chunks))
+    interior_ks = [k for k in range(2, n_chunks) if k not in used_k] or list(
+        range(2, n_chunks)
+    )
     for k in rng.sample(interior_ks, min(2, len(interior_ks))) or [2, 3]:
         plan.append(("interior", None, k * CHUNK + CHUNK // 2))
     while len(plan) < 8:
@@ -228,14 +297,21 @@ character. If you cannot find a slot's code, write UNKNOWN for that slot.
 """
 
 
-def build_prompt(tok, tier_tokens: int, seed: int, template_overhead: int) -> PromptSpec:
+def build_prompt(
+    tok, tier_tokens: int, seed: int, template_overhead: int
+) -> PromptSpec:
     rng = random.Random(seed)
     used: set[str] = set()
     plan = plan_offsets(tier_tokens, rng)
 
     needles = [
-        Needle(slot=i + 1, secret=make_secret(rng, used), kind=kind,
-               boundary_k=k, target_offset=off - template_overhead)
+        Needle(
+            slot=i + 1,
+            secret=make_secret(rng, used),
+            kind=kind,
+            boundary_k=k,
+            target_offset=off - template_overhead,
+        )
         for i, (kind, k, off) in enumerate(plan)
     ]
 
@@ -316,7 +392,8 @@ def load_prompts() -> list[PromptSpec]:
 
 def post(body: dict, timeout: int = REQUEST_TIMEOUT) -> dict:
     req = urllib.request.Request(
-        API, data=json.dumps(body).encode(),
+        API,
+        data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -324,15 +401,17 @@ def post(body: dict, timeout: int = REQUEST_TIMEOUT) -> dict:
 
 
 def chat(prompt: str, max_tokens: int = MAX_TOKENS, logprobs: bool = True) -> dict:
-    return post({
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
-        "temperature": TEMPERATURE,
-        "stream": False,
-        "logprobs": logprobs,
-        "top_logprobs": TOP_LOGPROBS,
-    })
+    return post(
+        {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": TEMPERATURE,
+            "stream": False,
+            "logprobs": logprobs,
+            "top_logprobs": TOP_LOGPROBS,
+        }
+    )
 
 
 def preflight() -> bool:
@@ -348,12 +427,16 @@ def preflight() -> bool:
     print(f"  reachable, finish_reason={ch.get('finish_reason')}")
     lp = ch.get("logprobs")
     if not lp or not lp.get("content"):
-        print("FAIL: logprobs came back empty -- Gate C (logit comparison) is "
-              "DEAD. Do not proceed silently; report this.")
+        print(
+            "FAIL: logprobs came back empty -- Gate C (logit comparison) is "
+            "DEAD. Do not proceed silently; report this."
+        )
         ok = False
     else:
-        print(f"  logprobs OK ({len(lp['content'])} positions, "
-              f"{len(lp['content'][0].get('top_logprobs') or [])} top-k)")
+        print(
+            f"  logprobs OK ({len(lp['content'])} positions, "
+            f"{len(lp['content'][0].get('top_logprobs') or [])} top-k)"
+        )
     print("  MANUAL CHECKS (not automatable from here):")
     print("   [ ] EXO_PREFILL_CHUNK_OVERLAP identical on BOTH ranks")
     print(f"   [ ] EXO_PREFILL_STEP_SIZE == {CHUNK} on BOTH ranks")
@@ -383,7 +466,9 @@ def score_needle(expected: str, got: str | None) -> dict:
     ef, gf = expected.upper().split("-"), got.upper().split("-")
     fields = sum(1 for a, b in zip(ef, gf, strict=False) if a == b)
     return {
-        "status": "WRONG", "exact": False, "fields": fields,
+        "status": "WRONG",
+        "exact": False,
+        "fields": fields,
         "edit": _lev(expected.upper(), got.upper()),
     }
 
@@ -405,7 +490,11 @@ def run_arm(arm: str, only: str | None = None) -> None:
     out = OUT_DIR / f"{arm}.jsonl"
     done = set()
     if out.exists():
-        done = {json.loads(ln)["prompt_id"] for ln in out.read_text().splitlines() if ln.strip()}
+        done = {
+            json.loads(ln)["prompt_id"]
+            for ln in out.read_text().splitlines()
+            if ln.strip()
+        }
 
     with out.open("a") as fh:
         for s in specs:
@@ -427,10 +516,13 @@ def run_arm(arm: str, only: str | None = None) -> None:
             dt = time.time() - t0
             ch = d["choices"][0]
             msg = ch["message"]
-            text = (msg.get("content") or "") + "\n" + (msg.get("reasoning_content") or "")
+            text = (
+                (msg.get("content") or "") + "\n" + (msg.get("reasoning_content") or "")
+            )
             usage = d.get("usage", {}) or {}
-            cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens",
-                                                                    usage.get("cached_tokens", 0))
+            cached = (usage.get("prompt_tokens_details") or {}).get(
+                "cached_tokens", usage.get("cached_tokens", 0)
+            )
             finish = ch.get("finish_reason")
 
             answers = parse_answers(text, len(s.needles))
@@ -439,13 +531,21 @@ def run_arm(arm: str, only: str | None = None) -> None:
                 sc = score_needle(nd.secret, answers.get(nd.slot))
                 # cross-contamination: did another slot's secret show up here?
                 sc["cross"] = next(
-                    (o.slot for o in s.needles
-                     if o.slot != nd.slot and answers.get(nd.slot)
-                     and answers[nd.slot].upper() == o.secret.upper()),
+                    (
+                        o.slot
+                        for o in s.needles
+                        if o.slot != nd.slot
+                        and answers.get(nd.slot)
+                        and answers[nd.slot].upper() == o.secret.upper()
+                    ),
                     None,
                 )
-                sc.update(slot=nd.slot, kind=nd.kind, boundary_k=nd.boundary_k,
-                          offset=nd.actual_offset)
+                sc.update(
+                    slot=nd.slot,
+                    kind=nd.kind,
+                    boundary_k=nd.boundary_k,
+                    offset=nd.actual_offset,
+                )
                 scores.append(sc)
 
             # INVALID, not WRONG. Truncation must never be scored as a miss.
@@ -458,16 +558,26 @@ def run_arm(arm: str, only: str | None = None) -> None:
             lp = ch.get("logprobs") or {}
             lp_content = lp.get("content") or []
             rec = {
-                "arm": arm, "prompt_id": s.prompt_id, "tier": s.tier_tokens,
-                "elapsed_s": round(dt, 1), "finish_reason": finish,
+                "arm": arm,
+                "prompt_id": s.prompt_id,
+                "tier": s.tier_tokens,
+                "elapsed_s": round(dt, 1),
+                "finish_reason": finish,
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "completion_tokens": usage.get("completion_tokens"),
-                "cached_tokens": cached, "invalid": invalid,
-                "answers": answers, "scores": scores,
+                "cached_tokens": cached,
+                "invalid": invalid,
+                "answers": answers,
+                "scores": scores,
                 "logprobs": [
-                    {"t": c.get("token"), "lp": c.get("logprob"),
-                     "top": [(x.get("token"), x.get("logprob"))
-                             for x in (c.get("top_logprobs") or [])]}
+                    {
+                        "t": c.get("token"),
+                        "lp": c.get("logprob"),
+                        "top": [
+                            (x.get("token"), x.get("logprob"))
+                            for x in (c.get("top_logprobs") or [])
+                        ],
+                    }
                     for c in lp_content
                 ],
                 "text_tail": text[-2000:],
@@ -475,9 +585,11 @@ def run_arm(arm: str, only: str | None = None) -> None:
             fh.write(json.dumps(rec) + "\n")
             fh.flush()
             nc = sum(1 for x in scores if x["status"] == "CORRECT")
-            print(f"  {nc}/{len(scores)} correct, finish={finish}, "
-                  f"cached={cached}, {dt:.0f}s"
-                  + (f"  INVALID: {invalid}" if invalid else ""))
+            print(
+                f"  {nc}/{len(scores)} correct, finish={finish}, "
+                f"cached={cached}, {dt:.0f}s"
+                + (f"  INVALID: {invalid}" if invalid else "")
+            )
 
 
 # --------------------------------------------------------------- analysis
@@ -487,7 +599,7 @@ def _binom_p_ge(k: int, n: int) -> float:
     """One-sided exact binomial P(X >= k | n, 0.5)."""
     if n == 0:
         return 1.0
-    return sum(math.comb(n, i) for i in range(k, n + 1)) / (2 ** n)
+    return sum(math.comb(n, i) for i in range(k, n + 1)) / (2**n)
 
 
 def _fisher_one_sided(a: int, b: int, c: int, d: int) -> float:
@@ -563,9 +675,12 @@ def analyze() -> None:
     print("=" * 72)
     print(f"trials: flag0={len(f0)} flag1={len(f1)} flag0_repeat={len(fr)}")
 
-    inv = [(a, r["prompt_id"], r["invalid"])
-           for a, m in (("flag0", f0), ("flag1", f1), ("flag0_repeat", fr))
-           for r in m.values() if r.get("invalid")]
+    inv = [
+        (a, r["prompt_id"], r["invalid"])
+        for a, m in (("flag0", f0), ("flag1", f1), ("flag0_repeat", fr))
+        for r in m.values()
+        if r.get("invalid")
+    ]
     total = len(f0) + len(f1) + len(fr)
     print(f"\nINVALID trials (excluded, NOT scored as errors): {len(inv)}/{total}")
     for a, pid, why in inv:
@@ -596,8 +711,10 @@ def analyze() -> None:
     print(f"  b (ok@flag0, wrong@flag1) = {b}")
     print(f"  c (wrong@flag0, ok@flag1) = {c}")
     print(f"  one-sided exact binomial p = {p_a:.4f}")
-    print(f"  -> {'FIRE (real regression)' if gate_a else 'no fire'}"
-          + ("" if (b + c) > 2 else "   [b+c<=2: underpowered, not evidence of safety]"))
+    print(
+        f"  -> {'FIRE (real regression)' if gate_a else 'no fire'}"
+        + ("" if (b + c) > 2 else "   [b+c<=2: underpowered, not evidence of safety]")
+    )
 
     # ---- Gate B: boundary vs interior WITHIN flag=1
     be = bt = ie = it = 0
@@ -625,7 +742,7 @@ def analyze() -> None:
     if hist:
         print("  per-boundary error histogram (k -> count):")
         for k in sorted(hist):
-            print(f"     k={k:<4} (tok {k*CHUNK:>7})  {'#' * hist[k]} {hist[k]}")
+            print(f"     k={k:<4} (tok {k * CHUNK:>7})  {'#' * hist[k]} {hist[k]}")
         print("  ^ THIS is the localization the test exists to produce.")
 
     # ---- Gate C: logit divergence vs measured noise floor
@@ -645,44 +762,62 @@ def analyze() -> None:
     if d_noise and d_flag:
         mn, mf = statistics.median(d_noise), statistics.median(d_flag)
         p_c = _mannwhitney_p(d_noise, d_flag)
-        print(f"  noise floor (flag0 vs flag0): median {mn:.5f}, max {max(d_noise):.5f}")
+        print(
+            f"  noise floor (flag0 vs flag0): median {mn:.5f}, max {max(d_noise):.5f}"
+        )
         print(f"  flag0 vs flag1            : median {mf:.5f}, max {max(d_flag):.5f}")
         print(f"  Mann-Whitney p = {p_c:.4f}")
-        print(f"  top1 agreement: noise min {min(ag_noise):.3f} | flag {min(ag_flag):.3f}")
+        print(
+            f"  top1 agreement: noise min {min(ag_noise):.3f} | flag {min(ag_flag):.3f}"
+        )
         gate_c = (mf > max(d_noise)) or (p_c <= 0.05 and mf >= 2 * mn)
         if ag_flag and ag_noise and min(ag_flag) < min(ag_noise):
             print("  top1 agreement between arms is BELOW the noise floor -> flag C")
             gate_c = True
     else:
-        print("  INSUFFICIENT DATA -- flag0_repeat arm missing. Gate C cannot be "
-              "evaluated; do NOT substitute a comparison against zero.")
+        print(
+            "  INSUFFICIENT DATA -- flag0_repeat arm missing. Gate C cannot be "
+            "evaluated; do NOT substitute a comparison against zero."
+        )
     print(f"  -> {'FIRE (numerics perturbed)' if gate_c else 'no fire'}")
 
     # ---- verdict
     print("\n" + "=" * 72)
     if gate_a and gate_b:
-        v = ("REAL BUG, LOCALIZED to specific chunk boundaries. Do NOT enable. "
-             "Fix the depth-1 fence in prefill_batched().")
+        v = (
+            "REAL BUG, LOCALIZED to specific chunk boundaries. Do NOT enable. "
+            "Fix the depth-1 fence in prefill_batched()."
+        )
     elif gate_a:
-        v = ("REAL correctness regression, NOT boundary-localized. Do NOT enable; "
-             "widen the investigation beyond the double buffer.")
+        v = (
+            "REAL correctness regression, NOT boundary-localized. Do NOT enable; "
+            "widen the investigation beyond the double buffer."
+        )
     elif gate_b:
-        v = ("REAL boundary-localized effect at sub-threshold global rate. "
-             "Do NOT enable.")
+        v = (
+            "REAL boundary-localized effect at sub-threshold global rate. "
+            "Do NOT enable."
+        )
     elif gate_c:
-        v = ("Numerics measurably perturbed; correctness impact unproven. "
-             "Do NOT enable; extend to N=24.")
+        v = (
+            "Numerics measurably perturbed; correctness impact unproven. "
+            "Do NOT enable; extend to N=24."
+        )
     elif (b + c) <= 2:
-        v = ("NO EFFECT DETECTED at this power. This is NOT 'proven safe' -- "
-             "see the minimum-detectable-effect note below.")
+        v = (
+            "NO EFFECT DETECTED at this power. This is NOT 'proven safe' -- "
+            "see the minimum-detectable-effect note below."
+        )
     else:
         v = "INCONCLUSIVE -- extend to N=24 prompts in a follow-up session."
     print(f"VERDICT: {v}")
     base = sum(1 for p in f0v for x in f0v[p]["scores"] if x["status"] != "CORRECT")
-    print(f"\nPower honesty: baseline (flag0) needle error rate = {base}/{npairs}. "
-          f"With {npairs} paired needles this design has ~80% power against an "
-          f"induced per-needle error rate of ~6-7%, and POOR power against ~1%. "
-          f"Any 'no effect' conclusion must be stated with that bound.")
+    print(
+        f"\nPower honesty: baseline (flag0) needle error rate = {base}/{npairs}. "
+        f"With {npairs} paired needles this design has ~80% power against an "
+        f"induced per-needle error rate of ~6-7%, and POOR power against ~1%. "
+        f"Any 'no effect' conclusion must be stated with that bound."
+    )
     print("=" * 72)
 
 
@@ -690,17 +825,22 @@ def analyze() -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--generate-only", action="store_true")
     ap.add_argument("--preflight", action="store_true")
     ap.add_argument("--run", action="store_true")
     ap.add_argument("--arm", choices=ARMS)
     ap.add_argument("--only", help="run a single prompt_id")
     ap.add_argument("--analyze-only", action="store_true")
-    ap.add_argument("--template-overhead", type=int, default=0,
-                    help="measured chat-template token prefix; recalibrate "
-                         "offsets after the first real prompt_tokens reading")
+    ap.add_argument(
+        "--template-overhead",
+        type=int,
+        default=0,
+        help="measured chat-template token prefix; recalibrate "
+        "offsets after the first real prompt_tokens reading",
+    )
     a = ap.parse_args()
 
     if a.generate_only:

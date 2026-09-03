@@ -170,9 +170,7 @@ class HoldingExoBatchGenerator:
             self._pending.pop(uid, None)
             self._held.pop(uid, None)
 
-    def set_prefill_cancel_probe(
-        self, probe: "Callable[[], bool] | None"
-    ) -> None:
+    def set_prefill_cancel_probe(self, probe: "Callable[[], bool] | None") -> None:
         """Match ExoBatchGenerator.set_prefill_cancel_probe's interface
         (called unconditionally by batch_generator.py's chunked-prefill
         drive setup). This fake's step() never actually drives a chunked
@@ -226,7 +224,9 @@ def _run_with_gate(monkeypatch: pytest.MonkeyPatch, max_concurrent: int):
 
     monkeypatch.setattr(mlx_builder, "load_mlx_items", make_nothin(lmi_gen()))
     monkeypatch.setattr(mlx_batch_generator, "warmup_inference", make_nothin(1))
-    monkeypatch.setattr(mlx_batch_generator, "_check_for_debug_prompts", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        mlx_batch_generator, "_check_for_debug_prompts", lambda *_a, **_k: None
+    )
     # IMPORTANT: do NOT hardcode mx_any to always return False here (that was
     # copy-pasted from test_event_ordering.py's patch_out_mlx without
     # checking its effect) -- BatchGenerator.step() gates its ENTIRE body on

@@ -23,7 +23,9 @@ class _MockMiniMaxAttn(nn.Module):
         self.v_proj = nn.Linear(hidden, kv_out, bias=False)
 
 
-def _make_attn(hidden: int = 3072, q_out: int = 3072, kv_out: int = 512) -> _MockMiniMaxAttn:
+def _make_attn(
+    hidden: int = 3072, q_out: int = 3072, kv_out: int = 512
+) -> _MockMiniMaxAttn:
     attn = _MockMiniMaxAttn(hidden, q_out, kv_out)
     mx.eval(attn.parameters())
     return attn
@@ -83,9 +85,15 @@ def test_fused_output_works_at_prefill_shapes() -> None:
 
 
 def _quantize_all(attn: _MockMiniMaxAttn, bits: int, group_size: int = 64) -> None:
-    attn.q_proj = nn.QuantizedLinear.from_linear(attn.q_proj, group_size=group_size, bits=bits)
-    attn.k_proj = nn.QuantizedLinear.from_linear(attn.k_proj, group_size=group_size, bits=bits)
-    attn.v_proj = nn.QuantizedLinear.from_linear(attn.v_proj, group_size=group_size, bits=bits)
+    attn.q_proj = nn.QuantizedLinear.from_linear(
+        attn.q_proj, group_size=group_size, bits=bits
+    )
+    attn.k_proj = nn.QuantizedLinear.from_linear(
+        attn.k_proj, group_size=group_size, bits=bits
+    )
+    attn.v_proj = nn.QuantizedLinear.from_linear(
+        attn.v_proj, group_size=group_size, bits=bits
+    )
     mx.eval(attn.parameters())
 
 

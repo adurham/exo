@@ -415,8 +415,6 @@ _ORPHAN_TOOLCALL_TAIL = re.compile(
 )
 
 
-
-
 def _orphan_toolcall_tail_match(text: str) -> re.Match[str] | None:
     """Match the orphan tool-call tail signature; None when it doesn't apply.
 
@@ -682,15 +680,19 @@ def _recover_or_fail_sentinelless_tool_call(
                             _DEGEN_PROBE_ENABLED,  # pyright: ignore[reportPrivateUsage]
                             _degen_probe_write,  # pyright: ignore[reportPrivateUsage]
                         )
+
                         if _DEGEN_PROBE_ENABLED:
                             import time as _t
-                            _degen_probe_write({
-                                "event": "orphan_tail_stripped_delivered",
-                                "shape": "bare_closer_tail",
-                                "stripped_tail": tail_text[-200:],
-                                "fence_fixup": bool(fence_fixup),
-                                "wall_ns": _t.perf_counter_ns(),
-                            })
+
+                            _degen_probe_write(
+                                {
+                                    "event": "orphan_tail_stripped_delivered",
+                                    "shape": "bare_closer_tail",
+                                    "stripped_tail": tail_text[-200:],
+                                    "fence_fixup": bool(fence_fixup),
+                                    "wall_ns": _t.perf_counter_ns(),
+                                }
+                            )
                     except Exception:
                         pass
                     logger.warning(
@@ -698,9 +700,7 @@ def _recover_or_fail_sentinelless_tool_call(
                         "content; stripped and delivered (fence_fixup="
                         f"{bool(fence_fixup)}). tail={tail_text[-160:]!r}"
                     )
-                    yield item.model_copy(
-                        update={"text": kept_text + fence_fixup}
-                    )
+                    yield item.model_copy(update={"text": kept_text + fence_fixup})
                     buffer = []
                     buffered_text = ""
                     buffer_pinned = False
@@ -719,14 +719,18 @@ def _recover_or_fail_sentinelless_tool_call(
                         _DEGEN_PROBE_ENABLED,  # pyright: ignore[reportPrivateUsage]
                         _degen_probe_write,  # pyright: ignore[reportPrivateUsage]
                     )
+
                     if _DEGEN_PROBE_ENABLED:
                         import time as _t
-                        _degen_probe_write({
-                            "event": "malformed_toolcall_cleanfail",
-                            "shape": "orphan_toolcall_tail",
-                            "buffered_tail": buffered_text[-200:],
-                            "wall_ns": _t.perf_counter_ns(),
-                        })
+
+                        _degen_probe_write(
+                            {
+                                "event": "malformed_toolcall_cleanfail",
+                                "shape": "orphan_toolcall_tail",
+                                "buffered_tail": buffered_text[-200:],
+                                "wall_ns": _t.perf_counter_ns(),
+                            }
+                        )
                 except Exception:
                     pass
                 # NOTE: loguru formats positional args with str.format(), not
@@ -769,31 +773,35 @@ def _recover_or_fail_sentinelless_tool_call(
                         _DEGEN_PROBE_ENABLED,
                         _degen_probe_write,
                     )
+
                     if _DEGEN_PROBE_ENABLED:
                         import time as _t
+
                         # Most-recent swap across any active uid (parser layer
                         # has no uid; timestamp-correlate against bs_transition).
                         _swaps: list[dict[str, Any]] = [
-                            s for s in _DEGEN_LAST_TRANSITION.values()
-                            if "wall_ns" in s
+                            s for s in _DEGEN_LAST_TRANSITION.values() if "wall_ns" in s
                         ]
                         _last_swap: dict[str, Any] | None = (
                             max(_swaps, key=lambda s: int(s["wall_ns"]))
-                            if _swaps else None
+                            if _swaps
+                            else None
                         )
                         _ms = (
-                            (_t.perf_counter_ns() - int(_last_swap["wall_ns"]))
-                            / 1e6
-                            if _last_swap else None
+                            (_t.perf_counter_ns() - int(_last_swap["wall_ns"])) / 1e6
+                            if _last_swap
+                            else None
                         )
-                        _degen_probe_write({
-                            "event": "malformed_toolcall_cleanfail",
-                            "shape": "sentinelless_toolcall",
-                            "buffered_tail": buffered_text[-200:],
-                            "ms_since_any_swap": _ms,
-                            "last_swap": _last_swap,
-                            "wall_ns": _t.perf_counter_ns(),
-                        })
+                        _degen_probe_write(
+                            {
+                                "event": "malformed_toolcall_cleanfail",
+                                "shape": "sentinelless_toolcall",
+                                "buffered_tail": buffered_text[-200:],
+                                "ms_since_any_swap": _ms,
+                                "last_swap": _last_swap,
+                                "wall_ns": _t.perf_counter_ns(),
+                            }
+                        )
                 except Exception:
                     pass
                 # ── RECOVER-FIRST ───────────────────────────────────────────
@@ -905,7 +913,11 @@ def _strip_orphan_dsml_from_content(
     """
     dsml_token = "｜DSML｜"
     for item in stream:
-        if isinstance(item, GenerationResponse) and item.text and dsml_token in item.text:
+        if (
+            isinstance(item, GenerationResponse)
+            and item.text
+            and dsml_token in item.text
+        ):
             cleaned = strip_dsml_markers(item.text)
             if cleaned == item.text:
                 yield item
@@ -1091,7 +1103,8 @@ def _parse_dsml_stream(
                 if before:
                     yield response.model_copy(update={"text": before})
                 yield _try_parse_tool_call(
-                    response.text[dsml_start:], response,
+                    response.text[dsml_start:],
+                    response,
                     confirmed_real=dsml_confirmed_real,
                 )
             else:
@@ -1337,18 +1350,22 @@ def parse_thinking_models(
                     is_thinking = not is_thinking
                 else:
                     stray_delimiter_swallows += 1
-                accumulated = accumulated[idx + len(delim):]
+                accumulated = accumulated[idx + len(delim) :]
             # Handle the remainder after the last delimiter. If it is a clean
             # (incomplete) prefix of EITHER possible next delimiter, keep it
             # buffered and wait for more; otherwise emit it with the new flag.
             if accumulated:
                 is_clean_prefix = bool(
-                    (think_start
-                     and len(accumulated) < len(think_start)
-                     and accumulated == think_start[: len(accumulated)])
-                    or (think_end
+                    (
+                        think_start
+                        and len(accumulated) < len(think_start)
+                        and accumulated == think_start[: len(accumulated)]
+                    )
+                    or (
+                        think_end
                         and len(accumulated) < len(think_end)
-                        and accumulated == think_end[: len(accumulated)])
+                        and accumulated == think_end[: len(accumulated)]
+                    )
                 )
                 if is_clean_prefix:
                     pending_buffer.append(

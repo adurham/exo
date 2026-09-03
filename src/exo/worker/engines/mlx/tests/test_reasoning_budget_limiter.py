@@ -21,6 +21,7 @@ entire generation budget and leave the answer channel empty. Once a
 still-open thinking block exceeds its token budget, the only viable next
 token is forced to be think_end_id.
 """
+
 import mlx.core as mx
 
 from exo.worker.engines.mlx.generator.generate import (
@@ -98,9 +99,7 @@ class TestReasoningBudgetLimiterBehavior:
         post-close content runs."""
         proc = make_reasoning_budget_limiter(THINK_START, THINK_END, budget_tokens=10)
         assert proc is not None
-        history = mx.array(
-            [THINK_START] + [5] * 15 + [THINK_END] + [6] * 500
-        )
+        history = mx.array([THINK_START] + [5] * 15 + [THINK_END] + [6] * 500)
         out = proc(history, _logits())
         assert not _is_forced_to_think_end(out)
 
@@ -111,9 +110,12 @@ class TestReasoningBudgetLimiterBehavior:
         proc = make_reasoning_budget_limiter(THINK_START, THINK_END, budget_tokens=10)
         assert proc is not None
         history = mx.array(
-            [THINK_START] + [1, 2, 3] + [THINK_END]
+            [THINK_START]
+            + [1, 2, 3]
+            + [THINK_END]
             + [9, 9, 9]
-            + [THINK_START] + [4] * 15
+            + [THINK_START]
+            + [4] * 15
         )
         out = proc(history, _logits())
         assert _is_forced_to_think_end(out)
@@ -124,9 +126,7 @@ class TestReasoningBudgetLimiterBehavior:
         proc = make_reasoning_budget_limiter(THINK_START, THINK_END, budget_tokens=10)
         assert proc is not None
         history = mx.array(
-            [THINK_START] + [1, 2, 3] + [THINK_END]
-            + [9] * 200
-            + [THINK_START] + [4, 5]
+            [THINK_START] + [1, 2, 3] + [THINK_END] + [9] * 200 + [THINK_START] + [4, 5]
         )
         out = proc(history, _logits())
         assert not _is_forced_to_think_end(out)
@@ -148,8 +148,11 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
         think_start_id ever appears in the generated stream, budget must
         still be enforced from the start of GENERATION."""
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END, budget_tokens=10,
-            starts_in_thinking=True, prompt_token_count=5,
+            THINK_START,
+            THINK_END,
+            budget_tokens=10,
+            starts_in_thinking=True,
+            prompt_token_count=5,
         )
         assert proc is not None
         # 5 prompt tokens (no THINK_START among them -- it's implicit/not
@@ -160,8 +163,11 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
 
     def test_starts_in_thinking_under_budget_is_noop(self):
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END, budget_tokens=10,
-            starts_in_thinking=True, prompt_token_count=5,
+            THINK_START,
+            THINK_END,
+            budget_tokens=10,
+            starts_in_thinking=True,
+            prompt_token_count=5,
         )
         assert proc is not None
         history = mx.array([100, 101, 102, 103, 104] + [5, 6, 7])
@@ -172,8 +178,11 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
         """A long prompt must not count against the reasoning budget --
         the window anchors to the start of GENERATION, not token 0."""
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END, budget_tokens=10,
-            starts_in_thinking=True, prompt_token_count=500,
+            THINK_START,
+            THINK_END,
+            budget_tokens=10,
+            starts_in_thinking=True,
+            prompt_token_count=500,
         )
         assert proc is not None
         # 500 prompt tokens + only 3 generated tokens: nowhere near budget.
@@ -185,13 +194,14 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
         """If the model DOES eventually emit a real think_end (even with no
         explicit think_start), that must still correctly close reasoning."""
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END, budget_tokens=10,
-            starts_in_thinking=True, prompt_token_count=5,
+            THINK_START,
+            THINK_END,
+            budget_tokens=10,
+            starts_in_thinking=True,
+            prompt_token_count=5,
         )
         assert proc is not None
-        history = mx.array(
-            [100, 101, 102, 103, 104] + [5, 6] + [THINK_END] + [7] * 500
-        )
+        history = mx.array([100, 101, 102, 103, 104] + [5, 6] + [THINK_END] + [7] * 500)
         out = proc(history, _logits())
         assert not _is_forced_to_think_end(out)
 
@@ -200,8 +210,11 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
         case) must behave exactly as before -- no explicit <think> seen
         means genuinely never entered thinking."""
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END, budget_tokens=10,
-            starts_in_thinking=False, prompt_token_count=5,
+            THINK_START,
+            THINK_END,
+            budget_tokens=10,
+            starts_in_thinking=False,
+            prompt_token_count=5,
         )
         assert proc is not None
         history = mx.array([100, 101, 102, 103, 104] + [5] * 50)
@@ -214,15 +227,21 @@ class TestReasoningBudgetLimiterPromptBakedInThinking:
         -- covers a model that both starts pre-opened AND later legitimately
         re-opens a second explicit block."""
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END, budget_tokens=10,
-            starts_in_thinking=True, prompt_token_count=5,
+            THINK_START,
+            THINK_END,
+            budget_tokens=10,
+            starts_in_thinking=True,
+            prompt_token_count=5,
         )
         assert proc is not None
         # Explicit close then explicit re-open, well past prompt_token_count.
         history = mx.array(
-            [100, 101, 102, 103, 104] + [1, 2] + [THINK_END]
+            [100, 101, 102, 103, 104]
+            + [1, 2]
+            + [THINK_END]
             + [9] * 200
-            + [THINK_START] + [4] * 15
+            + [THINK_START]
+            + [4] * 15
         )
         out = proc(history, _logits())
         assert _is_forced_to_think_end(out)
@@ -267,7 +286,8 @@ class TestReasoningBudgetLimiterMaxSeconds:
             lambda: fake_time[0],
         )
         proc = make_reasoning_budget_limiter(
-            THINK_START, THINK_END,
+            THINK_START,
+            THINK_END,
             budget_tokens=10_000,  # token trigger far out of reach
             max_seconds=5,
         )
@@ -336,8 +356,7 @@ class TestReasoningBudgetLimiterMaxSeconds:
         # would have exceeded max_seconds.
         fake_time[0] += 4.0
         history_reopened = mx.array(
-            [THINK_START] + [1, 2, 3] + [THINK_END] + [9] * 5
-            + [THINK_START] + [4]
+            [THINK_START] + [1, 2, 3] + [THINK_END] + [9] * 5 + [THINK_START] + [4]
         )
         out_reopened = proc(history_reopened, _logits())
         assert not _is_forced_to_think_end(out_reopened)
@@ -363,6 +382,5 @@ class TestSafeThinkTokenId:
 
     def test_returns_none_when_attribute_missing(self):
         assert (
-            safe_think_token_id(self._MissingAttrTokenizer(), "think_start_id")
-            is None
+            safe_think_token_id(self._MissingAttrTokenizer(), "think_start_id") is None
         )

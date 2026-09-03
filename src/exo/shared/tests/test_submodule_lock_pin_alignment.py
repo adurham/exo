@@ -315,7 +315,9 @@ def read_committed_gitlink(repository_root: Path, submodule_path: str) -> str:
     return sha
 
 
-def read_working_tree_dirt(repository_root: Path, submodule_path: str) -> tuple[str, ...]:
+def read_working_tree_dirt(
+    repository_root: Path, submodule_path: str
+) -> tuple[str, ...]:
     """Return porcelain status records for an initialized submodule working tree.
 
     ``git ls-tree``/``rev-parse`` only prove which COMMIT is checked out. The
@@ -422,7 +424,9 @@ def collect_lock_pin_occurrences(
                 LockPinOccurrence(
                     line_number=index,
                     sha=sha,
-                    version=inline_version if inline_version is not None else block_version,
+                    version=inline_version
+                    if inline_version is not None
+                    else block_version,
                 )
             )
 

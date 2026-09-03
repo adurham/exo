@@ -80,9 +80,7 @@ class MlxBuilder(Builder):
         # so no roll ever costs a model load.
         _fresh = os.environ.get("MLX_JACCL_RECONNECT_FRESH") == "1"
         attempts = int(
-            os.environ.get(
-                "EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "3" if _fresh else "1"
-            )
+            os.environ.get("EXO_JACCL_CONNECT_PROBE_ATTEMPTS", "3" if _fresh else "1")
         )
         for attempt in range(attempts + 1):
             try:

@@ -113,7 +113,22 @@ class TestDetectTokenLoop:
         the real failure's period). max_period/window were widened
         specifically so this class is caught."""
         # The actual confirmed token ids for " So N = 1,234,567,891,011."
-        cycle = [3016, 471, 438, 223, 19, 14, 14456, 14, 25601, 14, 31444, 14, 13407, 16]
+        cycle = [
+            3016,
+            471,
+            438,
+            223,
+            19,
+            14,
+            14456,
+            14,
+            25601,
+            14,
+            31444,
+            14,
+            13407,
+            16,
+        ]
         ids = cycle * 20
         result = _detect_token_loop(ids)
         assert result is not None, (
@@ -163,7 +178,9 @@ class TestDegenerationErrorSurfacing:
             finish_reason="error",
             usage=None,
         )
-        chunk = map_responses_to_chunks(resp, ModelId("mlx-community/DeepSeek-V4-Flash"))
+        chunk = map_responses_to_chunks(
+            resp, ModelId("mlx-community/DeepSeek-V4-Flash")
+        )
         assert isinstance(chunk, ErrorChunk)
         # The diagnostic is carried as the error message; the degenerate partial
         # is never surfaced as displayable content.

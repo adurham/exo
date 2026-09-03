@@ -32,43 +32,60 @@ def _gen_batched_fused_gqa_proj_source(K, N_Q, N_GATE, N_K, N_V, B, group_size=6
     N_K_TG = ceil_div(N_K, 8)
 
     # Per-batch x loading
-    x_load = "\n".join(f"""
+    x_load = "\n".join(
+        f"""
         float x{b}_thread[VALUES_PER_THREAD]; float xsum{b} = 0;
         for (int i = 0; i < VALUES_PER_THREAD; i++) {{
             float xi = float(x[{b} * K + x_base + i]); x{b}_thread[i] = xi; xsum{b} += xi;
-        }}""" for b in range(B))
+        }}"""
+        for b in range(B)
+    )
 
     # Per-batch qdot (weights in registers)
-    qdot = "\n".join(f"""
+    qdot = "\n".join(
+        f"""
             float accum{b} = 0;
             for (int i = 0; i < VALUES_PER_THREAD; i++) accum{b} += x{b}_thread[i] * w_vals[i];
-            result{b}[row] += s_val * accum{b} + xsum{b} * b_val;""" for b in range(B))
+            result{b}[row] += s_val * accum{b} + xsum{b} * b_val;"""
+        for b in range(B)
+    )
 
     result_decls = " ".join(f"float result{b}[4] = {{0,0,0,0}};" for b in range(B))
     simd_reduce = "\n    ".join(
-        f"for (int row = 0; row < 4; row++) result{b}[row] = simd_sum(result{b}[row]);" for b in range(B))
+        f"for (int row = 0; row < 4; row++) result{b}[row] = simd_sum(result{b}[row]);"
+        for b in range(B)
+    )
 
     # Queries epilogue (bf16 write per batch)
-    q_write = "\n".join(f"""
+    q_write = "\n".join(
+        f"""
             if (slid < 4u && q_row < N_Q) q_out[{b} * N_Q + q_row] = static_cast<bfloat16_t>(result{b}[slid]);"""
-        for b in range(B))
+        for b in range(B)
+    )
 
     # Gate epilogue (sigmoid → f32 per batch)
-    gate_write = "\n".join(f"""
+    gate_write = "\n".join(
+        f"""
             if (slid < 4u && g_row < N_GATE) {{
                 float sig{b} = 1.0f / (1.0f + metal::exp(-result{b}[slid]));
                 gate_out[{b} * N_GATE + g_row] = sig{b};
-            }}""" for b in range(B))
+            }}"""
+        for b in range(B)
+    )
 
     # Keys epilogue
-    k_write = "\n".join(f"""
+    k_write = "\n".join(
+        f"""
             if (slid < 4u && k_row < N_K) k_out[{b} * N_K + k_row] = static_cast<bfloat16_t>(result{b}[slid]);"""
-        for b in range(B))
+        for b in range(B)
+    )
 
     # Values epilogue
-    v_write = "\n".join(f"""
+    v_write = "\n".join(
+        f"""
             if (slid < 4u && v_row < N_V) v_out[{b} * N_V + v_row] = static_cast<bfloat16_t>(result{b}[slid]);"""
-        for b in range(B))
+        for b in range(B)
+    )
 
     N_V_val = N_TOTAL - N_Q - N_GATE - N_K
 
@@ -161,13 +178,16 @@ def _get_batched_proj_kernel(K, N_Q, N_GATE, N_K, N_V, B, group_size=64):
             name=f"batched_fused_gqa_proj_K{K}_NQ{N_Q}_B{B}",
             input_names=["x", "W_merged", "S_merged", "B_merged"],
             output_names=["q_out", "gate_out", "k_out", "v_out"],
-            source=_gen_batched_fused_gqa_proj_source(K, N_Q, N_GATE, N_K, N_V, B, group_size).replace("bfloat16_t", METAL_HALF_TYPE),
+            source=_gen_batched_fused_gqa_proj_source(
+                K, N_Q, N_GATE, N_K, N_V, B, group_size
+            ).replace("bfloat16_t", METAL_HALF_TYPE),
         )
     return _batched_proj_cache[key]
 
 
-def batched_fused_gqa_projections(x, W_merged, S_merged, B_merged, proj_dims,
-                                   batch_size, total_tg=None):
+def batched_fused_gqa_projections(
+    x, W_merged, S_merged, B_merged, proj_dims, batch_size, total_tg=None
+):
     """Batched fused GQA projections with register weight sharing.
 
     Args:
@@ -187,21 +207,28 @@ def batched_fused_gqa_projections(x, W_merged, S_merged, B_merged, proj_dims,
     kern = _get_batched_proj_kernel(K, N_Q, N_GATE, N_K, N_V, B)
 
     if total_tg is None:
-        total_tg = ceil_div(N_Q, 8) + ceil_div(N_GATE, 8) + ceil_div(N_K, 8) + ceil_div(N_V, 8)
+        total_tg = (
+            ceil_div(N_Q, 8) + ceil_div(N_GATE, 8) + ceil_div(N_K, 8) + ceil_div(N_V, 8)
+        )
 
     x_flat = x.reshape(B, K)
 
     results = kern(
         inputs=[x_flat, W_merged, S_merged, B_merged],
         output_shapes=[
-            (B * N_Q,), (B * N_GATE,), (B * N_K,), (B * N_V,),
+            (B * N_Q,),
+            (B * N_GATE,),
+            (B * N_K,),
+            (B * N_V,),
         ],
         output_dtypes=[COMPUTE_DTYPE, mx.float32, COMPUTE_DTYPE, COMPUTE_DTYPE],
         grid=(32, total_tg * 2, 1),
         threadgroup=(32, 2, 1),
     )
 
-    return (results[0].reshape(B, 1, N_Q),
-            results[1].reshape(B, 1, N_GATE),
-            results[2].reshape(B, 1, N_K),
-            results[3].reshape(B, 1, N_V))
+    return (
+        results[0].reshape(B, 1, N_Q),
+        results[1].reshape(B, 1, N_GATE),
+        results[2].reshape(B, 1, N_K),
+        results[3].reshape(B, 1, N_V),
+    )

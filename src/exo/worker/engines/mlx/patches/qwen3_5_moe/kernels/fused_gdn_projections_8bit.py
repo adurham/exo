@@ -202,22 +202,32 @@ def _get_fused_gdn_proj_kernel(K, N_QKV, N_Z, N_B, N_A, group_size=64):
             name=f"fused_gdn_proj_K{K}_NQKV{N_QKV}_NZ{N_Z}_NB{N_B}_NA{N_A}",
             input_names=[
                 "x",
-                "W_merged", "S_merged", "B_merged",
-                "conv_state", "conv_w",
-                "A_log_arr", "dt_bias_arr",
+                "W_merged",
+                "S_merged",
+                "B_merged",
+                "conv_state",
+                "conv_w",
+                "A_log_arr",
+                "dt_bias_arr",
             ],
             output_names=["qkv_out", "z_silu_out", "b_out", "a_out", "conv_state_out"],
-            source=_gen_fused_gdn_projections_source(K, N_QKV, N_Z, N_B, N_A, group_size).replace("bfloat16_t", METAL_HALF_TYPE),
+            source=_gen_fused_gdn_projections_source(
+                K, N_QKV, N_Z, N_B, N_A, group_size
+            ).replace("bfloat16_t", METAL_HALF_TYPE),
         )
     return _fused_gdn_proj_cache[key]
 
 
 def fused_gdn_projections(
     x,
-    W_merged, S_merged, B_merged,
+    W_merged,
+    S_merged,
+    B_merged,
     proj_dims,
-    conv_state, conv_weights,
-    A_log, dt_bias,
+    conv_state,
+    conv_weights,
+    A_log,
+    dt_bias,
     batch_size=1,
 ):
     """Fused GDN projections: 4 GEMVs + conv1d + activations + g/beta.
@@ -259,24 +269,36 @@ def fused_gdn_projections(
     N_A_TG = ceil_div(N_A, 8)
     total_tg = N_QKV_TG + N_Z_TG + N_B_TG + N_A_TG
 
-    conv_w_flat = conv_weights.reshape(-1, 4) if conv_weights.ndim == 3 else conv_weights
+    conv_w_flat = (
+        conv_weights.reshape(-1, 4) if conv_weights.ndim == 3 else conv_weights
+    )
     x_flat = x.reshape(B, K)
 
     results = kern(
         inputs=[
             x_flat,
-            W_merged, S_merged, B_merged,
-            conv_state, conv_w_flat,
-            A_log, dt_bias,
+            W_merged,
+            S_merged,
+            B_merged,
+            conv_state,
+            conv_w_flat,
+            A_log,
+            dt_bias,
         ],
         output_shapes=[
-            (B * N_QKV,),              # qkv_out
-            (B * N_Z,),                # z_silu_out
-            (B * N_B,),                # beta_out (f32)
-            (B * N_A,),                # g_out (f32)
-            (B * 3 * N_QKV,),          # conv_state_out
+            (B * N_QKV,),  # qkv_out
+            (B * N_Z,),  # z_silu_out
+            (B * N_B,),  # beta_out (f32)
+            (B * N_A,),  # g_out (f32)
+            (B * 3 * N_QKV,),  # conv_state_out
         ],
-        output_dtypes=[COMPUTE_DTYPE, mx.float32, mx.float32, mx.float32, COMPUTE_DTYPE],
+        output_dtypes=[
+            COMPUTE_DTYPE,
+            mx.float32,
+            mx.float32,
+            mx.float32,
+            COMPUTE_DTYPE,
+        ],
         grid=(32, total_tg * 2, B),
         threadgroup=(32, 2, 1),
     )

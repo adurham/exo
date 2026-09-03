@@ -96,7 +96,9 @@ def _get_fused_qk_rmsnorm_kernel():
             name="fused_qk_rmsnorm",
             input_names=["qkv"],
             output_names=["qk_out"],
-            source=_gen_fused_qk_rmsnorm_source().replace("bfloat16_t", METAL_HALF_TYPE),
+            source=_gen_fused_qk_rmsnorm_source().replace(
+                "bfloat16_t", METAL_HALF_TYPE
+            ),
         )
     return _fused_qk_rmsnorm_kernel
 

@@ -62,6 +62,7 @@ from exo.worker.runner.diagnostics import (
 PREFILL_TIMEOUT_SECONDS = 60
 DECODE_TIMEOUT_SECONDS = 5
 
+
 # Hang watchdog: if a runner has in-progress work but emits NO event (prefill
 # progress, generated token, status update) for this long, it is presumed hung
 # — the c>=2 degen-kill / GPU-timeout wedge spins a runner at 100% CPU inside a
@@ -112,6 +113,7 @@ def _process_is_stopped_or_traced(pid: int) -> bool:
     # BSD state field: first char is the primary state; on macOS a 'T' anywhere
     # in the flag string means stopped/traced. Empty output = process gone.
     return "T" in state
+
 
 # Companion watchdog for the PRE-serving phase. _check_hang only fires once a
 # task is in_progress, so a runner wedged during connect/load — e.g. the jaccl

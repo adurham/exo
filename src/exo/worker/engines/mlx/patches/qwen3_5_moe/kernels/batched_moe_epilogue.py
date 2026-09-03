@@ -8,6 +8,7 @@ Computes per batch element:
 Grid z = B (one set of threads per batch element).
 All constants baked into Metal source.
 """
+
 import mlx.core as mx
 
 from ..common import COMPUTE_DTYPE, METAL_HALF_TYPE
@@ -54,13 +55,16 @@ def _get_batched_epilogue_kernel(K, n_active, B):
             name=f"batched_epilogue_K{K}_na{n_active}_B{B}",
             input_names=["D_routed", "D_shared", "scores", "H", "gate_raw"],
             output_names=["Y"],
-            source=_gen_batched_epilogue_source(K, n_active, B).replace("bfloat16_t", METAL_HALF_TYPE),
+            source=_gen_batched_epilogue_source(K, n_active, B).replace(
+                "bfloat16_t", METAL_HALF_TYPE
+            ),
         )
     return _batched_epilogue_cache[key]
 
 
-def batched_moe_epilogue(d_routed, d_shared, scores, h, gate_raw,
-                          k_val, batch_size, n_active):
+def batched_moe_epilogue(
+    d_routed, d_shared, scores, h, gate_raw, k_val, batch_size, n_active
+):
     """Batched MoE epilogue with fused sigmoid.
 
     Args:

@@ -131,9 +131,7 @@ def test_process_is_stopped_or_traced_calls_ps_with_expected_args(
     short timeout so it can't wedge the watchdog loop."""
     calls: list[list[str]] = []
     kwargs: list[dict[str, object]] = []
-    _install_fake_ps(
-        monkeypatch, stdout=b"R\n", capture=calls, capture_kwargs=kwargs
-    )
+    _install_fake_ps(monkeypatch, stdout=b"R\n", capture=calls, capture_kwargs=kwargs)
 
     _ = _process_is_stopped_or_traced(4242)
 

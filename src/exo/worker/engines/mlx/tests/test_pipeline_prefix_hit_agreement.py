@@ -133,9 +133,7 @@ def test_group_none_passthrough() -> None:
 
 def test_group_size_one_passthrough() -> None:
     group = _FakeGroup(0, 1)
-    assert (
-        pipeline_agree_prefix_hit_length(999, cast(Any, group), 1) == 999
-    )
+    assert pipeline_agree_prefix_hit_length(999, cast(Any, group), 1) == 999
 
 
 def test_two_rank_unanimous_agreement() -> None:
@@ -193,7 +191,9 @@ def test_tag_mismatch_raises_on_receiving_rank() -> None:
         group = _FakeGroup(1, 2)
         try:
             results[1] = pipeline_agree_prefix_hit_length(
-                100, cast(Any, group), request_tag=999  # mismatched tag
+                100,
+                cast(Any, group),
+                request_tag=999,  # mismatched tag
             )
         except BaseException as e:  # noqa: BLE001
             results[1] = e

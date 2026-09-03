@@ -40,7 +40,10 @@ from mlx.nn.layers.distributed import (
 # expose ``weight`` (and ``scales`` / ``biases`` for the quantised pair)
 # at the right per-rank shape — concat-along-output-dim works identically.
 _BF16_LINEAR_TYPES: tuple[type, ...] = (nn.Linear, AllToShardedLinear)
-_QUANT_LINEAR_TYPES: tuple[type, ...] = (nn.QuantizedLinear, QuantizedAllToShardedLinear)
+_QUANT_LINEAR_TYPES: tuple[type, ...] = (
+    nn.QuantizedLinear,
+    QuantizedAllToShardedLinear,
+)
 
 # Sentinel attributes set on the attention module after a successful
 # install. ``WrappedMiniMaxAttention`` checks ``_INSTALLED_ATTR`` on each
@@ -72,9 +75,7 @@ def install_fused_qkv(attn: nn.Module) -> bool:
     k_proj = getattr(attn, "k_proj", None)
     v_proj = getattr(attn, "v_proj", None)
     if q_proj is None or k_proj is None or v_proj is None:
-        logger.warning(
-            "install_fused_qkv: attn missing q_proj/k_proj/v_proj; skipping"
-        )
+        logger.warning("install_fused_qkv: attn missing q_proj/k_proj/v_proj; skipping")
         return False
 
     # Refuse biases — MiniMax is bias=False, and merging a bias would

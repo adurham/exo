@@ -55,7 +55,7 @@ def _vanilla_gdn_call(self, inputs, mask, cache):
         qkv = mx.where(mask[..., None], qkv, 0)
     conv_input = mx.concatenate([conv_state, qkv], axis=1)
     if cache is not None:
-        cache[0] = conv_input[:, -(self.conv_kernel_size - 1):]
+        cache[0] = conv_input[:, -(self.conv_kernel_size - 1) :]
     conv_out = nn.silu(self.conv1d(conv_input))
 
     q, k, v = [
@@ -70,17 +70,19 @@ def _vanilla_gdn_call(self, inputs, mask, cache):
 
     state = cache[1] if cache else None
     inv_scale = k.shape[-1] ** -0.5
-    q = inv_scale * q * mx.rsqrt(
-        (q * q).sum(axis=-1, keepdims=True) + 1e-6
-    )
-    k = k * mx.rsqrt(
-        (k * k).sum(axis=-1, keepdims=True) + 1e-6
-    )
+    q = inv_scale * q * mx.rsqrt((q * q).sum(axis=-1, keepdims=True) + 1e-6)
+    k = k * mx.rsqrt((k * k).sum(axis=-1, keepdims=True) + 1e-6)
 
     out, state = gated_delta_update(
-        q, k, v, a, b,
-        self.A_log, self.dt_bias,
-        state, mask,
+        q,
+        k,
+        v,
+        a,
+        b,
+        self.A_log,
+        self.dt_bias,
+        state,
+        mask,
         use_kernel=True,
     )
 
@@ -134,10 +136,14 @@ def _fused_gdn_call(
     # ── Dispatch 2: fused projections (merged GEMV + conv + SiLU + g/beta) ──
     qkv_conv_silu, z_silu, beta, g, conv_state_out = fused_gdn_projections(
         inputs,
-        self._merged_proj_w, self._merged_proj_s, self._merged_proj_b,
+        self._merged_proj_w,
+        self._merged_proj_s,
+        self._merged_proj_b,
         self._merged_proj_dims,
-        conv_state, self.conv1d.weight,
-        self.A_log, self.dt_bias,
+        conv_state,
+        self.conv1d.weight,
+        self.A_log,
+        self.dt_bias,
         batch_size=B,
     )
 
@@ -148,9 +154,11 @@ def _fused_gdn_call(
     qk_normed = fused_qk_rmsnorm(qkv_conv_silu, batch_size=B)
 
     # ── Split q, k from normed output; v from conv output ──
-    q = qk_normed[:, :, :self.key_dim].reshape(B, S, self.num_k_heads, self.head_k_dim)
-    k = qk_normed[:, :, self.key_dim:].reshape(B, S, self.num_k_heads, self.head_k_dim)
-    v = qkv_conv_silu[:, :, 2 * self.key_dim:].reshape(B, S, self.num_v_heads, self.head_v_dim)
+    q = qk_normed[:, :, : self.key_dim].reshape(B, S, self.num_k_heads, self.head_k_dim)
+    k = qk_normed[:, :, self.key_dim :].reshape(B, S, self.num_k_heads, self.head_k_dim)
+    v = qkv_conv_silu[:, :, 2 * self.key_dim :].reshape(
+        B, S, self.num_v_heads, self.head_v_dim
+    )
 
     # ── Dispatch 4: GDN recurrence with pre-computed g/beta ──
     state = cache[1] if cache else None
@@ -161,7 +169,13 @@ def _fused_gdn_call(
         )
 
     out, state_new = gated_delta_kernel(
-        q, k, v, g, beta, state, mask,
+        q,
+        k,
+        v,
+        g,
+        beta,
+        state,
+        mask,
     )
 
     if cache is not None:

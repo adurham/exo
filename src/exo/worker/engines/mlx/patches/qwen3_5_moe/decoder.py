@@ -70,7 +70,7 @@ def _vanilla_decoder_call(self, x, mask=None, cache=None):
     """
     if self.is_linear:
         attn = self.linear_attn
-        if hasattr(attn, '_prefill_ba_w') and x.shape[1] > 1:
+        if hasattr(attn, "_prefill_ba_w") and x.shape[1] > 1:
             r = _fused_prefill_gdn_call(attn, self.input_layernorm(x), mask, cache)
         else:
             r = attn(self.input_layernorm(x), mask, cache)
@@ -135,9 +135,15 @@ def _fused_prefill_gdn_call(self, inputs, mask=None, cache=None):
     k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
 
     out, state = gated_delta_update(
-        q, k, v, a, b,
-        self.A_log, self.dt_bias,
-        state, mask,
+        q,
+        k,
+        v,
+        a,
+        b,
+        self.A_log,
+        self.dt_bias,
+        state,
+        mask,
         use_kernel=True,
     )
 
@@ -184,12 +190,10 @@ def _pre_oproj_attention_call(self, x, mask=None, cache=None):
     gate = gate.reshape(B, L, -1)
     keys, values = self.k_proj(x), self.v_proj(x)
     queries = self.q_norm(queries).transpose(0, 2, 1, 3)
-    keys = self.k_norm(
-        keys.reshape(B, L, self.num_key_value_heads, -1)
-    ).transpose(0, 2, 1, 3)
-    values = values.reshape(B, L, self.num_key_value_heads, -1).transpose(
+    keys = self.k_norm(keys.reshape(B, L, self.num_key_value_heads, -1)).transpose(
         0, 2, 1, 3
     )
+    values = values.reshape(B, L, self.num_key_value_heads, -1).transpose(0, 2, 1, 3)
     if cache is not None:
         queries = self.rope(queries, offset=cache.offset)
         keys = self.rope(keys, offset=cache.offset)
@@ -199,6 +203,7 @@ def _pre_oproj_attention_call(self, x, mask=None, cache=None):
         keys = self.rope(keys)
 
     from mlx_lm.models.qwen3_next import scaled_dot_product_attention
+
     output = scaled_dot_product_attention(
         queries, keys, values, cache=cache, scale=self.scale, mask=mask
     )
@@ -261,9 +266,15 @@ def _pre_oproj_qwen35_linear_attn_call(
     k = inv_scale * mx.fast.rms_norm(k, None, 1e-6)
 
     out, state = gated_delta_update(
-        q, k, v, a, b,
-        self.A_log, self.dt_bias,
-        state, mask,
+        q,
+        k,
+        v,
+        a,
+        b,
+        self.A_log,
+        self.dt_bias,
+        state,
+        mask,
         use_kernel=True,
     )
 

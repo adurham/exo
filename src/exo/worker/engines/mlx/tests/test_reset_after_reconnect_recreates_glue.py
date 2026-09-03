@@ -116,9 +116,7 @@ class _RankGroupStub:
         return 2
 
 
-def test_reset_after_reconnect_recreates_rank0_glue_dropping_admitted_request() -> (
-    None
-):
+def test_reset_after_reconnect_recreates_rank0_glue_dropping_admitted_request() -> None:
     """THE regression test for the real 2026-08-09 crash: an admitted,
     steadily-decoding request (never itself in chunk-drive prefill)
     must be genuinely dropped by reset_after_reconnect() -- not left

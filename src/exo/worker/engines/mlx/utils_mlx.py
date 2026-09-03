@@ -678,7 +678,7 @@ def _overlay_dsv4_dedicated_mtp(model: Any, model_path: Path) -> None:
     raw = mx.load(sf)
     # Strip the decoder. prefix → matches DeepseekV4MTPModule's own param tree.
     remap = {
-        (k[len("decoder."):] if k.startswith("decoder.") else k): v
+        (k[len("decoder.") :] if k.startswith("decoder.") else k): v
         for k, v in raw.items()
     }
 
@@ -825,7 +825,7 @@ def _overlay_dsv4_dspark(model: Any) -> None:
         st, rest = m.group(1), m.group(2)
         for pre, dst in _specials.items():
             if rest == pre or rest.startswith(pre + "."):
-                return dst + rest[len(pre):]
+                return dst + rest[len(pre) :]
         return f"stages.{st}.{rest}"
 
     weights = {_remap(k): v for k, v in raw.items()}
@@ -845,7 +845,11 @@ def _overlay_dsv4_dspark(model: Any) -> None:
         n_groups = int(v.shape[-1])
         for cand_bits in (4, 8):
             in_features = in_packed * (32 // cand_bits)
-            if n_groups and in_features % n_groups == 0 and in_features // n_groups == 32:
+            if (
+                n_groups
+                and in_features % n_groups == 0
+                and in_features // n_groups == 32
+            ):
                 schemes[base] = {
                     "group_size": 32,
                     "bits": cand_bits,
@@ -872,7 +876,10 @@ def _overlay_dsv4_dspark(model: Any) -> None:
         f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
     )
     _log_dspark_load_guard(
-        mod, inner, provenance="local", source=str(head_dir),
+        mod,
+        inner,
+        provenance="local",
+        source=str(head_dir),
         serving_model_path=None,
     )
 
@@ -928,9 +935,7 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
     if not index_path.exists():
         raise RuntimeError(f"no model.safetensors.index.json at {model_path}")
     weight_map = _json.loads(index_path.read_text())["weight_map"]
-    mtp_shards = sorted(
-        {v for k, v in weight_map.items() if k.startswith("mtp.")}
-    )
+    mtp_shards = sorted({v for k, v in weight_map.items() if k.startswith("mtp.")})
     if not mtp_shards:
         raise RuntimeError(
             f"checkpoint at {model_path} has no mtp.* weights — "
@@ -952,9 +957,7 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
     sanitized = _DSv4Model.sanitize(
         _SanitizeSelf(inner.args), mtp_only, n_mtp_override=n_stages
     )
-    mtp_sanitized = {
-        k: v for k, v in sanitized.items() if k.startswith("model.mtp.")
-    }
+    mtp_sanitized = {k: v for k, v in sanitized.items() if k.startswith("model.mtp.")}
 
     _specials = {
         "main_proj": "main_proj",
@@ -971,7 +974,7 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
         st, rest = m.group(1), m.group(2)
         for pre, dst in _specials.items():
             if rest == pre or rest.startswith(pre + "."):
-                return dst + rest[len(pre):]
+                return dst + rest[len(pre) :]
         return f"stages.{st}.{rest}"
 
     weights = {_remap(k): v for k, v in mtp_sanitized.items()}
@@ -995,7 +998,11 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
         n_groups = int(v.shape[-1])
         for cand_bits in (4, 8):
             in_features = in_packed * (32 // cand_bits)
-            if n_groups and in_features % n_groups == 0 and in_features // n_groups == 32:
+            if (
+                n_groups
+                and in_features % n_groups == 0
+                and in_features // n_groups == 32
+            ):
                 schemes[base] = {
                     "group_size": 32,
                     "bits": cand_bits,
@@ -1029,10 +1036,12 @@ def _overlay_dsv4_dspark_native(model: Any, model_path: Path) -> None:
         f"block_size={mod.block_size}, taps={mod.target_layer_ids})."
     )
     _log_dspark_load_guard(
-        mod, inner, provenance="native", source=str(model_path),
+        mod,
+        inner,
+        provenance="native",
+        source=str(model_path),
         serving_model_path=str(model_path),
     )
-
 
 
 def _log_dspark_load_guard(
@@ -1078,10 +1087,7 @@ def _log_dspark_load_guard(
 
         loaded = {k for k, _ in tree_flatten(mod.parameters())}
         expected = {
-            k
-            for k, _ in tree_flatten(
-                DeepseekV4DSparkModule(inner.args).parameters()
-            )
+            k for k, _ in tree_flatten(DeepseekV4DSparkModule(inner.args).parameters())
         }
         missing = expected - loaded
         extra = loaded - expected
@@ -1565,7 +1571,7 @@ def apply_chat_template(
     task_params: TextGenerationTaskParams,
 ) -> str:
     messages: list[dict[str, ChatTemplateValue]] = []
-    
+
     def _flatten_content(content: Any) -> Any:
         if isinstance(content, list):
             text_parts = []
@@ -1579,7 +1585,9 @@ def apply_chat_template(
         # Use pre-formatted messages that preserve tool_calls, thinking, etc.
         for msg in task_params.chat_template_messages:
             flattened_msg = msg.copy()
-            if "content" in flattened_msg and isinstance(flattened_msg["content"], list):
+            if "content" in flattened_msg and isinstance(
+                flattened_msg["content"], list
+            ):
                 flattened_msg["content"] = _flatten_content(flattened_msg["content"])
             messages.append(flattened_msg)
     else:
@@ -1592,7 +1600,9 @@ def apply_chat_template(
             if not msg.content:
                 logger.warning("Received message with empty content, skipping")
                 continue
-            messages.append({"role": msg.role, "content": _flatten_content(msg.content)})
+            messages.append(
+                {"role": msg.role, "content": _flatten_content(msg.content)}
+            )
 
     prompt = render_chat_template(tokenizer, messages, task_params)
     logger.debug(prompt)
@@ -1990,9 +2000,7 @@ def pipeline_agree_prefix_hit_length(
         mx.eval(sent)
 
     def _recv(src: int) -> tuple[int, int]:
-        wire = mx.distributed.recv_like(
-            mx.zeros(3, dtype=mx.int32), src, group=group
-        )
+        wire = mx.distributed.recv_like(mx.zeros(3, dtype=mx.int32), src, group=group)
         mx.eval(wire)
         raw = cast(list[int], wire.tolist())
         tag, min_v, max_v = (int(v) for v in raw)
@@ -2296,7 +2304,9 @@ def mx_all_gather_tasks(
     # slot in the gather output (transport bug); if they match, the
     # corruption is in our local Python state (rare).
     if max_tasks > 1024:
-        local_vs_received = all_counts[my_rank] if my_rank < len(all_counts) else "<oob>"
+        local_vs_received = (
+            all_counts[my_rank] if my_rank < len(all_counts) else "<oob>"
+        )
         raise RuntimeError(
             f"mx_all_gather_tasks: implausible max_tasks={max_tasks} from "
             f"all_counts={all_counts!r} (rank={my_rank}, local n_tasks={n_tasks}, "

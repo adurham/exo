@@ -62,6 +62,7 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
     import os as _os
     import sys as _sys
     import time as _time
+
     _gpu_probe = bool(_os.environ.get("MLX_GPU_TIME"))
     if _gpu_probe:
         _gpu_log_every = int(_os.environ.get("MLX_GPU_TIME_LOG_EVERY", "32"))
@@ -168,6 +169,7 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
         _t_step_end = _time.perf_counter()
         _wall_ns = int((_t_step_end - _wall_start) * 1e9)
         _gpu_ns_delta = mx.metal.gpu_time_ns() - _gpu_ns_start
+
         def _ns(a: float, b: float) -> int:
             return int((b - a) * 1e9)
 
@@ -182,18 +184,33 @@ def _patched_step(self: GenerationBatch) -> tuple[list[int], list[mx.array]]:
         self._gpu_probe_cnt = cnt
         self._gpu_probe_sum_wall = getattr(self, "_gpu_probe_sum_wall", 0) + _wall_ns
         self._gpu_probe_sum_gpu = getattr(self, "_gpu_probe_sum_gpu", 0) + _gpu_ns_delta
-        self._gpu_probe_sum_pre_fwd = getattr(self, "_gpu_probe_sum_pre_fwd", 0) + _pre_fwd_ns
-        self._gpu_probe_sum_fwd_build = getattr(self, "_gpu_probe_sum_fwd_build", 0) + _fwd_build_ns
-        self._gpu_probe_sum_sample = getattr(self, "_gpu_probe_sum_sample", 0) + _sample_build_ns
+        self._gpu_probe_sum_pre_fwd = (
+            getattr(self, "_gpu_probe_sum_pre_fwd", 0) + _pre_fwd_ns
+        )
+        self._gpu_probe_sum_fwd_build = (
+            getattr(self, "_gpu_probe_sum_fwd_build", 0) + _fwd_build_ns
+        )
+        self._gpu_probe_sum_sample = (
+            getattr(self, "_gpu_probe_sum_sample", 0) + _sample_build_ns
+        )
         self._gpu_probe_sum_async = getattr(self, "_gpu_probe_sum_async", 0) + _async_ns
-        self._gpu_probe_sum_eval = getattr(self, "_gpu_probe_sum_eval", 0) + _eval_block_ns
-        self._gpu_probe_sum_post = getattr(self, "_gpu_probe_sum_post", 0) + _post_eval_ns
+        self._gpu_probe_sum_eval = (
+            getattr(self, "_gpu_probe_sum_eval", 0) + _eval_block_ns
+        )
+        self._gpu_probe_sum_post = (
+            getattr(self, "_gpu_probe_sum_post", 0) + _post_eval_ns
+        )
         if cnt % _gpu_log_every == 0:
+
             def avg(x: float) -> float:
                 return x / cnt / 1e6
 
             B = inputs.shape[0] if hasattr(inputs, "shape") else len(inputs)
-            pct = (self._gpu_probe_sum_gpu / self._gpu_probe_sum_wall * 100.0) if self._gpu_probe_sum_wall > 0 else 0.0
+            pct = (
+                (self._gpu_probe_sum_gpu / self._gpu_probe_sum_wall * 100.0)
+                if self._gpu_probe_sum_wall > 0
+                else 0.0
+            )
             _sys.stderr.write(
                 f"[GPU_TIME pid={_os.getpid()}] "
                 f"steps={cnt} B={B} "

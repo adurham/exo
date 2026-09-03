@@ -66,7 +66,7 @@ def apply_qwen35_batched_fused_patches(model: nn.Module) -> None:
                     n_gqa += 1
 
                 if (li + 1) % 10 == 0 or li == 0:
-                    logger.info(f"  Patched layer {li+1}/{n_layers}")
+                    logger.info(f"  Patched layer {li + 1}/{n_layers}")
     except Exception as e:  # noqa: BLE001
         logger.warning(
             f"Qwen3.5 batched fused weight-prep failed on layer {li}: {e}. "

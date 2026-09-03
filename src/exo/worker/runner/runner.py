@@ -628,6 +628,7 @@ class Runner:
         # Helps separate generator.step() wall from send_chunk + queue
         # overhead between cycles.
         import os as _os
+
         _runner_probe = bool(_os.environ.get("MLX_GPU_TIME"))
         _probe_log_every = int(_os.environ.get("MLX_GPU_TIME_LOG_EVERY", "32"))
         _probe_cycle_count = 0
@@ -783,9 +784,9 @@ class Runner:
                     sys.stderr.write(
                         f"[RUNNER_LOOP pid={_os.getpid()}] "
                         f"cycles={n} ntasks={_n_results_this_cycle} "
-                        f"avg_step_ms={_probe_sum_step_ns/n/1e6:.2f} "
-                        f"avg_send_ms={_probe_sum_send_ns/n/1e6:.2f} "
-                        f"avg_total_ms={_probe_sum_total_ns/n/1e6:.2f}\n"
+                        f"avg_step_ms={_probe_sum_step_ns / n / 1e6:.2f} "
+                        f"avg_send_ms={_probe_sum_send_ns / n / 1e6:.2f} "
+                        f"avg_total_ms={_probe_sum_total_ns / n / 1e6:.2f}\n"
                     )
                     sys.stderr.flush()
 

@@ -265,7 +265,9 @@ class Worker:
                         )
                     else:
                         if repo_url:
-                            logger.info(f"P2P download available for {model_id} from {repo_url}")
+                            logger.info(
+                                f"P2P download available for {model_id} from {repo_url}"
+                            )
                         await self.download_command_sender.send(
                             ForwarderDownloadCommand(
                                 origin=self._system_id,
@@ -416,9 +418,7 @@ class Worker:
                     continue
                 if isinstance(sup.status, (_Conn, _Load, _Warm)):
                     return True
-                if any(
-                    isinstance(t, _LoadModel) for t in sup.in_progress.values()
-                ):
+                if any(isinstance(t, _LoadModel) for t in sup.in_progress.values()):
                     return True
             return False
 

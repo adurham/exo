@@ -77,7 +77,7 @@ def _batched_oproj_moe_call(self, attn_out_3d, _residual=None):
         y = (y * scores[..., None]).sum(axis=-2)
 
         # Fused shared expert: one matmul instead of two for gate+up
-        if hasattr(self, '_shared_w_gu'):
+        if hasattr(self, "_shared_w_gu"):
             shared_y = _fused_shared_expert(self, x)
         else:
             shared_y = self.shared_expert(x)
@@ -95,47 +95,81 @@ def _batched_oproj_moe_call(self, attn_out_3d, _residual=None):
     residual = _residual.reshape(B_dim, K).astype(COMPUTE_DTYPE)
 
     # ── Dispatch 1: batched o_proj + gate GEMVs ──
-    h_scaled, h_out, x2_partials, gate_part_a, gate_part_b = \
-        batched_oproj_gate_gemv(
-            self._oproj_w, self._oproj_s, self._oproj_b,
-            attn_out, residual, self._oproj_rms_weight,
-            self._oproj_M1, self._oproj_W_fused,
-            M=K, K_attn=K_attn, batch_size=B_dim,
-            n_experts=E, gate_bm=self._oproj_gate_bm,
-            K_hidden=self._oproj_K_hidden,
-        )
+    h_scaled, h_out, x2_partials, gate_part_a, gate_part_b = batched_oproj_gate_gemv(
+        self._oproj_w,
+        self._oproj_s,
+        self._oproj_b,
+        attn_out,
+        residual,
+        self._oproj_rms_weight,
+        self._oproj_M1,
+        self._oproj_W_fused,
+        M=K,
+        K_attn=K_attn,
+        batch_size=B_dim,
+        n_experts=E,
+        gate_bm=self._oproj_gate_bm,
+        K_hidden=self._oproj_K_hidden,
+    )
 
     n_oproj_tg = (K + 31) // 32
     N_INTER = self.switch_mlp._fused_n_inter
     SHARED_INTER = self._shared_inter
 
     # ── Dispatch 2: batched softmax + topk + SwiGLU ──
-    y_routed, y_shared, out_inds, norm_scores, gate_raw = \
+    y_routed, y_shared, out_inds, norm_scores, gate_raw = (
         batched_softmax_topk_swiglu_8bit(
-            self.switch_mlp._fused_w_gu, self.switch_mlp._fused_s_gu,
+            self.switch_mlp._fused_w_gu,
+            self.switch_mlp._fused_s_gu,
             self.switch_mlp._fused_b_gu,
-            self._shared_w_gu, self._shared_s_gu, self._shared_b_gu,
-            self._seg_w, self._seg_s, self._seg_b,
-            h_scaled, gate_part_a, gate_part_b, x2_partials,
-            n_inter=N_INTER, k_hidden=K, batch_size=B_dim,
-            n_active=n_active, n_oproj_tg=n_oproj_tg,
-            n_experts=E, shared_inter=SHARED_INTER,
+            self._shared_w_gu,
+            self._shared_s_gu,
+            self._shared_b_gu,
+            self._seg_w,
+            self._seg_s,
+            self._seg_b,
+            h_scaled,
+            gate_part_a,
+            gate_part_b,
+            x2_partials,
+            n_inter=N_INTER,
+            k_hidden=K,
+            batch_size=B_dim,
+            n_active=n_active,
+            n_oproj_tg=n_oproj_tg,
+            n_experts=E,
+            shared_inter=SHARED_INTER,
         )
+    )
 
     # ── Dispatch 3: batched merged down_proj ──
     d_routed, d_shared = batched_merged_down_proj_8bit(
-        self._down_w, self._down_s, self._down_b,
-        self._shared_down_w, self._shared_down_s, self._shared_down_b,
-        y_routed, y_shared.reshape(B_dim * SHARED_INTER), out_inds,
-        k_out=K, n_in=self._down_N, batch_size=B_dim,
-        n_active=n_active, shared_n_in=SHARED_INTER,
+        self._down_w,
+        self._down_s,
+        self._down_b,
+        self._shared_down_w,
+        self._shared_down_s,
+        self._shared_down_b,
+        y_routed,
+        y_shared.reshape(B_dim * SHARED_INTER),
+        out_inds,
+        k_out=K,
+        n_in=self._down_N,
+        batch_size=B_dim,
+        n_active=n_active,
+        shared_n_in=SHARED_INTER,
     )
 
     # ── Dispatch 4: batched epilogue ──
     Y = batched_moe_epilogue(
-        d_routed, d_shared, norm_scores,
-        h_out, gate_raw,
-        k_val=K, batch_size=B_dim, n_active=n_active,
+        d_routed,
+        d_shared,
+        norm_scores,
+        h_out,
+        gate_raw,
+        k_val=K,
+        batch_size=B_dim,
+        n_active=n_active,
     )
 
     return Y.reshape(B_dim, 1, K).astype(attn_out_3d.dtype)

@@ -54,12 +54,12 @@ def speculative_forward(model, inputs, cache, speculative=False):
     Returns:
         (pre_norm, logits) — pre-RMSNorm hidden states and vocab logits
     """
-    inner = getattr(model, 'model', None) or model.language_model.model
-    text_model = getattr(model, 'model', None) or model.language_model
+    inner = getattr(model, "model", None) or model.language_model.model
+    text_model = getattr(model, "model", None) or model.language_model
     S = inputs.shape[1]
     do_spec = speculative and S > 1
 
-    if hasattr(inner, 'embed_tokens'):
+    if hasattr(inner, "embed_tokens"):
         hidden_states = inner.embed_tokens(inputs)
     else:
         hidden_states = inputs
@@ -69,8 +69,9 @@ def speculative_forward(model, inputs, cache, speculative=False):
     gdn_spec_data = []
     if do_spec:
         from .speculative_cache import SpeculativeArraysCache
+
         for i, c in enumerate(cache_list):
-            if c is not None and hasattr(c, 'cache') and not hasattr(c, 'offset'):
+            if c is not None and hasattr(c, "cache") and not hasattr(c, "offset"):
                 cache_list[i] = SpeculativeArraysCache(c, S=S)
         if cache is not None:
             for i in range(len(cache)):
@@ -79,10 +80,12 @@ def speculative_forward(model, inputs, cache, speculative=False):
     spec_all_states = []
     if do_spec:
         import mlx_lm.models.qwen3_5 as _qwen3_5_mod
+
         _orig_gdu = _qwen3_5_mod.gated_delta_update
         _qwen3_5_mod.gated_delta_update = _make_speculative_gdu(spec_all_states)
 
     from mlx_lm.models.qwen3_5 import create_attention_mask, create_ssm_mask
+
     fa_mask = create_attention_mask(hidden_states, cache_list[inner.fa_idx])
     ssm_mask = create_ssm_mask(hidden_states, cache_list[inner.ssm_idx])
 
@@ -91,13 +94,19 @@ def speculative_forward(model, inputs, cache, speculative=False):
 
         if do_spec and layer.is_linear:
             from .speculative_cache import SpeculativeArraysCache
+
             if isinstance(c, SpeculativeArraysCache):
                 pre_conv = c[0]
                 if pre_conv is None:
                     gdn = layer.linear_attn
                     pre_conv = mx.zeros(
-                        (hidden_states.shape[0], gdn.conv_kernel_size - 1,
-                         gdn.conv_dim), dtype=hidden_states.dtype)
+                        (
+                            hidden_states.shape[0],
+                            gdn.conv_kernel_size - 1,
+                            gdn.conv_dim,
+                        ),
+                        dtype=hidden_states.dtype,
+                    )
                 gdn_spec_data.append((hidden_states, pre_conv, c, layer))
 
         hidden_states = layer(hidden_states, mask=mask, cache=c)
@@ -113,21 +122,27 @@ def speculative_forward(model, inputs, cache, speculative=False):
 
             gdn = parent_layer.linear_attn
             normed = parent_layer.input_layernorm(layer_input)
-            if hasattr(gdn, 'in_proj_qkv'):
+            if hasattr(gdn, "in_proj_qkv"):
                 qkv = gdn.in_proj_qkv(normed)
             else:
                 q, k, v, z, b, a = gdn.fix_query_key_value_ordering(
-                    gdn.in_proj_qkvz(normed), gdn.in_proj_ba(normed))
+                    gdn.in_proj_qkvz(normed), gdn.in_proj_ba(normed)
+                )
                 B_dim = normed.shape[0]
                 qkv = mx.concatenate(
-                    [q.reshape(B_dim, S, -1), k.reshape(B_dim, S, -1),
-                     v.reshape(B_dim, S, -1)], axis=-1)
+                    [
+                        q.reshape(B_dim, S, -1),
+                        k.reshape(B_dim, S, -1),
+                        v.reshape(B_dim, S, -1),
+                    ],
+                    axis=-1,
+                )
             spec_cache.conv_input = mx.concatenate([pre_conv, qkv], axis=1)
 
     pre_norm = hidden_states
     normed = inner.norm(hidden_states)
 
-    if hasattr(text_model, 'lm_head'):
+    if hasattr(text_model, "lm_head"):
         logits = text_model.lm_head(normed)
     else:
         logits = inner.embed_tokens.as_linear(normed)
@@ -148,8 +163,9 @@ def _make_speculative_gdu(all_states_list):
 
     from .speculative_gdn_kernel import speculative_gated_delta_kernel
 
-    def speculative_gated_delta_update(q, k, v, a, b, A_log, dt_bias,
-                                        state=None, mask=None, use_kernel=True):
+    def speculative_gated_delta_update(
+        q, k, v, a, b, A_log, dt_bias, state=None, mask=None, use_kernel=True
+    ):
         beta = mx.sigmoid(b)
         g = compute_g(A_log, a, dt_bias)
         if state is None:
@@ -157,7 +173,8 @@ def _make_speculative_gdu(all_states_list):
             Hv, Dv = v.shape[-2:]
             state = mx.zeros((B, Hv, Dv, Dk), dtype=q.dtype)
         y, state_out, all_states = speculative_gated_delta_kernel(
-            q, k, v, g, beta, state, mask)
+            q, k, v, g, beta, state, mask
+        )
         all_states_list.append(all_states)
         return y, state_out
 
@@ -182,12 +199,12 @@ class MTPPredictor:
             skip_mlp: skip MoE/MLP weights (saves ~13GB for PP mode)
         """
         self.model = model
-        self._inner = getattr(model, 'model', None) or model.language_model.model
-        self._text_model = getattr(model, 'model', None) or model.language_model
+        self._inner = getattr(model, "model", None) or model.language_model.model
+        self._text_model = getattr(model, "model", None) or model.language_model
 
         # Shared components
         self.embed_tokens = self._inner.embed_tokens
-        if hasattr(self._text_model, 'lm_head'):
+        if hasattr(self._text_model, "lm_head"):
             self.lm_head = self._text_model.lm_head
         else:
             # tie_word_embeddings case
@@ -209,6 +226,7 @@ class MTPPredictor:
         # again or we'd double-shift the norms and corrupt the draft.
         # (Linear projection weights (2-D) are never shifted.)
         import os as _os
+
         _noshift_marker = os.path.splitext(mtp_weights_path)[0] + ".noshift"
         _already_shifted = _os.path.exists(_noshift_marker)
         if _already_shifted:
@@ -223,7 +241,7 @@ class MTPPredictor:
                 print(f"  Sanitized {len(shifted)} norm weights (+1.0 shift)")
 
         # Detect pre-quantized weights (have .scales/.biases companions)
-        _is_prequantized = any(k.endswith('.scales') for k in weights)
+        _is_prequantized = any(k.endswith(".scales") for k in weights)
 
         # Infer all dimensions from weight shapes (works for any Qwen3.5 size)
         # For pre-quantized 4-bit: shape[0] = output_dims (unchanged),
@@ -237,43 +255,48 @@ class MTPPredictor:
                 d = d * 32 // 4  # 4-bit packing: unpack input_dims
             return d
 
-        fc_w = weights['mtp.fc.weight']
-        hidden_size = _dim(fc_w, 0)                    # 4096 (9B) or 5120 (27B)
+        fc_w = weights["mtp.fc.weight"]
+        hidden_size = _dim(fc_w, 0)  # 4096 (9B) or 5120 (27B)
 
-        q_w = weights['mtp.layers.0.self_attn.q_proj.weight']
-        k_w = weights['mtp.layers.0.self_attn.k_proj.weight']
-        kv_out = _dim(k_w, 0)                          # num_kv_heads * head_dim
-        o_w = weights['mtp.layers.0.self_attn.o_proj.weight']
-        o_in = _dim(o_w, 1)                            # num_heads * head_dim
+        q_w = weights["mtp.layers.0.self_attn.q_proj.weight"]
+        k_w = weights["mtp.layers.0.self_attn.k_proj.weight"]
+        kv_out = _dim(k_w, 0)  # num_kv_heads * head_dim
+        o_w = weights["mtp.layers.0.self_attn.o_proj.weight"]
+        o_in = _dim(o_w, 1)  # num_heads * head_dim
 
         # Detect MoE vs dense MLP
-        self.is_moe = 'mtp.layers.0.mlp.gate.weight' in weights
+        self.is_moe = "mtp.layers.0.mlp.gate.weight" in weights
 
         if not self.is_moe:
-            gate_w = weights['mtp.layers.0.mlp.gate_proj.weight']
+            gate_w = weights["mtp.layers.0.mlp.gate_proj.weight"]
             intermediate = gate_w.shape[0]
         else:
             intermediate = 0  # MoE experts handle this
 
         # head_dim from q_norm weight (always per-head)
-        head_dim = weights.get('mtp.layers.0.self_attn.q_norm.weight',
-                               mx.ones(256)).shape[0]
+        head_dim = weights.get(
+            "mtp.layers.0.self_attn.q_norm.weight", mx.ones(256)
+        ).shape[0]
         num_heads = o_in // head_dim
         num_kv_heads = kv_out // head_dim
 
-        print(f"  Dims: hidden={hidden_size}, heads={num_heads}, kv_heads={num_kv_heads}, "
-              f"head_dim={head_dim}, MLP={'MoE' if self.is_moe else f'dense({intermediate})'}")
+        print(
+            f"  Dims: hidden={hidden_size}, heads={num_heads}, kv_heads={num_kv_heads}, "
+            f"head_dim={head_dim}, MLP={'MoE' if self.is_moe else f'dense({intermediate})'}"
+        )
 
         # Build layers from weights — all dimension-agnostic
-        def make_linear(w, key_prefix: str = ''):
-            if _is_prequantized and f'{key_prefix}.scales' in weights:
+        def make_linear(w, key_prefix: str = ""):
+            if _is_prequantized and f"{key_prefix}.scales" in weights:
                 # Pre-quantized: build QuantizedLinear and update weights via module.update()
-                scales = weights[f'{key_prefix}.scales']
-                biases = weights[f'{key_prefix}.biases']
+                scales = weights[f"{key_prefix}.scales"]
+                biases = weights[f"{key_prefix}.biases"]
                 in_dims = w.shape[1] * 32 // 4  # unpack packed input_dims
                 out_dims = w.shape[0]
-                ql = nn.QuantizedLinear(in_dims, out_dims, bias=False, group_size=64, bits=4)
-                ql.update({'weight': w, 'scales': scales, 'biases': biases})
+                ql = nn.QuantizedLinear(
+                    in_dims, out_dims, bias=False, group_size=64, bits=4
+                )
+                ql.update({"weight": w, "scales": scales, "biases": biases})
                 return ql
             out_dim, in_dim = w.shape
             linear = nn.Linear(in_dim, out_dim, bias=False)
@@ -281,30 +304,35 @@ class MTPPredictor:
             return linear
 
         self.pre_fc_norm_hidden = nn.RMSNorm(hidden_size)
-        self.pre_fc_norm_hidden.weight = weights['mtp.pre_fc_norm_hidden.weight']
+        self.pre_fc_norm_hidden.weight = weights["mtp.pre_fc_norm_hidden.weight"]
 
         self.pre_fc_norm_embedding = nn.RMSNorm(hidden_size)
-        self.pre_fc_norm_embedding.weight = weights['mtp.pre_fc_norm_embedding.weight']
+        self.pre_fc_norm_embedding.weight = weights["mtp.pre_fc_norm_embedding.weight"]
 
-        self.fc = make_linear(fc_w, 'mtp.fc')
-        self.q_proj = make_linear(q_w, 'mtp.layers.0.self_attn.q_proj')
-        self.k_proj = make_linear(k_w, 'mtp.layers.0.self_attn.k_proj')
-        self.v_proj = make_linear(weights['mtp.layers.0.self_attn.v_proj.weight'], 'mtp.layers.0.self_attn.v_proj')
-        self.o_proj = make_linear(o_w, 'mtp.layers.0.self_attn.o_proj')
+        self.fc = make_linear(fc_w, "mtp.fc")
+        self.q_proj = make_linear(q_w, "mtp.layers.0.self_attn.q_proj")
+        self.k_proj = make_linear(k_w, "mtp.layers.0.self_attn.k_proj")
+        self.v_proj = make_linear(
+            weights["mtp.layers.0.self_attn.v_proj.weight"],
+            "mtp.layers.0.self_attn.v_proj",
+        )
+        self.o_proj = make_linear(o_w, "mtp.layers.0.self_attn.o_proj")
 
         self.q_norm = nn.RMSNorm(head_dim)
         self.k_norm = nn.RMSNorm(head_dim)
-        q_norm_key = 'mtp.layers.0.self_attn.q_norm.weight'
-        k_norm_key = 'mtp.layers.0.self_attn.k_norm.weight'
+        q_norm_key = "mtp.layers.0.self_attn.q_norm.weight"
+        k_norm_key = "mtp.layers.0.self_attn.k_norm.weight"
         if q_norm_key in weights:
             self.q_norm.weight = weights[q_norm_key]
             self.k_norm.weight = weights[k_norm_key]
 
         self.input_layernorm = nn.RMSNorm(hidden_size)
-        self.input_layernorm.weight = weights['mtp.layers.0.input_layernorm.weight']
+        self.input_layernorm.weight = weights["mtp.layers.0.input_layernorm.weight"]
 
         self.post_attention_layernorm = nn.RMSNorm(hidden_size)
-        self.post_attention_layernorm.weight = weights['mtp.layers.0.post_attention_layernorm.weight']
+        self.post_attention_layernorm.weight = weights[
+            "mtp.layers.0.post_attention_layernorm.weight"
+        ]
 
         self.skip_mlp = skip_mlp
 
@@ -312,11 +340,13 @@ class MTPPredictor:
             # Reuse mlx-lm's SparseMoeBlock from the target model
             moe_layer = None
             for layer in self._inner.layers:
-                if hasattr(layer, 'mlp') and hasattr(layer.mlp, 'gate'):
+                if hasattr(layer, "mlp") and hasattr(layer.mlp, "gate"):
                     moe_layer = layer.mlp
                     break
             if moe_layer is None:
-                raise RuntimeError("MTP has MoE weights but target model has no MoE layer")
+                raise RuntimeError(
+                    "MTP has MoE weights but target model has no MoE layer"
+                )
 
             # Create a fresh MoE block with same class/config as target.
             # When the target model is tensor-parallel, layer.mlp is a
@@ -327,22 +357,28 @@ class MTPPredictor:
             # The MTP module loads FULL (replicated) weights for every other
             # projection (q/k/v/o via make_linear), so the MoE must likewise be
             # the raw, unsharded block. Unwrap to the underlying class.
-            original_layer = getattr(moe_layer, 'original_layer', None)
+            original_layer = getattr(moe_layer, "original_layer", None)
             raw_moe = original_layer if original_layer is not None else moe_layer
             moe_class = type(raw_moe)
-            args = (getattr(self._text_model, 'args', None)
-                    or getattr(getattr(self._text_model, 'model', None), 'args', None)
-                    or getattr(self.model, 'args', None))
+            args = (
+                getattr(self._text_model, "args", None)
+                or getattr(getattr(self._text_model, "model", None), "args", None)
+                or getattr(self.model, "args", None)
+            )
             self.mlp = moe_class(args)
             # Quantize the fresh block to match the pre-quantized weight format
             # Skip layers that were too small to quantize (min dim < 64)
             if _is_prequantized:
+
                 def _q_predicate(path, m):
-                    if not hasattr(m, 'to_quantized'):
+                    if not hasattr(m, "to_quantized"):
                         return False
-                    w = getattr(m, 'weight', None)
+                    w = getattr(m, "weight", None)
                     return not (w is not None and min(w.shape) < 64)
-                nn.quantize(self.mlp, group_size=64, bits=4, class_predicate=_q_predicate)
+
+                nn.quantize(
+                    self.mlp, group_size=64, bits=4, class_predicate=_q_predicate
+                )
 
             # Load MTP MoE weights — remap HF expert names to mlx-lm SwitchLinear.
             # Two HF layouts exist:
@@ -357,23 +393,23 @@ class MTPPredictor:
             # Without branch (A), int(parts[1]) parsed 'down_proj' as an expert
             # index -> ValueError -> MTP init failed and Qwen3.6 silently ran pure
             # autoregressive (no speculative decoding).
-            prefix = 'mtp.layers.0.mlp.'
+            prefix = "mtp.layers.0.mlp."
             direct_keys = {}
             expert_weights = {}  # {proj_name: {expert_idx: weight}}  (layout B)
             fused = {}  # {leaf_name: weight}  (layout A)
             for k, v in weights.items():
                 if not k.startswith(prefix):
                     continue
-                name = k[len(prefix):]
-                if name in ('experts.gate_up_proj', 'experts.down_proj'):
+                name = k[len(prefix) :]
+                if name in ("experts.gate_up_proj", "experts.down_proj"):
                     fused[name] = v
-                elif name.startswith('experts.') and name.split('.')[1].isdigit():
+                elif name.startswith("experts.") and name.split(".")[1].isdigit():
                     # experts.N.{gate,up,down}_proj.{weight,scales,biases}
-                    parts = name.split('.')
+                    parts = name.split(".")
                     idx = int(parts[1])
                     proj = parts[2]  # gate_proj, up_proj, down_proj
-                    suffix = '.'.join(parts[3:])  # weight, scales, or biases
-                    key = f'{proj}.{suffix}'
+                    suffix = ".".join(parts[3:])  # weight, scales, or biases
+                    key = f"{proj}.{suffix}"
                     if key not in expert_weights:
                         expert_weights[key] = {}
                     expert_weights[key][idx] = v
@@ -384,50 +420,60 @@ class MTPPredictor:
             if fused:
                 # Layout A: split fused gate_up and rename to switch_mlp.* — same
                 # transform mlx-lm applies in qwen3_5_moe.Model.sanitize.
-                gate_up = fused['experts.gate_up_proj']
+                gate_up = fused["experts.gate_up_proj"]
                 mid = gate_up.shape[-2] // 2
                 moe_weights.append(
-                    ('switch_mlp.gate_proj.weight', gate_up[..., :mid, :])
+                    ("switch_mlp.gate_proj.weight", gate_up[..., :mid, :])
                 )
+                moe_weights.append(("switch_mlp.up_proj.weight", gate_up[..., mid:, :]))
                 moe_weights.append(
-                    ('switch_mlp.up_proj.weight', gate_up[..., mid:, :])
-                )
-                moe_weights.append(
-                    ('switch_mlp.down_proj.weight', fused['experts.down_proj'])
+                    ("switch_mlp.down_proj.weight", fused["experts.down_proj"])
                 )
             else:
                 # Layout B: stack individual expert weights into SwitchLinear format
                 for proj_key, idx_map in expert_weights.items():
                     n_experts = max(idx_map.keys()) + 1
                     stacked = mx.stack([idx_map[i] for i in range(n_experts)])
-                    moe_weights.append((f'switch_mlp.{proj_key}', stacked))
+                    moe_weights.append((f"switch_mlp.{proj_key}", stacked))
 
             # Direct (non-expert) keys: gate.weight, shared_expert.*,
             # shared_expert_gate.weight.
             for name, v in direct_keys.items():
                 moe_weights.append((name, v))
 
-            print(f"  MoE loading {len(moe_weights)} weight groups, keys: {[k for k,_ in moe_weights][:10]}...")
+            print(
+                f"  MoE loading {len(moe_weights)} weight groups, keys: {[k for k, _ in moe_weights][:10]}..."
+            )
             _missing = self.mlp.load_weights(moe_weights, strict=False)
             if _missing:
-                print(f"  MoE note: {len(_missing)} module-level keys unmatched: {list(_missing)[:5]}")
+                print(
+                    f"  MoE note: {len(_missing)} module-level keys unmatched: {list(_missing)[:5]}"
+                )
             # Verify quantized weights were loaded
-            if hasattr(self.mlp, 'switch_mlp') and hasattr(self.mlp.switch_mlp, 'gate_proj'):
+            if hasattr(self.mlp, "switch_mlp") and hasattr(
+                self.mlp.switch_mlp, "gate_proj"
+            ):
                 gp = self.mlp.switch_mlp.gate_proj
-                print(f"  MoE verify: switch_mlp.gate_proj.weight={gp.weight.dtype} {gp.weight.shape}")
-            if hasattr(self.mlp, 'gate'):
-                print(f"  MoE verify: gate.weight={self.mlp.gate.weight.dtype} {self.mlp.gate.weight.shape}")
-            print(f"  MoE MLP: {len(moe_weights)} weight groups loaded "
-                  f"({len(expert_weights)} stacked expert projections)")
+                print(
+                    f"  MoE verify: switch_mlp.gate_proj.weight={gp.weight.dtype} {gp.weight.shape}"
+                )
+            if hasattr(self.mlp, "gate"):
+                print(
+                    f"  MoE verify: gate.weight={self.mlp.gate.weight.dtype} {self.mlp.gate.weight.shape}"
+                )
+            print(
+                f"  MoE MLP: {len(moe_weights)} weight groups loaded "
+                f"({len(expert_weights)} stacked expert projections)"
+            )
         elif skip_mlp:
             print("  MLP skipped (skip_mlp=True)")
         else:
-            self.gate_proj = make_linear(gate_w, 'mtp.layers.0.mlp.gate_proj')
-            self.up_proj = make_linear(weights['mtp.layers.0.mlp.up_proj.weight'])
-            self.down_proj = make_linear(weights['mtp.layers.0.mlp.down_proj.weight'])
+            self.gate_proj = make_linear(gate_w, "mtp.layers.0.mlp.gate_proj")
+            self.up_proj = make_linear(weights["mtp.layers.0.mlp.up_proj.weight"])
+            self.down_proj = make_linear(weights["mtp.layers.0.mlp.down_proj.weight"])
 
         self.norm = nn.RMSNorm(hidden_size)
-        self.norm.weight = weights['mtp.norm.weight']
+        self.norm.weight = weights["mtp.norm.weight"]
 
         # RoPE from main model's GQA layers
         for layer in self._inner.layers:
@@ -439,48 +485,73 @@ class MTPPredictor:
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
         self.head_dim = head_dim
-        self.scale = head_dim ** -0.5
+        self.scale = head_dim**-0.5
 
         # MTP KV cache (separate from main model)
         self.kv_cache = None
 
-        mx.eval(self.pre_fc_norm_hidden.weight, self.pre_fc_norm_embedding.weight,
-                self.fc.weight, self.input_layernorm.weight,
-                self.post_attention_layernorm.weight, self.norm.weight,
-                self.q_norm.weight, self.k_norm.weight)
+        mx.eval(
+            self.pre_fc_norm_hidden.weight,
+            self.pre_fc_norm_embedding.weight,
+            self.fc.weight,
+            self.input_layernorm.weight,
+            self.post_attention_layernorm.weight,
+            self.norm.weight,
+            self.q_norm.weight,
+            self.k_norm.weight,
+        )
 
         if quantize:
             self._quantize_linears()
 
         total_params = sum(w.size for w in weights.values())
-        q_label = ' (pre-quantized 4-bit)' if _is_prequantized else (' (quantized 8-bit gs=64)' if quantize else ' (bf16)')
-        print(f"  MTP loaded: {len(weights)} tensors, {total_params / 1e6:.1f}M params{q_label}")
+        q_label = (
+            " (pre-quantized 4-bit)"
+            if _is_prequantized
+            else (" (quantized 8-bit gs=64)" if quantize else " (bf16)")
+        )
+        print(
+            f"  MTP loaded: {len(weights)} tensors, {total_params / 1e6:.1f}M params{q_label}"
+        )
 
     def _quantize_linears(self):
         """Quantize all MTP linear layers to 8-bit gs=64."""
-        for name in ['fc', 'q_proj', 'k_proj', 'v_proj', 'o_proj',
-                      'gate_proj', 'up_proj', 'down_proj']:
+        for name in [
+            "fc",
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]:
             linear = getattr(self, name, None)
             if linear is None:
                 continue  # MoE models don't have dense MLP projections
-            _cdtype = mx.bfloat16 if os.environ.get("EXO_COMPUTE_DTYPE", "fp16") == "bf16" else mx.float16
+            _cdtype = (
+                mx.bfloat16
+                if os.environ.get("EXO_COMPUTE_DTYPE", "fp16") == "bf16"
+                else mx.float16
+            )
             linear.weight = linear.weight.astype(_cdtype)
             q = nn.QuantizedLinear.from_linear(linear, group_size=64, bits=8)
             mx.eval(q.parameters())
             setattr(self, name, q)
         # For MoE, quantize expert weights in-place to reduce memory
         # (nn.quantize on the whole block OOMs — quantize one expert at a time)
-        if self.is_moe and hasattr(self, 'mlp'):
-            if hasattr(self.mlp, 'switch_mlp'):
+        if self.is_moe and hasattr(self, "mlp"):
+            if hasattr(self.mlp, "switch_mlp"):
                 nn.quantize(self.mlp.switch_mlp, group_size=64, bits=8)
                 mx.eval(self.mlp.switch_mlp.parameters())
-            if hasattr(self.mlp, 'shared_expert'):
+            if hasattr(self.mlp, "shared_expert"):
                 nn.quantize(self.mlp.shared_expert, group_size=64, bits=8)
                 mx.eval(self.mlp.shared_expert.parameters())
 
     def reset_cache(self):
         """Reset the MTP KV cache (call at start of generation)."""
         from mlx_lm.models.cache import KVCache
+
         self.kv_cache = KVCache()
 
     def get_hidden_state(self, inputs, cache, speculative=False):
@@ -498,18 +569,18 @@ class MTPPredictor:
         h = self.input_layernorm(h)
 
         q_out = self.q_proj(h)
-        q_out, gate = mx.split(
-            q_out.reshape(B, S, self.num_heads, -1), 2, axis=-1
-        )
+        q_out, gate = mx.split(q_out.reshape(B, S, self.num_heads, -1), 2, axis=-1)
         gate = gate.reshape(B, S, -1)
 
         queries = self.q_norm(q_out).transpose(0, 2, 1, 3)
         keys = self.k_norm(
             self.k_proj(h).reshape(B, S, self.num_kv_heads, self.head_dim)
         ).transpose(0, 2, 1, 3)
-        values = self.v_proj(h).reshape(
-            B, S, self.num_kv_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
+        values = (
+            self.v_proj(h)
+            .reshape(B, S, self.num_kv_heads, self.head_dim)
+            .transpose(0, 2, 1, 3)
+        )
 
         if self.kv_cache is not None:
             offset = self.kv_cache.offset
@@ -525,9 +596,11 @@ class MTPPredictor:
             total_kv = keys.shape[2]
             q_pos = mx.arange(S) + (total_kv - S)
             k_pos = mx.arange(total_kv)
-            mask = mx.where(k_pos[None, :] <= q_pos[:, None],
-                           mx.array(0, dtype=queries.dtype),
-                           mx.array(-1e9, dtype=queries.dtype))
+            mask = mx.where(
+                k_pos[None, :] <= q_pos[:, None],
+                mx.array(0, dtype=queries.dtype),
+                mx.array(-1e9, dtype=queries.dtype),
+            )
 
         output = mx.fast.scaled_dot_product_attention(
             queries, keys, values, scale=self.scale, mask=mask
@@ -671,7 +744,9 @@ def _compute_eagle_soft_emb(
     return (topk_embs * topk_probs[..., None]).sum(axis=-2)  # (B, S, hidden)
 
 
-def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None):
+def draft_tokens(
+    mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=False, sync_group=None
+):
     """Draft γ tokens by chaining MTP predictions — fully lazy, no mx.eval.
 
     The entire chain stays in the MLX computation graph. Draft token ids
@@ -700,6 +775,7 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
     # broadcast_from_canonical is the source of the 2026-05-06 broken-
     # English regression. Remove once the regression is rooted.
     import os as _os_local
+
     _disable_broadcast = _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
 
     # Eagle soft-embedding chain — opt-in via EXO_DSV4_MTP_EAGLE_K>0 on
@@ -765,9 +841,7 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                 # K>1: broadcast tiny topk_ids + topk_probs and rebuild
                 # the mixture locally on every rank.
                 _logits3d = (
-                    prev_logits
-                    if prev_logits.ndim == 3
-                    else prev_logits[:, None, :]
+                    prev_logits if prev_logits.ndim == 3 else prev_logits[:, None, :]
                 )
                 _scaled = _logits3d / _eagle_t if _eagle_t != 1.0 else _logits3d
                 _probs = mx.softmax(_scaled, axis=-1)
@@ -791,15 +865,14 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                     _topk_ids = broadcast_from_canonical(
                         _topk_ids.astype(mx.int32), sync_group
                     )
-                    _topk_probs = broadcast_from_canonical(
-                        _topk_probs, sync_group
-                    )
+                    _topk_probs = broadcast_from_canonical(_topk_probs, sync_group)
                 _topk_embs = _eagle_embed(_topk_ids)
                 soft_emb = (_topk_embs * _topk_probs[..., None]).sum(axis=-2)
             mtp_pred.set_eagle_soft_emb(soft_emb)
         try:
-            logits, h = mtp_pred.predict(h, tok_arr, return_hidden=True,
-                                          draft_mode=fast_lm_head)
+            logits, h = mtp_pred.predict(
+                h, tok_arr, return_hidden=True, draft_mode=fast_lm_head
+            )
         finally:
             if _eagle_installed:
                 mtp_pred.set_eagle_soft_emb(None)
@@ -822,9 +895,7 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                     flush=True,
                 )
             if sync_drafts and not _disable_broadcast:
-                tok_arr = broadcast_from_canonical(
-                    tok_arr.astype(mx.int32), sync_group
-                )
+                tok_arr = broadcast_from_canonical(tok_arr.astype(mx.int32), sync_group)
             draft_ids.append(tok_arr.reshape(-1))
             draft_probs.append(None)
             # Token-tree alpha probe (greedy path only). Capture MTP top-5
@@ -845,17 +916,17 @@ def draft_tokens(mtp_pred, hidden, first_token_arr, gamma, temp, fast_lm_head=Fa
                 logits_flat = logits.reshape(-1)
                 top5 = mx.argsort(-logits_flat)[:5]
                 top5_ids = top5.tolist()  # synchronous; materialise NOW
-                _TREE_ALPHA_PROBE_STEPS.append({
-                    "step": i,
-                    "top5_ids": top5_ids,
-                })
+                _TREE_ALPHA_PROBE_STEPS.append(
+                    {
+                        "step": i,
+                        "top5_ids": top5_ids,
+                    }
+                )
         else:
             q = mx.softmax(logits / temp, axis=-1)
             tok_arr = mx.random.categorical(logits * (1.0 / temp)).reshape(1, 1)
             if sync_drafts:
-                tok_arr = broadcast_from_canonical(
-                    tok_arr.astype(mx.int32), sync_group
-                )
+                tok_arr = broadcast_from_canonical(tok_arr.astype(mx.int32), sync_group)
                 # NOTE: q (softmax) stays per-rank. The downstream
                 # acceptance check (ratio = p/q with verify-side p) will
                 # diverge by ~1ulp; we sync n_accepted at the end of the
@@ -919,9 +990,8 @@ def draft_tokens_topk(
     """
     sync_drafts = sync_group is not None and sync_group.size() > 1
     import os as _os_local
-    _disable_broadcast = (
-        _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
-    )
+
+    _disable_broadcast = _os_local.environ.get("EXO_DSV4_MTP_NO_BROADCAST") == "1"
     # Greedy tree: only expand depth-2 children for the TOP-1 depth-1
     # sibling, not all K. Cuts tree from 1+K+K^2 to 1+K+K nodes (e.g.,
     # 7 -> 5 for K=2 gamma=2). The intuition: top-2 d1 is already
@@ -953,9 +1023,7 @@ def draft_tokens_topk(
     # MTP forward at the root: input = (hidden, first_token). Output: top-K
     # token logits + a new hidden h_root. The h_root becomes the seed for
     # all K depth-1 MTP forwards.
-    logits_root, h_root = mtp_pred.predict(
-        hidden, first_token_arr, return_hidden=True
-    )
+    logits_root, h_root = mtp_pred.predict(hidden, first_token_arr, return_hidden=True)
     # Cache offset is now L_kv + 1 (root MTP forward consumed one step).
     # Top-K (sorted by logit desc). Materialise to Python ints
     # IMMEDIATELY — keeping lazy mx.arrays across the rest of this
@@ -965,9 +1033,7 @@ def draft_tokens_topk(
     if sync_drafts and not _disable_broadcast:
         # Broadcast the K-vector of token IDs from rank 0 so all ranks
         # agree on the same tree shape downstream.
-        top_K_arr = broadcast_from_canonical(
-            top_K_arr.astype(mx.int32), sync_group
-        )
+        top_K_arr = broadcast_from_canonical(top_K_arr.astype(mx.int32), sync_group)
     depth1_ids = top_K_arr.tolist()  # sync; cheap (K ints)
 
     for k in range(K):
@@ -1010,9 +1076,7 @@ def draft_tokens_topk(
         # Cache offset is now L_kv + 2.
         top_K_d1 = mx.argsort(-logits_d1.reshape(-1))[:K]
         if sync_drafts and not _disable_broadcast:
-            top_K_d1 = broadcast_from_canonical(
-                top_K_d1.astype(mx.int32), sync_group
-            )
+            top_K_d1 = broadcast_from_canonical(top_K_d1.astype(mx.int32), sync_group)
         d2_ids = top_K_d1.tolist()  # sync; K ints
 
         for k in range(K):

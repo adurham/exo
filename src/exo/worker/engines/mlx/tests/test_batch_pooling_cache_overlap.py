@@ -86,9 +86,7 @@ def _store_overlap_carry(cache: object, last_kv: mx.array, last_gate: mx.array) 
     store(last_kv, last_gate)
 
 
-def _fetch_overlap_carry(
-    cache: object, batch_size: int
-) -> tuple[mx.array, mx.array]:
+def _fetch_overlap_carry(cache: object, batch_size: int) -> tuple[mx.array, mx.array]:
     fetch = cast(
         Callable[[int, int, int, mx.Dtype], tuple[mx.array, mx.array]],
         getattr(cache, "fetch_overlap_carry"),  # noqa: B009
@@ -220,4 +218,4 @@ def test_fetch_overlap_carry_no_carry_untouched_by_extend() -> None:
 
     kv_carry, gate_carry = _fetch_overlap_carry(cache, 2)
     assert _all_equal(kv_carry, 0.0)
-    assert _all_equal(gate_carry, -float('inf'))
+    assert _all_equal(gate_carry, -float("inf"))

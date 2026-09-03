@@ -258,22 +258,14 @@ def _copy_pooling_cache(pc: "PoolingCache") -> "PoolingCache":
     copy._pool_offset = pc._pool_offset
     copy._pending_offset_bump = getattr(pc, "_pending_offset_bump", 0)
     copy._pool_storage = (
-        _detached_copy_numpy(pc._pool_storage)
-        if pc._pool_storage is not None
-        else None
+        _detached_copy_numpy(pc._pool_storage) if pc._pool_storage is not None else None
     )
-    copy.buf_kv = (
-        _detached_copy_numpy(pc.buf_kv) if pc.buf_kv is not None else None
-    )
+    copy.buf_kv = _detached_copy_numpy(pc.buf_kv) if pc.buf_kv is not None else None
     copy.buf_gate = (
         _detached_copy_numpy(pc.buf_gate) if pc.buf_gate is not None else None
     )
     mx.eval(
-        *(
-            a
-            for a in (copy._pool_storage, copy.buf_kv, copy.buf_gate)
-            if a is not None
-        )
+        *(a for a in (copy._pool_storage, copy.buf_kv, copy.buf_gate) if a is not None)
     )
     return copy
 
@@ -1262,9 +1254,7 @@ class KVPrefixCache:
             _mismatch_pos = -1
             if _donor_len >= match_length:
                 _cmp = _donor_tokens_np[:match_length] == _query_np[:match_length]
-                _mismatch_pos = (
-                    int(np.argmin(_cmp)) if not bool(_cmp.all()) else -1
-                )
+                _mismatch_pos = int(np.argmin(_cmp)) if not bool(_cmp.all()) else -1
             logger.error(
                 f"[PREFIX_CACHE_INTEGRITY_VIOLATION] donor leaf "
                 f"{donor_leaf.leaf_id} does NOT actually share the query's "

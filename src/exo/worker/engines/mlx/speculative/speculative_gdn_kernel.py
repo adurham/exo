@@ -127,9 +127,13 @@ def _make_speculative_gated_delta_kernel(has_mask=False, vectorized=False):
 
 # Pre-build kernel variants
 _spec_kernel = _make_speculative_gated_delta_kernel(has_mask=False, vectorized=False)
-_spec_kernel_masked = _make_speculative_gated_delta_kernel(has_mask=True, vectorized=False)
+_spec_kernel_masked = _make_speculative_gated_delta_kernel(
+    has_mask=True, vectorized=False
+)
 _spec_kernel_vec = _make_speculative_gated_delta_kernel(has_mask=False, vectorized=True)
-_spec_kernel_vec_masked = _make_speculative_gated_delta_kernel(has_mask=True, vectorized=True)
+_spec_kernel_vec_masked = _make_speculative_gated_delta_kernel(
+    has_mask=True, vectorized=True
+)
 
 
 def speculative_gated_delta_kernel(

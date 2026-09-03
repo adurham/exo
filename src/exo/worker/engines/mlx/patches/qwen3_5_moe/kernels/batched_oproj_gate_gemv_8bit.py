@@ -10,6 +10,7 @@ Three GEMV regions (same as B=1):
 
 All constants baked into Metal source. B is unrolled at code-generation time.
 """
+
 import mlx.core as mx
 
 from ..common import COMPUTE_DTYPE, METAL_HALF_TYPE
@@ -19,7 +20,9 @@ def ceil_div(a, b):
     return (a + b - 1) // b
 
 
-def _gen_batched_oproj_source(n_experts, M, K_attn, K_hidden, B, group_size=64, gate_bm=8):
+def _gen_batched_oproj_source(
+    n_experts, M, K_attn, K_hidden, B, group_size=64, gate_bm=8
+):
     E = int(n_experts)
     gs = group_size
     oproj_slid_divisor = gs // 8
@@ -54,48 +57,81 @@ def _gen_batched_oproj_source(n_experts, M, K_attn, K_hidden, B, group_size=64, 
     oproj_x2_final_code = "\n".join(oproj_x2_final)
 
     # o_proj K-loop: load weights once, compute B batch elements
-    oproj_x_load = "\n".join(f"""
+    oproj_x_load = "\n".join(
+        f"""
             float xv{b}[VPT]; float xsum{b} = 0.0f;
-            for (int i = 0; i < VPT; i++) {{ xv{b}[i] = float(attn_out[{b} * K_ATTN_DIM + xb + i]); xsum{b} += xv{b}[i]; }}""" for b in range(B))
+            for (int i = 0; i < VPT; i++) {{ xv{b}[i] = float(attn_out[{b} * K_ATTN_DIM + xb + i]); xsum{b} += xv{b}[i]; }}"""
+        for b in range(B)
+    )
 
-    oproj_qdot = "\n".join(f"""
-                acc{b}[row] += s_val * wdot(xv{b}, w_vals) + xsum{b} * b_val;""" for b in range(B))
+    oproj_qdot = "\n".join(
+        f"""
+                acc{b}[row] += s_val * wdot(xv{b}, w_vals) + xsum{b} * b_val;"""
+        for b in range(B)
+    )
 
     oproj_result_decls = " ".join(f"float acc{b}[TM] = {{0,0,0,0}};" for b in range(B))
-    oproj_simd_reduce = "\n".join(f"            float result{b}[TM]; for (int tm=0;tm<TM;tm++) result{b}[tm] = simd_sum(acc{b}[tm]);" for b in range(B))
+    oproj_simd_reduce = "\n".join(
+        f"            float result{b}[TM]; for (int tm=0;tm<TM;tm++) result{b}[tm] = simd_sum(acc{b}[tm]);"
+        for b in range(B)
+    )
 
-    oproj_tgp_write = "\n".join(f"            tgp_x2[sgid * {B} + {b}] = x2_acc{b};" for b in range(B))
+    oproj_tgp_write = "\n".join(
+        f"            tgp_x2[sgid * {B} + {b}] = x2_acc{b};" for b in range(B)
+    )
     oproj_total_decls = " ".join(f"float total{b} = 0.0f;" for b in range(B))
 
     # Gate M1 GEMV: load M1 weights once, compute B dot products with B attn_outs
-    gate_a_x_load = "\n".join(f"""
+    gate_a_x_load = "\n".join(
+        f"""
             float v{b}[TN];
-            for (int tn = 0; tn < TN; tn++) v{b}[tn] = float(attn_out[{b} * K_ATTN_DIM + bn + tn]);""" for b in range(B))
+            for (int tn = 0; tn < TN; tn++) v{b}[tn] = float(attn_out[{b} * K_ATTN_DIM + bn + tn]);"""
+        for b in range(B)
+    )
 
-    gate_a_dot = "\n".join(f"""
+    gate_a_dot = "\n".join(
+        f"""
                 float gacc{b} = 0.0f;
                 for (int tn = 0; tn < TN; tn++) gacc{b} += w_row[tn] * v{b}[tn];
-                gresult{b}[tm] += gacc{b};""" for b in range(B))
+                gresult{b}[tm] += gacc{b};"""
+        for b in range(B)
+    )
 
     gate_a_decls = " ".join(f"float gresult{b}[TM] = {{0,0,0,0}};" for b in range(B))
-    gate_a_reduce = "\n".join(f"            gresult{b}[tm] = simd_sum(gresult{b}[tm]);" for b in range(B))
-    gate_a_write = "\n".join(f"""
-                    gate_part_a[{b} * E_CONST + e] = gresult{b}[tm];""" for b in range(B))
+    gate_a_reduce = "\n".join(
+        f"            gresult{b}[tm] = simd_sum(gresult{b}[tm]);" for b in range(B)
+    )
+    gate_a_write = "\n".join(
+        f"""
+                    gate_part_a[{b} * E_CONST + e] = gresult{b}[tm];"""
+        for b in range(B)
+    )
 
     # Gate W_fused GEMV: same pattern but with residual input
-    gate_b_x_load = "\n".join(f"""
+    gate_b_x_load = "\n".join(
+        f"""
             float rv{b}[TN];
-            for (int tn = 0; tn < TN; tn++) rv{b}[tn] = float(residual[{b} * K_HIDDEN_DIM + bn + tn]);""" for b in range(B))
+            for (int tn = 0; tn < TN; tn++) rv{b}[tn] = float(residual[{b} * K_HIDDEN_DIM + bn + tn]);"""
+        for b in range(B)
+    )
 
-    gate_b_dot = "\n".join(f"""
+    gate_b_dot = "\n".join(
+        f"""
                 float wdot{b} = 0.0f;
                 for (int tn = 0; tn < TN; tn++) wdot{b} += w_row[tn] * rv{b}[tn];
-                bresult{b}[tm] += wdot{b};""" for b in range(B))
+                bresult{b}[tm] += wdot{b};"""
+        for b in range(B)
+    )
 
     gate_b_decls = " ".join(f"float bresult{b}[TM] = {{0,0,0,0}};" for b in range(B))
-    gate_b_reduce = "\n".join(f"            bresult{b}[tm] = simd_sum(bresult{b}[tm]);" for b in range(B))
-    gate_b_write = "\n".join(f"""
-                    gate_part_b[{b} * E_CONST + e] = bresult{b}[tm];""" for b in range(B))
+    gate_b_reduce = "\n".join(
+        f"            bresult{b}[tm] = simd_sum(bresult{b}[tm]);" for b in range(B)
+    )
+    gate_b_write = "\n".join(
+        f"""
+                    gate_part_b[{b} * E_CONST + e] = bresult{b}[tm];"""
+        for b in range(B)
+    )
 
     return f"""
     const int TM = 4;
@@ -258,29 +294,54 @@ def _gen_batched_oproj_source(n_experts, M, K_attn, K_hidden, B, group_size=64, 
 _batched_oproj_cache = {}
 
 
-def _get_batched_oproj_kernel(n_experts, M, K_attn, K_hidden, B, group_size=64, gate_bm=8):
+def _get_batched_oproj_kernel(
+    n_experts, M, K_attn, K_hidden, B, group_size=64, gate_bm=8
+):
     key = (n_experts, M, K_attn, K_hidden, B, group_size, gate_bm)
     if key not in _batched_oproj_cache:
         _batched_oproj_cache[key] = mx.fast.metal_kernel(
             name=f"batched_oproj_E{n_experts}_M{M}_Ka{K_attn}_Kh{K_hidden}_B{B}",
             input_names=[
-                "W_oproj", "S_oproj", "B_oproj",
-                "attn_out", "residual", "w_rms",
-                "M1", "W_fused",
+                "W_oproj",
+                "S_oproj",
+                "B_oproj",
+                "attn_out",
+                "residual",
+                "w_rms",
+                "M1",
+                "W_fused",
             ],
-            output_names=["h_scaled", "h_out", "x2_partials",
-                          "gate_part_a", "gate_part_b"],
-            source=_gen_batched_oproj_source(n_experts, M, K_attn, K_hidden, B, group_size, gate_bm).replace("bfloat16_t", METAL_HALF_TYPE),
+            output_names=[
+                "h_scaled",
+                "h_out",
+                "x2_partials",
+                "gate_part_a",
+                "gate_part_b",
+            ],
+            source=_gen_batched_oproj_source(
+                n_experts, M, K_attn, K_hidden, B, group_size, gate_bm
+            ).replace("bfloat16_t", METAL_HALF_TYPE),
         )
     return _batched_oproj_cache[key]
 
 
-def batched_oproj_gate_gemv(W_oproj, S_oproj, B_oproj,
-                             attn_out, residual, w_rms,
-                             M1, W_fused,
-                             M, K_attn, batch_size,
-                             n_experts=256, gate_bm=8,
-                             K_hidden=None, group_size=64):
+def batched_oproj_gate_gemv(
+    W_oproj,
+    S_oproj,
+    B_oproj,
+    attn_out,
+    residual,
+    w_rms,
+    M1,
+    W_fused,
+    M,
+    K_attn,
+    batch_size,
+    n_experts=256,
+    gate_bm=8,
+    K_hidden=None,
+    group_size=64,
+):
     """Batched fused 8-bit o_proj + bf16 gate GEMVs.
 
     Args:
@@ -305,7 +366,9 @@ def batched_oproj_gate_gemv(W_oproj, S_oproj, B_oproj,
     K_attn_val = int(K_attn)
     K_hidden_val = int(K_hidden) if K_hidden is not None else M_val
 
-    kern = _get_batched_oproj_kernel(n_experts, M_val, K_attn_val, K_hidden_val, B, group_size, gate_bm)
+    kern = _get_batched_oproj_kernel(
+        n_experts, M_val, K_attn_val, K_hidden_val, B, group_size, gate_bm
+    )
 
     n_oproj_tg = ceil_div(M_val, 32)
     blockM_gate = gate_bm * 4
@@ -314,21 +377,38 @@ def batched_oproj_gate_gemv(W_oproj, S_oproj, B_oproj,
     total_tg = n_oproj_tg + n_m1_tg + n_wf_tg
 
     results = kern(
-        inputs=[W_oproj, S_oproj, B_oproj,
-                attn_out.reshape(B * K_attn_val), residual.reshape(B * M_val), w_rms,
-                M1, W_fused],
-        output_shapes=[
-            (B * M_val,), (B * M_val,),
-            (B * n_oproj_tg,),
-            (B * n_experts,), (B * n_experts,),
+        inputs=[
+            W_oproj,
+            S_oproj,
+            B_oproj,
+            attn_out.reshape(B * K_attn_val),
+            residual.reshape(B * M_val),
+            w_rms,
+            M1,
+            W_fused,
         ],
-        output_dtypes=[COMPUTE_DTYPE, COMPUTE_DTYPE, mx.float32, mx.float32, mx.float32],
+        output_shapes=[
+            (B * M_val,),
+            (B * M_val,),
+            (B * n_oproj_tg,),
+            (B * n_experts,),
+            (B * n_experts,),
+        ],
+        output_dtypes=[
+            COMPUTE_DTYPE,
+            COMPUTE_DTYPE,
+            mx.float32,
+            mx.float32,
+            mx.float32,
+        ],
         grid=(total_tg * 32, 8, 1),
         threadgroup=(32, 8, 1),
     )
 
-    return (results[0].reshape(B, M_val),
-            results[1].reshape(B, M_val),
-            results[2].reshape(B, n_oproj_tg),
-            results[3].reshape(B, n_experts),
-            results[4].reshape(B, n_experts))
+    return (
+        results[0].reshape(B, M_val),
+        results[1].reshape(B, M_val),
+        results[2].reshape(B, n_oproj_tg),
+        results[3].reshape(B, n_experts),
+        results[4].reshape(B, n_experts),
+    )

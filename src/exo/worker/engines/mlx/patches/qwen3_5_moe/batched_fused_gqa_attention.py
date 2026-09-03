@@ -41,9 +41,9 @@ def _batched_fused_gqa_call(
         gate = gate.reshape(B, S, -1)
         keys, values = self.k_proj(x), self.v_proj(x)
         queries = self.q_norm(queries).transpose(0, 2, 1, 3)
-        keys = self.k_norm(
-            keys.reshape(B, S, self.num_key_value_heads, -1)
-        ).transpose(0, 2, 1, 3)
+        keys = self.k_norm(keys.reshape(B, S, self.num_key_value_heads, -1)).transpose(
+            0, 2, 1, 3
+        )
         values = values.reshape(B, S, self.num_key_value_heads, -1).transpose(
             0, 2, 1, 3
         )
@@ -56,6 +56,7 @@ def _batched_fused_gqa_call(
             keys = self.rope(keys)
 
         from mlx_lm.models.qwen3_next import scaled_dot_product_attention
+
         output = scaled_dot_product_attention(
             queries, keys, values, cache=cache, scale=self.scale, mask=mask
         )
@@ -74,9 +75,9 @@ def _batched_fused_gqa_call(
         gate = gate.reshape(B, S, -1)
         keys, values = self.k_proj(x), self.v_proj(x)
         queries = self.q_norm(queries).transpose(0, 2, 1, 3)
-        keys = self.k_norm(
-            keys.reshape(B, S, self.num_key_value_heads, -1)
-        ).transpose(0, 2, 1, 3)
+        keys = self.k_norm(keys.reshape(B, S, self.num_key_value_heads, -1)).transpose(
+            0, 2, 1, 3
+        )
         values = values.reshape(B, S, self.num_key_value_heads, -1).transpose(
             0, 2, 1, 3
         )
@@ -88,6 +89,7 @@ def _batched_fused_gqa_call(
             queries = self.rope(queries)
             keys = self.rope(keys)
         from mlx_lm.models.qwen3_next import scaled_dot_product_attention
+
         output = scaled_dot_product_attention(
             queries, keys, values, cache=cache, scale=self.scale, mask=mask
         )
@@ -101,10 +103,12 @@ def _batched_fused_gqa_call(
     # ── Dispatch 1: batched fused projections ──
     queries, gate_sigmoid, keys, values = batched_fused_gqa_projections(
         x,
-        self._merged_proj_w, self._merged_proj_s, self._merged_proj_b,
+        self._merged_proj_w,
+        self._merged_proj_s,
+        self._merged_proj_b,
         self._merged_proj_dims,
         batch_size=B,
-        total_tg=getattr(self, '_d1_total_tg', None),
+        total_tg=getattr(self, "_d1_total_tg", None),
     )
 
     # ── Dispatch 2+: vanilla norm + rope (avoids mx.eval sync on BatchKVCache offset) ──
@@ -125,6 +129,7 @@ def _batched_fused_gqa_call(
 
     # ── Dispatch 4: vanilla SDPA ──
     from mlx_lm.models.qwen3_next import scaled_dot_product_attention
+
     output = scaled_dot_product_attention(
         queries, keys, values, cache=cache, scale=self.scale, mask=mask
     )

@@ -788,9 +788,7 @@ class ExoBatchGenerator:
     # boundary. Set by BatchGenerator._start_task via
     # set_prefill_cancel_probe(); None until then and on every
     # non-chunk-drive path, so existing behaviour is untouched.
-    _prefill_cancel_probe: "Callable[[], bool] | None" = field(
-        init=False, default=None
-    )
+    _prefill_cancel_probe: "Callable[[], bool] | None" = field(init=False, default=None)
     # Rank-0-only: prefill work deferred until Rank0BatchedDecodeGlue's
     # tick() grants it (2026-08-06 fix, see _DeferredPrefill's own
     # docstring). Keyed by uid so _step_batched_decode can look up the
@@ -2166,9 +2164,7 @@ class ExoBatchGenerator:
             1 <= len(self._active_tasks) <= limit and not self._pp_spec_active
         )
 
-    def set_prefill_cancel_probe(
-        self, probe: "Callable[[], bool] | None"
-    ) -> None:
+    def set_prefill_cancel_probe(self, probe: "Callable[[], bool] | None") -> None:
         """Register the callable the chunked-prefill drive consults at
         each chunk boundary (design doc Section 96).
 
@@ -4999,7 +4995,9 @@ class ExoBatchGenerator:
                 _active_glue is not None
                 and _active_glue.is_prefill_session_active_for(uid)
             )
-            if chunk_drive_live or (deferred is not None and deferred.drive is not None):
+            if chunk_drive_live or (
+                deferred is not None and deferred.drive is not None
+            ):
                 if self._batched_decode_rank0_glue is not None:
                     from exo.worker.engines.mlx.pp_prefill_session import (
                         PrefillSessionError,
@@ -5166,16 +5164,18 @@ class ExoBatchGenerator:
                     f"reset_after_reconnect: could not enumerate rank0 glue's "
                     f"admitted requests before recreation: {e!r}"
                 )
-            dropped_prefill_r0 = (
-                self._batched_decode_rank0_glue.reset_chunk_drive_state_after_reconnect()
-            )
-            if dropped_prefill_r0 is not None and dropped_prefill_r0 not in dropped_uids:
+            dropped_prefill_r0 = self._batched_decode_rank0_glue.reset_chunk_drive_state_after_reconnect()
+            if (
+                dropped_prefill_r0 is not None
+                and dropped_prefill_r0 not in dropped_uids
+            ):
                 dropped_uids.append(dropped_prefill_r0)
         if self._batched_decode_rank1_glue is not None:
-            dropped_prefill_r1 = (
-                self._batched_decode_rank1_glue.reset_chunk_drive_state_after_reconnect()
-            )
-            if dropped_prefill_r1 is not None and dropped_prefill_r1 not in dropped_uids:
+            dropped_prefill_r1 = self._batched_decode_rank1_glue.reset_chunk_drive_state_after_reconnect()
+            if (
+                dropped_prefill_r1 is not None
+                and dropped_prefill_r1 not in dropped_uids
+            ):
                 dropped_uids.append(dropped_prefill_r1)
 
         # RECREATE (not reset) the glue objects -- see this method's own
