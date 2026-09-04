@@ -1,0 +1,33 @@
+{
+ "tag": "A_r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "5f3f98f5a0864703aa80cbbf2d33ee9d",
+ "target_tokens": 79000,
+ "prompt_tokens": 90402,
+ "completion_tokens": 1200,
+ "prefill_s": 217.49,
+ "prefill_tps": 415.66,
+ "decode_s": 40.3,
+ "decode_tps": 29.78,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 417.2671696209857,
+  "generation_tps": 29.729225225910803,
+  "prompt_tokens": 90402,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 100110493318
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1586,
+  "mtp_accepted_drafts_cumulative": 1975
+ },
+ "server_generation_tps": 29.729225225910803,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5160,
+ "reasoning_chars": 5160,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions? Need state secret code exactly. Then essay >=900 words. Need be careful: document contains repeated text and one secret code: \"FALCON-MERCURY-7749.\" Need state exactly. Then essay explaining observer pattern and B-trees. Need detailed, at least 900 words. Need include time/space complexity, when choose over alternatives, concrete examples. Need produce final with code and essay. Need maybe mention code exactly. Let's craft.\n\nNeed ensure essay length. We'll write comprehensive. Need maybe structure.\n\nLet's draft.\n\nFirst: The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\n\nThen essay.\n\nNeed discuss observer pattern: subject maintains list observers, notify state changes. Works via subscribe/unsubscribe, notify. Push/pull models. Time complexity: attach/detach O(1) if list/set? Notify O(n) where n observers, plus observer update cost. Space O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams, polling. Choose observer when one-to-many, decoupling, dynamic subscriptions; avoid when too many observers, notification storms, ordering, memory leaks. Examples: GUI button listeners, MVC model-view, Java Observer/Observable, event listeners in JS DOM, stock ticker, logging.\n\nB-trees: self-balancing tree, nodes with multiple keys and children, sorted, balanced height O(log_m n), m branching factor. Works: internal nodes keys guide search, leaves contain data; insertions split nodes, deletions merge/borrow. Time: search/insert/delete O(log n) worst-case, but in practice disk I/O optimized; space O(n). B+tree variants. Choose over BST/AVL/Red-black when block-oriented storage, large fanout, range queries, sequential access; alternatives: LSM trees for write-heavy, hash tables for point lookups, skip lists. Real systems: databases (PostgreSQL, MySQL InnoDB, SQLite), filesystems (NTFS, ext4, HFS+), key-value stores, indexes. Need mention complexity: B-tree height O(log_m n), operations O(log_m n) comparisons, but disk accesses O(log_m n). Space O(n). Need maybe compare with binary trees: high fanout reduces height, cache/disk locality.\n\nNeed maybe include observer pattern time complexity: attach/detach O(1) if using hash set, O(n) if list? Notify O(n) plus update cost. Space O(n). Need mention alternatives: event bus decouples further, but less direct; callbacks; reactive streams. Choose observer when one-to-many and dynamic; not for one-to-one or high-frequency? Could use event bus.\n\nNeed maybe include concrete examples: Observer: Java Swing ActionListener, React? Actually observer pattern in event listeners, MVC, distributed pub/sub. B-trees: PostgreSQL indexes, MySQL InnoDB, SQLite, MongoDB WiredTiger? Need be accurate: MongoDB uses WiredTiger with B-trees? WiredTiger uses B-trees and LSM. Filesystems: ext4 uses Htree (B-tree variant), NTFS uses B+ tree for file indexes. Good.\n\nNeed ensure essay at least 900 words. We'll write maybe 1200 words. Need maybe count? We'll produce.\n\nNeed maybe mention \"time and space complexity\" for both. For observer: space O(n) for observer list; time attach/detach O(1) average if hash set, O(n) if array; notify O(n) plus observer work. For B-tree: space O(n); time O(log n) average/worst for search/insert/delete, but with high fanout reduces disk I/O; worst-case O(log_m n). Need mention \"self-balancing\" ensures height.\n\nNeed maybe \"when choose one over alternatives\" for observer: choose over polling because no wasted cycles, over callbacks because multiple observers and dynamic, over event bus when direct coupling okay and need simple. For B-trees: choose over hash table for range queries, sorted order; over binary search tree for disk/block; over LSM for read-heavy workloads, stable read latency; over skip list? Need mention.\n\nNeed maybe \"concrete examples in real systems\": Observer: Java's PropertyChangeListener, GUI event listeners, MVC, Node.js EventEmitter? Actually Node EventEmitter is observer pattern. B-trees: relational DB indexes, ext4, SQLite.\n\nNeed maybe include \"secret code exactly\" maybe no extra? We'll state.\n\nNeed maybe avoid saying \"authorization code\" in essay? Fine.\n\nLet's craft final.\n\nNeed maybe include headings.\n\nLet's write.\n\nPotential issue: User says \"Below is a long document. Read it carefully.\" It contains repeated text and secret code. We need maybe not mention \"I read\". Fine.\n\nLet's produce final with first line code, then essay.\n\nNeed ensure essay >=900 words. Let's count roughly. We'll write detailed.\n\nLet's draft:\n\n\"Secret authorization code: FALCON-MERCURY-7749\"\n\nThen essay.\n\nObserver pattern:\n- Definition, participants: Subject, Observer, ConcreteSubject, ConcreteObserver.\n- How works: subscribe, notify, update; push/pull.\n- Complexity: attach/detach O(1) average with hash set; notify O(n) where n observers; update may be O(1) or more; space O(n).\n- When choose: one-to-many, dynamic, loose coupling; alternatives: polling (wasteful), callbacks (single), event bus (more decoupled but harder), reactive streams; choose observer for simple decoupled notification.\n- Examples: GUI button listeners, MVC, stock ticker, Java Observer,",
+ "content": ""
+}

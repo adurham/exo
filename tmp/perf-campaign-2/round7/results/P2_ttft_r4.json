@@ -1,0 +1,33 @@
+{
+ "tag": "P2_ttft_r4",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "a77a125fd6234924a035f397f4571ee8",
+ "target_tokens": 2000,
+ "prompt_tokens": 2239,
+ "completion_tokens": 200,
+ "prefill_s": 8.44,
+ "prefill_tps": 265.28,
+ "decode_s": 5.82,
+ "decode_tps": 34.36,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 284.8690946758861,
+  "generation_tps": 34.038854057442414,
+  "prompt_tokens": 2239,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96784610304
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 308,
+  "mtp_accepted_drafts_cumulative": 492
+ },
+ "server_generation_tps": 34.038854057442414,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 895,
+ "reasoning_chars": 759,
+ "content_chars": 136,
+ "reasoning_content": "We need to answer two tasks. First, state the secret authorization code for project Nightingale exactly as it appears. The code appears in the text: \"FALCON-MERCURY-7749.\" It appears once in the middle of the document. So answer that.\n\nSecond, write a detailed essay of at least 900 words explaining the observer pattern and B-trees. We need to cover how each works, time and space complexity, when to choose over alternatives, and concrete examples in real systems. We'll write a comprehensive essay.\n\nWe'll structure the essay: introduction, observer pattern (definition, how it works, complexity, alternatives, examples), B-trees (definition, how they work, complexity, alternatives, examples), and conclusion. Ensure it's at least 900 words.\n\nLet's write.",
+ "content": "**Task 1: Secret Authorization Code**  \nThe secret authorization code for project Nightingale is: **FALCON-MERCURY-7749**.\n\n---\n\n**Task "
+}

@@ -1,0 +1,33 @@
+{
+ "tag": "bi0_id89k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r7fixed89k",
+ "target_tokens": 79000,
+ "prompt_tokens": 74455,
+ "completion_tokens": 300,
+ "prefill_s": 177.28,
+ "prefill_tps": 419.99,
+ "decode_s": 8.78,
+ "decode_tps": 34.17,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 422.4869375174115,
+  "generation_tps": 33.60972759603093,
+  "prompt_tokens": 74455,
+  "generation_tokens": 300,
+  "peak_memory_usage": {
+   "in_bytes": 98624547388
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 418,
+  "mtp_accepted_drafts_cumulative": 560
+ },
+ "server_generation_tps": 33.60972759603093,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 1260,
+ "reasoning_chars": 1260,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention observer pattern complexity: subject maintains list, notify O(N) observers, attach/detach O(1) if list, space O(N). B-trees: search/insert/delete O(log n) time, space O(n), disk I/O optimized, high branching factor, etc. Need essay 900+ words. Need not mention hidden? It's okay. Need maybe \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Then essay.\n\nNeed ensure essay at least 900 words. Let's craft robust. Need maybe include observer pattern: definition, participants, push/pull, decoupling, event handling, MVC, pub-sub, complexity, alternatives: polling, callbacks, event bus, reactive streams. B-trees: definition, nodes, branching factor, balanced height, disk block, database indexes, filesystems, complexity, alternatives: BST, AVL, red-black, hash tables, LSM trees, B+ trees. Need concrete examples: observer in GUI button listeners, stock market, event bus, React? B-trees in PostgreSQL indexes, MySQL InnoDB, NTFS, ext4, HFS+,",
+ "content": ""
+}

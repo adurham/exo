@@ -1,0 +1,33 @@
+{
+ "tag": "P2_ttft_r5",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "98646bc514a749d9a99b4fec8962729f",
+ "target_tokens": 2000,
+ "prompt_tokens": 2285,
+ "completion_tokens": 200,
+ "prefill_s": 8.01,
+ "prefill_tps": 285.27,
+ "decode_s": 7.54,
+ "decode_tps": 26.53,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 310.16421297217994,
+  "generation_tps": 26.370929585029586,
+  "prompt_tokens": 2285,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96858939912
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 402,
+  "mtp_accepted_drafts_cumulative": 599
+ },
+ "server_generation_tps": 26.370929585029586,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 920,
+ "reasoning_chars": 920,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. It contains repeated text with secret code: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly. Then essay at least 900 words explaining observer pattern and B-trees. Need be thorough. Need include time/space complexity, when choose over alternatives, concrete examples. Need ensure essay length. We can produce.\n\nNeed be careful: The document is long with repeated text and some garbled. Secret code appears once: FALCON-MERCURY-7749. Need exact.\n\nNow essay. Need at least 900 words. We'll craft detailed.\n\nNeed discuss observer pattern: behavioral design pattern, subject maintains list observers, notifies on state changes. How works: subject interface attach/detach/notify; observer interface update; concrete subject state; observers register; notification push/pull; decoupling. Time complexity: attach/detach O(1) if list,",
+ "content": ""
+}

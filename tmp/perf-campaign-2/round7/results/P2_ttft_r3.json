@@ -1,0 +1,33 @@
+{
+ "tag": "P2_ttft_r3",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "3ea0b8ecd7f2475b84fa52810162cbe1",
+ "target_tokens": 2000,
+ "prompt_tokens": 2308,
+ "completion_tokens": 200,
+ "prefill_s": 7.41,
+ "prefill_tps": 311.47,
+ "decode_s": 7.27,
+ "decode_tps": 27.51,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 338.3371644985029,
+  "generation_tps": 27.3482058346946,
+  "prompt_tokens": 2308,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96709526914
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 244,
+  "mtp_accepted_drafts_cumulative": 355
+ },
+ "server_generation_tps": 27.3482058346946,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 919,
+ "reasoning_chars": 919,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. It contains repeated text with some truncations and one key sentence: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly. Then essay at least 900 words explaining observer pattern and B-trees. Need be thorough. Need include time/space complexity, when choose over alternatives, concrete examples. Need ensure no mention hidden? We can comply. Need maybe note code exactly. Let's craft.\n\nNeed be careful: The document is weird repeated with salt. But code appears once: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly.\n\nEssay: Need at least 900 words. We'll write detailed. Need cover observer pattern: subject maintains list observers, notifies state changes. How works: Observer interface update, Subject attach/detach/notify. Push/pull models. Time complexity: attach/detach",
+ "content": ""
+}

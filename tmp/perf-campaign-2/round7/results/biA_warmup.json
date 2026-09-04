@@ -1,0 +1,33 @@
+{
+ "tag": "A_warmup",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "75619c053cdd485da3882039cb99517c",
+ "target_tokens": 79000,
+ "prompt_tokens": 84199,
+ "completion_tokens": 1200,
+ "prefill_s": 202.36,
+ "prefill_tps": 416.09,
+ "decode_s": 34.46,
+ "decode_tps": 34.82,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 417.65470014349995,
+  "generation_tps": 34.698582223783745,
+  "prompt_tokens": 84199,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 98833563950
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 966,
+  "mtp_accepted_drafts_cumulative": 1396
+ },
+ "server_generation_tps": 34.698582223783745,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5774,
+ "reasoning_chars": 2168,
+ "content_chars": 3606,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need detailed. Need maybe mention code found in document. Need not reveal? User asks. We can comply. Need ensure essay length. Let's craft.\n\nNeed include observer pattern: subject maintains list observers, notify state changes. How works: observers register, subject updates, calls update. Push/pull models. Time complexity: register/deregister O(1) if list, notify O(n) observers; memory O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams, model-view-controller. Choose observer when one-to-many, decoupling, dynamic subscriptions; avoid when too many notifications, ordering, memory leaks, synchronous cascades. Real examples: GUI button listeners, Java Observer/Observable deprecated, JavaScript EventTarget, React Redux store subscribe, MVC model-view, stock ticker, notification systems.\n\nB-trees: self-balancing tree, nodes with multiple keys/children, sorted, leaves same depth. How works: search from root, binary search within node; insert split nodes, delete merge/borrow. Time complexity: search/insert/delete O(log n) worst-case, but in practice height O(log_m n) where m order; space O(n). Disk I/O optimized: node size = block/page, reduces disk accesses. Alternatives: BST/AVL/Red-black, hash tables, skip lists, LSM trees. Choose B-tree when large data on disk, databases, filesystems, range queries, ordered traversal; choose hash for exact lookup; red-black for in-memory balanced; LSM for write-heavy. Examples: MySQL InnoDB indexes, PostgreSQL, SQLite, MongoDB WiredTiger, NTFS, ext4, HFS+, Btrfs, key-value stores.\n\nNeed essay >=900 words. We'll write maybe 1000-1200. Need include code exactly. Let's produce.\n\nNeed be careful: \"secret authorization code for project Nightingale exactly as it appears\" It appears \"FALCON-MERCURY-7749.\" Include period? It appears with period after? Text: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" The code itself no period. State exactly: FALCON-MERCURY-7749.\n\nLet's craft final with headings.",
+ "content": "**Secret authorization code for project Nightingale:**  \n`FALCON-MERCURY-7749`\n\n---\n\n## The Observer Pattern and B-Trees: A Detailed Essay\n\nSoftware engineering relies on design patterns and data structures to build systems that are maintainable, efficient, and scalable. Two foundational concepts are the **observer pattern**, a behavioral design pattern for managing dependencies between objects, and the **B-tree**, a self-balancing tree data structure optimized for storage systems. Although they solve different problems, both are widely used in real-world systems and offer distinct trade-offs in time complexity, space usage, and applicability.\n\n### The Observer Pattern\n\nThe observer pattern defines a one-to-many dependency between objects. The object that holds the state is called the **subject**, and the objects that depend on it are called **observers**. When the subject changes state, it automatically notifies all registered observers, allowing them to update themselves. This pattern is fundamental to event-driven programming, user interfaces, and distributed systems.\n\n#### How It Works\n\nThe subject maintains a list of observers. Observers register themselves with the subject, often through methods like `attach()` or `subscribe()`. When the subject\u2019s state changes, it calls a notification method, typically `notify()`, which iterates through the observer list and invokes an update method on each observer, such as `update()` or `onEvent()`. The observers can then query the subject for the new state or receive the state directly in the notification.\n\nThere are two common variants: **push** and **pull**. In the push model, the subject sends detailed state information to observers. In the pull model, the subject only signals that a change occurred, and observers retrieve the data they need. The push model is simpler but can be inefficient if observers need only a small portion of the data. The pull model is more flexible but requires observers to know how to query the subject.\n\n#### Time and Space Complexity\n\nThe time complexity of registering or removing an observer is O(1) if the subject uses a hash set or an unordered list, though removal from an array list can be O(n). Notifying all observers is O(n), where n is the number of observers, because the subject must call each observer\u2019s update method. The space complexity is O(n) for storing the observer list. If notifications are expensive, the pattern can become a bottleneck when there are many observers or when updates occur frequently.\n\n#### Choosing the Observer Pattern\n\nThe observer pattern is ideal when there is a one-to-many relationship and the subject should not know the details of its dependents. It promotes loose coupling and supports dynamic relationships: observers can be added or removed at runtime. It is commonly used in graphical user interfaces, where buttons, sliders, and text fields notify listeners of user actions. It is also used in model-view-controller architectures, where the model notifies views of changes.\n\nHowever, the observer pattern has drawbacks. Notification order is usually not guaranteed, which can cause subtle bugs. Observers can cause cascading updates, leading to performance issues. Memory leaks can occur if observers are not properly removed. Alternatives include the **publish-subscribe pattern**, which uses a message broker to decouple producers and consumers, and **reactive streams**, which provide backpressure and asynchronous processing. The observer pattern is preferable when the relationship is direct, synchronous, and within a single application.\n\n"
+}

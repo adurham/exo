@@ -1,0 +1,33 @@
+{
+ "tag": "A_r3",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "c870520928b944d48f4fa2956628e3fa",
+ "target_tokens": 79000,
+ "prompt_tokens": 85086,
+ "completion_tokens": 1200,
+ "prefill_s": 203.3,
+ "prefill_tps": 418.52,
+ "decode_s": 38.87,
+ "decode_tps": 30.87,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 420.2916771501168,
+  "generation_tps": 30.779064449807702,
+  "prompt_tokens": 85086,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 102394096860
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 2749,
+  "mtp_accepted_drafts_cumulative": 3213
+ },
+ "server_generation_tps": 30.779064449807702,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5078,
+ "reasoning_chars": 4645,
+ "content_chars": 433,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need be thorough. Need maybe mention time/space complexity, alternatives, examples. Need ensure no extra harmful? It's fine. Need maybe not reveal? User asks secret code from document. It's in document. We can provide. Need write essay.\n\nNeed craft essay 900+ words. Let's plan.\n\nObserver pattern:\n- Behavioral design pattern, subject maintains list observers, notifies on state changes.\n- Components: Subject (Observable), Observer interface, ConcreteSubject, ConcreteObserver.\n- Works via subscription: observers register, subject iterates and calls update/notify with event/state.\n- Push vs pull models.\n- Time complexity: attach/detach O(1) if list/set? If using list O(1) append, removal O(n) if by value; if set O(1) average. notify O(n) where n observers, plus observer update cost. Space O(n) for observer list.\n- Alternatives: event bus/pub-sub, callbacks, signals/slots, reactive streams, polling. Observer pattern decouples but can cause memory leaks if not unregistered, notification order nondeterministic, cascading updates.\n- Examples: GUI button listeners, MVC model notifies views, Java Observer/Observable deprecated, PropertyChangeListener, React state? Event listeners in DOM, stock market ticker, pub-sub message queues.\n\nB-trees:\n- Self-balancing tree, nodes with multiple keys/children, sorted, optimized for disk/block storage. Generalization of BST; all leaves same depth; internal nodes have between ceil(m/2) and m children; root exceptions.\n- How works: search from root, compare keys, descend; insert: search leaf, insert key, split if overflow, promote median; delete: borrow/merge, rebalance.\n- Time complexity: O(log_m n) comparisons? Actually height O(log_m n), but within node binary/linear search O(log m) or O(m). For disk, m large, height small. Search/insert/delete O(log n) comparisons? More precisely O(log n) if m constant, but m often large; operations O(m log_m n) for linear search within node, or O(log m log_m n) with binary search. Space O(n). B-trees minimize disk I/O: height ~ log_m n, each node fits block.\n- Alternatives: AVL/red-black trees (in-memory, O(log n), lower constants? B-trees also used in memory due cache), skip lists, hash tables (not ordered), sorted arrays. Choose B-tree for large datasets, disk/SSD, range queries, databases, filesystems. AVL/RB for in-memory ordered maps with frequent updates. Hash for exact lookup no order.\n- Examples: databases (MySQL InnoDB, PostgreSQL indexes, SQLite), filesystems (NTFS, ext4, HFS+, ZFS), key-value stores (LevelDB, RocksDB, MongoDB), B-trees in main memory? Also B+tree variants.\n\nNeed essay at least 900 words. Need maybe count. We'll write around 1200 words. Need include secret code first. Maybe \"The secret authorization code is: FALCON-MERCURY-7749.\" Then essay.\n\nNeed be careful: \"state the secret authorization code for project Nightingale exactly as it appears.\" It appears \"FALCON-MERCURY-7749.\" Good.\n\nNeed maybe mention \"I will not discuss code beyond...\" But okay.\n\nLet's write detailed essay.\n\nNeed maybe include headings? Fine.\n\nLet's draft.\n\nPotential issue: The document contains repeated text and secret code inserted. We can say \"The code is FALCON-MERCURY-7749.\" Then essay.\n\nLet's ensure essay length. We'll count approximate.\n\nLet's write:\n\nTitle: The Observer Pattern and B-Trees: Design and Data Structure in Practice\n\nParagraphs:\n\n- Observer pattern definition and components.\n- Mechanics: registration, notification, push/pull, decoupling.\n- Complexity: attach/detach O(1), notify O(n), space O(n); update cost.\n- Alternatives: event bus, callbacks, polling; when choose observer.\n- Real examples: GUI event listeners, MVC, distributed pub/sub, React? Need concrete.\n\n- B-trees definition and properties.\n- Mechanics: search, insert, split, delete, merge; B+tree.\n- Complexity: height O(log_m n), operations O(log n) with node search; space O(n); disk I/O.\n- Alternatives: BST, AVL/RB, hash, sorted arrays; choose B-tree for disk/range.\n- Real examples: databases, filesystems, key-value stores.\n\n- Conclusion.\n\nNeed maybe mention \"time and space complexity\" explicitly.\n\nLet's craft with enough detail.\n\nNeed maybe include \"observer pattern time complexity: attach/detach O(1) if using hash set, O(n) if list removal; notify O(n) plus observer update; space O(n).\" Good.\n\nNeed maybe mention \"B-tree time complexity: search/insert/delete O(log n) average/worst, but if counting node search O(m log_m n); space O(n).\" Good.\n\nLet's write final.",
+ "content": "The secret authorization code for project Nightingale is: **FALCON-MERCURY-7749**.\n\n---\n\n## The Observer Pattern and B-Trees: Design and Data Structure in Practice\n\nSoftware engineering relies on patterns and data structures that balance flexibility, performance, and maintainability. Two foundational concepts are the **observer pattern**, a behavioral design pattern for managing dependencies between objects, and the **B-tree**, a"
+}

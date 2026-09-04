@@ -1,0 +1,33 @@
+{
+ "tag": "P2_ttft_r2",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "5ed4dc474fba4aa5b1b7dd68230ec4f6",
+ "target_tokens": 2000,
+ "prompt_tokens": 2354,
+ "completion_tokens": 200,
+ "prefill_s": 8.29,
+ "prefill_tps": 283.96,
+ "decode_s": 6.62,
+ "decode_tps": 30.21,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 306.4021195946394,
+  "generation_tps": 30.03051494617835,
+  "prompt_tokens": 2354,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96634982546
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 154,
+  "mtp_accepted_drafts_cumulative": 244
+ },
+ "server_generation_tps": 30.03051494617835,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 872,
+ "reasoning_chars": 872,
+ "content_chars": 0,
+ "reasoning_content": "We need to extract the secret authorization code from the document. The document contains repeated text about observer pattern and B-trees, with some variations and errors. The secret code appears in one of the runs: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" That appears in run seq 7? Let's check: The text after seq 7 salt 21486238] ... \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" So the code is FALCON-MERCURY-7749.\n\nNow, write a detailed essay of at least 900 words explaining observer pattern and B-trees. Need to cover: how each works, time and space complexity, when to choose over alternatives, concrete examples in real systems. Must be thorough.\n\nI'll structure the essay with introduction, sections on observer pattern, B-trees, comparison, and conclusion. Ensure word count >900.\n\nLet",
+ "content": ""
+}

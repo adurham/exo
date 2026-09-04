@@ -1,0 +1,33 @@
+{
+ "tag": "Z_ttft_r3",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "943e0bc841a04a778617f3604e3af74d",
+ "target_tokens": 2000,
+ "prompt_tokens": 2285,
+ "completion_tokens": 200,
+ "prefill_s": 7.72,
+ "prefill_tps": 295.98,
+ "decode_s": 6.2,
+ "decode_tps": 32.26,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 314.04527626059996,
+  "generation_tps": 31.59022382788301,
+  "prompt_tokens": 2285,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96709677656
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 239,
+  "mtp_accepted_drafts_cumulative": 363
+ },
+ "server_generation_tps": 31.59022382788301,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 940,
+ "reasoning_chars": 573,
+ "content_chars": 367,
+ "reasoning_content": "We need to extract the secret authorization code from the document. The document is a long repeated text with some variations. The secret code appears in one of the runs: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" That appears in seq 7. So the code is FALCON-MERCURY-7749.\n\nNow for the essay: need at least 900 words explaining observer pattern and B-trees, covering how each works, time/space complexity, when to choose over alternatives, concrete examples in real systems. Must be thorough and specific.\n\nI'll write a detailed essay.",
+ "content": "**Secret Authorization Code for Project Nightingale:**  \nFALCON-MERCURY-7749\n\n---\n\n**The Observer Pattern and B-Trees: Design Principles, Complexity, and Real-World Applications**\n\nIn the landscape of software engineering, two concepts stand out for their ubiquity and elegance: the Observer pattern, a behavioral design pattern that facilitates communication between"
+}

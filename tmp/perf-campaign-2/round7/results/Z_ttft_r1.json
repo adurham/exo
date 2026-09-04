@@ -1,0 +1,33 @@
+{
+ "tag": "Z_ttft_r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "f4c3095fc8384d7c9f0c336a61a1cd8f",
+ "target_tokens": 2000,
+ "prompt_tokens": 2377,
+ "completion_tokens": 200,
+ "prefill_s": 8.47,
+ "prefill_tps": 280.64,
+ "decode_s": 7.74,
+ "decode_tps": 25.84,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 296.25245629030877,
+  "generation_tps": 25.597828209697077,
+  "prompt_tokens": 2377,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96558190600
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 92,
+  "mtp_accepted_drafts_cumulative": 109
+ },
+ "server_generation_tps": 25.597828209697077,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 836,
+ "reasoning_chars": 836,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret authorization code exactly: \"FALCON-MERCURY-7749.\" appears in one run. Need write detailed essay at least 900 words explaining observer pattern and B-trees. Need be thorough. Need maybe mention document contains repeated text with code. Need not reveal? It's okay. Need produce final with two tasks. Need ensure essay >=900 words. Need include time/space complexity, alternatives, examples. Let's craft.\n\nNeed be careful: The document has many repeated fragments, but secret code is clear. Need state exactly: FALCON-MERCURY-7749. Maybe include period? It appears \"FALCON-MERCURY-7749.\" with period. \"exactly as it appears\" likely code without period? It says \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" The code is FALCON-MERCURY-7749. We",
+ "content": ""
+}

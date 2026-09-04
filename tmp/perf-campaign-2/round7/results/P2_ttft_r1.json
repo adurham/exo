@@ -1,0 +1,33 @@
+{
+ "tag": "P2_ttft_r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "9dfa9a657ffd4463b42ebaee477b0cce",
+ "target_tokens": 2000,
+ "prompt_tokens": 2308,
+ "completion_tokens": 200,
+ "prefill_s": 7.8,
+ "prefill_tps": 295.9,
+ "decode_s": 6.92,
+ "decode_tps": 28.9,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 325.12208065091636,
+  "generation_tps": 28.727717441690025,
+  "prompt_tokens": 2308,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96558190600
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 80,
+  "mtp_accepted_drafts_cumulative": 119
+ },
+ "server_generation_tps": 28.727717441690025,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 939,
+ "reasoning_chars": 939,
+ "content_chars": 0,
+ "reasoning_content": "We need to answer two tasks. First, extract the secret authorization code for project Nightingale exactly as it appears. The document contains repeated text with some variations, but the code appears in one line: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" That is the exact string. So answer that.\n\nSecond, write a detailed essay of at least 900 words explaining observer pattern and B-trees. Need to cover: how each works, time and space complexity, when to choose over alternatives, concrete examples in real systems. Must be thorough and specific. I'll write an essay.\n\nLet me structure: Introduction, then observer pattern: definition, components, how it works, complexity (time for notification O(n) where n observers, space O(n) for list), alternatives (publish-subscribe, event-driven, etc.), when to use, examples (GUI event handling, MVC, reactive programming, etc.). Then B-trees: definition",
+ "content": ""
+}

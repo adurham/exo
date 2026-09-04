@@ -1,0 +1,33 @@
+{
+ "tag": "biA_id89k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r7fixed89k",
+ "target_tokens": 79000,
+ "prompt_tokens": 74455,
+ "completion_tokens": 300,
+ "prefill_s": 178.38,
+ "prefill_tps": 417.4,
+ "decode_s": 9.28,
+ "decode_tps": 32.33,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 419.5192508660492,
+  "generation_tps": 31.53716090911863,
+  "prompt_tokens": 74455,
+  "generation_tokens": 300,
+  "peak_memory_usage": {
+   "in_bytes": 102394096860
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 3154,
+  "mtp_accepted_drafts_cumulative": 3828
+ },
+ "server_generation_tps": 31.53716090911863,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 1298,
+ "reasoning_chars": 1298,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention observer pattern complexity: subject maintains list, notify O(N) observers, attach/detach O(1) if list, space O(N). B-trees: search/insert/delete O(log n) average/worst, space O(n), node branching factor, disk I/O. Need essay. Need ensure no extra? We can provide. Need maybe mention code appears in document. Let's craft.\n\nNeed maybe \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Then essay.\n\nNeed 900 words. Let's write robust.\n\nNeed include observer pattern: definition, participants, workflow, decoupling, push/pull, complexity, alternatives: event-driven, pub/sub, callbacks, reactive streams, when choose. Real systems: GUI button listeners, MVC, stock ticker, DOM event listeners, notification systems.\n\nB-trees: self-balancing tree, nodes with multiple keys/children, sorted, leaves same depth, splitting/merging, branching factor, disk block, complexity: search O(log_m n) comparisons? Actually O(log n) with base m, but in terms of operations O(log n) if m constant;",
+ "content": ""
+}

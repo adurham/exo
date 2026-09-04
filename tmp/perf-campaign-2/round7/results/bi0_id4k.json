@@ -1,0 +1,33 @@
+{
+ "tag": "bi0_id4k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r7fixed4k",
+ "target_tokens": 4000,
+ "prompt_tokens": 3811,
+ "completion_tokens": 300,
+ "prefill_s": 11.29,
+ "prefill_tps": 337.56,
+ "decode_s": 11.12,
+ "decode_tps": 26.98,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 359.7409822517818,
+  "generation_tps": 26.82064838139076,
+  "prompt_tokens": 3811,
+  "generation_tokens": 300,
+  "peak_memory_usage": {
+   "in_bytes": 97936574604
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 273,
+  "mtp_accepted_drafts_cumulative": 406
+ },
+ "server_generation_tps": 26.82064838139076,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 1331,
+ "reasoning_chars": 1331,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret code exactly: \"FALCON-MERCURY-7749\" appears in one run. Need write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples real systems. Need be thorough. Need maybe mention document contains repeated degraded text but code. Need produce final with code and essay. Need ensure essay >=900 words. Need include observer pattern details, B-trees details, complexity, alternatives, examples. Need maybe mention observer pattern: subject maintains observers, notify state changes; decouples; push/pull; complexity O(1) add/remove if list, notify O(n); memory O(n); alternatives: event bus, pub/sub, callbacks, reactive streams; choose when one-to-many dynamic dependencies, avoid tight coupling; examples: GUI event listeners, MVC model-view, stock ticker, notification systems, React? B-trees: self-balancing tree, nodes with multiple keys/children, sorted, O(log n) search/insert/delete, space O(n), high fanout reduces disk I/O; choose for databases/filesystems over BST/AVL due to block size, cache locality; examples: PostgreSQL indexes, MySQL InnoDB, SQLite, NTFS, ext4, HFS+, MongoDB? Need mention B+tree variant. Need maybe compare alternatives: LSM trees, hash",
+ "content": ""
+}
