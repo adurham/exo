@@ -8,6 +8,9 @@
 # NO EXO_BATCHED_PREFILL_RENDEZVOUS_MS env var at all, so start_cluster.sh's own
 # default takes effect. Still ps-eww-verify afterward to prove it.
 set -u
+# Pin interpreter: bare python3 can resolve to Homebrew python (no httpx);
+# this must match the interpreter used for the already-collected arm data.
+PY=/usr/bin/python3
 N="$1"
 RV="$2"
 EXTRA="${3:-}"

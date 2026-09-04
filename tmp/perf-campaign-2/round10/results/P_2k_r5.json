@@ -1,0 +1,33 @@
+{
+ "tag": "P_2k_r5",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "d41376b5be6b4b7ba10c1c11a17657ed",
+ "target_tokens": 2000,
+ "prompt_tokens": 2331,
+ "completion_tokens": 16,
+ "prefill_s": 8.49,
+ "prefill_tps": 274.56,
+ "decode_s": 0.64,
+ "decode_tps": 25.0,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 298.51546690260983,
+  "generation_tps": 23.193269966113622,
+  "prompt_tokens": 2331,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96858906668
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 36,
+  "mtp_accepted_drafts_cumulative": 43
+ },
+ "server_generation_tps": 23.193269966113622,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 83,
+ "reasoning_chars": 83,
+ "content_chars": 0,
+ "reasoning_content": "We need to answer two tasks. First, state the secret authorization code for project",
+ "content": ""
+}

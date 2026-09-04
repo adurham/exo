@@ -11,6 +11,9 @@
 # The capture-number arg lets the same arm be captured twice for a
 # within-arm self-control (byte-identity gate).
 set -u
+# Pin interpreter: bare python3 can resolve to Homebrew python (no httpx);
+# this must match the interpreter used for the already-collected arm data.
+PY=/usr/bin/python3
 A="$1"
 C="$2"
 R10=/Users/adam.durham/repos/exo/tmp/perf-campaign-2/round10
@@ -21,10 +24,10 @@ S=/tmp/r10_ident_${A}_c${C}_status.txt
 echo "IDENT_START $A c$C $(date -u +%FT%TZ)" > "$S"
 
 run() {  # name target maxtok
-  python3 bench/long_decode_probe.py "$2" --max-tokens "$3" --run-id r10id \
+  "$PY" bench/long_decode_probe.py "$2" --max-tokens "$3" --run-id r10id \
     --tag ident_${A}_c${C}_$1 --out "$RES/identity_${A}_c${C}_$1.json" >> /tmp/r10_ident_${A}_c${C}.log 2>&1
   echo "$1 rc=$? $(date -u +%FT%TZ)" >> "$S"
-  python3 -c "
+  "$PY" -c "
 import json,sys
 d=json.load(open('$RES/identity_${A}_c${C}_$1.json'))
 open('$RES/identity_${A}_c${C}_$1.txt','w').write(d['content'])

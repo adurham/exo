@@ -1,0 +1,33 @@
+{
+ "tag": "steelbi_RV200_89k_1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r10id",
+ "target_tokens": 89000,
+ "prompt_tokens": 81866,
+ "completion_tokens": 200,
+ "prefill_s": 1.13,
+ "prefill_tps": 72447.79,
+ "decode_s": 6.93,
+ "decode_tps": 28.86,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 2.3957418089950457,
+  "generation_tps": 28.675978970456512,
+  "prompt_tokens": 81866,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 100454593576
+  },
+  "prefix_cache_hit": "exact",
+  "mtp_cycles_cumulative": 419,
+  "mtp_accepted_drafts_cumulative": 435
+ },
+ "server_generation_tps": 28.675978970456512,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 898,
+ "reasoning_chars": 898,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need be thorough. Need maybe mention code found in document. Need not reveal? User asks. We can comply. Need ensure essay length. Let's craft.\n\nNeed include observer pattern: subject maintains list observers, notify state changes. How works: Observer interface update, Subject attach/detach/notify. Push/pull models. Time complexity: attach/detach O(1) if list, notify O(n) observers; space O(n). Alternatives: event bus, pub/sub, callbacks, signals/slots, reactive streams. Choose observer when one-to-many decoupling, dynamic subscriptions, but beware memory leaks, update storms, ordering. Real examples: GUI button listeners, MVC model-view, Java Observer/Observable deprecated, EventListener, React props? Actually observer in UI",
+ "content": ""
+}

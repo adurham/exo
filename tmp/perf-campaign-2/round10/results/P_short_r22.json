@@ -1,0 +1,33 @@
+{
+ "tag": "P_short_r22",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "bebcbe9fdbd24e87b923a01a622fbc9b",
+ "target_tokens": 20,
+ "prompt_tokens": 228,
+ "completion_tokens": 16,
+ "prefill_s": 1.98,
+ "prefill_tps": 115.15,
+ "decode_s": 0.55,
+ "decode_tps": 29.09,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 179.26931958506094,
+  "generation_tps": 24.466404613112342,
+  "prompt_tokens": 228,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96858906668
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 172,
+  "mtp_accepted_drafts_cumulative": 273
+ },
+ "server_generation_tps": 24.466404613112342,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 82,
+ "reasoning_chars": 82,
+ "content_chars": 0,
+ "reasoning_content": "We need to answer two tasks. First, state the secret authorization code exactly as",
+ "content": ""
+}

@@ -6,6 +6,9 @@
 # steelbi_<ARM>_89k_{1,2,3}.json plus .txt extractions of reasoning_content
 # and content (concatenated, reasoning first then content).
 set -u
+# Pin interpreter: bare python3 can resolve to Homebrew python (no httpx);
+# this must match the interpreter used for the already-collected arm data.
+PY=/usr/bin/python3
 A="$1"
 R10=/Users/adam.durham/repos/exo/tmp/perf-campaign-2/round10
 RES="$R10/results"
@@ -15,10 +18,10 @@ S=/tmp/r10_89kself_${A}_status.txt
 echo "89K_SELFCONTROL_START $A $(date -u +%FT%TZ)" > "$S"
 
 for i in 1 2 3; do
-  python3 bench/long_decode_probe.py 89000 --max-tokens 200 --run-id r10id \
+  "$PY" bench/long_decode_probe.py 89000 --max-tokens 200 --run-id r10id \
     --tag steelbi_${A}_89k_$i --out "$RES/steelbi_${A}_89k_$i.json" >> /tmp/r10_89kself_${A}.log 2>&1
   echo "89k_$i rc=$? $(date -u +%FT%TZ)" >> "$S"
-  python3 -c "
+  "$PY" -c "
 import json,sys
 d=json.load(open('$RES/steelbi_${A}_89k_$i.json'))
 open('$RES/steelbi_${A}_89k_$i.txt','w').write(d['reasoning_content'] + d['content'])

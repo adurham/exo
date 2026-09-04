@@ -1,0 +1,33 @@
+{
+ "tag": "P_short_r18",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "fbce2eeeb77d46b384c3b2863718709a",
+ "target_tokens": 20,
+ "prompt_tokens": 224,
+ "completion_tokens": 16,
+ "prefill_s": 2.0,
+ "prefill_tps": 112.0,
+ "decode_s": 0.58,
+ "decode_tps": 27.59,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 182.0399804387311,
+  "generation_tps": 21.301137855748163,
+  "prompt_tokens": 224,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96858906668
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 146,
+  "mtp_accepted_drafts_cumulative": 231
+ },
+ "server_generation_tps": 21.301137855748163,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 70,
+ "reasoning_chars": 70,
+ "content_chars": 0,
+ "reasoning_content": "1.  The user asks for two tasks. First, state the secret authorization",
+ "content": ""
+}
