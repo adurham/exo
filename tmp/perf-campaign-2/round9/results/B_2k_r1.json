@@ -1,0 +1,33 @@
+{
+ "tag": "B_2k_r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "bf1742f473f94746a0e3a8ab194f6802",
+ "target_tokens": 2000,
+ "prompt_tokens": 2308,
+ "completion_tokens": 16,
+ "prefill_s": 7.23,
+ "prefill_tps": 319.23,
+ "decode_s": 0.65,
+ "decode_tps": 24.62,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 351.93230878906684,
+  "generation_tps": 22.69612332698472,
+  "prompt_tokens": 2308,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96558190600
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 6,
+  "mtp_accepted_drafts_cumulative": 9
+ },
+ "server_generation_tps": 22.69612332698472,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 85,
+ "reasoning_chars": 85,
+ "content_chars": 0,
+ "reasoning_content": "We need to answer two tasks. First, extract the secret authorization code for project",
+ "content": ""
+}
