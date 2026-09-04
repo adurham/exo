@@ -1,0 +1,32 @@
+{
+ "tag": "g2-warmup",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 88630,
+ "completion_tokens": 1200,
+ "prefill_s": 212.13,
+ "prefill_tps": 417.81,
+ "decode_s": 37.22,
+ "decode_tps": 32.24,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 419.7094337457138,
+  "generation_tps": 32.11259571703994,
+  "prompt_tokens": 88630,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 98726705932
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 611,
+  "mtp_accepted_drafts_cumulative": 589
+ },
+ "server_generation_tps": 32.11259571703994,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5039,
+ "reasoning_chars": 4587,
+ "content_chars": 452,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret authorization code exactly. It appears in document: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need include exactly. Then essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples real systems. Need be thorough. Need maybe mention document contains repeated text and secret code inserted. Need not reveal? User asks. We can comply. Need ensure essay >=900 words. Need maybe count. Need produce final with code and essay. Need be careful not to overdo? Desired oververbosity 5, but user asks 900 words. Need write detailed essay. Let's craft.\n\nNeed include secret code exactly: FALCON-MERCURY-7749.\n\nEssay structure:\n- Intro: observer pattern and B-tree are unrelated but important in software.\n- Observer pattern:\n  - Definition: subject maintains list observers, notifies on state changes.\n  - How works: Observer interface update; Subject attach/detach/notify; push/pull models; decoupling.\n  - Time complexity: attach/detach O(1) if list/hash, O(n) if array; notify O(n) observers, each update may vary; space O(n) observers.\n  - Alternatives: event bus/pub-sub, callbacks, signals/slots, reactive streams; choose observer when direct one-to-many within process, decoupling; pub-sub for distributed/many-to-many; callbacks for single.\n  - Real examples: GUI event listeners (Java Swing/AWT, .NET events), MVC model notifies views, React? state management, Node.js EventEmitter, observer in distributed? \n- B-trees:\n  - How works: self-balancing tree, nodes with multiple keys and children; sorted; all leaves same depth; insertion/splitting, deletion/merging; branching factor; disk-oriented.\n  - Time complexity: search/insert/delete O(log_m n) comparisons? Actually O(log n) height, each node binary search O(log m), so O(log m * log_m n) = O(log n) if m constant; disk I/O O(log_m n). Space O(n).\n  - Alternatives: BST/AVL/red-black, hash tables, skip lists, B+ trees. Choose B-tree when block storage, large data, range queries, database indexes, filesystems; hash for equality; AVL for in-memory ordered.\n  - Real examples: databases (PostgreSQL/MySQL indexes, SQLite), filesystems (NTFS, ext4, HFS+), key-value stores (LevelDB uses LSM not B-tree? but many), MongoDB indexes, InnoDB B+ tree.\n- Need maybe compare observer and B-trees? Could mention both are design/data structure patterns; observer for behavior, B-tree for storage. Need \"when you would choose one over alternatives\" for each.\n\nNeed count words. Let's write around 1000-1200 words. Need not mention \"document repeated\" maybe.\n\nNeed be careful: \"state secret authorization code exactly as it appears\" include in first line maybe.\n\nLet's craft final.\n\nNeed maybe include \"FALCON-MERCURY-7749\" exactly. Good.\n\nLet's write essay.\n\nNeed maybe \"time and space complexity\" for observer: attach/detach O(1) average with hash set; notify O(n); space O(n). For B-tree: search O(log n) comparisons? Let's be precise: In B-tree of order m, each node has at most m children and m-1 keys. Height O(log_m n). Search within node can be O(log m) if binary search, so total O(log m * log_m n) = O(log n). If linear search within node O(m log_m n), but m constant. Insert/delete O(log n) amortized? Usually O(log n) with splits/merges. Space O(n). B+ tree variants.\n\nNeed \"concrete examples of each in real systems\": Observer: Java's java.util.Observer deprecated, Swing ActionListener, .NET events, Node.js EventEmitter, MVC. B-trees: relational database indexes, PostgreSQL, MySQL InnoDB, SQLite, filesystems, key-value stores.\n\nNeed maybe \"when choose one over alternatives\": Observer vs pub-sub: observer is direct coupling, synchronous; pub-sub via broker decouples producers/consumers, supports many-to-many, async, cross-process. Observer vs callbacks: callbacks for one event one handler; observer for multiple dynamic observers. Observer vs polling: observer avoids repeated polling but adds notification complexity. B-tree vs hash index: range queries, ordered scans, prefix matching; hash for point equality. B-tree vs AVL/red-black: B-tree reduces disk I/O due to high fanout; AVL/red-black in memory. B-tree vs LSM: write-optimized vs read-optimized; B-tree for read-heavy, stable latency; LSM for write-heavy.\n\nNeed maybe \"how each works\" detailed.\n\nLet's craft final with code line and essay. Need maybe \"Secret authorization code: FALCON-MERCURY-7749\" exactly. Then essay.\n\nNeed ensure no \"I\" maybe.\n\nLet's produce.",
+ "content": "Secret authorization code for project Nightingale: **FALCON-MERCURY-7749**\n\n---\n\n## The Observer Pattern and B-Trees: Design and Data Structure in Practice\n\nThe observer pattern and B-trees are two foundational concepts in software engineering, but they operate at very different levels. The observer pattern is a behavioral software design pattern that manages communication between objects, while a B-tree is a self-balancing tree data structure used"
+}

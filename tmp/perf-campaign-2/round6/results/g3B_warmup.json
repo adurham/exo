@@ -1,0 +1,32 @@
+{
+ "tag": "g3B-warmup",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 88628,
+ "completion_tokens": 1200,
+ "prefill_s": 212.47,
+ "prefill_tps": 417.13,
+ "decode_s": 36.46,
+ "decode_tps": 32.91,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 419.25086863341465,
+  "generation_tps": 32.733019641159466,
+  "prompt_tokens": 88628,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 98726722316
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 544,
+  "mtp_accepted_drafts_cumulative": 655
+ },
+ "server_generation_tps": 32.733019641159466,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5446,
+ "reasoning_chars": 3613,
+ "content_chars": 1833,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need be thorough. Need maybe mention document contains repeated text and code. Need not reveal? User asks. We can comply. Need ensure essay detailed. Let's craft.\n\nNeed include observer pattern: subject maintains list observers, notify state changes. How works: subject interface attach/detach/notify; observers update. Push/pull models. Time complexity: attach/detach O(1) if list, notify O(n) observers; memory O(n). Alternatives: event bus, pub/sub, callbacks, signals/slots, reactive streams. Choose observer when one-to-many, decoupling, dynamic subscriptions; avoid when too many observers, update storms, ordering, memory leaks. Real examples: GUI button listeners, MVC model notifies views, Java Observable/PropertyChangeListener, React state? Event emitters Node.js, Kafka pub/sub? Need concrete.\n\nB-trees: self-balancing tree, nodes with multiple keys and children, sorted, balanced height O(log n), high branching factor, minimize disk I/O. How works: each node contains up to t-1 keys, children; insert split, delete merge/borrow; search traverse. Time complexity: search/insert/delete O(log n) worst-case; space O(n). Alternatives: BST/AVL/Red-black, hash tables, skip lists, LSM trees. Choose B-tree for disk/database/filesystems because block size, locality, fewer I/O; alternatives for in-memory. Examples: databases (MySQL InnoDB, PostgreSQL, MongoDB), filesystems (NTFS, ext4, HFS+), key-value stores.\n\nNeed essay at least 900 words. Need maybe count. We'll write detailed. Need maybe include \"observer pattern and B-trees\" together? Could structure.\n\nNeed ensure \"exactly as it appears\": FALCON-MERCURY-7749. Include maybe code block.\n\nLet's craft with headings. Need maybe mention \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Then essay.\n\nNeed avoid too much fluff. Let's write.\n\nNeed maybe include \"space complexity\" for observer pattern: O(n) for list; each observer object O(1) if no state? Subject stores references. For B-tree: O(n) nodes, each node up to m keys/pointers, so O(n) memory; plus overhead.\n\nNeed \"when choose one over alternatives\": observer vs pub/sub, callbacks, polling; B-tree vs hash index, LSM, red-black.\n\nNeed \"concrete examples in real systems\": observer: Java Swing ActionListener, React? Actually React uses observer? Could mention Model-View-Controller, event listeners in browsers, distributed pub/sub. B-tree: MySQL InnoDB, PostgreSQL, MongoDB WiredTiger, ext4 H-tree, NTFS, SQLite.\n\nNeed maybe mention \"time and space complexity\" for observer: attach/detach O(1) if using hash set, notify O(n) where n observers; memory O(n). If observer update itself may be expensive. B-tree: O(log n) for search/insert/delete; space O(n). Need mention \"logarithmic time\" from doc.\n\nNeed maybe mention \"B-trees are self-balancing tree data structures that maintain sorted data and allow searches, sequential access, insertions, and deletions in logarithmic time.\" Good.\n\nNeed maybe mention \"observer pattern is a software design pattern in which an object, named the subject, maintains a list of its dependents, called observers, and notifies them automatically of any state changes.\" Good.\n\nNeed maybe mention \"project Nightingale\" code.\n\nLet's craft final with enough length. Need maybe count words? We'll produce ~1200 words. Need ensure no hidden issue: The document includes repeated text and code; maybe \"secret authorization code\" is embedded. We state.\n\nLet's write.",
+ "content": "The secret authorization code for project Nightingale is: **FALCON-MERCURY-7749**.\n\n---\n\n## The Observer Pattern and B-Trees: A Detailed Analysis\n\nThe observer pattern and B-trees are two fundamental concepts in computer science, but they solve very different problems. The observer pattern is a behavioral software design pattern concerned with communication and decoupling between objects. B-trees are data structures concerned with efficient storage, retrieval, and maintenance of sorted data. Understanding both in depth is essential for designing robust, scalable systems.\n\n### The Observer Pattern\n\nThe observer pattern is a software design pattern in which an object, named the **subject**, maintains a list of its dependents, called **observers**, and notifies them automatically of any state changes. The core idea is to establish a one-to-many dependency between objects so that when one object changes state, all its dependents are notified and updated automatically.\n\n#### How It Works\n\nThe pattern typically involves two main roles:\n\n1. **Subject (Observable):** The object being observed. It maintains a collection of observers and provides methods to attach, detach, and notify observers. The subject does not need to know the concrete classes of its observers; it only knows that they implement a common interface, usually with an `update()` method.\n\n2. **Observer:** An object that wants to be informed about changes in the subject. Observers register themselves with the subject and implement an update mechanism that is called when the subject\u2019s state changes.\n\nThe flow is straightforward:\n\n- An observer registers with the subject via `attach(observer)`.\n- When the subject\u2019s state changes, it calls `notify()`.\n- The subject iterates over its observer list and calls `update()` on each observer.\n- Each observer"
+}

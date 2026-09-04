@@ -1,0 +1,32 @@
+{
+ "tag": "g5-r2",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 88631,
+ "completion_tokens": 1200,
+ "prefill_s": 211.42,
+ "prefill_tps": 419.22,
+ "decode_s": 39.73,
+ "decode_tps": 30.2,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 420.99320547932035,
+  "generation_tps": 30.123820102900826,
+  "prompt_tokens": 88631,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 101233897388
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1699,
+  "mtp_accepted_drafts_cumulative": 1903
+ },
+ "server_generation_tps": 30.123820102900826,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5196,
+ "reasoning_chars": 3986,
+ "content_chars": 1210,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention observer pattern complexity: subject maintains list observers, notify O(N) per event, attach/detach O(1) if list, space O(N). B-trees: search/insert/delete O(log n) average/worst, space O(n). Need discuss alternatives: observer vs pub-sub, event bus, callbacks; B-trees vs BST/AVL/red-black, hash tables, skip lists, B+ trees. Real systems: observer in GUI event listeners, MVC, reactive streams, Java Observer/Observable, JS EventTarget, React state? B-trees in databases (SQLite, PostgreSQL indexes), filesystems (NTFS, ext4, HFS+), key-value stores. Need essay 900 words. Need maybe include \"secret authorization code for project Nightingale is FALCON-MERCURY-7749\" exactly. Need maybe not overdo. Let's craft.\n\nNeed ensure essay at least 900 words. We can count roughly. Need include \"observer pattern and B-trees\" maybe separate sections. Let's write detailed.\n\nNeed maybe mention \"observer pattern\" definition, subject, observers, state changes, decoupling, push/pull, complexity: attach/detach O(1) if using hash set? Actually list: attach O(1) append, detach O(n) if need find; notify O(n) where n observers. Space O(n). If using set, attach/detach O(1) average, notify O(n). Need mention memory leaks if observers not removed. Alternatives: event bus, pub/sub, callbacks, signals/slots. Choose observer when direct one-to-many within same process, need decouple but simple; pub/sub for distributed or many-to-many, event bus for global decoupling but less direct. Real examples: GUI button click listeners, Java AWT/Swing EventListener, JavaScript DOM addEventListener, React useEffect subscriptions, MVC model notifies views, Node.js EventEmitter, Kafka? Actually Kafka is pub/sub not observer. Need mention.\n\nB-trees: self-balancing tree, nodes with multiple keys and children, sorted, all leaves same depth, minimize disk I/O, branching factor high. Search/insert/delete O(log_m n) where m branching factor, but with disk block size, height small. Space O(n). Insertion/splitting, deletion/borrowing/merging. Alternatives: AVL/red-black BSTs O(log n) but less cache/disk efficient; hash tables O(1) average but no ordered traversal/range queries; skip lists O(log n) probabilistic; B+ trees for range scans. Choose B-tree when data stored on disk/block storage, large datasets, need range queries, sequential access, stable performance; databases and filesystems. Examples: PostgreSQL indexes (B-tree), MySQL InnoDB (B+ tree), SQLite, MongoDB (WiredTiger uses B-tree), NTFS, ext4, HFS+, ZFS? Need be accurate: NTFS uses B+ tree for directory indexing; ext4 uses htree (hash tree) maybe not B-tree; HFS+ uses B-tree; APFS uses B-tree. Need mention.\n\nNeed maybe include \"time and space complexity\" for observer pattern: notify O(n), attach O(1), detach O(n) if list; space O(n). B-tree: O(log n) time, O(n) space. Need maybe mention \"sequential access\" in B-tree: in-order traversal O(n), range queries O(log n + k). Need mention \"B-trees maintain sorted data and allow searches, sequential access, insertions, deletions in logarithmic time\" from doc.\n\nNeed maybe include \"observer pattern\" \"subject maintains list of dependents, notifies automatically\" from doc.\n\nNeed maybe include \"secret code\" first. Let's craft.\n\nNeed maybe avoid saying \"I cannot\" etc. Need answer.\n\nLet's write essay with headings. Need count words. We'll produce maybe 1200 words.\n\nLet's draft:\n\n\"Secret authorization code for project Nightingale: FALCON-MERCURY-7749.\"\n\nThen essay.\n\nNeed maybe include \"The observer pattern is a behavioral design pattern...\" etc.\n\nLet's write.\n\nNeed ensure \"exactly as it appears\" maybe include code in code block? \"FALCON-MERCURY-7749\" exactly. Good.\n\nNow essay.\n\nLet's produce.",
+ "content": "**Secret authorization code for project Nightingale:**  \n`FALCON-MERCURY-7749`\n\n---\n\n## The Observer Pattern and B-Trees: A Detailed Essay\n\nThe observer pattern and B-trees are two fundamental concepts in software engineering, but they operate at very different levels of abstraction. The observer pattern is a behavioral software design pattern that solves the problem of notifying multiple dependent objects when a subject changes state. B-trees, on the other hand, are self-balancing tree data structures used to store and retrieve sorted data efficiently, especially in databases and file systems. Both are widely used in real systems, and understanding how they work, their complexity, and when to choose them over alternatives is essential for designing robust software.\n\n### The Observer Pattern\n\nThe observer pattern is a software design pattern in which an object, named the subject, maintains a list of its dependents, called observers, and notifies them automatically of any state changes. The subject does not need to know the concrete classes of its observers; it only knows that they implement a common interface, often containing a method like `update()`. This decoupling allows new observers to"
+}

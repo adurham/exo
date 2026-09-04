@@ -1,0 +1,32 @@
+{
+ "tag": "g2-r2",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 89517,
+ "completion_tokens": 1200,
+ "prefill_s": 214.94,
+ "prefill_tps": 416.47,
+ "decode_s": 34.57,
+ "decode_tps": 34.71,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 418.58060195094043,
+  "generation_tps": 34.57197048979622,
+  "prompt_tokens": 89517,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 101770394944
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1770,
+  "mtp_accepted_drafts_cumulative": 1832
+ },
+ "server_generation_tps": 34.57197048979622,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5635,
+ "reasoning_chars": 1908,
+ "content_chars": 3727,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: \"FALCON-MERCURY-7749\" appears in document. Need write detailed essay >=900 words explaining observer pattern and B-trees. Need be thorough. Need maybe mention code. Need ensure no extra? We can include.\n\nNeed craft essay. Need cover observer pattern: subject maintains list observers, notifies state changes. How works: interfaces, subscribe/unsubscribe, notify. Time/space complexity: observer registration O(1) if list, notification O(n) observers, update maybe. Space O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams, polling. Choose observer when decoupling, one-to-many, dynamic. Examples: GUI button listeners, MVC, event emitters Node.js, stock ticker, distributed pub/sub.\n\nB-trees: self-balancing tree, nodes with multiple keys/children, sorted, balanced height O(log n), high branching factor. Operations search/insert/delete O(log n) worst-case, space O(n). Node size, fill factor, splits/merges. Alternatives: BST/AVL/Red-black, hash tables, skip lists, LSM trees. Choose B-tree for disk/block storage, range queries, sequential access, high fanout reduces I/O. Examples: databases (SQLite, PostgreSQL, MySQL InnoDB, MongoDB), filesystems (NTFS, ext4, HFS+), key-value stores.\n\nNeed at least 900 words. Need maybe count. We'll write detailed essay maybe 1200 words. Need include code exactly. Let's craft.\n\nNeed be careful: \"secret authorization code for project Nightingale exactly as it appears\" It appears \"FALCON-MERCURY-7749.\" Include no extra? We can state.\n\nNeed maybe mention \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Good.\n\nNeed essay. Let's write with headings.\n\nNeed maybe include complexity table? Good.\n\nLet's draft.\n\nPotential issue: The document contains repeated text and code inserted. We can ignore.\n\nLet's produce final with code and essay.",
+ "content": "The secret authorization code for project Nightingale is: **FALCON-MERCURY-7749**.\n\n---\n\n## The Observer Pattern and B-Trees: A Detailed Essay\n\nSoftware engineering relies on patterns and data structures to manage complexity, decouple components, and achieve performance. Two foundational concepts are the **Observer pattern**, a behavioral design pattern for managing dependencies between objects, and the **B-tree**, a self-balancing tree data structure optimized for storage systems. Although they solve different problems, both are widely used in real systems and offer important trade-offs in time, space, and design flexibility.\n\n### The Observer Pattern\n\nThe observer pattern is a software design pattern in which an object, called the **subject**, maintains a list of its dependents, called **observers**, and notifies them automatically of any state changes. The pattern defines a one-to-many dependency: when the subject changes, all observers are updated automatically, without the subject needing to know their concrete classes.\n\n#### How It Works\n\nThe pattern typically involves three roles:\n\n1. **Subject (Observable):** Maintains state and a collection of observers. It provides methods to attach, detach, and notify observers.\n2. **Observer:** An interface or abstract class with an `update()` method that the subject calls when state changes.\n3. **Concrete Subject and Concrete Observers:** Implementations that define actual state and reactions.\n\nThe flow is straightforward:\n\n- Observers register themselves with the subject using `attach(observer)`.\n- When the subject\u2019s state changes, it calls `notify()`, which iterates through the observer list and invokes each observer\u2019s `update()` method.\n- Observers can also be removed using `detach(observer)`.\n\nThis design decouples the subject from the observers. The subject only knows that observers implement a common interface, not their internal details. This supports the open-closed principle: new observers can be added without modifying the subject.\n\n#### Time and Space Complexity\n\n- **Attaching an observer:** If the subject stores observers in a list, attaching is typically O(1) if appending to the end, or O(n) if checking for duplicates.\n- **Detaching an observer:** Usually O(n), because the subject must find the observer in the list.\n- **Notifying observers:** O(n), where n is the number of observers, because each observer\u2019s `update()` method must be called. The actual cost also depends on the work done inside each observer.\n- **Space complexity:** O(n), where n is the number of observers, because the subject stores references to all observers.\n\nIf observers are stored in a hash set, attach and detach can be O(1) on average, but notification remains O(n). The pattern is efficient when the number of observers is small or when updates are infrequent relative to the cost of polling.\n\n#### When to Choose the Observer Pattern\n\nThe observer pattern is ideal when:\n\n- There is a one-to-many dependency between objects.\n- Multiple components need to react to changes in another component.\n- The set of dependents is dynamic and can change at runtime.\n- You want to avoid tight coupling between the source of events and the consumers.\n\nAlternatives include:\n\n- **Polling:** The dependent repeatedly checks the subject\u2019s state. This is simpler but wasteful, especially if state changes rarely.\n- **Callbacks:** The subject accepts a function to call. This is lighter weight but less flexible for managing multiple observers.\n- **Event bus / pub-sub:** A central broker mediates events. This decouples producers and consumers even further, but adds indirection and can make flow harder to trace.\n- **Reactive streams:** More sophisticated, with"
+}

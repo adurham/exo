@@ -1,0 +1,32 @@
+{
+ "tag": "g4-r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 87745,
+ "completion_tokens": 1200,
+ "prefill_s": 210.44,
+ "prefill_tps": 416.96,
+ "decode_s": 40.01,
+ "decode_tps": 29.99,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 418.9280351738716,
+  "generation_tps": 29.94388948698662,
+  "prompt_tokens": 87745,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 101152201816
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1116,
+  "mtp_accepted_drafts_cumulative": 1283
+ },
+ "server_generation_tps": 29.94388948698662,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5199,
+ "reasoning_chars": 5199,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow? They ask two tasks. First state secret authorization code exactly. It appears in document: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly. Second essay at least 900 words explaining observer pattern and B-trees. Need thorough. Need maybe mention code. Need not mention hidden? It's in doc. We'll comply.\n\nNeed craft essay 900+ words. Need include observer pattern: subject maintains list observers, notifies state changes. How works: observers register, subject updates, notify. Time complexity: attach/detach O(1) if list, notify O(n) observers; push vs pull; space O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams, model-view-controller. When choose observer: decouple, one-to-many, dynamic; avoid if tight coupling, too many notifications, memory leaks, ordering issues. Real examples: GUI button listeners, Java Observer/Observable, .NET events, MVC, stock ticker, React? B-trees: self-balancing tree, nodes with multiple keys/children, sorted, balanced height O(log n), maintain fill factor, split/merge. Time complexity search/insert/delete O(log n) worst-case, space O(n). Alternatives: BST/AVL/Red-black, skip lists, LSM trees, hash tables. When choose B-tree: disk/block-oriented storage, range queries, high fanout, database indexes, filesystems. Examples: PostgreSQL/MySQL InnoDB indexes, SQLite, NTFS, ext4, HBase? Need concrete.\n\nNeed ensure essay at least 900 words. We'll write maybe 1200 words. Need maybe include complexity details. Need not overdo.\n\nNeed maybe mention \"observer pattern\" and \"B-trees\" separately. Need include \"time and space complexity\" for both. Need \"when choose one over alternatives\" for each. Need \"concrete examples in real systems\". Need be thorough.\n\nLet's draft.\n\nFirst: \"FALCON-MERCURY-7749\"\n\nSecond essay.\n\nNeed maybe include \"observer pattern\" complexity: attach/detach O(1) if using hash set or linked list; notify O(n) where n observers; space O(n). If notification includes event object, no extra? Could mention.\n\nB-tree complexity: For order m, each node up to m children, height O(log_m n), operations O(log_m n) comparisons; disk I/O O(log_m n) with high fanout; space O(n). Insert/delete may split/merge nodes O(m) per node, but m constant; amortized O(log n). Need mention.\n\nNeed \"alternatives\": Observer vs event bus, pub/sub, callbacks, reactive streams. B-trees vs binary search trees, red-black, skip lists, LSM, hash indexes.\n\nNeed \"concrete examples\": Observer: Java Swing ActionListener, JavaScript EventTarget, MVC, distributed pub/sub (Kafka? maybe not exactly observer but pub-sub). B-trees: database indexes, filesystems, key-value stores.\n\nNeed maybe mention \"project Nightingale\" code? First task only.\n\nNeed maybe avoid saying \"secret\" too much? Fine.\n\nLet's write.\n\nNeed ensure no hidden issue: The document contains repeated text and one line with code. The user asks \"state secret authorization code exactly as it appears.\" We can state exactly. Good.\n\nNeed maybe mention \"FALCON-MERCURY-7749\" with hyphen. Yes.\n\nNow essay.\n\nLet's craft with headings.\n\nPotential essay:\n\nTitle: The Observer Pattern and B-Trees: Design and Data Structure in Practice\n\nParagraphs.\n\nNeed count words. Let's write around 1200.\n\nLet's begin.\n\nNeed maybe include \"observer pattern\" definition: \"an object, named subject, maintains list of dependents, observers, and notifies them automatically of state changes.\" Good.\n\nNeed maybe include \"B-trees are self-balancing tree data structures that maintain sorted data and allow searches, sequential access, insertions, deletions in logarithmic time.\" Good.\n\nLet's write.\n\nNeed maybe include \"time and space complexity\" for observer: \"Registration/deregistration O(1) if using linked list/hash set; notification O(n) in worst case; memory O(n).\" \"If observers are notified synchronously, total time includes observer callbacks; if asynchronous, queue overhead.\" Good.\n\nNeed maybe include \"space complexity\" for B-tree: \"O(n) keys plus overhead for node arrays; each node has up to m-1 keys and m child pointers, so O(n) total.\"\n\nNeed maybe include \"when choose one over alternatives\" for observer: \"Use observer when one source changes and many unknown/dynamic dependents need update; avoid if only one dependent, if tight coupling acceptable, if need guaranteed delivery/ordering, if too many notifications cause performance issues; consider event bus for decoupling across modules, reactive streams for backpressure, callbacks for one-to-one.\" Good.\n\nFor B-tree: \"Use B-tree when data is stored on disk/block devices and range queries needed; avoid if only point lookups in memory (hash table), if workload write-heavy and no range queries (LSM), if data fits in memory and simple AVL/red-black enough; but B-tree still good for range scans.\" Good.\n\nNeed maybe \"concrete examples\": Observer: \"Java's java.util.Observer/Observable (legacy), Swing/AWT event listeners, .NET events, JavaScript DOM addEventListener, Model-View-Controller frameworks, stock ticker feeds, chat room subscriptions.\" B-tree: \"PostgreSQL indexes (B-tree), MySQL InnoDB clustered index, SQLite, Oracle, MongoDB WiredTiger",
+ "content": ""
+}

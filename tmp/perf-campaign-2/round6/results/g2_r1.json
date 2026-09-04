@@ -1,0 +1,32 @@
+{
+ "tag": "g2-r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 87743,
+ "completion_tokens": 1200,
+ "prefill_s": 209.76,
+ "prefill_tps": 418.3,
+ "decode_s": 36.49,
+ "decode_tps": 32.89,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 420.5832538640261,
+  "generation_tps": 32.750741089540234,
+  "prompt_tokens": 87743,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 100916726344
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1211,
+  "mtp_accepted_drafts_cumulative": 1190
+ },
+ "server_generation_tps": 32.750741089540234,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5600,
+ "reasoning_chars": 5600,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention observer pattern complexity? Need discuss.\n\nNeed craft essay. Need ensure 900 words. Let's plan.\n\nNeed answer first line maybe \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Then essay.\n\nNeed explain observer pattern: subject maintains list observers, notifies state changes. Works: observers register, subject updates, notify. Push/pull models. Time complexity: register/deregister O(1) if list/hash, notify O(n) observers; memory O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams. Choose observer when one-to-many decoupling, dynamic subscriptions; avoid if too many observers, notification ordering, memory leaks, synchronous overhead. Real examples: GUI button listeners, MVC model-view, Java Observer/Observable, event listeners in JS, stock ticker.\n\nB-trees: self-balancing tree, nodes with multiple keys/children, sorted, leaves at same depth. Works: search/insert/delete with branching factor, split/merge. Time complexity: O(log n) search/insert/delete; space O(n). Alternatives: BST/AVL/Red-black, hash tables, skip lists, LSM trees. Choose B-tree for disk/block storage, high fanout reduces I/O, range queries, sequential access; database indexes, filesystems (NTFS, ext4, HFS+), key-value stores. Need mention B+tree variant.\n\nNeed maybe compare observer pattern and B-trees? They are unrelated; essay can have sections. Need at least 900 words. Need count. Let's write robust.\n\nNeed maybe include \"time and space complexity\" for observer pattern: subject stores observers O(n), notification O(n), registration O(1) if list. B-tree: search O(log n), insert/delete O(log n), space O(n). Need mention \"logarithmic time\" from doc.\n\nNeed maybe mention \"when choose one over alternatives\": observer vs event bus: observer simple direct coupling; event bus decouples but more complex. B-tree vs hash: hash O(1) equality but no range; B-tree range and sorted. vs AVL: B-tree better cache/disk due to high fanout; AVL better in-memory? Actually B-tree also in-memory indexes due cache. Need mention.\n\nNeed maybe include concrete examples: Observer: Java Swing ActionListener, React Redux? B-trees: PostgreSQL indexes, MySQL InnoDB, MongoDB, ext4, NTFS.\n\nNeed ensure no hallucination? Fine.\n\nNeed maybe mention \"secret code exactly as appears\" with hyphens. \"FALCON-MERCURY-7749\". Need maybe no extra.\n\nLet's craft final with first line.\n\nNeed maybe \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Then essay.\n\nNeed ensure essay length. Let's write around 1000 words.\n\nLet's draft.\n\n---\n\nThe secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\n\n## Observer Pattern and B-Trees: A Detailed Essay\n\n### Observer Pattern\n\nThe observer pattern is a behavioral software design pattern. It defines a one-to-many dependency between objects: when one object, called the subject, changes state, all its dependents, called observers, are notified and updated automatically. The subject does not need to know concrete details of observers; it only knows they implement a common interface, often with an `update()` method. This decouples the source of events from the components that react to them.\n\n**How it works:** The subject maintains a collection of observer references. Observers can register themselves with the subject via an `attach` or `subscribe` method, and can later leave via `detach` or `unsubscribe`. When the subject's state changes, it iterates over the collection and calls a notification method on each observer. There are two common notification styles: push, where the subject sends detailed state data in the notification, and pull, where the observer receives only a signal and then queries the subject for the data it needs. The subject is unaware of what observers do with the notification, so observers can be added, removed, or changed independently.\n\n**Time and space complexity:** The subject stores one reference per observer, so space complexity is O(n), where n is the number of observers. Attaching or detaching an observer is O(1) if the collection is a hash set or if the subject stores a doubly linked list with references, though some implementations may be O(n) if an array list requires scanning. Notifying all observers is O(n), because each observer must be called. If observers perform expensive work during notification, the total cost can be much higher, but the pattern itself only guarantees linear notification overhead. The pattern does not add significant time complexity to the subject's own state changes beyond the notification loop.\n\n**When to choose it over alternatives:** The observer pattern is ideal when you have a one-to-many relationship and want loose coupling. For example, a UI button should not know how many listeners are attached, and new listeners should be added without modifying the button. It is also useful when the set of observers changes dynamically at runtime. Alternatives include the event bus or publish-subscribe pattern, which adds a central broker and allows many-to-many communication; this is better for large systems where senders and receivers are completely independent, but it adds complexity and can make flow harder to trace. Another alternative is direct callback registration, which is similar but often less formal. The",
+ "content": ""
+}

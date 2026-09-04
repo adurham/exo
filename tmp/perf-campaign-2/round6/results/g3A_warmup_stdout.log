@@ -1,0 +1,41 @@
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Uninstalled 1 package in 2ms
+Installed 1 package in 4ms
+{
+  "tag": "g3A-warmup",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 79000,
+  "prompt_tokens": 86856,
+  "completion_tokens": 1200,
+  "prefill_s": 207.39,
+  "prefill_tps": 418.81,
+  "decode_s": 38.5,
+  "decode_tps": 31.17,
+  "decode_sample_trustworthy": true,
+  "server_stats": {
+    "prompt_tps": 420.6657909632292,
+    "generation_tps": 31.0922716322327,
+    "prompt_tokens": 86856,
+    "generation_tokens": 1200,
+    "peak_memory_usage": {
+      "in_bytes": 98684369420
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 585,
+    "mtp_accepted_drafts_cumulative": 616
+  },
+  "server_generation_tps": 31.0922716322327,
+  "finish_reason": "length",
+  "needle_hit": true,
+  "gen_chars": 5592,
+  "reasoning_chars": 3341,
+  "content_chars": 2251
+}
+Traceback (most recent call last):
+  File "/Users/adam.durham/repos/exo/bench/long_decode_probe.py", line 198, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/Users/adam.durham/repos/exo/bench/long_decode_probe.py", line 191, in main
+    with open(args.out, "w") as fh:
+         ~~~~^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'tmp/perf-campaign-2/round6/results/g3A_warmup.json'

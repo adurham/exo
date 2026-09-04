@@ -1,0 +1,32 @@
+{
+ "tag": "g5-warmup",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 88630,
+ "completion_tokens": 1200,
+ "prefill_s": 212.04,
+ "prefill_tps": 417.99,
+ "decode_s": 39.92,
+ "decode_tps": 30.06,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 419.97865430736044,
+  "generation_tps": 29.990487891484452,
+  "prompt_tokens": 88630,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 98726705932
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 567,
+  "mtp_accepted_drafts_cumulative": 633
+ },
+ "server_generation_tps": 29.990487891484452,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5224,
+ "reasoning_chars": 5224,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: \"FALCON-MERCURY-7749\" appears in document. Need write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples real systems. Need be thorough. Need maybe mention document contains repeated text and secret code. Need not reveal hidden? It's okay.\n\nNeed craft essay 900+ words. Need include observer pattern: subject maintains list observers, notify state changes. How works: subject interface attach/detach/notify; observers update. Push/pull models. Time complexity: attach/detach O(1) if list, O(n) if array; notify O(n) per event, update cost depends. Space O(n) observers. Alternatives: event bus, pub/sub, callbacks, signals/slots, reactive streams. Choose observer when one-to-many, decoupling, dynamic subscriptions; avoid when many observers, synchronous notification, ordering, memory leaks, complex dependencies. Real examples: GUI button listeners, MVC model-view, Java Observer/Observable, .NET events, React Redux? Need concrete.\n\nB-trees: self-balancing tree, nodes with multiple keys and children, sorted, leaves same depth. How works: branching factor, split/merge, search/insert/delete O(log n) (base b), space O(n). Disk I/O optimized, node size block. Time complexity: search O(log_b n), insert/delete O(log_b n), sequential access O(n) with in-order traversal, but efficient range queries. Space O(n). Alternatives: BST/AVL/Red-black, skip list, hash table, LSM tree. Choose B-tree for disk-based storage, range queries, high fanout, balanced; alternatives for memory, write-heavy? Real examples: databases (MySQL InnoDB, PostgreSQL, SQLite), filesystems (NTFS, ext4, HFS+), key-value stores.\n\nNeed ensure essay at least 900 words. Need maybe include intro and conclusion. Need maybe mention \"secret authorization code for project Nightingale exactly as it appears: FALCON-MERCURY-7749.\" Then essay.\n\nNeed be careful: The document includes \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly.\n\nNeed maybe not mention \"I cannot\" etc. Need answer.\n\nLet's write with headings. Need count words. I'll produce around 1200 words. Need include time and space complexity. Need \"when you would choose one over alternatives\" for both. Need concrete examples.\n\nLet's draft.\n\nPotential structure:\n\n- Secret code line.\n- Essay:\n  - Introduction\n  - Observer Pattern\n    - Definition and structure\n    - How it works\n    - Complexity\n    - Alternatives and selection\n    - Real examples\n  - B-Trees\n    - Definition and structure\n    - How it works\n    - Complexity\n    - Alternatives and selection\n    - Real examples\n  - Conclusion\n\nNeed ensure \"observer pattern and B-trees\" maybe not related but both in doc. Need explain.\n\nLet's write.\n\nNeed maybe mention \"space complexity\" for observer: subject stores list of observers O(n), each observer stores reference to subject O(1) maybe. Notification time O(n) if all observers. Attach/detach O(1) if using hash set, O(n) if list. Need mention.\n\nB-tree space: O(n) keys, plus internal nodes overhead O(n) (actually O(n) total). Search O(log n) with high branching factor; insert/delete O(log n) amortized? Usually O(log n). Sequential access O(n) but range query O(log n + k). Need mention.\n\nNeed \"when choose one over alternatives\": Observer vs pub/sub: observer is direct subject-to-observer, pub/sub has broker, more decoupled but more overhead. Observer vs callbacks: multiple observers, dynamic. Observer vs polling: event-driven. B-tree vs hash index: range queries, ordered scans, equality vs range. B-tree vs AVL: disk I/O, high fanout, cache locality. B-tree vs LSM: read optimized vs write optimized. Need mention.\n\nNeed \"concrete examples\": Observer: Java Swing ActionListener, Android OnClickListener, MVC, event listeners in browser DOM, Kafka? Actually Kafka is pub/sub. Need maybe \"Java's java.util.Observer/Observable deprecated, but pattern in Spring ApplicationEvent, React useEffect subscriptions.\" B-tree: MySQL InnoDB index, PostgreSQL B-tree, SQLite, MongoDB WiredTiger, NTFS, ext4, HFS+, Oracle indexes.\n\nNeed maybe mention \"B-trees are self-balancing tree data structures that maintain sorted data and allow searches, sequential access, insertions, and deletions in logarithmic time.\" Good.\n\nNeed maybe mention \"observer pattern is a software design pattern in which an object, named the subject, maintains a list of its dependents, called observers, and notifies them automatically of any state changes.\" Good.\n\nNeed maybe include \"time complexity of observer notification is O(n) where n is number of observers; if observer update itself does work, total O(n * cost).\" Good.\n\nNeed maybe include \"space complexity of observer pattern: subject stores references; O(n).\"\n\nNeed maybe include \"B-tree node size often equal to disk page, e.g., 4KB/8KB, reducing disk I/O.\"\n\nNeed maybe include \"B-tree height is O(log_b n), with b branching factor; for large b, height small.\"\n\nNeed maybe include \"B-tree insertion: search leaf, insert key, if overflow split, propagate; deletion: borrow/merge.\"\n\nNeed maybe include \"B",
+ "content": ""
+}

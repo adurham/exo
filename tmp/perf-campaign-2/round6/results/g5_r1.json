@@ -1,0 +1,32 @@
+{
+ "tag": "g5-r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "target_tokens": 79000,
+ "prompt_tokens": 88631,
+ "completion_tokens": 1200,
+ "prefill_s": 212.5,
+ "prefill_tps": 417.09,
+ "decode_s": 40.03,
+ "decode_tps": 29.98,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 419.0409149288045,
+  "generation_tps": 29.921254644519326,
+  "prompt_tokens": 88631,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 99981863236
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1161,
+  "mtp_accepted_drafts_cumulative": 1239
+ },
+ "server_generation_tps": 29.921254644519326,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5169,
+ "reasoning_chars": 5169,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention observer pattern complexity: subject maintains list observers; notify O(N) where N observers; attach/detach O(1) if list, O(N) if array; space O(N). B-trees: balanced tree, nodes with multiple keys/children, height O(log_m N), search/insert/delete O(log_m N) (m branching factor), space O(N). Need discuss alternatives: observer vs pub-sub, event bus, callbacks, polling; B-trees vs BST/AVL/Red-black, B+ trees, hash tables, LSM trees. Real systems: observer in GUI event listeners, MVC, Java Observer/Observable, React? B-trees in databases (PostgreSQL, MySQL InnoDB), filesystems (NTFS, ext4, HFS+), key-value stores. Need essay length. Need maybe include \"observer pattern\" definition and \"B-trees\" definition. Need ensure no hallucination? We can write.\n\nNeed maybe mention \"secret authorization code for project Nightingale exactly as it appears\" from document: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" So answer first line.\n\nNeed essay at least 900 words. Let's craft detailed.\n\nNeed maybe include \"observer pattern\" subject maintains list dependents, notifies automatically state changes. \"B-trees are self-balancing tree data structures that maintain sorted data and allow searches, sequential access, insertions, and deletions in logarithmic time.\" Need maybe mention \"B-trees generalize binary search trees; nodes can have more than two children; all leaves at same depth; each node contains sorted keys and child pointers; branching factor b; height O(log_b n).\" Complexity: search O(log_b n) comparisons? Actually each node search O(b) or O(log b) if binary search within node; total O(b log_b n) or O(log b * log_b n) = O(log n) if b constant? More precise: B-tree operations O(log n) with base b, but node size constant; disk I/O O(log_b n). Space O(n). Insertion: search leaf, insert key, split if overflow; deletion: borrow/merge; amortized O(log n). Need mention \"sequential access\" if B+ tree leaves linked; B-tree itself in-order traversal.\n\nObserver pattern complexity: attach/detach O(1) if using linked list/hash set; notify O(N) where N observers; memory O(N). If observer update can be expensive, total O(N * cost). Need mention \"subject doesn't know concrete observers; loose coupling; one-to-many dependency; push vs pull; risk memory leaks if observers not removed; order nondeterministic; exceptions can break notification.\"\n\nWhen choose observer over alternatives: Use when many objects need react to state changes without coupling; alternatives: polling (wasteful, latency), callbacks (single, direct), event bus/pub-sub (decoupled, global, more complex, no direct subject), reactive streams (backpressure), MVC. Observer good for small-to-medium number of observers, direct lifecycle, synchronous updates. Pub-sub better for distributed/loose decoupling, multiple event types, cross-module. Polling better if events rare? Actually if no event infrastructure, but observer better.\n\nB-trees vs alternatives: Hash tables O(1) average but no ordered traversal, range queries, sequential access; BSTs/AVL/Red-black O(log n) but high disk I/O due to node per key, poor cache locality; B-trees reduce disk I/O by high branching factor, each node fits block/page; good for databases/filesystems. B+ trees: all data in leaves, linked leaves for range scans; B-tree with data in internal nodes can be faster for point queries? Need mention. LSM trees for write-heavy workloads, but read amplification; B-trees for read-heavy/balanced. Tries for prefix. Need mention \"when choose one over alternatives\": choose B-tree when data too large for memory, need persistent storage, range queries, predictable performance; choose hash when exact equality and no order; choose red-black when in-memory sorted map with frequent updates; choose LSM for high write throughput.\n\nConcrete examples: Observer: Java Swing/AWT event listeners (ActionListener), .NET events, JavaScript DOM addEventListener, Model-View-Controller, React state/props? Actually React uses observer-like? \"React's state and props with re-render\" maybe not exactly; \"Redux store subscribe\" is observer. \"Event listeners in GUI.\" \"MVC: model notifies views.\" \"Stock ticker updates dashboard.\" \"Notification systems.\"\n\nB-trees: relational databases indexes (MySQL InnoDB uses B+ tree), PostgreSQL indexes (B-tree), MongoDB WiredTiger uses B-tree? Actually MongoDB uses WiredTiger with B-tree? Yes. File systems: NTFS MFT, ext4 HFS+? ext4 uses extents, HFS+ uses B-tree; SQLite uses B-tree for tables/indexes. \"Key-value stores like CouchDB, LevelDB? LevelDB uses LSM, not B-tree.\" Need be accurate: \"SQLite uses B-trees for tables and indexes; PostgreSQL uses B-tree for many indexes; MySQL InnoDB uses B+ tree; filesystems like NTFS and HFS+ use B-trees; many key-value stores use LSM instead.\" Good.\n\nNeed maybe include \"space complexity\" for observer: O(N) for",
+ "content": ""
+}
