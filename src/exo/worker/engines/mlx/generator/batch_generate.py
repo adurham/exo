@@ -54,6 +54,7 @@ from exo.worker.engines.mlx.generator.generate import (
     safe_think_token_id,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.phase_marks import runner_phase_marks
 from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
@@ -2196,6 +2197,8 @@ class ExoBatchGenerator:
             all_prompt_tokens = fix_unmatched_think_end_tokens(
                 all_prompt_tokens, self.tokenizer
             )
+        # Round-11 b3 (tokenized): delta since b2 template_rendered.
+        runner_phase_marks.mark("tokenized_ms")
 
         vision: VisionResult | None = None
         media_regions: list[MediaRegion] = []
@@ -2528,6 +2531,11 @@ class ExoBatchGenerator:
         _prefill_tokens: int = 0
         cache_snapshots: list[CacheSnapshot] = []
         remote_prefilled = False
+        # Round-11 b6 (prefill_start): delta since b5 kv_restored_lazy_no_eval
+        # (or since b3 tokenized on a cold miss where b4/b5 never fired --
+        # mark() is a no-op sequence-wise, each mark is simply relative to
+        # whichever mark preceded it).
+        runner_phase_marks.mark("prefill_start_ms")
         with vision_ctx, T("submit.prefill"):
             if use_remote and task_params.prefill_endpoint is not None:
                 try:
@@ -2569,6 +2577,12 @@ class ExoBatchGenerator:
                     snapshot_offset=prefix_hit_length,
                 )
 
+        # Round-11 b7 (prefill_done): delta since b6 prefill_start. G1: no
+        # mx.eval added here -- prefill()/remote_prefill() already force
+        # whatever evaluation the arm's implementation performs; this mark
+        # observes that Python-level return, it does not force one.
+        runner_phase_marks.mark("prefill_done_ms")
+
         # We need to clamp rotating kv caches to max size so that mlx lm's _merge_caches behaves
         with T("submit.clamp_rotating_caches"):
             for c in cache:
@@ -2599,6 +2613,14 @@ class ExoBatchGenerator:
                     task_params.low_priority,
                     task_params.high_priority,
                 )
+        # Round-11 b8 (cache_commit_pre_first_token_ms): delta since b7
+        # prefill_done. Named to make the ordering explicit -- CODE-READ
+        # established _save_prefix_cache runs INSIDE submit(), i.e. AFTER
+        # prefill but BEFORE decode/first token. This is a pre-first-token
+        # TTFT term, not a tail cost after generation; do not rename this
+        # field to something implying "committed" without preserving that
+        # ordering signal.
+        runner_phase_marks.mark("cache_commit_pre_first_token_ms")
 
         last_tokens = prompt_tokens[-2:]
 
@@ -4288,6 +4310,15 @@ class ExoBatchGenerator:
             if response.finish_reason is not None:
                 state.detokenizer.finalize()
             text = state.detokenizer.last_segment
+            # Round-11 b9/b10: first_token_emitted fires once (delta since
+            # b8 cache_commit_pre_first_token_ms); last_token fires every
+            # iteration and is deliberately left to be overwritten each
+            # call so the value surviving in the final marks dict is the
+            # LAST decode step's latency (delta since the previous token's
+            # last_token mark), matching the "last token" name.
+            if state.completion_tokens == 0:
+                runner_phase_marks.mark("first_token_emitted_ms")
+            runner_phase_marks.mark("last_token_ms")
             state.completion_tokens += 1
             state.generated_text_parts.append(text)
             state.potential_stop_sequence_text += text
@@ -4522,6 +4553,12 @@ class ExoBatchGenerator:
             _t_stop_total += time.perf_counter() - _t0
 
             is_done = finish_reason is not None
+            if is_done:
+                # Round-11 b11 (stop_detected): delta since the last decode
+                # step's last_token mark. Only recorded once per request
+                # (is_done fires exactly once per uid, on the terminating
+                # response).
+                runner_phase_marks.mark("stop_detected_ms")
 
             # ── logprobs extraction ──
             _t0 = time.perf_counter()
@@ -4610,6 +4647,13 @@ class ExoBatchGenerator:
                     prefix_cache_hit=prefix_cache_kind,
                     mtp_cycles_cumulative=mtp_cycles_cum,
                     mtp_accepted_drafts_cumulative=mtp_accepted_cum,
+                    # Round-11 G5/G6: rides inside the EXISTING stats block so
+                    # the study's client-wall join is unchanged. None when
+                    # EXO_PHASE_MARKS is unset (no-op) or when this uid's
+                    # begin() was never called (e.g. bench requests, or a
+                    # second concurrent uid under this process's single
+                    # active recorder -- see phase_marks.py docstring).
+                    phase_marks_ms=runner_phase_marks.snapshot_and_clear(),
                 )
                 total_prompt_tokens = len(state.all_prompt_tokens)
                 usage = Usage(

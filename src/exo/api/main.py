@@ -47,6 +47,8 @@ from exo.api.adapters.responses import (
     responses_request_to_text_generation,
 )
 from exo.api.keepalive import with_sse_keepalive
+from exo.api.phase_marks import new_recorder
+from exo.api.phase_marks import register as register_phase_marks
 from exo.api.types import (
     AddCustomModelParams,
     AdvancedImageParams,
@@ -1130,11 +1132,30 @@ class API:
         self, payload: ChatCompletionRequest
     ) -> ChatCompletionResponse | StreamingResponse | Response:
         """OpenAI Chat Completions API - adapter."""
+        # Round-11 a1 (handler_entered): first statement, AFTER pydantic
+        # validation (FastAPI validates `payload: ChatCompletionRequest`
+        # before this handler is ever called -- see CODE-READ.md's citation
+        # of main.py:1129-1131 in the pre-instrumentation source). Labelled
+        # honestly as post-validation: recv_headers/body_read_done would
+        # need hypercorn-level ASGI middleware hooks, out of scope this
+        # round (see tmp/perf-campaign-2/round11/PHASE-MARKS-NOTES.md).
+        _phase_recorder = new_recorder()
         task_params = await chat_request_to_text_generation(payload)
+        if _phase_recorder is not None:
+            # Round-11 a2 (messages_serialized): covers the full
+            # chat_request_to_text_generation call -- the ~55-message walk
+            # + model_dump (chat_completions.py:144-147).
+            _phase_recorder.mark("messages_serialized_ms")
         validated_model = await self._validate_model_has_instance(task_params.model)
         task_params = task_params.model_copy(update={"model": validated_model})
 
         command = await self._send_text_generation_with_images(task_params)
+        if _phase_recorder is not None:
+            # Round-11 a3 (command_published): covers
+            # _send_text_generation_with_images, which ends in
+            # `await self._send(command)` -- the gossip publish.
+            _phase_recorder.mark("command_published_ms")
+            register_phase_marks(command.command_id, _phase_recorder)
 
         if payload.stream:
             return StreamingResponse(

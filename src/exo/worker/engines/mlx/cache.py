@@ -26,6 +26,7 @@ from exo.worker.engines.mlx.constants import (
     TURBOQUANT_RESIDUAL,
     TURBOQUANT_SKETCH_DIM,
 )
+from exo.worker.engines.mlx.phase_marks import runner_phase_marks
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import get_coord_group
 from exo.worker.runner.bootstrap import logger
@@ -1217,6 +1218,11 @@ class KVPrefixCache:
         # leaf in match_node's subtree whose path passes through the truncation
         # point works — pick the most recent.
         donor_leaf = self._pick_leaf_under(match_node)
+        # Round-11 b4 (trie_matched): delta since b3 tokenized. Placed here
+        # (not right after _longest_prefix_match) so it also covers
+        # _pick_leaf_under's O(leaves x depth) pure-Python scan -- CODE-READ
+        # flagged this as a per-hit cost worth its own mark.
+        runner_phase_marks.mark("trie_matched_ms")
         if donor_leaf is None:
             # Shouldn't happen: every node has ref_count > 0 ⇒ at least one leaf.
             if _diag:
@@ -1318,6 +1324,15 @@ class KVPrefixCache:
             snapshot=snapshot,
             strict_snapshot=True,
         )
+        # Round-11 b5 (kv_restored_lazy_no_eval): delta since b4 trie_matched.
+        # NAMED "lazy_no_eval" deliberately -- CODE-READ proved
+        # _materialize_cache_to_depth contains NO mx.eval on the sliceable
+        # restore path, so this delta measures Python-visible wall only.
+        # The real GPU cost of restoring this cache is deferred into the
+        # next mx.eval, which happens inside prefill (b6/b7), NOT here. Do
+        # not read this mark as "the true restore cost" -- see the module
+        # docstring in phase_marks.py and CODE-READ.md section (d).
+        runner_phase_marks.mark("kv_restored_lazy_no_eval_ms")
         if materialized is None:
             self._trace(
                 f"get_kv_cache STRICT-MISS (non-sliceable layer without "

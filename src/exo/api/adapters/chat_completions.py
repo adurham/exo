@@ -6,6 +6,8 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from exo.api.phase_marks import mark as mark_phase
+from exo.api.phase_marks import snapshot_and_clear as snapshot_phase_marks
 from exo.api.types import (
     ChatCompletionChoice,
     ChatCompletionMessage,
@@ -234,8 +236,23 @@ async def generate_chat_stream(
 ) -> AsyncGenerator[str, None]:
     """Generate Chat Completions API streaming events from chunks."""
     last_usage: Usage | None = None
+    # Round-11 a5 (first_sse_written): fires once, on the first data-carrying
+    # SSE frame (excludes the prefill-progress comment, which third-party
+    # clients ignore and which is not part of the study's SSE-write chain).
+    _first_sse_written = False
+    # Round-11 a4 (first_chunk_received): fires once, on the FIRST chunk
+    # this generator receives from the underlying command stream at all
+    # (including a leading PrefillProgressChunk) -- this is the earliest
+    # observable point the API process learns anything came back from the
+    # command it published, which is exactly what the analysis script's
+    # dispatch_and_ipc_gap formula needs on the API side of the
+    # subtraction.
+    _first_chunk_received = False
 
     async for chunk in chunk_stream:
+        if not _first_chunk_received:
+            mark_phase(command_id, "first_chunk_received_ms")
+            _first_chunk_received = True
         match chunk:
             case PrefillProgressChunk():
                 # Use SSE comment so third-party clients ignore it
@@ -280,9 +297,32 @@ async def generate_chat_stream(
                     ],
                     usage=last_usage,
                 )
+                if not _first_sse_written:
+                    mark_phase(command_id, "first_sse_written_ms")
+                    _first_sse_written = True
                 yield f"data: {tool_response.model_dump_json(exclude_none=True)}\n\n"
-                if chunk.stats is not None:
-                    yield f": generation_stats {chunk.stats.model_dump_json()}\n\n"
+                # Round-11 a6 (last_sse_written): this is the LAST
+                # data-carrying frame on the tool_calls finish path.
+                mark_phase(command_id, "last_sse_written_ms")
+                # Round-11 a7 (stream_closed): recorded just before the
+                # generator closes so it lands inside the SAME snapshot
+                # attached to this stats payload below.
+                mark_phase(command_id, "stream_closed_ms")
+                # Round-11 G6: the tool_calls finish path is one of the two
+                # SSE stats-comment emission sites (see chat_completions.py
+                # module docstring / CODE-READ) -- 44/55 of the study's real
+                # requests end here, so a5-a7 MUST be wired on this branch
+                # too, not just the TokenChunk branch below. G5: rides
+                # inside the EXISTING "generation_stats" SSE comment, no new
+                # comment type introduced.
+                stats_to_emit = chunk.stats
+                api_marks = snapshot_phase_marks(command_id)
+                if stats_to_emit is not None and api_marks is not None:
+                    stats_to_emit = stats_to_emit.model_copy(
+                        update={"api_phase_marks_ms": api_marks}
+                    )
+                if stats_to_emit is not None:
+                    yield f": generation_stats {stats_to_emit.model_dump_json()}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -294,11 +334,22 @@ async def generate_chat_stream(
                     chunk_response = chunk_response.model_copy(
                         update={"usage": last_usage}
                     )
+                if not _first_sse_written:
+                    mark_phase(command_id, "first_sse_written_ms")
+                    _first_sse_written = True
                 yield f"data: {chunk_response.model_dump_json(exclude_none=True)}\n\n"
 
                 if chunk.finish_reason is not None:
-                    if chunk.stats is not None:
-                        yield f": generation_stats {chunk.stats.model_dump_json()}\n\n"
+                    mark_phase(command_id, "last_sse_written_ms")
+                    mark_phase(command_id, "stream_closed_ms")
+                    stats_to_emit = chunk.stats
+                    api_marks = snapshot_phase_marks(command_id)
+                    if stats_to_emit is not None and api_marks is not None:
+                        stats_to_emit = stats_to_emit.model_copy(
+                            update={"api_phase_marks_ms": api_marks}
+                        )
+                    if stats_to_emit is not None:
+                        yield f": generation_stats {stats_to_emit.model_dump_json()}\n\n"
                     yield "data: [DONE]\n\n"
                     return
 

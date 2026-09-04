@@ -1603,6 +1603,12 @@ for NODE in "${NODES[@]}"; do
   # Tracing default OFF in prod (session-3 A/B); export EXO_TRACING_ENABLED=true to enable.
   [ "${EXO_TRACING_ENABLED:-false}" = "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=true"
   [ "${EXO_TRACING_ENABLED:-false}" != "true" ] && EXO_ENV="$EXO_ENV EXO_TRACING_ENABLED=false"
+  # Round-11 c=1 phase-boundary marks (exo.worker.engines.mlx.phase_marks +
+  # exo.api.phase_marks). Default OFF; export EXO_PHASE_MARKS=1 to enable.
+  # G4 (round11 hard rule): MUST be in this allow-list or the runner/API
+  # processes never see it and the whole boot measures nothing (R4/Ask-A
+  # lesson).
+  [ -n "${EXO_PHASE_MARKS:-}" ] && EXO_ENV="$EXO_ENV EXO_PHASE_MARKS=$EXO_PHASE_MARKS"
   [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
   [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
   [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"

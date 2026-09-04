@@ -37,6 +37,7 @@ from exo.worker.engines.mlx.generator.generate import (
     mlx_generate,
     warmup_inference,
 )
+from exo.worker.engines.mlx.phase_marks import runner_phase_marks
 from exo.worker.engines.mlx.types import Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -1157,6 +1158,11 @@ class BatchGenerator(Engine):
         _check_for_debug_prompts(task.task_params)
         with T("start_task.apply_chat_template"):
             prompt = apply_chat_template(self.tokenizer, task.task_params)
+        # Round-11 b2 (template_rendered): delta since b1 task_received (or
+        # since the previous mark if this runner is mid-sequence for another
+        # task). See exo.worker.engines.mlx.phase_marks module docstring for
+        # the same-clock-delta-only design rule.
+        runner_phase_marks.mark("template_rendered_ms")
 
         def on_prefill_progress(processed: int, total: int) -> None:
             if self.device_rank == 0:

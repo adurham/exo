@@ -187,6 +187,22 @@ class GenerationStats(BaseModel):
     # care about MTP can ignore these.
     mtp_cycles_cumulative: int = 0
     mtp_accepted_drafts_cumulative: int = 0
+    # Round-11 phase-boundary instrumentation (EXO_PHASE_MARKS-gated). Maps
+    # mark name -> milliseconds since the previous mark, ALL same-process
+    # perf_counter deltas (see exo.worker.engines.mlx.phase_marks). None
+    # when the env var is unset or the runner never called begin() for this
+    # request (e.g. bench mode). NEVER a cross-node clock value -- do not
+    # add API-side wall-clock fields into this same dict; the API's own
+    # marks live in a separate, API-process-only structure and are joined
+    # against this one only via same-clock interval subtraction in the
+    # analysis script, never by direct comparison.
+    phase_marks_ms: dict[str, float] | None = None
+    # API-process phase marks (a1-a7, exo.api.phase_marks), attached by
+    # generate_chat_stream() right before the terminal SSE frame -- these
+    # are ALSO same-process perf_counter deltas, just a different process
+    # than phase_marks_ms above. Never compare the two dicts' values
+    # directly; each is only valid relative to its own process's clock.
+    api_phase_marks_ms: dict[str, float] | None = None
 
 
 class ImageGenerationStats(BaseModel):

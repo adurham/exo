@@ -65,6 +65,7 @@ from exo.worker.disaggregated.server import (
     PrefillServer,
 )
 from exo.worker.engines.base import Builder, Engine
+from exo.worker.engines.mlx.phase_marks import runner_phase_marks
 from exo.worker.runner.bootstrap import logger
 
 PREFILL_PICKUP_TIMEOUT_SECONDS = 3
@@ -560,6 +561,11 @@ class Runner:
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, Engine)
 
+        # Round-11 b1 (task_received): the study's server_received_ts anchor.
+        # Kept coincident with the "received chat request" log line below by
+        # design -- begin() must fire before any other work in this method so
+        # every subsequent b2-b11 delta is measured relative to this instant.
+        runner_phase_marks.begin()
         logger.info(f"received chat request: {truncate_for_log(starting_task)}")
         self.update_status(RunnerRunning())
         logger.info("runner running")
