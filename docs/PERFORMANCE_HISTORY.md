@@ -8207,3 +8207,42 @@ HISTORICAL, not actionable. No lever survives; the record's fence on/off experim
    profiler.py:109-113). Production is safe today (EXO_PROFILER unset; only
    EXO_PROFILER_LEVEL=1, which is inert without it — bootstrap.py:117-119) — but ANY
    fence/drain measurement taken with spans on is INVALID. Pre-registered caveat.
+
+## CAMPAIGN 2 — ROUND 5: γ re-tune — NO SHIP, but the first TRUE acceptance measurement and a broken harness (2026-09-03/04)
+
+Commits 62aeca65e (pre-registration, before any sweep), bea4e635a (report). Artifacts:
+tmp/perf-campaign-2/round5/. Cluster verified γ=3 both nodes, leftover_diag_count=0, API 200.
+
+**THE FINDING: the acceptance histogram had NEVER BEEN EMITTED.** `EXO_DSV4_MTP_LOG_INTERVAL` is
+an import-time read (dsv4_mtp.py:118), unset on all 8 runner PIDs across every campaign session.
+It rode the Phase-1 relaunch and gave the first true acceptance of this config:
+**γ=3 -> 1.820/3; γ=4 -> 2.420/4.** This SUPERSEDES both prior figures — the 1.73 used for the
+May tuning AND the 1.411 from campaign-1's wall-attribution (which was inferred from dump
+timestamps, not counted). The record's acceptance numbers were all derived; this one is counted.
+
+**PRE-REGISTERED ORDERING CONTRADICTED — and that is the finding, not a failure.** Predicted
+(committed before boot 1): a cliff past the head's 3 trained stages, no arm clears the band.
+Reality: the reconstructed `bypos` curve does NOT cliff — conditional continue-probability is
+flat at 73-83% through position 4; the distribution is bimodal, not geometric. **γ=4 buys +33%
+acceptance** (1.82 -> 2.42). The draft head extrapolates beyond its trained depth.
+
+**NO SHIP, because throughput was never validly measured.** The band requires derived AND
+measured t/s; the measured input does not exist:
+- the original harness timed a burst-delivered stream: 0.21s for 71 tokens (~14x impossible);
+- the "fix" computed a CHUNK rate: exactly 9 chunks/rep whether 71 or 101 tokens; implied
+  token rate still 472-595 t/s;
+- TTFT collapsed 150s -> 3s on an identical prompt: a prefix-cache HIT, not a fast prefill;
+- depth was ~62K, not the 89K target.
+Shipping γ=4 on acceptance alone would be the single-boot-delta violation the charter forbids.
+**A worker's numbers were wrong TWICE, and the second "fix" passed its own sanity check
+(38-55 t/s looked plausible) while still being a chunk rate.** The PM caught it by re-deriving
+tokens / window from raw fields. This harness produces believable-looking garbage.
+
+**Protocol deviation, recorded:** γ=2, γ=5, and the closing γ=3 bracket never ran, so
+boot variance for this sweep is unquantified. I8 (per-draft cost) UNMEASURED — the profiler
+brackets mx.eval every cycle and would corrupt the t/s under test; deferred, not guessed.
+
+**CARRY-FORWARD:** γ=4 is the strongest live candidate in campaign 2 (+33% acceptance on a
+counted measurement). It is blocked ONLY by the absence of a trustworthy decode-throughput
+harness. Round 6 must build that harness and prove it against the known ~26 t/s @2K before any
+sweep number is believed.
