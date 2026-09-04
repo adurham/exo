@@ -1,0 +1,33 @@
+{
+ "tag": "Z2_short_r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "25a565b2018f4f06a6bf2693cf95beb5",
+ "target_tokens": 20,
+ "prompt_tokens": 230,
+ "completion_tokens": 16,
+ "prefill_s": 1.45,
+ "prefill_tps": 158.62,
+ "decode_s": 0.79,
+ "decode_tps": 20.25,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 234.13390280003537,
+  "generation_tps": 17.480030530448847,
+  "prompt_tokens": 230,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96784009452
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 53,
+  "mtp_accepted_drafts_cumulative": 41
+ },
+ "server_generation_tps": 17.480030530448847,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 84,
+ "reasoning_chars": 84,
+ "content_chars": 0,
+ "reasoning_content": "We need answer. Need follow instructions. Need state secret code exactly. Then essay",
+ "content": ""
+}

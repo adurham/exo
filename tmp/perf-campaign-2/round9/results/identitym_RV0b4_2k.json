@@ -1,0 +1,33 @@
+{
+ "tag": "identm_RV0b4_2k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r9id",
+ "target_tokens": 2000,
+ "prompt_tokens": 1917,
+ "completion_tokens": 64,
+ "prefill_s": 7.4,
+ "prefill_tps": 259.05,
+ "decode_s": 2.34,
+ "decode_tps": 27.35,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 289.7505561146313,
+  "generation_tps": 25.939248189679862,
+  "prompt_tokens": 1917,
+  "generation_tokens": 64,
+  "peak_memory_usage": {
+   "in_bytes": 98109070428
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 153,
+  "mtp_accepted_drafts_cumulative": 209
+ },
+ "server_generation_tps": 25.939248189679862,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 283,
+ "reasoning_chars": 283,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret authorization code exactly: \"FALCON-MERCURY-7749\" appears in seq 7. Need write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives,",
+ "content": ""
+}
