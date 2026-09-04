@@ -1,0 +1,17 @@
+We need answer user. Need parse document. Need state secret authorization code exactly: "FALCON-MERCURY-7749" appears in seq 7. Need write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples real systems. Need be thorough. Need maybe mention document repeated with degradation? But focus.
+
+Need produce final with two tasks. Need ensure essay >=900 words. Need include complexities. Let's craft.
+
+Need be careful: The document has repeated text with errors, but secret code is clear. Need state exactly.
+
+Essay structure:
+
+- Intro: Observer pattern behavioral design pattern, B-tree data structure.
+- Observer pattern:
+  - Subject maintains list observers, state changes notify.
+  - How works: subject interface attach/detach/notify; observer interface update; concrete subject state; push/pull models; decoupling.
+  - Time complexity: attach/detach O(1) if list, O(n) if array; notify O(n) per observer update; observer update may be O(1) or more. Space O(n) for list.
+  - Alternatives: event bus/pub-sub, callbacks, signals/slots, reactive streams. Choose observer when direct one-to-many dependency, decoupling, dynamic subscriptions; avoid when too many observers causing notification storms, memory leaks if not detached, need ordering? Event bus for decoupled components, but less direct.
+  - Real examples: GUI toolkits (Java Swing ActionListener, .NET events, React props?); MVC model notifies views; stock market ticker; logging frameworks; distributed pub-sub? Observer in Java PropertyChangeListener; Node.js EventEmitter.
+- B-trees:
+  - Self-balancing tree, nodes with many keys/children, sorted order, leaves at same depth. How works: each node has up to order m, keys sorted, children between;

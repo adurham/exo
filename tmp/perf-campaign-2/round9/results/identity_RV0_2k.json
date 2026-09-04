@@ -1,0 +1,33 @@
+{
+ "tag": "ident_RV0_2k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r9id",
+ "target_tokens": 2000,
+ "prompt_tokens": 1917,
+ "completion_tokens": 400,
+ "prefill_s": 7.29,
+ "prefill_tps": 262.96,
+ "decode_s": 15.72,
+ "decode_tps": 25.45,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 292.66170257641556,
+  "generation_tps": 25.255584475514574,
+  "prompt_tokens": 1917,
+  "generation_tokens": 400,
+  "peak_memory_usage": {
+   "in_bytes": 98109072030
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 448,
+  "mtp_accepted_drafts_cumulative": 589
+ },
+ "server_generation_tps": 25.255584475514574,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 1818,
+ "reasoning_chars": 1818,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret authorization code exactly: \"FALCON-MERCURY-7749\" appears in seq 7. Need write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples real systems. Need be thorough. Need maybe mention document repeated with degradation? But focus.\n\nNeed produce final with two tasks. Need ensure essay >=900 words. Need include complexities. Let's craft.\n\nNeed be careful: The document has repeated text with errors, but secret code is clear. Need state exactly.\n\nEssay structure:\n\n- Intro: Observer pattern behavioral design pattern, B-tree data structure.\n- Observer pattern:\n  - Subject maintains list observers, state changes notify.\n  - How works: subject interface attach/detach/notify; observer interface update; concrete subject state; push/pull models; decoupling.\n  - Time complexity: attach/detach O(1) if list, O(n) if array; notify O(n) per observer update; observer update may be O(1) or more. Space O(n) for list.\n  - Alternatives: event bus/pub-sub, callbacks, signals/slots, reactive streams. Choose observer when direct one-to-many dependency, decoupling, dynamic subscriptions; avoid when too many observers causing notification storms, memory leaks if not detached, need ordering? Event bus for decoupled components, but less direct.\n  - Real examples: GUI toolkits (Java Swing ActionListener, .NET events, React props?); MVC model notifies views; stock market ticker; logging frameworks; distributed pub-sub? Observer in Java PropertyChangeListener; Node.js EventEmitter.\n- B-trees:\n  - Self-balancing tree, nodes with many keys/children, sorted order, leaves at same depth. How works: each node has up to order m, keys sorted, children between;",
+ "content": ""
+}

@@ -1,0 +1,33 @@
+{
+ "tag": "Z1_short_r7",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "adb4937f124c419688edc091285e3df5",
+ "target_tokens": 20,
+ "prompt_tokens": 222,
+ "completion_tokens": 16,
+ "prefill_s": 1.57,
+ "prefill_tps": 141.4,
+ "decode_s": 0.59,
+ "decode_tps": 27.12,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 209.34419503612534,
+  "generation_tps": 25.842606961029347,
+  "prompt_tokens": 222,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96784234058
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 77,
+  "mtp_accepted_drafts_cumulative": 113
+ },
+ "server_generation_tps": 25.842606961029347,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 72,
+ "reasoning_chars": 72,
+ "content_chars": 0,
+ "reasoning_content": "We need to respond to the user. The user provided a long document with a",
+ "content": ""
+}
