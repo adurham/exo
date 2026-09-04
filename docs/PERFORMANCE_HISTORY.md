@@ -8445,3 +8445,53 @@ production path. ZERO throughput shipped in campaign 2 — every round closed a 
 evidence or corrected the record (R1 kernel-artifact, R2 fence algebra, R4 dead-knob, R7
 nonexistent gate, R8 6-bit premise: five supervisor/brief errors caught by PMs). **The loop
 pivots to TTFT: Fix A trie persistence (49% of real-session uncached tokens = one cold start).**
+
+## CAMPAIGN 2 — ROUND 9: RENDEZVOUS_MS held by one rep in 20; the 200-vs-480 is EXPLAINED (2026-09-04)
+
+Commits 82e168eba (pre-registration, before any measurement) … 0dbed04a4 (report). Artifacts:
+tmp/perf-campaign-2/round9/ (PRE-REGISTRATION, TASK1-CODE-ANALYSIS, REPORT, 4 per-boot notes,
+~92 result JSONs). Cluster restored to RV=200 production, verified on real PIDs both nodes +
+API 200. The coherent temp=0 completion was blocked by the tool-approval gate for the worker,
+the PM, AND the supervisor — not circumvented, not reported as passing.
+
+**TASK 1 — 200-vs-480 RESOLVED from code, pre-registered before measuring.** Exactly ONE
+functional consumer (runner.py:580-624); the deadline is armed once at :582 so the wait is
+bounded by W by construction; ranks are concurrent via agree_on_tasks → joint start W, not 2W;
+nothing is serialized behind it. All three candidate mechanisms from the brief REFUTED.
+**Predicted delta: −200 ms.** R7's −480 decomposed from its own JSONs: ~270 ms of it sat in
+in-`prefill()` compute (Z prompt_tps 221 vs P2 176 on identical prompts) — a bucket a
+pre-prefill sleep cannot enter. Discrepancy closed.
+
+**TASK 2 — four paired boots, PM-recomputed from raw JSONs (short-prompt TTFT, ms):**
+A(200) 1960 [1690,2260] · Z1(0) 1570 [1460,1940] · B(200) 1835 [1640,2180] · Z2(0) 1580
+[1430,1740]. RV=200 A-vs-B spread = 125 ms. Gap = **−322.5 ms**, all four pairwise gaps negative.
+**Band applied verbatim → HOLD (fails 2 of 3):** ranges-disjoint FAIL (ONE Z1 rep at 1940 vs B
+min 1640; 19/20 clean) · gap > spread PASS · gap in [150,250] FAIL. start_cluster.sh:136 unchanged.
+
+**DISCREPANCY NAMED (the real finding):** the excess over 200 ms sits in the COMPUTE term, which
+FLIPS SIGN across the two independent pairs (+861 vs −132 ms at 2K). A constant sleep cannot
+change sign — raw TTFT carries a noisy term the window cannot influence. The RESIDUAL statistic
+(TTFT minus in-prefill compute) is stable and same-signed across all four pairs (−201/−165,
+−266/−274); its −183 ms WOULD be in band. It was declared diagnostic-only in the pre-registration,
+so the PM correctly did not ship on it. Raw TTFT is the wrong instrument for a 200 ms effect on
+this cluster; the residual is the right one and now has a justification on record.
+
+**TASK 3 — byte-identity PASSES.** Short and 2K identical. 89K initially differed (905 vs 926
+tokens) and LOOKED disqualifying; the PM ran self-controls before reporting: **8 of 9 runs across
+both arms are byte-identical (sha 4241713bf830)** — the lone outlier is RV=200's OWN first
+capture. Divergence does not track the arm. **CONSEQUENCE FOR R7: its §4 89K byte-identity
+failure for STEEL_BATCH_INVARIANT lacked a same-arm self-control and now NEEDS ONE to stand** (its
+<8192 and 5-prompt failures are untouched). R7's steel-BI verdict is downgraded from "proven" to
+"likely" pending that control.
+
+**RIDE-ALONGS:** I15 — R8's blocker cleared (vars fired) but NO deployed probe emits a launch
+count (`dispatch_count()` lives only in bench/ and one unit test, never on a decode path). Band
+inapplicable; I15 CLOSED as unmeasurable without new instrumentation. I12 — serial driver
+CONFIRMED at runtime (`Starting prefill` 19×, batched 0×); the tiled-SDPA / exact-topk "log
+markers" the brief asked for DO NOT EXIST in src/ — supervisor brief error, corrected.
+
+Also shipped: `exo-cluster-operations/references/measuring-small-latency-effects.md` (the
+residual-statistic method, the 89K self-control rule, two launcher gotchas that cost a void boot).
+
+**NEXT: one cheap closing round** — pre-register the RESIDUAL as governing (justification on
+record), n=25 short reps, two boots. Worth ~250-390 ms/turn under the user's standing bar.
