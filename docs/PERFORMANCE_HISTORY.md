@@ -8301,3 +8301,49 @@ async fence armed, residual stall is genuine compute at 117% GPU busy (R4); γ l
 (R6). The remaining decode levers all change the WORK, not the mechanism: expert precision
 (I11, user quality decision), the live c=2-tax knobs (I2: steel-BI ~5%, rendezvous 200ms TTFT),
 and lm_head vocab-sharding (I7, ~1.5%). Prefill at c=1 remains exhausted from campaign 1.
+
+## CAMPAIGN 2 — ROUND 7: both live c=2-tax knobs HOLD, for opposite reasons (2026-09-04)
+
+Commits dcb2ec162 (stale-comment corrections), b9c91fbe0 (pre-registration), 7e68ecbc6
+(amendment 1, before the comparison arm), 2f122b454 (report). Cluster restored to production,
+PM-verified on real PIDs: BI=1, RV=200, γ=3, API 200, coherent completion — supervisor
+re-verified. Round 6's open smoke-check item closed.
+
+**TASK B — `MLX_STEEL_BATCH_INVARIANT`: HOLD. It IS CORRECTNESS-LOAD-BEARING AT c=1.** Byte-
+identity FAILED at both regimes on byte-identical temp=0 prompts (PM-verified): <8192 diverges at
+char 8; ~89K at char 442; identity_gate 2/5 prompts differ. The 89K failure is decisive because
+ROWSEQ_VEC is provably DEAD at that depth (`_VERIFY_BATCH_CTX["active"]` guard, deepseek_v4.py:
+5295/5442) — so this is NOT the documented rowseq interaction; the batched M=4 verify rows simply
+stop being bitwise-equal to sequential decode without the flag. Per the pre-registered stopping
+rule, decode was NOT measured and the closing bracket not spent: the ~5% claim is MOOT. **This
+knob is not a c>=2 tax. The launcher comment framing it that way was actively misleading** — the
+comment is corrected (dcb2ec162).
+
+**TASK A — `RENDEZVOUS_MS` 200 -> 0: SAFE, but HOLD on measurement.** `agree_on_tasks` uses a
+synchronous all_gather + set intersection (utils_mlx.py:2284-2338) independent of the window, so
+0 cannot cause rank disagreement at c=1; the launcher's 50/100ms warning was a throughput
+failure needing >=2 racing tasks. 0 is a clean `> 0` skip, not a sentinel (runner.py:580). Logs
+clean over 20+ requests. BUT: pre-registered A1 TTFT delta = +120ms (P 7900 / Z 8020 / P2
+8010ms) — outside [-250,-150], WRONG SIGN. All three arms sit within 120ms while individual
+ranges span 370-1800ms: the ~8s deep-prompt TTFT instrument cannot resolve a 200ms effect. The
+PM caught this from arm P ALONE and committed Amendment 1 (a short-prompt instrument) BEFORE the
+comparison arm ran. That instrument shows -480ms with non-overlapping ranges — the sleep is
+real, but 480 != 200 and the PM refused to ship a number it could not explain. Confound:
+paired across two different boots (§8.2). Round 8 needs a paired-boot design.
+
+**RECORD CORRECTIONS:**
+1. **Round 4's "FENCE_EVERY_N_LAYERS is a dead knob (zero readers)" is WRONG** — it has a live
+   reader at deepseek_v4.py:2959. Round 4's grep missed it. Dead-knob count is 3, not 4, and
+   FENCE cadence is now the best remaining I2 lever. The PM left that comment untouched rather
+   than commit a false "dead" note.
+2. The brief's `ab_probe_tier1.py 7/7` gate DOES NOT EXIST — that script is a single-request
+   probe with no pass/fail and a stale hardcoded model. (Supervisor error: I cited a gate from
+   the record without verifying the script.) Moot once Task B failed identity, but the next
+   brief must name real gates.
+
+**TASK C:** stale knob comments corrected, comment-only (0 non-comment lines changed, bash -n
+clean, all values intact).
+
+**JUDGMENT CALL (PM's, flagged for review):** boot 4 was spent on the production restore + the
+paired A2 arm rather than Task B's closing bracket — correct, since the identity failure had
+already made that bracket unnecessary.
