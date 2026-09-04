@@ -1,0 +1,26 @@
+{
+  "run_id": "2cd52909f86948068ca1be7065577d61",
+  "target_tokens": 89000,
+  "max_tokens": 500,
+  "t_start": 1788535170.361517,
+  "t_first_token": 1788535399.23566,
+  "t_end": 1788535415.6438751,
+  "prefill_s": 228.8741431236267,
+  "decode_s": 16.408215045928955,
+  "prompt_tokens": 95838,
+  "completion_tokens": 500,
+  "finish_reason": "length",
+  "server_stats": {
+    "prompt_tps": 420.94699145091477,
+    "generation_tps": 30.321654230567688,
+    "prompt_tokens": 95838,
+    "generation_tokens": 500,
+    "peak_memory_usage": {
+      "in_bytes": 99616427508
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 763,
+    "mtp_accepted_drafts_cumulative": 1051
+  },
+  "content_len": 0
+}
