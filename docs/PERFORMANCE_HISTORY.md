@@ -8393,3 +8393,55 @@ per R4; collective removal moves <=8.4%) and prefill is exhausted modulo the I12
 addresses 49% of real-session uncached tokens (one cold start after relaunch = 92.6K uncached,
 282s TTFT in the real-usage study). On the "does the user feel it" axis this dominates any 1-2
 t/s throughput win still findable. Not a consolation prize.
+
+## CAMPAIGN 2 — ROUND 8 (last throughput round): I12 shared, I9 closed, I11's PREMISE WAS FALSE (2026-09-04)
+
+Artifacts: tmp/perf-campaign-2/round8/ (REPORT.md, I11-DECISION.md), 7 local commits
+37a30be46..fcaa01eba. Cluster never relaunched this round; verified healthy on real PIDs with a
+coherent temp=0 completion. Nothing shipped, no weights converted.
+
+**SUPERVISOR CORRECTION — A WRONG PREMISE OF MINE, PROPAGATED THROUGH THREE BRIEFS.** IDEAS.md
+I11, the R7 review, and the R8 brief all said "routed experts are at 6-bit; 4-bit is -33% bytes."
+**FALSE.** `make_quantization_config` (deepseek_v4.py:952-962) assigns `mxfp4` (4-bit, g=32) to
+every `.ffn.switch_mlp.*_proj` at LOAD TIME; the live log shows `QuantizedSwitchLinear()` on every
+expert projection; shared_experts and attention are mxfp8. Supervisor re-verified at the source
+site and the live process. There is no deployed 6-bit and no evidence there ever was — "6-bit"
+traces to two model cards that FAIL validation at load (model_cards.py:167) and describe nothing
+that runs. The -33% win was ALREADY BANKED in today's throughput. The instruction "leave the
+cluster on 6-bit" was satisfied trivially and was mislabelled; the deployed config is mxfp4
+experts + mxfp8 attention/shared/lm_head.
+
+**I11 RESOLVED BY MEASUREMENT, not deferred as a user tradeoff.** Kernel-path microbench (chained-
+graph method, at deployed shapes, M=4), keyed to deployed mxfp4 = 1.000x: 3-bit 0.960 (+4.0%, the
+ONLY remaining downward step); 5-bit 1.382 (+38% cost to move UP); 6-bit 1.599; mxfp8 1.890.
+5-bit IS on the fast path (dispatch depends on N and K, never on bits) — the constraint is format,
+not speed. **Recommendation: no precision change.** 3-bit's +4% is inside boot variance and the
+quality cost of a 4->3 step on MoE experts is not worth it. Steps 3-4 (measured t/s + quality
+battery vs a 6-bit arm) deliberately NOT run: they would have meant manufacturing a regression to
+measure the cost of undoing it.
+**Third wrong-path catch this campaign:** step 1's harness hardcoded `mode="affine"`, so its
+4-bit arm measured the WRONG kernel — 15.4% too slow. Same class as R1 (serial-sync) and R2
+(fence algebra). Caught by a follow-up dispatch before it reached the decision doc.
+`exo-perf-tuning` skill patched with the mode-vs-bits trap.
+
+**I12: ALL SIX SHARED — CLOSED, zero measurement.** Under TP `is_pipeline=False`, so the serial
+loop IS mlx-lm's `generate_step` and both drivers converge on the same `model(...)` call: tiled
+SDPA, exact-topk, indexer, prefix-cache keying, STEP_SIZE chunking, clear-cache cadence are all
+reachable from the serial driver by construction. Two items are serial-EXCLUSIVE (the batched
+path is the deficient one). Caveat: static reachability, not observed runtime — rides along free
+on the TTFT pivot's first boot.
+
+**I9: CLOSED.** GPU clock idle 699.7 / prefill 1573.0 / decode 1576.4 MHz — decode is 0.2% ABOVE
+prefill, nowhere near the 15%-below band. No P-state lever.
+
+**I15: BLOCKED, not closed** — the probe env vars are boot-gated and were not set on the running
+cluster (PM verified probe-var-count=0 on the live process). No count reported, nothing estimated.
+The PM correctly declined to spend a relaunch on it; it rides along on the TTFT pivot's first boot.
+
+**CAMPAIGN 2 THROUGHPUT VERDICT after 8 rounds:** decode is at a physics floor (bandwidth-bound at
+mxfp4 already, 117% GPU busy, no GPU collective possible, γ exhausted, steel-BI correctness-
+load-bearing); prefill at c=1 is exhausted and its optimizations are confirmed reachable on the
+production path. ZERO throughput shipped in campaign 2 — every round closed a lever with
+evidence or corrected the record (R1 kernel-artifact, R2 fence algebra, R4 dead-knob, R7
+nonexistent gate, R8 6-bit premise: five supervisor/brief errors caught by PMs). **The loop
+pivots to TTFT: Fix A trie persistence (49% of real-session uncached tokens = one cold start).**

@@ -232,7 +232,7 @@ Trie is in-memory only (builder.py:156). Persisting KV to disk (multi-GB per nod
 on launch. Value depends on relaunch frequency in normal use — LOW in steady state, high while
 the loop is relaunching. Design only; user decides.
 
-### I11. Weight precision: 5-bit or 4-bit routed experts (USER DECISION — quality tradeoff)
+### I11. Weight precision — PREMISE REFUTED R8 (2026-09-04): routed experts are ALREADY mxfp4 4-bit at load (deepseek_v4.py:952). "6-bit" was a supervisor error. No downward step worth taking (3-bit = +4%, inside boot variance). CLOSED.
 Bandwidth-bound decode scales ~linearly with expert bytes: 6->5 bit ≈ -17% bytes, 6->4 ≈ -33%.
 Declined in campaign 1 on quality grounds, not performance. Prepare: (a) quantize a 5-bit
 variant offline, (b) run the FULL quality battery (Tier-1 7/7, needle, DSML tool-call
