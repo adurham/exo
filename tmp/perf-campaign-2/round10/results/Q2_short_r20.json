@@ -1,0 +1,33 @@
+{
+ "tag": "Q2_short_r20",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "f5d72f5f80324db8af3461d8a8116098",
+ "target_tokens": 20,
+ "prompt_tokens": 228,
+ "completion_tokens": 16,
+ "prefill_s": 1.64,
+ "prefill_tps": 139.02,
+ "decode_s": 0.69,
+ "decode_tps": 23.19,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 192.0703502030203,
+  "generation_tps": 24.96927121576129,
+  "prompt_tokens": 228,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96859801688
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 161,
+  "mtp_accepted_drafts_cumulative": 252
+ },
+ "server_generation_tps": 24.96927121576129,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 65,
+ "reasoning_chars": 65,
+ "content_chars": 0,
+ "reasoning_content": "1.  The user asks for two tasks based on the provided document.\n2",
+ "content": ""
+}

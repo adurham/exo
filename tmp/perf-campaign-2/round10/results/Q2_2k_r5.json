@@ -1,0 +1,33 @@
+{
+ "tag": "Q2_2k_r5",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "615439c9b75e4a5a8ee658231b8150f3",
+ "target_tokens": 2000,
+ "prompt_tokens": 2331,
+ "completion_tokens": 16,
+ "prefill_s": 8.18,
+ "prefill_tps": 284.96,
+ "decode_s": 0.55,
+ "decode_tps": 29.09,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 302.74169144627535,
+  "generation_tps": 26.47042705281234,
+  "prompt_tokens": 2331,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96859801688
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 34,
+  "mtp_accepted_drafts_cumulative": 43
+ },
+ "server_generation_tps": 26.47042705281234,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 82,
+ "reasoning_chars": 82,
+ "content_chars": 0,
+ "reasoning_content": "We need to answer two tasks. First, extract the secret authorization code from the",
+ "content": ""
+}

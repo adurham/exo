@@ -1,0 +1,33 @@
+{
+ "tag": "ident_RV0_c1_short",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r10id",
+ "target_tokens": 20,
+ "prompt_tokens": 194,
+ "completion_tokens": 64,
+ "prefill_s": 1.32,
+ "prefill_tps": 146.97,
+ "decode_s": 1.89,
+ "decode_tps": 33.86,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 213.50331001497608,
+  "generation_tps": 33.4263511563284,
+  "prompt_tokens": 194,
+  "generation_tokens": 64,
+  "peak_memory_usage": {
+   "in_bytes": 96859801688
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 211,
+  "mtp_accepted_drafts_cumulative": 345
+ },
+ "server_generation_tps": 33.4263511563284,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 276,
+ "reasoning_chars": 276,
+ "content_chars": 0,
+ "reasoning_content": "We need to answer two tasks. First, state the secret authorization code exactly as it appears: \"FALCON-MERCURY-7749\". Second, write a detailed essay of at least 900 words explaining observer pattern and B-trees. The essay must cover: how each works, time and space complexity,",
+ "content": ""
+}

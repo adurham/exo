@@ -1,0 +1,33 @@
+{
+ "tag": "Q2_short_r19",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "f7239eea68ef40dd9b1d3ffc5b8ab98d",
+ "target_tokens": 20,
+ "prompt_tokens": 232,
+ "completion_tokens": 16,
+ "prefill_s": 1.56,
+ "prefill_tps": 148.72,
+ "decode_s": 0.67,
+ "decode_tps": 23.88,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 196.64301565071966,
+  "generation_tps": 23.05629297336267,
+  "prompt_tokens": 232,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96859801688
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 155,
+  "mtp_accepted_drafts_cumulative": 243
+ },
+ "server_generation_tps": 23.05629297336267,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 79,
+ "reasoning_chars": 79,
+ "content_chars": 0,
+ "reasoning_content": "1.  The user provides a long document containing a secret authorization code: \"",
+ "content": ""
+}
