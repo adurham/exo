@@ -38,7 +38,7 @@ Five supervisor errors in briefs were caught by PMs and are in the record.
 | I7 | lm_head vocab-sharding | CANCELLED — ~0.45 t/s, below measurement floor | R7 review |
 | I8 | per-draft cost | RESOLVED — ~3-6ms per extra draft row; acceptance doesn't cover it | R6 |
 | I9 | GPU P-state | CLOSED — decode clock 0.2% ABOVE prefill | R8 |
-| I10 | Fix A trie persistence | **OPEN — the TTFT pivot target** (49% of real-session uncached tokens = one cold start) | — |
+| I10 | Fix A trie persistence | CANCELLED by user — "I don't normally re-launch in the middle of sessions." The 49% figure measured CAMPAIGN relaunches, not normal usage; ~0 value in steady state | user, 09-04 |
 | I11 | expert precision | **PREMISE FALSE** — experts are ALREADY mxfp4 4-bit at load (`deepseek_v4.py:952`). "6-bit" was a supervisor error in 3 briefs. 3-bit = +4%, inside boot variance. No change | R8 |
 | I12 | serial-vs-batched prefill parity | CLOSED — all six optimizations reachable from the serial driver by construction | R8 |
 | I13 | idle-gap warmup | CANCELLED — only matters if warmup is in the shipping loop | R7 review |
@@ -66,12 +66,12 @@ Never build a new harness — R5 lost a round to one.
 
 ## NEXT (needs user direction — loop is paused)
 
-Recommended by the R7 review and the supervisor: **pivot to TTFT via Fix A** (prefix-trie
-persistence across relaunch; trie is in-memory only, `builder.py:156`). Latency, not throughput.
-I15's launch count and I12's runtime check ride along on its first boot. RENDEZVOUS_MS 200→0
-(safe, proven) also belongs to the TTFT thread with a paired-boot design.
+Fix A is DEAD (user: relaunches are not part of normal sessions). With it gone, the TTFT pivot's
+only remaining item is RENDEZVOUS_MS 200→0 (safe, proven; -480ms on the short-prompt instrument
+but unresolved against the 200ms claim; needs a paired-boot design) — a one-knob round, and the
+user should decide whether a ~200-480ms TTFT trim per turn is worth a boot cycle.
 
-Alternatives: STOP the loop; or a user-named target.
+Everything else is closed. Recommendation: STOP the loop unless the user names a target.
 
 **Cluster:** healthy on shipped production config (γ=3, BI=1, RV=200, mxfp4 experts, async
 fence armed), both nodes READY, verified 2026-09-04. No probe/diag env leftover. Tree clean,

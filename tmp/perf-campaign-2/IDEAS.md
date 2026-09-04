@@ -238,7 +238,7 @@ lower P-state, and on Apple Silicon the memory controller/fabric clock is couple
 runs at a lower clock than prefill, that is a systems lever (sustained-performance mode,
 `pmset`, or keeping a compute-side kernel resident). Zero relaunch.
 
-### I10. **[OPEN — THE TTFT PIVOT TARGET]** Fix A — prefix-trie persistence across relaunch
+### I10. **[CANCELLED by user 09-04: relaunches are not part of normal sessions; the 49% figure measured campaign relaunches]** Fix A — prefix-trie persistence across relaunch
 49% of the real session's uncached tokens were one cold start (92.6K uncached, 282s TTFT).
 Trie is in-memory only (builder.py:156). Persisting KV to disk (multi-GB per node) and reloading
 on launch. Value depends on relaunch frequency in normal use — LOW in steady state, high while
