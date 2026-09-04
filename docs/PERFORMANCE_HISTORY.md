@@ -8246,3 +8246,58 @@ brackets mx.eval every cycle and would corrupt the t/s under test; deferred, not
 counted measurement). It is blocked ONLY by the absence of a trustworthy decode-throughput
 harness. Round 6 must build that harness and prove it against the known ~26 t/s @2K before any
 sweep number is believed.
+
+## CAMPAIGN 2 — ROUND 6: γ LEVER EXHAUSTED — γ=4 is SLOWER on a calibrated ruler; HOLD at γ=3 (2026-09-04)
+
+Commits 76c1b64d3 (pre-registration), 73d0d0de0 (calibration gate PASSED + amendment), cb2eba341
+(report). Artifacts: tmp/perf-campaign-2/round6/. start_cluster.sh UNMODIFIED. Cluster verified
+γ=3 on 8 runner PIDs both nodes, API 200; supervisor ran the coherent-completion smoke the PM's
+approval layer blocked: "43", finish_reason=stop.
+
+**CALIBRATION GATE PASSED** (stats.generation_tps, no new harness): 2K -> 29.058 t/s (band
+20.6-32.6); 89K-class -> 32.816 (band 24.0-40.0). The ruler is trustworthy. Every number below is
+the server's own generator-timed decode rate.
+
+**ALL FIVE ARMS RAN, in the pre-registered bracketing order, ~88K depth, n=3, trustworthy:**
+
+| arm | median t/s | range |
+|---|---|---|
+| γ=3 (A) | 33.512 | [33.467, 34.493] |
+| γ=4 | 29.964 | [29.944, 33.033] |
+| γ=3 (B) | 32.215 | [30.424, 33.550] |
+| γ=2 | 32.751 | [31.358, 34.572] |
+| γ=5 | 30.124 | [29.921, 30.701] |
+
+**BOOT VARIANCE, finally measured for this sweep:** γ=3 union [30.424, 34.493]; A-vs-B median
+spread = 1.297 t/s. (Round 5 never produced this.)
+
+**DECISION: HOLD AT γ=3.** γ=4's median (29.964) is BELOW the minimum of all six γ=3 reps; gap to
+the γ=3 union max is -4.549 t/s against a required > +1.297. γ=5 is worse still. γ=2 overlaps
+γ=3 (inside boot variance). **Since effective γ = min(GAMMA, block_size=5), every reachable value
+is now measured on a calibrated ruler: the γ lever is EXHAUSTED.**
+
+**ROUND 5's +33% ACCEPTANCE DID NOT REPRODUCE — and the PM said why honestly.** γ=4 measured
+~1.02 accepted/cycle vs γ=3's ~1.15-1.29. But acceptance is NOT RESOLVABLE at n=3: within-arm
+spread (0.25-0.40) exceeds the between-arm differences, because each rep uses a fresh salted
+prompt. What IS resolvable is CYCLE TIME, rising monotonically with γ: **61.1 -> 66.9/67.4 ->
+67.6 -> 74.0 ms.** That is the I8 number: each extra draft/verify row costs ~3-6 ms of cycle,
+and the acceptance it buys does not cover it. Round 5's histogram was a single boot at 62K depth
+on a different prompt mix; its bimodal bypos curve was real for that run but not general.
+
+**JUDGMENT CALLS (all committed BEFORE any arm ran, scored openly in REPORT.md §9):**
+- Dropped `EXO_DSV4_MTP_LOG_INTERVAL` against the brief's letter: the ops record documents it
+  triggering JACCL instability during t/s benches — it would have corrupted the one metric the
+  round existed to produce. Its purpose was served FREE by server counters, validated per-rep
+  by the identity tokens/cycle == 1 + Δaccepted/Δcycles (held to <=0.25% on all 14 deltas).
+  Arms differ in γ ONLY. Correct call.
+- Depth fixed at ~88K (not Phase 0's incidental 144K) to stay in the campaign comparison regime.
+- Quality gate correctly not run — nothing to ship.
+- PM's own pre-registered prediction #2 (γ=4 wins narrowly) was WRONG, and is recorded as such.
+- `phase1-arms-A.md` was never written by an interrupted worker; the PM re-derived every
+  γ=3(A)/γ=4 figure from the raw JSONs rather than trusting the worker summary.
+
+**CAMPAIGN 2 STATE after 6 rounds:** decode collective thread closed at the stack level (R2-R3);
+async fence armed, residual stall is genuine compute at 117% GPU busy (R4); γ lever exhausted
+(R6). The remaining decode levers all change the WORK, not the mechanism: expert precision
+(I11, user quality decision), the live c=2-tax knobs (I2: steel-BI ~5%, rendezvous 200ms TTFT),
+and lm_head vocab-sharding (I7, ~1.5%). Prefill at c=1 remains exhausted from campaign 1.
