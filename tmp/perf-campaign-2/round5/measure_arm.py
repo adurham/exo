@@ -176,7 +176,22 @@ def send_rep(
     t0 = time.perf_counter()
     t_first = None
     usage = None
+    finish_reason = None
     text_parts: list[str] = []
+    # Wall-clock arrival time (seconds since t0) of EVERY chunk that carried
+    # at least one token of content. This is the raw evidence needed to
+    # detect burst/buffered delivery -- do NOT collapse it to a single
+    # ttft/total pair before recording it, that is exactly the bug that
+    # made arm_g3_boot1/arm_g4_boot1 report 300+ tok/s decode.
+    chunk_times: list[float] = []
+    # NOTE on streaming correctness: client.stream(...) + r.iter_lines() is
+    # true incremental SSE consumption -- httpx does not read the whole
+    # response body before this loop starts (that would require r.text,
+    # r.read(), or list(r.iter_lines()), none of which are used here).
+    # iter_lines() yields a line as soon as a '\n' is seen in the decoded
+    # byte stream; it does not wait for the connection to close. So if
+    # tokens still arrive in a visible end-of-window burst below, that is
+    # evidence of server-side (or intermediary) buffering, not a client bug.
     with client.stream("POST", f"{api}/v1/chat/completions", json=body) as r:
         r.raise_for_status()
         for line in r.iter_lines():
@@ -189,10 +204,14 @@ def send_rep(
             if chunk.get("usage"):
                 usage = chunk["usage"]
             for ch in chunk.get("choices", []):
+                if ch.get("finish_reason"):
+                    finish_reason = ch["finish_reason"]
                 delta = ch.get("delta", {}).get("content") or ""
                 if delta:
+                    now = time.perf_counter()
                     if t_first is None:
-                        t_first = time.perf_counter()
+                        t_first = now
+                    chunk_times.append(now - t0)
                     text_parts.append(delta)
     t_end = time.perf_counter()
 
@@ -201,20 +220,58 @@ def send_rep(
     prompt_tokens = usage.get("prompt_tokens") if usage else None
     completion_tokens = usage.get("completion_tokens") if usage else None
 
-    decode_tps = None
-    if (
-        completion_tokens is not None
-        and ttft_s is not None
-        and (total_s - ttft_s) > 0
-    ):
-        decode_tps = completion_tokens / (total_s - ttft_s)
+    n_chunks = len(chunk_times)
+    t_first_tok: float | None = None
+    t_last_tok: float | None = None
+    decode_window_s: float | None = None
+    decode_tps: float | None = None
+    interchunk_ms: dict[str, float | None] = {"p50": None, "max": None}
+    stream_looks_buffered: bool | None = None
+
+    if n_chunks >= 2:
+        t_first_tok = chunk_times[0]
+        t_last_tok = chunk_times[-1]
+        decode_window_s = t_last_tok - t_first_tok
+        if decode_window_s > 0:
+            # n-1: the window spans BETWEEN the first and last token, so it
+            # covers n_chunks - 1 inter-token gaps, not n_chunks tokens.
+            decode_tps = (n_chunks - 1) / decode_window_s
+
+        gaps_ms = [
+            (chunk_times[i] - chunk_times[i - 1]) * 1000.0
+            for i in range(1, n_chunks)
+        ]
+        sorted_gaps = sorted(gaps_ms)
+        mid = len(sorted_gaps) // 2
+        if len(sorted_gaps) % 2 == 1:
+            p50 = sorted_gaps[mid]
+        else:
+            p50 = (sorted_gaps[mid - 1] + sorted_gaps[mid]) / 2.0
+        interchunk_ms = {"p50": p50, "max": max(sorted_gaps)}
+
+        # Smoking-gun check for burst/buffered delivery: if more than half
+        # of all token-bearing chunks land within the final 10% of the
+        # decode window, the stream was not really arriving incrementally.
+        threshold = t_first_tok + 0.9 * decode_window_s
+        n_in_tail = sum(1 for t in chunk_times if t >= threshold)
+        stream_looks_buffered = n_in_tail > (n_chunks / 2.0)
+    elif n_chunks == 1:
+        t_first_tok = chunk_times[0]
+        t_last_tok = chunk_times[0]
 
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "ttft_s": ttft_s,
         "total_s": total_s,
+        "finish_reason": finish_reason,
+        "n_chunks": n_chunks,
+        "t_first_tok": t_first_tok,
+        "t_last_tok": t_last_tok,
+        "decode_window_s": decode_window_s,
         "decode_tps": decode_tps,
+        "interchunk_ms": interchunk_ms,
+        "stream_looks_buffered": stream_looks_buffered,
         "response_chars": sum(len(p) for p in text_parts),
     }
 

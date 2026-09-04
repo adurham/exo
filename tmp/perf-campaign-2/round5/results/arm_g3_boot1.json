@@ -1,0 +1,115 @@
+{
+  "arm": {
+    "gamma": 3,
+    "tag": "g3_boot1",
+    "depth": 89000,
+    "reps": 4,
+    "max_tokens": 300,
+    "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "api": "http://192.168.86.201:52415"
+  },
+  "reps": [
+    {
+      "prompt_tokens": 61684,
+      "completion_tokens": 71,
+      "ttft_s": 150.37559554199106,
+      "total_s": 150.58700649999082,
+      "decode_tps": 335.83878845145057,
+      "response_chars": 19,
+      "rep": 0,
+      "warmup": true,
+      "expected_needle": "FALCON-MERCURY-7749"
+    },
+    {
+      "prompt_tokens": 62014,
+      "completion_tokens": 74,
+      "ttft_s": 150.34940033298335,
+      "total_s": 150.5529827499995,
+      "decode_tps": 363.489151394295,
+      "response_chars": 19,
+      "rep": 1,
+      "warmup": false,
+      "expected_needle": "FALCON-MERCURY-7749"
+    },
+    {
+      "prompt_tokens": 61963,
+      "completion_tokens": 74,
+      "ttft_s": 150.51244891699753,
+      "total_s": 150.71515445798286,
+      "decode_tps": 365.06155500383557,
+      "response_chars": 19,
+      "rep": 2,
+      "warmup": false,
+      "expected_needle": "FALCON-MERCURY-7749"
+    },
+    {
+      "prompt_tokens": 62062,
+      "completion_tokens": 73,
+      "ttft_s": 150.01817245801794,
+      "total_s": 150.19866449999972,
+      "decode_tps": 404.4499646547822,
+      "response_chars": 19,
+      "rep": 3,
+      "warmup": false,
+      "expected_needle": "FALCON-MERCURY-7749"
+    }
+  ],
+  "aggregate_decode_tps": {
+    "min": 363.489151394295,
+    "median": 365.06155500383557,
+    "max": 404.4499646547822,
+    "n": 3
+  },
+  "mtp_counters": {
+    "macstudio-m4-1": {
+      "before": null,
+      "after": {
+        "cycles": 50,
+        "mean_accept": 1.82,
+        "gamma_denominator": 3,
+        "hist": {
+          "0": 11,
+          "1": 9,
+          "2": 8,
+          "3": 22
+        },
+        "raw": "[MTP] cycles=50 mean_accept=1.820/3 hist=0:11,1:9,2:8,3:22"
+      },
+      "cycles_delta": null,
+      "mean_accept_delta": null,
+      "hist_delta": null
+    },
+    "macstudio-m4-2": {
+      "before": null,
+      "after": {
+        "cycles": 50,
+        "mean_accept": 1.82,
+        "gamma_denominator": 3,
+        "hist": {
+          "0": 11,
+          "1": 9,
+          "2": 8,
+          "3": 22
+        },
+        "raw": "[MTP] cycles=50 mean_accept=1.820/3 hist=0:11,1:9,2:8,3:22"
+      },
+      "cycles_delta": null,
+      "mean_accept_delta": null,
+      "hist_delta": null
+    }
+  },
+  "mtp_prof": {
+    "macstudio-m4-1": null,
+    "macstudio-m4-2": null
+  },
+  "derived_tps": null,
+  "derived_tps_source": null,
+  "warnings": [
+    "no [MTP] line found on macstudio-m4-1 at BEFORE snapshot (expected if EXO_DSV4_MTP_LOG_INTERVAL is unset)",
+    "no [MTP] line found on macstudio-m4-2 at BEFORE snapshot (expected if EXO_DSV4_MTP_LOG_INTERVAL is unset)",
+    "no [MTP-PROF] data found on macstudio-m4-1 (expected if EXO_DSV4_MTP_PROFILE is unset)",
+    "no [MTP-PROF] data found on macstudio-m4-2 (expected if EXO_DSV4_MTP_PROFILE is unset)",
+    "derived_tps is null: no node had a usable mean_accept_delta (no [MTP] BEFORE+AFTER pair with cycles_delta>0 on any node)",
+    "derived_tps is null: no node had a usable MTP-PROF 'total' series mean (in ms) to use as cycle_ms"
+  ]
+}
