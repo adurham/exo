@@ -1,7 +1,8 @@
 # OVERNIGHT LOOP — STATE
 
-**Mode:** AUTONOMOUS (authorized 2026-09-02, runs until user says STOP). **Currently PAUSED
-awaiting user direction** (2026-09-04 ~11:30 CDT) — no PM in flight.
+**Mode:** AUTONOMOUS (authorized 2026-09-02, runs until user says STOP). **Do NOT pause for a
+go/no-go between rounds** (user, 09-04: "You don't need to stop and wait for me"). Record →
+consult → dispatch → report. Stop only for a genuine blocker or an explicit STOP.
 **Charter:** `/Users/adam.durham/.hermes/cache/OVERNIGHT-LOOP-CHARTER.md` (read first on context loss;
 includes the mandatory GREP-THE-RECORD-FIRST step).
 **Supervisor model:** claude-opus-5
@@ -66,12 +67,20 @@ Never build a new harness — R5 lost a round to one.
 
 ## NEXT (needs user direction — loop is paused)
 
-Fix A is DEAD (user: relaunches are not part of normal sessions). With it gone, the TTFT pivot's
-only remaining item is RENDEZVOUS_MS 200→0 (safe, proven; -480ms on the short-prompt instrument
-but unresolved against the 200ms claim; needs a paired-boot design) — a one-knob round, and the
-user should decide whether a ~200-480ms TTFT trim per turn is worth a boot cycle.
+**User's standing bar (09-04): "every possible performance enhancement we can get without impacting
+quality matters."** Sub-second wins earn a bounded round if quality is provably untouched.
 
-Everything else is closed. Recommendation: STOP the loop unless the user names a target.
+**IN FLIGHT: R10 (deleg_0d2cf7c9)** — close RENDEZVOUS_MS 200→0 on the RESIDUAL instrument R9
+established (raw TTFT carries an arm-independent compute term that flips sign; the residual is
+stable at −183 ms, in band). Pre-register residual as governing, recompute from R9 JSONs, one
+confirmatory pair n=25, byte-identity with self-controls, ship or hold. Rides along: R7's missing
+steel-BI 89K same-arm self-control.
+
+**AFTER R10:** consult for next direction under the standing bar. Candidates not yet exhausted
+under "small but quality-free": the R7 steel-BI re-test IF the self-control voids its 89K leg
+(its <8192 leg still stands, so likely still HOLD); anything the consult surfaces. Fix A is DEAD
+(relaunches are not part of normal sessions). I15 CLOSED (no launch-count probe exists on the
+decode path). Everything else in the ledger is closed.
 
 **Cluster:** healthy on shipped production config (γ=3, BI=1, RV=200, mxfp4 experts, async
 fence armed), both nodes READY, verified 2026-09-04. No probe/diag env leftover. Tree clean,
