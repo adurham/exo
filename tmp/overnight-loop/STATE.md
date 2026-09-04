@@ -70,7 +70,11 @@ Never build a new harness — R5 lost a round to one.
 **User's standing bar (09-04): "every possible performance enhancement we can get without impacting
 quality matters."** Sub-second wins earn a bounded round if quality is provably untouched.
 
-**IN FLIGHT: R10 (deleg_0d2cf7c9)** — close RENDEZVOUS_MS 200→0 on the RESIDUAL instrument R9
+**R10 SHIPPED** (RENDEZVOUS_MS 200→0, −224 ms/turn, 096a00a58). **R11 PARTIAL** (wrapped for a
+control-host reboot; cluster never relaunched). **RESUME HERE →** R11 Task 2: one instrumented
+boot + closure check per tmp/perf-campaign-2/round11/REPORT.md §3, then R12 on the top-ranked
+phase (leading candidate: the 100 ms plan_step poll tick, worker/main.py:195). Prior in-flight note follows for history:
+**(was) IN FLIGHT: R10 (deleg_0d2cf7c9)** — close RENDEZVOUS_MS 200→0 on the RESIDUAL instrument R9
 established (raw TTFT carries an arm-independent compute term that flips sign; the residual is
 stable at −183 ms, in band). Pre-register residual as governing, recompute from R9 JSONs, one
 confirmatory pair n=25, byte-identity with self-controls, ship or hold. Rides along: R7's missing

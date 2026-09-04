@@ -8537,3 +8537,50 @@ published the residual medians, so it was not written blind. The 2K secondary fl
 source/GPU evidence, 5 supervisor brief errors caught by PMs, 2 measurement-method findings now in
 the skill (residual statistic; same-arm self-control rule). Throughput is at the floor; the loop
 continues under the user's standing bar ("every enhancement without impacting quality matters").
+
+## CAMPAIGN 2 — ROUND 11 (PARTIAL, wrapped for a control-host reboot): the per-request fixed cost is context-INDEPENDENT; a 100 ms poll tick found (2026-09-04)
+
+Artifacts: tmp/perf-campaign-2/round11/{PREDICTION,CODE-READ,TASK0-REGRESSION,REPORT,
+PHASE-MARKS-NOTES}.md + scripts. 5 local commits (76294c3d4 pre-registration … ), pushed by
+supervisor. Cluster NEVER relaunched this round — verified on real PIDs: RV=0, γ=3, BI=1,
+`EXO_PHASE_MARKS` absent, API 200. 0 of 2 authorized relaunches used.
+
+**Target:** the real-usage study's undecomposed residual — median 0.94 s on all 55 real requests,
+of which ~0.19 "transit" and ~0.2 the rendezvous sleep (removed R10); **~0.55 s/turn unexplained**.
+
+**Task 0 (free, existing data, n=54) — MIXED, with one robust finding.** Residual−transit vs
+prompt_tokens: slope 0.68 µs/tok, CI [−0.45, 1.82], r²=0.027 — CI spans both hypotheses.
+prompt_tokens and cached_tokens are collinear at r=0.997, so trie-vs-tokenization is NOT
+separable on this data. **Robust: a stable 0.65-0.78 s INTERCEPT across every fit variant — a
+real context-INDEPENDENT floor.** The pre-registered falsification criterion (ex-transit r² should
+rise if O(context) work dominates) FAILED → tilts toward fixed ticks, not O(context) work.
+Prediction scored 3/4.
+
+**Task 1 — code read, every cite PM-reverified by direct grep:**
+- `server_received_ts` is stamped in the RUNNER (runner.py:563), NOT the API process. So the
+  0.191 s "transit" is gossip round-trip + poll tick, not network. The study's transit/residual
+  split was mislabeled; the true unexplained per-turn cost is closer to the full ~0.75 s.
+- **A live 100 ms `anyio.sleep` at the top of `plan_step`'s loop (worker/main.py:195)** —
+  size-independent, every request, expected ~50 ms mean (uniform phase). Same class as the
+  rendezvous: a scheduling sleep, quality-free to remove.
+- **KV restore is LAZY** — zero `mx.eval` in cache.py:1157-1790; restore cost defers into the
+  first prefill eval and was already inside `prefill_uncached`. The reviewer's #2 candidate
+  (30-300 ms restore in the residual) is a PHANTOM for this target.
+- `_save_prefix_cache` runs inside `submit()` — pre-first-token, NOT on the tail. Cache commit
+  is on the critical path BEFORE generation starts.
+- `generation_tps` is wall-clock over the whole generation, so first-step warm-up is already
+  inside the study's `decode` term, not the residual.
+
+**Task 2 NOT RUN — no boot, no numbers.** Instrumentation committed, env-gated, PM-verified inert:
+`_MARKS_ENABLED` read once at import; `if not _MARKS_ENABLED: return` is the first line of all 8
+entry points; allow-list line present at start_cluster.sh:1611; basedpyright 425→425 identical
+set; ruff 0→0. Resume path: REPORT.md §3, 6 numbered commands, with the mandatory `ps eww`
+allow-list gate before spending the boot.
+
+**R12 recommendation (PM):** remove the 100 ms `plan_step` tick via event-triggered wake with the
+sleep retained as fallback — quality-free by construction (pure scheduling). GATED on running
+Task 2 first to confirm ≥75 ms measured; do not ship on a code read alone.
+
+**Supervisor note:** after the reboot the loop resumes at Task 2 (one instrumented boot + closure
+check), then R12 on whichever phase the marks rank first — the plan_step tick is the leading
+candidate but the marks decide.
