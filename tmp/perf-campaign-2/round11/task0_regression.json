@@ -1,0 +1,181 @@
+{
+  "interpreter": "/usr/bin/python3",
+  "n_total_records": 57,
+  "n_main_rows": 55,
+  "validation_vs_partition_verified": {
+    "recomputed_median": 0.9432209088306731,
+    "recomputed_min": 0.7514700730998669,
+    "recomputed_max": 1.3222741220040248,
+    "published_median": 0.94,
+    "published_min": 0.75,
+    "published_max": 1.32,
+    "median_diff": 0.0032209088306731637,
+    "min_diff": 0.0014700730998669087,
+    "max_diff": 0.00227412200402477,
+    "pass": true
+  },
+  "exclusions": {
+    "aux_rows_excluded": 2,
+    "prefix_cache_hit_none_rows_in_55": 1,
+    "prefix_cache_hit_none_task_ids": [
+      "19282ba9-c98c-45f5-a72b-1822080d7597"
+    ],
+    "cold_outlier_task_id": "19282ba9-c98c-45f5-a72b-1822080d7597",
+    "cold_outlier_prompt_tokens": 92594,
+    "cold_outlier_cached_tokens": 0,
+    "cold_outlier_prefill_uncached_s": 222.13230257549202,
+    "note": "partition_verified.json reports prefix_cache={'partial':54,'none':3} across ALL captured records (57), not just the 55 main rows. Reconciliation: 2 of those 3 'none' rows are the aux rows (prompt 18/17, excluded from the 55 main rows because client fields are null). Only 1 'none'-hit row remains among the 55 main rows, and it is exactly the pre-registered cold outlier (prompt 92594, cached 0). No further exclusion beyond the 2 aux rows + the single cold-outlier sensitivity check was needed."
+  },
+  "fit_A_residual_ex_transit_vs_prompt_tokens": {
+    "with_cold_outlier": {
+      "n": 55,
+      "slope": 8.619523869225625e-07,
+      "intercept": 0.6532509231362648,
+      "r2": 0.04410841542767263,
+      "se_slope": 5.51174266516106e-07,
+      "ci95_low": -2.4370319170874606e-07,
+      "ci95_high": 1.967607965553871e-06,
+      "slope_us_per_tok": 0.8619523869225625,
+      "ci95_low_us_per_tok": -0.24370319170874605,
+      "ci95_high_us_per_tok": 1.967607965553871
+    },
+    "without_cold_outlier": {
+      "n": 54,
+      "slope": 6.833532823721345e-07,
+      "intercept": 0.6814356433372264,
+      "r2": 0.027157652322216563,
+      "se_slope": 5.671771611138594e-07,
+      "ci95_low": -4.544041028222674e-07,
+      "ci95_high": 1.8211106675665364e-06,
+      "slope_us_per_tok": 0.6833532823721346,
+      "ci95_low_us_per_tok": -0.4544041028222674,
+      "ci95_high_us_per_tok": 1.8211106675665363
+    }
+  },
+  "fit_B_residual_vs_prompt_tokens": {
+    "with_cold_outlier": {
+      "n": 55,
+      "slope": 1.6741143617902316e-06,
+      "intercept": 0.7260735943788655,
+      "r2": 0.11807440858311447,
+      "se_slope": 6.284710402708229e-07,
+      "ci95_low": 4.1340145500696115e-07,
+      "ci95_high": 2.934827268573502e-06,
+      "slope_us_per_tok": 1.6741143617902317,
+      "ci95_low_us_per_tok": 0.4134014550069611,
+      "ci95_high_us_per_tok": 2.934827268573502
+    },
+    "without_cold_outlier": {
+      "n": 54,
+      "slope": 1.591275419093613e-06,
+      "intercept": 0.7391464058441014,
+      "r2": 0.1020460529398256,
+      "se_slope": 6.545948868244736e-07,
+      "ci95_low": 2.78158076123719e-07,
+      "ci95_high": 2.904392762063507e-06,
+      "slope_us_per_tok": 1.591275419093613,
+      "ci95_low_us_per_tok": 0.278158076123719,
+      "ci95_high_us_per_tok": 2.904392762063507
+    }
+  },
+  "fit_C_residual_vs_cached_tokens": {
+    "with_cold_outlier": {
+      "n": 55,
+      "slope": 1.3562840502679953e-06,
+      "intercept": 0.7762916931385938,
+      "r2": 0.11168964928430614,
+      "se_slope": 5.253982445850952e-07,
+      "ci95_low": 3.023351716302944e-07,
+      "ci95_high": 2.410232928905696e-06,
+      "slope_us_per_tok": 1.3562840502679954,
+      "ci95_low_us_per_tok": 0.30233517163029444,
+      "ci95_high_us_per_tok": 2.410232928905696
+    },
+    "without_cold_outlier": {
+      "n": 54,
+      "slope": 1.521058791652218e-06,
+      "intercept": 0.7519929232182119,
+      "r2": 0.09449340079992707,
+      "se_slope": 6.52964242181815e-07,
+      "ci95_low": 2.112125218354972e-07,
+      "ci95_high": 2.8309050614689385e-06,
+      "slope_us_per_tok": 1.521058791652218,
+      "ci95_low_us_per_tok": 0.21121252183549719,
+      "ci95_high_us_per_tok": 2.8309050614689384
+    }
+  },
+  "collinearity_prompt_vs_cached_tokens": {
+    "pearson_r_with_cold_outlier": 0.9310827514485228,
+    "pearson_r_without_cold_outlier": 0.9972495094537837
+  },
+  "theil_sen_fit_A": {
+    "with_cold_outlier": {
+      "slope": 8.136569652664657e-07,
+      "intercept": 0.6583658692383605,
+      "n_pairs": 1485,
+      "slope_us_per_tok": 0.8136569652664657
+    },
+    "without_cold_outlier": {
+      "slope": 5.718027486969252e-07,
+      "intercept": 0.7023758687160307,
+      "n_pairs": 1431,
+      "slope_us_per_tok": 0.5718027486969253
+    }
+  },
+  "descriptive_stats": {
+    "residual_s": {
+      "median": 0.9432209088306731,
+      "min": 0.7514700730998669,
+      "max": 1.3222741220040248,
+      "mean": 0.9660378292075967,
+      "n": 55
+    },
+    "transit_s": {
+      "median": 0.19099998474121094,
+      "min": 0.07699990272521973,
+      "max": 0.3940000534057617,
+      "mean": 0.18923635916276413,
+      "n": 55
+    },
+    "residual_ex_transit_s": {
+      "median": 0.7806570380377256,
+      "min": 0.560470088358656,
+      "max": 1.0452741715950893,
+      "mean": 0.7768014700448326,
+      "n": 55
+    },
+    "prompt_tokens": {
+      "median": 145918,
+      "min": 92594,
+      "max": 188902,
+      "mean": 143338.0181818182,
+      "n": 55
+    }
+  },
+  "verdict": {
+    "fit_A_without_cold_outlier": "MIXED -- naive fit cannot rank hypotheses",
+    "fit_A_with_cold_outlier": "MIXED -- naive fit cannot rank hypotheses"
+  },
+  "prediction_scoring": {
+    "slope_0.5_to_2.0_us_per_tok": {
+      "predicted": "0.5-2.0 us/token",
+      "observed_us_per_tok": 1.591275419093613,
+      "correct": true
+    },
+    "r2_raw_fit_lt_0.35": {
+      "predicted": "< 0.35",
+      "observed": 0.1020460529398256,
+      "correct": true
+    },
+    "intercept_0.4_to_0.8s": {
+      "predicted": "0.4-0.8 s",
+      "observed_s": 0.7391464058441014,
+      "correct": true
+    },
+    "r2_ex_transit_fit_gt_0.4": {
+      "predicted": "> 0.4",
+      "observed": 0.027157652322216563,
+      "correct": false
+    }
+  }
+}
