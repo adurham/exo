@@ -257,6 +257,15 @@ fi
 # (gold gate vs loop and vs MTP-off) were validated with steel-BI=1.
 # The ~5% c=1 decode cost noted above is absorbed by the vec win
 # (33.7 vs 29.5 net). Set =0 only with EXO_DSV4_VERIFY_ROWSEQ_VEC=0.
+# NOTE 2026-09-04 (campaign 2 round 7): the c>=2-only framing above is
+# INCOMPLETE. The knob's actual mechanism is GEMM batch-invariance /
+# bit-exactness, not a c>=2-specific feature -- it is potentially
+# load-bearing for c=1 correctness too, since the M=4 batched
+# speculative-verify rows must remain bitwise equivalent to sequential
+# decode. Do NOT flip this to 0 on the strength of the c>=2 framing
+# alone; any change requires a byte-identity gate (verify batched-vs-
+# sequential decode bitwise equivalence) before it ships. Value
+# unchanged by this note -- stays 1.
 : "${MLX_STEEL_BATCH_INVARIANT:=1}"
 # EXO_DSV4_ROWSEQ_FULLBLOCK / _MOE_PARTS_ROWSEQ: DEFAULT RE-ENABLED
 # 2026-08-02 -- CONFIRMED FIX for the DSpark self-doubt-loop bug (see the
@@ -422,12 +431,22 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
   # concurrent (BS>1) MTP verify forward produces repetition-biased logits,
   # collapsing one stream into a deterministic period-6 prompt-echo loop that
   # trips the degeneration kill-switch (HTTP 500 on every concurrent request).
-  # Proven: with all three =0, BS=2 MTP-on is CLEAN (0 errors, 0 degeneration);
-  # with them ON, BS=2 degenerates every iteration. Combined perf they buy is
-  # only ~3-4% (FUSED_MOE +1.2%/+1.1%, COMPILE_FFN +1.3% c=2, COMPILE_LAYER
-  # incremental) — not worth breaking concurrent serving. Implementation is
-  # left intact (env-gated, dormant) pending a batch-correct rework; set any
-  # of these =1 to re-enable for single-stream-only experiments.
+  # Proven (historical, pre-removal): with all three =0, BS=2 MTP-on is CLEAN
+  # (0 errors, 0 degeneration); with them ON, BS=2 degenerates every
+  # iteration. Combined perf they bought (historical) was only ~3-4%
+  # (FUSED_MOE +1.2%/+1.1%, COMPILE_FFN +1.3% c=2, COMPILE_LAYER incremental)
+  # — not worth breaking concurrent serving.
+  # NOTE 2026-09-04 (campaign 2 round 7): these three are now NO-OPS. The
+  # wiring was REMOVED ENTIRELY (not just defaulted off) on 2026-06-18 --
+  # see src/exo/worker/engines/mlx/auto_parallel.py ~L110-119 -- and the
+  # fused/compiled method bodies in mlx-lm's deepseek_v4.py were likewise
+  # removed. There are zero os.environ/getenv reads of EXO_DSV4_FUSED_MOE,
+  # EXO_DSV4_COMPILE_FFN, or EXO_DSV4_COMPILE_LAYER anywhere in live
+  # src/exo/ or mlx-lm/mlx_lm/ code. Setting any of these =1 re-enables
+  # nothing; the knobs are retained here only because the campaign record
+  # references them. Do not read the "set any of these =1 to re-enable"
+  # framing below as still true -- it describes intent as of the original
+  # 2026-06-18 disable, before the wiring itself was deleted.
   # Full diagnosis: skills/.../references/dsv4-mtp-batch-degeneration-and-
   # diagnosis-2026-06-17.md (UPDATE9). Also fixed two real sampling bugs this
   # session (per-request temp 1b443098, residual correction 6cd30df9).
@@ -1972,18 +1991,18 @@ for NODE in "${NODES[@]}"; do
   # MUST be set identically on both ranks -- flag skew is the primary
   # hazard (see the code-site comment in generate.py).
   [ -n "${EXO_PREFILL_CHUNK_OVERLAP:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_CHUNK_OVERLAP=$EXO_PREFILL_CHUNK_OVERLAP"
-  # c>=2 MTP spec gate: =1 => spec-off at c>=2 (clean, non-spec batched
-  # decode). INTERIM as of 2026-07-04 pending the batch-invariant bf16
-  # kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap bug
-  # (that's fixed, mlx-lm 8b7b5f9); it is batch-dependent bf16 rounding
+  # c>=2 MTP spec gate (historical): =1 => spec-off at c>=2 (clean, non-spec
+  # batched decode). INTERIM as of 2026-07-04 pending the batch-invariant
+  # bf16 kernel fix. The residual c>=2 corruption is NOT the ring-bootstrap
+  # bug (that's fixed, mlx-lm 8b7b5f9); it is batch-dependent bf16 rounding
   # DRIFT in the decode: on-cluster spec-trace showed a c=2 stream match
   # its canonical c=1 trajectory BITWISE for 75 tokens then flip a near-tie,
   # which cascades into a repetition attractor (~23% of deep temp-1.0 c=2
   # pairs). fp32 activations fix it (batch-invariant, proven: 0 server degen)
   # but reliably crash this cluster's jaccl/RDMA transport at ~2 c=2 pairs
   # (EXO_DSV4_FP32_ACT, off by default). The real fix is batch-invariant
-  # bf16 kernels (fixed reduction order). Until then: spec-off at c>=2.
-  # Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
+  # bf16 kernels (fixed reduction order). Until then (historical): spec-off
+  # at c>=2. Set =0 to re-enable c>=2 spec (fast but ~23% corrupt).
   # 2026-07-11: RE-ARMED =1 after live degens (4 kill-switch events on
   # ragged c=2 hermes pairs at temp=1.0).
   # 2026-07-12 ROOT CAUSE FOUND — it was never kernel drift: the degens
@@ -1997,6 +2016,17 @@ for NODE in "${NODES[@]}"; do
   # (temp=0 batteries are blind to acceptance-spread bugs). Making c>=2
   # spec actually PROFITABLE needs per-stream pool rollback (pools track
   # per-stream keeps like PerStreamBatchRotatingKVCache.trim_per_stream).
+  # NOTE 2026-09-04 (campaign 2 round 7): this whole "1 = spec-off at c>=2
+  # (default); 0 = spec on" binary framing is STALE. The gate itself was
+  # REMOVED 2026-06-24 -- see src/exo/worker/engines/mlx/speculative/
+  # dsv4_mtp.py ~L2371-2385: the true root cause was a
+  # _bootstrap_per_stream_ring positioning bug (self._offset vs
+  # self.offset), fixed elsewhere (mlx-lm 48a4a3c), and MTP-on at c>=2
+  # high context is now clean through 500K context. The env var is still
+  # read for backward-compat safety but no longer has a default-threshold
+  # effect -- setting it to 0 is a no-op (no gate exists to disable);
+  # setting it to a nonzero threshold re-arms an explicit opt-in ceiling
+  # only, for bandaging a future regression, not the old binary gate.
   : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}" # 1 = spec-off at c>=2 (default); 0 = spec on (needs BS_MIN_ACCEPT=1)
   [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
   [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
