@@ -8495,3 +8495,45 @@ residual-statistic method, the 89K self-control rule, two launcher gotchas that 
 
 **NEXT: one cheap closing round** — pre-register the RESIDUAL as governing (justification on
 record), n=25 short reps, two boots. Worth ~250-390 ms/turn under the user's standing bar.
+
+## CAMPAIGN 2 — ROUND 10: SHIPPED — RENDEZVOUS_MS default 200→0, −224 ms TTFT on every turn (2026-09-04)
+
+**The first ship of campaign 2.** Commits b06fb1c29 (pre-registration) → 0a98ce693 (R9 residual
+recompute + drivers) → 99c74a27b (boot P) → **096a00a58 (the ship: start_cluster.sh:136)** →
+2d93e91cf (report). Artifacts: tmp/perf-campaign-2/round10/{PRE-REGISTRATION,REPORT,
+R9-RESIDUAL-RECOMPUTE}.md. Supervisor independently verified post-push: RV=0 on all 8 runner PIDs
+across both nodes with NO env var set at launch — the default itself is what's live.
+
+**Governing result (residual instrument, pre-registered before measuring):** full 6-boot set,
+45 short reps/arm: **224.4 ms**, RV=0 lower — inside the pre-registered [150,250] band, 12.2%
+above the code-predicted 200. Gap 149.6 > RV=200 A-vs-B spread 56.6. All three required
+applications agree: R9-only recompute 205.3, fresh pair 238.9, full set 224.4. Raw TTFT on the
+SAME boots gave 370 ms — out of band again, reproducing R9's diagnosed contamination on identical
+data. That divergence is the strongest evidence the instrument, not the effect, was R9's problem.
+
+**What the user gets:** every request starts ~200 ms sooner. The server no longer waits 200 ms for
+a second concurrent request that, at c=1, never arrives. Same tokens, same decode speed. The knob
+is preserved (`:=` form) so c≥2 deployments can restore it.
+
+**Gates:** byte-identity PASS — within-arm self-controls first on both arms, then cross-arm; all
+10 captures share the same 3 hashes at short/2K/89K. Clean-logs PASS — zero rank-disagreement/
+out-of-sync; tracebacks present were individually classified (all GLM-4.7 catalog-poll 404s +
+invalid-model-card errors, excluded by name in the pre-registration), not claimed as empty logs.
+Default-took-effect check: relaunched with no env var; ps eww shows RV=0 on every real PID.
+
+**R7's steel-BI 89K leg STANDS.** 3 temp=0 captures on the production boot (BI=1) byte-identical
+(0a2cc063d4df), corroborated by 2 more — 5/5. Steel-BI not flipped. R9's 89K outlier was rarer
+than it appeared; this reinstates the 89K leg and nothing more. R7's verdict is back to proven.
+
+**Deviations, declared:** one VOID boot (Q) — a concurrent session's commit landed mid-rsync and
+the node-consistency gate aborted it (R9's exact failure mode); relaunched as Q2, no reps lost.
+Tooling bug found+fixed: drivers called bare `python3` → Homebrew python lacking httpx, killing a
+capture set while the driver still printed success; pinned PY=/usr/bin/python3 (same interpreter
+as the already-collected data). Harness untouched. Pre-registration §3.1 discloses R9 had already
+published the residual medians, so it was not written blind. The 2K secondary flipped FAIL→PASS
+(252.8 → 249.4) on a sub-3 ms margin — pre-registered non-governing, stated plainly, decided nothing.
+
+**Campaign-2 tally after R10:** 10 rounds, 1 ship (−224 ms TTFT/turn), 14 levers closed with
+source/GPU evidence, 5 supervisor brief errors caught by PMs, 2 measurement-method findings now in
+the skill (residual statistic; same-arm self-control rule). Throughput is at the floor; the loop
+continues under the user's standing bar ("every enhancement without impacting quality matters").
