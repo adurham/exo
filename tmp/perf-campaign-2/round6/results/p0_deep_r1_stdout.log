@@ -1,0 +1,31 @@
+{
+  "tag": "P0-DEEP-r1",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 128000,
+  "prompt_tokens": 143964,
+  "completion_tokens": 1200,
+  "prefill_s": 346.44,
+  "prefill_tps": 415.55,
+  "decode_s": 36.5,
+  "decode_tps": 32.88,
+  "decode_sample_trustworthy": true,
+  "server_stats": {
+    "prompt_tps": 416.7974004937583,
+    "generation_tps": 32.81613497978879,
+    "prompt_tokens": 143964,
+    "generation_tokens": 1200,
+    "peak_memory_usage": {
+      "in_bytes": 100060586216
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 1176,
+    "mtp_accepted_drafts_cumulative": 1543
+  },
+  "server_generation_tps": 32.81613497978879,
+  "finish_reason": "length",
+  "needle_hit": true,
+  "gen_chars": 5905,
+  "reasoning_chars": 1368,
+  "content_chars": 4537
+}
+wrote tmp/perf-campaign-2/round6/results/p0_deep_r1.json

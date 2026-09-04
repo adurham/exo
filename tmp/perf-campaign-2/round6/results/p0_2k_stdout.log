@@ -1,0 +1,31 @@
+{
+  "tag": "P0-2K",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+  "target_tokens": 2000,
+  "prompt_tokens": 2262,
+  "completion_tokens": 1500,
+  "prefill_s": 7.89,
+  "prefill_tps": 286.69,
+  "decode_s": 51.45,
+  "decode_tps": 29.15,
+  "decode_sample_trustworthy": true,
+  "server_stats": {
+    "prompt_tps": 315.5510805467732,
+    "generation_tps": 29.058197215624283,
+    "prompt_tokens": 2262,
+    "generation_tokens": 1500,
+    "peak_memory_usage": {
+      "in_bytes": 96577834592
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 667,
+    "mtp_accepted_drafts_cumulative": 853
+  },
+  "server_generation_tps": 29.058197215624283,
+  "finish_reason": "length",
+  "needle_hit": true,
+  "gen_chars": 7153,
+  "reasoning_chars": 2878,
+  "content_chars": 4275
+}
+wrote tmp/perf-campaign-2/round6/results/p0_2k.json

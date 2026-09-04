@@ -94,11 +94,24 @@ def main() -> int:
     reasoning_parts: list[str] = []
     usage: dict[str, object] = {}
     finish_reason = None
+    # Server-side stats (perf_counter-timed INSIDE the generator at
+    # batch_generate.py:1255-1257/4559-4576), emitted on the streaming
+    # path as an SSE comment line (": generation_stats {...}") rather
+    # than inside a "data: " chunk -- see chat_completions.py
+    # generate_chat_stream(). This is the ONLY trusted throughput
+    # number; client-side decode_tps below remains a cross-check only.
+    server_stats: dict[str, object] | None = None
 
     with httpx.Client(timeout=1800.0) as client:
         with client.stream("POST", f"{API}/v1/chat/completions", json=body) as r:
             r.raise_for_status()
             for line in r.iter_lines():
+                if line and line.startswith(": generation_stats "):
+                    try:
+                        server_stats = json.loads(line[len(": generation_stats "):])
+                    except json.JSONDecodeError:
+                        pass
+                    continue
                 if not line or not line.startswith("data: "):
                     continue
                 payload = line[6:]
@@ -151,6 +164,13 @@ def main() -> int:
         # honesty flag: the standing rule is that t/s from a short
         # generation is startup noise, not a throughput measurement.
         "decode_sample_trustworthy": bool(ctok and ctok >= 400),
+        # Server-side, perf_counter-timed decode throughput -- the
+        # trusted number. decode_tps above is a client-side cross-check
+        # only, never the decision input (round-6 phase-0 rule).
+        "server_stats": server_stats,
+        "server_generation_tps": (
+            server_stats.get("generation_tps") if server_stats else None
+        ),
         "finish_reason": finish_reason,
         "needle_hit": "FALCON-MERCURY-7749" in full,
         "gen_chars": len(full),
