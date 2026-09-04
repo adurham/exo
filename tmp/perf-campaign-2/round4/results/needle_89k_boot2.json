@@ -1,0 +1,62 @@
+[
+  {
+    "schema_version": 2,
+    "label": "r4-boot2-needle",
+    "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "target_tokens": 89000,
+    "concurrency": 1,
+    "iters_n": 1,
+    "expected_needle": "FALCON-MERCURY-7749",
+    "timestamp": "2026-09-03 19:00:36 CDT",
+    "iters": [
+      {
+        "iter_idx": 0,
+        "iter_wall_s": 150.40210541599663,
+        "aggregate_decode_tps": 255.09925354708494,
+        "symmetry": 1.0,
+        "bistability_flag": false,
+        "all_streams_ok": true,
+        "any_special_tokens_leaked": false,
+        "all_needles_found": true,
+        "streams": [
+          {
+            "stream_idx": 0,
+            "ttft_s": 150.12364670899115,
+            "total_s": 150.40196974997525,
+            "prompt_tokens": 61684,
+            "generation_tokens": 71,
+            "prefill_tps_apparent": 410.88796703408116,
+            "decode_tps_apparent": 255.09925354708494,
+            "needle_found": true,
+            "quality": {
+              "special_token_counts": {
+                "<｜begin▁of▁sentence｜>": 0,
+                "<｜end▁of▁sentence｜>": 0,
+                "<｜User｜>": 0,
+                "<｜Assistant｜>": 0
+              },
+              "total_special_tokens": 0,
+              "issues": [],
+              "has_quality_issue": false
+            },
+            "stream_ok": true,
+            "response_text": "FALCON-MERCURY-7749",
+            "response_text_repr_prefix": "'FALCON-MERCURY-7749'"
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "all_iters_ok": true,
+      "iters_with_special_token_leak": 0,
+      "iters_with_bistability": 0,
+      "iters_with_all_needles": 1,
+      "agg_tps_mean": 255.09925354708494,
+      "agg_tps_min": 255.09925354708494,
+      "agg_tps_max": 255.09925354708494,
+      "agg_tps_stdev": 0.0,
+      "symmetry_mean": 1.0,
+      "symmetry_min": 1.0
+    }
+  }
+]
