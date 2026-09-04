@@ -1,0 +1,33 @@
+{
+ "tag": "P_ttft_r1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "4212454f2e434c7eafec1914c78fb973",
+ "target_tokens": 2000,
+ "prompt_tokens": 2285,
+ "completion_tokens": 200,
+ "prefill_s": 7.8,
+ "prefill_tps": 292.95,
+ "decode_s": 7.86,
+ "decode_tps": 25.45,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 330.5523402426898,
+  "generation_tps": 24.861198375494357,
+  "prompt_tokens": 2285,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96585616676
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 111,
+  "mtp_accepted_drafts_cumulative": 103
+ },
+ "server_generation_tps": 24.861198375494357,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 870,
+ "reasoning_chars": 870,
+ "content_chars": 0,
+ "reasoning_content": "We need answer. Need parse document. Need state secret code exactly: \"FALCON-MERCURY-7749.\" appears in seq 7. Need include exact. Then essay at least 900 words explaining observer pattern and B-trees. Need be thorough. Need maybe mention document repeated. Need not mention hidden? We can.\n\nNeed craft essay. Need ensure 900+ words. Let's plan.\n\nNeed explain observer pattern: subject maintains list observers, notifies state changes. How works: Observer interface update, Subject attach/detach/notify. Push/pull models. Loose coupling. Time complexity: attach/detach O(1) if list, notify O(n) observers, update cost. Space O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams, model-view-controller. Choose observer when one-to-many, decoupled, dynamic; avoid when too many notifications, ordering, memory leaks, synchronous overhead. Real examples: Java",
+ "content": ""
+}

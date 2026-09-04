@@ -1,0 +1,33 @@
+{
+ "tag": "P_ttft_r2",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "53855540af7843499ee190d7372668e5",
+ "target_tokens": 2000,
+ "prompt_tokens": 2216,
+ "completion_tokens": 200,
+ "prefill_s": 7.66,
+ "prefill_tps": 289.3,
+ "decode_s": 7.59,
+ "decode_tps": 26.35,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 323.2874219906301,
+  "generation_tps": 26.23054351708394,
+  "prompt_tokens": 2216,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96585616676
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 207,
+  "mtp_accepted_drafts_cumulative": 207
+ },
+ "server_generation_tps": 26.23054351708394,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 918,
+ "reasoning_chars": 918,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret authorization code exactly: \"FALCON-MERCURY-7749\" appears in one run. Need write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples real systems. Need be thorough. Need maybe mention document contains repeated text with code. Need not reveal hidden? It's okay.\n\nNeed craft essay. Need ensure >=900 words. Let's plan.\n\nNeed include observer pattern: subject maintains list observers, notify state changes. How works: Observer interface update, Subject attach/detach/notify. Push/pull models. Time complexity: attach/detach O(1) if list, notify O(n) observers; update cost depends. Space O(n) observers. Alternatives: event bus/pub-sub, callbacks, signals/slots, reactive streams. Choose observer when one-to-many, decoupling, dynamic subscriptions",
+ "content": ""
+}

@@ -43,9 +43,16 @@ FILLER = (
 NEEDLE = "The secret authorization code for project Nightingale is: FALCON-MERCURY-7749."
 
 
-def build_prompt(target_tokens: int) -> str:
-    """~4 chars/token heuristic; needle at 40% depth, cache-busted."""
-    run_id = uuid.uuid4().hex
+def build_prompt(target_tokens: int, run_id: str | None = None) -> str:
+    """~4 chars/token heuristic; needle at 40% depth, cache-busted.
+
+    If `run_id` is provided, it is used verbatim (instead of a fresh
+    uuid) and seeds the RNG, making the entire returned prompt a pure
+    function of (target_tokens, run_id) -- for deterministic identity
+    checks only. Default (run_id=None) behavior is unchanged: a fresh
+    uuid each call, which defeats the server prefix cache.
+    """
+    run_id = run_id if run_id is not None else uuid.uuid4().hex
     rng = random.Random(run_id)
     total_chars = target_tokens * 4
     n_fill = max(1, total_chars // len(FILLER))
@@ -76,9 +83,18 @@ def main() -> int:
     ap.add_argument("--tag", default="untagged")
     ap.add_argument("--out", type=str)
     ap.add_argument("--model", default=MODEL)
+    ap.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Deterministic run id; when set, the prompt is a pure "
+        "function of (target_tokens, run_id) instead of using a "
+        "fresh uuid. For identity checks only.",
+    )
     args = ap.parse_args()
 
-    prompt = build_prompt(args.target_tokens)
+    effective_run_id = args.run_id if args.run_id is not None else uuid.uuid4().hex
+    prompt = build_prompt(args.target_tokens, run_id=effective_run_id)
     body = {
         "model": args.model,
         "messages": [{"role": "user", "content": prompt}],
@@ -150,6 +166,7 @@ def main() -> int:
     result = {
         "tag": args.tag,
         "model": args.model,
+        "run_id": effective_run_id,
         "target_tokens": args.target_tokens,
         "prompt_tokens": ptok,
         "completion_tokens": ctok,

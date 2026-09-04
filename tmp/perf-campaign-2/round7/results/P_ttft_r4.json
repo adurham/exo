@@ -1,0 +1,33 @@
+{
+ "tag": "P_ttft_r4",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "1c3733b49188486497eafeacb33c7fdf",
+ "target_tokens": 2000,
+ "prompt_tokens": 2285,
+ "completion_tokens": 200,
+ "prefill_s": 7.94,
+ "prefill_tps": 287.78,
+ "decode_s": 8.15,
+ "decode_tps": 24.54,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 314.9649189537827,
+  "generation_tps": 24.44219573861131,
+  "prompt_tokens": 2285,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 96735849200
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 377,
+  "mtp_accepted_drafts_cumulative": 435
+ },
+ "server_generation_tps": 24.44219573861131,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 897,
+ "reasoning_chars": 897,
+ "content_chars": 0,
+ "reasoning_content": "We need answer. Need parse document. Need state secret code exactly: \"FALCON-MERCURY-7749.\" appears in run seq 7? Need exact as appears: FALCON-MERCURY-7749. Need essay at least 900 words explaining observer pattern and B-trees. Need be thorough. Need include time/space complexity, when choose over alternatives, concrete examples. Need ensure no mention? We can write.\n\nNeed craft essay. Need maybe mention observer pattern: subject maintains list observers, notify state changes. Time complexity: register/deregister O(1) if list, O(n) if need uniqueness; notify O(n) observers, each update maybe O(1). Space O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams, signals/slots. Choose observer when direct one-to-many, decoupling, dynamic subscriptions; avoid when many observers causing performance, memory leaks, complex ordering, synchronous notification. Examples: GUI button",
+ "content": ""
+}
