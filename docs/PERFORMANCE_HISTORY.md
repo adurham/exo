@@ -8347,3 +8347,49 @@ clean, all values intact).
 **JUDGMENT CALL (PM's, flagged for review):** boot 4 was spent on the production restore + the
 paired A2 arm rather than Task B's closing bracket — correct, since the identity failure had
 already made that bracket unnecessary.
+
+## CAMPAIGN 2 — REVIEW AFTER R7: converged on a physics floor; pivot recommended (2026-09-04)
+
+Second-opinion review (opus-4-7; fable unavailable) of the campaign-2 trajectory, with the
+supervisor's concurrence.
+
+**RANKED, remaining items:**
+1. **I11 expert precision** — the only lever with a large-ceiling, evidence-backed physics story
+   (bandwidth-bound decode x -33% active bytes at 4-bit). Blocked on the USER's quality decision,
+   not on cluster time. Needs an evidence package (below).
+2. **I12 serial-vs-batched prefill parity** — a REAL gap, not pattern-matching: two prior
+   "measured the wrong path" failures (R1 serial-sync artifact, R2 fence algebra bug) are a live
+   failure mode. But it is a 1-2h CODE AUDIT, not a measurement round: trace whether the serial
+   driver's call path reaches each shipped campaign-1 prefill win (tiled SDPA, exact-topk,
+   indexer, prefix-cache keying, pad-strip). Measurement only if the audit finds a bypass.
+3. **I15 kernel-launch count** — one-shot Metal capture, not a boot. Elevated -> lever; else close.
+4. **I9 GPU P-state** — cheap powermetrics probe, LOW prior (bandwidth-bound decode is largely
+   insensitive to core clock). Ride along with I15.
+
+**CLOSE WITHOUT CLUSTER TIME:** I7 lm_head vocab-sharding (1.5% = ~0.45 t/s, below the floor by
+design); I13 idle-gap warmup (only matters if warmup is in the shipping loop); I14 within-boot
+drift (a measurement artifact, not a lever); RENDEZVOUS paired-boot (a TTFT question, not
+throughput — folds into the TTFT pivot); **FENCE_EVERY_N_LAYERS cadence — CLOSE ON EVIDENCE:**
+with the async fence armed (R4, >=98.5%), the cadence controls dispatch-submission overhead, not
+wait-blocking; single-digit us per fence op over ~43 layers is <0.1 t/s. The comment's "+0.7
+t/s at fence=8" was measured pre-08-22 when the fence was serial-sync — it describes an overhead
+category that no longer exists. Caveat: confirm no code path can still take the sync branch.
+
+**I11 EVIDENCE PACKAGE (minimum, for the user to decide):** baseline 6-bit t/s vs MEASURED
+4-bit t/s (not projected — active-bytes math is an upper bound) at 2-3 prompt lengths incl.
+89K; quality deltas on the user's OWN evals (perplexity alone is insufficient for MoE at 4-bit —
+expert routing changes matter); side-by-side outputs on 5-10 real prompts (long-context, code,
+reasoning); rollback cost (disk, conversion time, redeploy blast radius); explicit note that it
+is one-way once shipped unless both weight sets are kept. **5-bit: verify the kernel exists AND
+is fast in the deployed mlx before offering it** — non-power-of-two widths often fall to a slow
+generic path even when nominally supported; if absent, the choice is binary 6->4.
+
+**STOPPING RULE: do NOT adopt "N rounds no-ship -> stop" — it keeps the loop running.** The
+evidence at R7 is that decode throughput is at a physics floor (bandwidth-bound; no GPU idle gap
+per R4; collective removal moves <=8.4%) and prefill is exhausted modulo the I12 audit.
+**Absent I11 authorization, there is no round-shaped THROUGHPUT work left.**
+
+**PIVOT:** the next natural target is USER-PERCEIVED LATENCY (TTFT). Fix A trie persistence
+addresses 49% of real-session uncached tokens (one cold start after relaunch = 92.6K uncached,
+282s TTFT in the real-usage study). On the "does the user feel it" axis this dominates any 1-2
+t/s throughput win still findable. Not a consolation prize.
