@@ -1,0 +1,402 @@
+[i11] mlx 0.32.1.dev20260822+e40a416b2 device Device(gpu, 0)
+[i11] shapes: E=256 hidden=4096 per_rank_inter=1024 top_k=6 M=4
+[i11] mode=affine group_size=32 bits=[6, 5, 4]
+[i11] chain_len=300 n_pool=64 reps=5
+[i11] empty-graph baseline: 12.63 us/call (range 12.10-18.89)
+[i11] post-baseline: active=0.00GB cache=0.00GB
+[i11] --- rep 1/5 order=[6, 5, 4] ---
+[i11]     chunk@0 active=0.12GB cache=0.81GB
+[i11]     chunk@32 active=0.23GB cache=0.81GB
+[i11]     chunk@64 active=0.62GB cache=0.54GB
+[i11]     chunk@96 active=0.47GB cache=0.81GB
+[i11]     chunk@128 active=0.59GB cache=0.81GB
+[i11]     chunk@160 active=0.97GB cache=0.54GB
+[i11]     chunk@192 active=0.82GB cache=0.81GB
+[i11]     chunk@224 active=1.21GB cache=0.54GB
+[i11]     chunk@0 active=1.06GB cache=0.81GB
+[i11]     chunk@32 active=1.44GB cache=0.54GB
+[i11]     chunk@64 active=1.56GB cache=0.54GB
+[i11]     chunk@96 active=1.68GB cache=0.54GB
+[i11]     chunk@128 active=1.53GB cache=0.81GB
+[i11]     chunk@160 active=1.91GB cache=0.54GB
+[i11]     chunk@192 active=1.76GB cache=0.81GB
+[i11]     chunk@224 active=1.88GB cache=0.81GB
+[i11]     chunk@0 active=2.00GB cache=0.81GB
+[i11]     chunk@32 active=2.11GB cache=0.81GB
+[i11]     chunk@64 active=2.23GB cache=0.81GB
+[i11]     chunk@96 active=2.35GB cache=0.81GB
+[i11]     chunk@128 active=2.47GB cache=0.81GB
+[i11]     chunk@160 active=2.58GB cache=0.81GB
+[i11]     chunk@192 active=2.70GB cache=0.81GB
+[i11]     chunk@224 active=2.82GB cache=0.81GB
+[i11]   b=6 bytes/expert(3 projs)=11,010,048 B  bytes/call=264,241,152 B
+[i11]   b=6 scaling chain_len=100 us/call=552.59
+[i11]   b=6 scaling chain_len=200 us/call=550.17
+[i11]   b=6 scaling chain_len=300 us/call=550.97
+[i11]   b=6 raw=553.39 us/call net=540.76 us/call gpu=0.9770781993865967->0.9770781993865967
+[i11]     chunk@0 active=0.10GB cache=0.81GB
+[i11]     chunk@32 active=0.20GB cache=0.81GB
+[i11]     chunk@64 active=0.30GB cache=0.81GB
+[i11]     chunk@96 active=0.40GB cache=0.81GB
+[i11]     chunk@128 active=0.50GB cache=0.81GB
+[i11]     chunk@160 active=0.60GB cache=0.81GB
+[i11]     chunk@192 active=0.70GB cache=0.81GB
+[i11]     chunk@224 active=0.81GB cache=0.81GB
+[i11]     chunk@0 active=1.17GB cache=0.54GB
+[i11]     chunk@32 active=1.28GB cache=0.54GB
+[i11]     chunk@64 active=1.38GB cache=0.54GB
+[i11]     chunk@96 active=1.21GB cache=0.81GB
+[i11]     chunk@128 active=1.58GB cache=0.54GB
+[i11]     chunk@160 active=1.41GB cache=0.81GB
+[i11]     chunk@192 active=1.78GB cache=0.54GB
+[i11]     chunk@224 active=1.88GB cache=0.54GB
+[i11]     chunk@0 active=1.98GB cache=0.54GB
+[i11]     chunk@32 active=1.81GB cache=0.81GB
+[i11]     chunk@64 active=1.91GB cache=0.81GB
+[i11]     chunk@96 active=2.01GB cache=0.81GB
+[i11]     chunk@128 active=2.11GB cache=0.81GB
+[i11]     chunk@160 active=2.21GB cache=0.81GB
+[i11]     chunk@192 active=2.58GB cache=0.54GB
+[i11]     chunk@224 active=2.42GB cache=0.81GB
+[i11]   b=5 bytes/expert(3 projs)=9,437,184 B  bytes/call=226,492,416 B
+[i11]   b=5 scaling chain_len=100 us/call=480.11
+[i11]   b=5 scaling chain_len=200 us/call=479.87
+[i11]   b=5 scaling chain_len=300 us/call=479.56
+[i11]   b=5 raw=483.48 us/call net=470.85 us/call gpu=0.9923181533813477->0.9923181533813477
+[i11]     chunk@0 active=0.08GB cache=0.81GB
+[i11]     chunk@32 active=0.44GB cache=0.54GB
+[i11]     chunk@64 active=0.25GB cache=0.81GB
+[i11]     chunk@96 active=0.34GB cache=0.81GB
+[i11]     chunk@128 active=0.42GB cache=0.81GB
+[i11]     chunk@160 active=0.77GB cache=0.54GB
+[i11]     chunk@192 active=0.59GB cache=0.81GB
+[i11]     chunk@224 active=0.67GB cache=0.81GB
+[i11]     chunk@0 active=0.76GB cache=0.81GB
+[i11]     chunk@32 active=1.11GB cache=0.54GB
+[i11]     chunk@64 active=0.92GB cache=0.81GB
+[i11]     chunk@96 active=1.01GB cache=0.81GB
+[i11]     chunk@128 active=1.09GB cache=0.81GB
+[i11]     chunk@160 active=1.17GB cache=0.81GB
+[i11]     chunk@192 active=1.53GB cache=0.54GB
+[i11]     chunk@224 active=1.34GB cache=0.81GB
+[i11]     chunk@0 active=1.43GB cache=0.81GB
+[i11]     chunk@32 active=1.51GB cache=0.81GB
+[i11]     chunk@64 active=1.59GB cache=0.81GB
+[i11]     chunk@96 active=1.68GB cache=0.81GB
+[i11]     chunk@128 active=1.76GB cache=0.81GB
+[i11]     chunk@160 active=1.85GB cache=0.81GB
+[i11]     chunk@192 active=2.20GB cache=0.54GB
+[i11]     chunk@224 active=2.01GB cache=0.81GB
+[i11]   b=4 bytes/expert(3 projs)=7,864,320 B  bytes/call=188,743,680 B
+[i11]   b=4 scaling chain_len=100 us/call=400.63
+[i11]   b=4 scaling chain_len=200 us/call=399.62
+[i11]   b=4 scaling chain_len=300 us/call=399.69
+[i11]   b=4 raw=402.92 us/call net=390.29 us/call gpu=0.9869157075881958->0.9869157075881958
+[i11] --- rep 2/5 order=[4, 5, 6] ---
+[i11]     chunk@0 active=0.08GB cache=0.81GB
+[i11]     chunk@32 active=0.44GB cache=0.54GB
+[i11]     chunk@64 active=0.25GB cache=0.81GB
+[i11]     chunk@96 active=0.34GB cache=0.81GB
+[i11]     chunk@128 active=0.42GB cache=0.81GB
+[i11]     chunk@160 active=0.50GB cache=0.81GB
+[i11]     chunk@192 active=0.59GB cache=0.81GB
+[i11]     chunk@224 active=0.67GB cache=0.81GB
+[i11]     chunk@0 active=0.76GB cache=0.81GB
+[i11]     chunk@32 active=0.84GB cache=0.81GB
+[i11]     chunk@64 active=0.92GB cache=0.81GB
+[i11]     chunk@96 active=1.01GB cache=0.81GB
+[i11]     chunk@128 active=1.09GB cache=0.81GB
+[i11]     chunk@160 active=1.17GB cache=0.81GB
+[i11]     chunk@192 active=1.53GB cache=0.54GB
+[i11]     chunk@224 active=1.34GB cache=0.81GB
+[i11]     chunk@0 active=1.43GB cache=0.81GB
+[i11]     chunk@32 active=1.51GB cache=0.81GB
+[i11]     chunk@64 active=1.59GB cache=0.81GB
+[i11]     chunk@96 active=1.68GB cache=0.81GB
+[i11]     chunk@128 active=1.76GB cache=0.81GB
+[i11]     chunk@160 active=1.85GB cache=0.81GB
+[i11]     chunk@192 active=2.20GB cache=0.54GB
+[i11]     chunk@224 active=2.01GB cache=0.81GB
+[i11]   b=4 raw=402.31 us/call net=389.69 us/call gpu=0.9869157075881958->0.9869157075881958
+[i11]     chunk@0 active=0.10GB cache=0.81GB
+[i11]     chunk@32 active=0.47GB cache=0.54GB
+[i11]     chunk@64 active=0.30GB cache=0.81GB
+[i11]     chunk@96 active=0.40GB cache=0.81GB
+[i11]     chunk@128 active=0.50GB cache=0.81GB
+[i11]     chunk@160 active=0.60GB cache=0.81GB
+[i11]     chunk@192 active=0.70GB cache=0.81GB
+[i11]     chunk@224 active=1.07GB cache=0.54GB
+[i11]     chunk@0 active=0.91GB cache=0.81GB
+[i11]     chunk@32 active=1.01GB cache=0.81GB
+[i11]     chunk@64 active=1.11GB cache=0.81GB
+[i11]     chunk@96 active=1.21GB cache=0.81GB
+[i11]     chunk@128 active=1.58GB cache=0.54GB
+[i11]     chunk@160 active=1.68GB cache=0.54GB
+[i11]     chunk@192 active=1.51GB cache=0.81GB
+[i11]     chunk@224 active=1.88GB cache=0.54GB
+[i11]     chunk@0 active=1.71GB cache=0.81GB
+[i11]     chunk@32 active=2.08GB cache=0.54GB
+[i11]     chunk@64 active=1.91GB cache=0.81GB
+[i11]     chunk@96 active=2.28GB cache=0.54GB
+[i11]     chunk@128 active=2.38GB cache=0.54GB
+[i11]     chunk@160 active=2.48GB cache=0.54GB
+[i11]     chunk@192 active=2.58GB cache=0.54GB
+[i11]     chunk@224 active=2.68GB cache=0.54GB
+[i11]   b=5 raw=482.47 us/call net=469.84 us/call gpu=0.9857222437858582->0.9857222437858582
+[i11]     chunk@0 active=0.12GB cache=0.81GB
+[i11]     chunk@32 active=0.23GB cache=0.81GB
+[i11]     chunk@64 active=0.62GB cache=0.54GB
+[i11]     chunk@96 active=0.47GB cache=0.81GB
+[i11]     chunk@128 active=0.86GB cache=0.54GB
+[i11]     chunk@160 active=0.70GB cache=0.81GB
+[i11]     chunk@192 active=0.82GB cache=0.81GB
+[i11]     chunk@224 active=1.21GB cache=0.54GB
+[i11]     chunk@0 active=1.33GB cache=0.54GB
+[i11]     chunk@32 active=1.17GB cache=0.81GB
+[i11]     chunk@64 active=1.29GB cache=0.81GB
+[i11]     chunk@96 active=1.68GB cache=0.54GB
+[i11]     chunk@128 active=1.80GB cache=0.54GB
+[i11]     chunk@160 active=1.91GB cache=0.54GB
+[i11]     chunk@192 active=1.76GB cache=0.81GB
+[i11]     chunk@224 active=2.15GB cache=0.54GB
+[i11]     chunk@0 active=2.00GB cache=0.81GB
+[i11]     chunk@32 active=2.11GB cache=0.81GB
+[i11]     chunk@64 active=2.23GB cache=0.81GB
+[i11]     chunk@96 active=2.35GB cache=0.81GB
+[i11]     chunk@128 active=2.73GB cache=0.54GB
+[i11]     chunk@160 active=2.85GB cache=0.54GB
+[i11]     chunk@192 active=2.97GB cache=0.54GB
+[i11]     chunk@224 active=2.82GB cache=0.81GB
+[i11]   b=6 raw=555.84 us/call net=543.21 us/call gpu=0.9934934377670288->0.9934934377670288
+[i11] --- rep 3/5 order=[6, 5, 4] ---
+[i11]     chunk@0 active=0.12GB cache=0.81GB
+[i11]     chunk@32 active=0.50GB cache=0.54GB
+[i11]     chunk@64 active=0.62GB cache=0.54GB
+[i11]     chunk@96 active=0.74GB cache=0.54GB
+[i11]     chunk@128 active=0.59GB cache=0.81GB
+[i11]     chunk@160 active=0.70GB cache=0.81GB
+[i11]     chunk@192 active=0.82GB cache=0.81GB
+[i11]     chunk@224 active=1.21GB cache=0.54GB
+[i11]     chunk@0 active=1.06GB cache=0.81GB
+[i11]     chunk@32 active=1.44GB cache=0.81GB
+[i11]     chunk@64 active=1.29GB cache=0.81GB
+[i11]     chunk@96 active=1.41GB cache=0.81GB
+[i11]     chunk@128 active=1.53GB cache=0.81GB
+[i11]     chunk@160 active=1.64GB cache=0.81GB
+[i11]     chunk@192 active=2.03GB cache=0.54GB
+[i11]     chunk@224 active=1.88GB cache=0.81GB
+[i11]     chunk@0 active=2.00GB cache=0.81GB
+[i11]     chunk@32 active=2.38GB cache=0.54GB
+[i11]     chunk@64 active=2.23GB cache=0.81GB
+[i11]     chunk@96 active=2.62GB cache=0.54GB
+[i11]     chunk@128 active=2.47GB cache=0.81GB
+[i11]     chunk@160 active=2.85GB cache=0.54GB
+[i11]     chunk@192 active=2.97GB cache=0.54GB
+[i11]     chunk@224 active=3.09GB cache=0.54GB
+[i11]   b=6 raw=556.00 us/call net=543.37 us/call gpu=0.993775486946106->0.993775486946106
+[i11]     chunk@0 active=0.10GB cache=0.81GB
+[i11]     chunk@32 active=0.47GB cache=0.54GB
+[i11]     chunk@64 active=0.57GB cache=0.54GB
+[i11]     chunk@96 active=0.67GB cache=0.54GB
+[i11]     chunk@128 active=0.50GB cache=0.81GB
+[i11]     chunk@160 active=0.87GB cache=0.54GB
+[i11]     chunk@192 active=0.97GB cache=0.54GB
+[i11]     chunk@224 active=0.81GB cache=0.81GB
+[i11]     chunk@0 active=1.17GB cache=0.54GB
+[i11]     chunk@32 active=1.01GB cache=0.81GB
+[i11]     chunk@64 active=1.11GB cache=0.81GB
+[i11]     chunk@96 active=1.21GB cache=0.81GB
+[i11]     chunk@128 active=1.31GB cache=0.81GB
+[i11]     chunk@160 active=1.68GB cache=0.54GB
+[i11]     chunk@192 active=1.78GB cache=0.54GB
+[i11]     chunk@224 active=1.88GB cache=0.54GB
+[i11]     chunk@0 active=1.71GB cache=0.81GB
+[i11]     chunk@32 active=1.81GB cache=0.81GB
+[i11]     chunk@64 active=1.91GB cache=0.81GB
+[i11]     chunk@96 active=2.28GB cache=0.54GB
+[i11]     chunk@128 active=2.38GB cache=0.54GB
+[i11]     chunk@160 active=2.21GB cache=0.81GB
+[i11]     chunk@192 active=2.32GB cache=0.81GB
+[i11]     chunk@224 active=2.42GB cache=0.81GB
+[i11]   b=5 raw=485.27 us/call net=472.64 us/call gpu=0.9780373573303223->0.9780373573303223
+[i11]     chunk@0 active=0.08GB cache=0.81GB
+[i11]     chunk@32 active=0.17GB cache=0.81GB
+[i11]     chunk@64 active=0.25GB cache=0.81GB
+[i11]     chunk@96 active=0.34GB cache=0.81GB
+[i11]     chunk@128 active=0.42GB cache=0.81GB
+[i11]     chunk@160 active=0.50GB cache=0.81GB
+[i11]     chunk@192 active=0.59GB cache=0.81GB
+[i11]     chunk@224 active=0.67GB cache=0.81GB
+[i11]     chunk@0 active=1.02GB cache=0.54GB
+[i11]     chunk@32 active=1.11GB cache=0.54GB
+[i11]     chunk@64 active=0.92GB cache=0.81GB
+[i11]     chunk@96 active=1.01GB cache=0.81GB
+[i11]     chunk@128 active=1.36GB cache=0.54GB
+[i11]     chunk@160 active=1.17GB cache=0.81GB
+[i11]     chunk@192 active=1.53GB cache=0.54GB
+[i11]     chunk@224 active=1.34GB cache=0.81GB
+[i11]     chunk@0 active=1.43GB cache=0.81GB
+[i11]     chunk@32 active=1.51GB cache=0.81GB
+[i11]     chunk@64 active=1.86GB cache=0.81GB
+[i11]     chunk@96 active=1.68GB cache=0.81GB
+[i11]     chunk@128 active=1.76GB cache=0.81GB
+[i11]     chunk@160 active=1.85GB cache=0.81GB
+[i11]     chunk@192 active=2.20GB cache=0.54GB
+[i11]     chunk@224 active=2.01GB cache=0.81GB
+[i11]   b=4 raw=404.12 us/call net=391.49 us/call gpu=0.9834567904472351->0.9834567904472351
+[i11] --- rep 4/5 order=[4, 5, 6] ---
+[i11]     chunk@0 active=0.08GB cache=0.81GB
+[i11]     chunk@32 active=0.17GB cache=0.81GB
+[i11]     chunk@64 active=0.25GB cache=0.81GB
+[i11]     chunk@96 active=0.34GB cache=0.81GB
+[i11]     chunk@128 active=0.42GB cache=0.81GB
+[i11]     chunk@160 active=0.50GB cache=0.81GB
+[i11]     chunk@192 active=0.59GB cache=0.81GB
+[i11]     chunk@224 active=0.67GB cache=0.81GB
+[i11]     chunk@0 active=0.76GB cache=0.81GB
+[i11]     chunk@32 active=0.84GB cache=0.81GB
+[i11]     chunk@64 active=0.92GB cache=0.81GB
+[i11]     chunk@96 active=1.01GB cache=0.81GB
+[i11]     chunk@128 active=1.09GB cache=0.81GB
+[i11]     chunk@160 active=1.44GB cache=0.54GB
+[i11]     chunk@192 active=1.26GB cache=0.81GB
+[i11]     chunk@224 active=1.34GB cache=0.81GB
+[i11]     chunk@0 active=1.69GB cache=0.54GB
+[i11]     chunk@32 active=1.51GB cache=0.81GB
+[i11]     chunk@64 active=1.59GB cache=0.81GB
+[i11]     chunk@96 active=1.68GB cache=0.81GB
+[i11]     chunk@128 active=1.76GB cache=0.81GB
+[i11]     chunk@160 active=2.11GB cache=0.54GB
+[i11]     chunk@192 active=1.93GB cache=0.81GB
+[i11]     chunk@224 active=2.28GB cache=0.54GB
+[i11]   b=4 raw=405.48 us/call net=392.86 us/call gpu=0.9834567904472351->0.9834567904472351
+[i11]     chunk@0 active=0.10GB cache=0.81GB
+[i11]     chunk@32 active=0.47GB cache=0.54GB
+[i11]     chunk@64 active=0.30GB cache=0.81GB
+[i11]     chunk@96 active=0.40GB cache=0.81GB
+[i11]     chunk@128 active=0.50GB cache=0.81GB
+[i11]     chunk@160 active=0.60GB cache=0.81GB
+[i11]     chunk@192 active=0.70GB cache=0.81GB
+[i11]     chunk@224 active=1.07GB cache=0.54GB
+[i11]     chunk@0 active=0.91GB cache=0.81GB
+[i11]     chunk@32 active=1.01GB cache=0.81GB
+[i11]     chunk@64 active=1.38GB cache=0.54GB
+[i11]     chunk@96 active=1.48GB cache=0.54GB
+[i11]     chunk@128 active=1.58GB cache=0.54GB
+[i11]     chunk@160 active=1.41GB cache=0.81GB
+[i11]     chunk@192 active=1.78GB cache=0.54GB
+[i11]     chunk@224 active=1.88GB cache=0.54GB
+[i11]     chunk@0 active=1.71GB cache=0.81GB
+[i11]     chunk@32 active=1.81GB cache=0.81GB
+[i11]     chunk@64 active=2.18GB cache=0.54GB
+[i11]     chunk@96 active=2.28GB cache=0.54GB
+[i11]     chunk@128 active=2.11GB cache=0.81GB
+[i11]     chunk@160 active=2.48GB cache=0.81GB
+[i11]     chunk@192 active=2.58GB cache=0.54GB
+[i11]     chunk@224 active=2.42GB cache=0.81GB
+[i11]   b=5 raw=483.67 us/call net=471.04 us/call gpu=0.9888485074043274->0.9888485074043274
+[i11]     chunk@0 active=0.12GB cache=0.81GB
+[i11]     chunk@32 active=0.23GB cache=0.81GB
+[i11]     chunk@64 active=0.35GB cache=0.81GB
+[i11]     chunk@96 active=0.47GB cache=0.81GB
+[i11]     chunk@128 active=0.59GB cache=0.81GB
+[i11]     chunk@160 active=0.97GB cache=0.54GB
+[i11]     chunk@192 active=1.09GB cache=0.54GB
+[i11]     chunk@224 active=1.21GB cache=0.54GB
+[i11]     chunk@0 active=1.33GB cache=0.54GB
+[i11]     chunk@32 active=1.17GB cache=0.81GB
+[i11]     chunk@64 active=1.29GB cache=0.81GB
+[i11]     chunk@96 active=1.41GB cache=0.81GB
+[i11]     chunk@128 active=1.53GB cache=0.81GB
+[i11]     chunk@160 active=1.64GB cache=0.81GB
+[i11]     chunk@192 active=2.03GB cache=0.54GB
+[i11]     chunk@224 active=2.15GB cache=0.54GB
+[i11]     chunk@0 active=2.00GB cache=0.81GB
+[i11]     chunk@32 active=2.38GB cache=0.54GB
+[i11]     chunk@64 active=2.50GB cache=0.54GB
+[i11]     chunk@96 active=2.35GB cache=0.81GB
+[i11]     chunk@128 active=2.47GB cache=0.81GB
+[i11]     chunk@160 active=2.58GB cache=0.81GB
+[i11]     chunk@192 active=2.70GB cache=0.81GB
+[i11]     chunk@224 active=2.82GB cache=0.81GB
+[i11]   b=6 raw=556.97 us/call net=544.35 us/call gpu=0.9909411072731018->0.9909411072731018
+[i11] --- rep 5/5 order=[6, 5, 4] ---
+[i11]     chunk@0 active=0.39GB cache=0.54GB
+[i11]     chunk@32 active=0.50GB cache=0.54GB
+[i11]     chunk@64 active=0.62GB cache=0.54GB
+[i11]     chunk@96 active=0.47GB cache=0.81GB
+[i11]     chunk@128 active=0.59GB cache=0.81GB
+[i11]     chunk@160 active=0.97GB cache=0.54GB
+[i11]     chunk@192 active=1.09GB cache=0.54GB
+[i11]     chunk@224 active=0.94GB cache=0.81GB
+[i11]     chunk@0 active=1.33GB cache=0.54GB
+[i11]     chunk@32 active=1.17GB cache=0.81GB
+[i11]     chunk@64 active=1.56GB cache=0.54GB
+[i11]     chunk@96 active=1.68GB cache=0.54GB
+[i11]     chunk@128 active=1.80GB cache=0.54GB
+[i11]     chunk@160 active=1.91GB cache=0.54GB
+[i11]     chunk@192 active=1.76GB cache=0.81GB
+[i11]     chunk@224 active=2.15GB cache=0.54GB
+[i11]     chunk@0 active=2.00GB cache=0.81GB
+[i11]     chunk@32 active=2.38GB cache=0.54GB
+[i11]     chunk@64 active=2.50GB cache=0.54GB
+[i11]     chunk@96 active=2.62GB cache=0.54GB
+[i11]     chunk@128 active=2.73GB cache=0.54GB
+[i11]     chunk@160 active=2.58GB cache=0.81GB
+[i11]     chunk@192 active=2.70GB cache=0.81GB
+[i11]     chunk@224 active=3.09GB cache=0.54GB
+[i11]   b=6 raw=556.27 us/call net=543.64 us/call gpu=0.9791110754013062->0.9791110754013062
+[i11]     chunk@0 active=0.37GB cache=0.54GB
+[i11]     chunk@32 active=0.47GB cache=0.54GB
+[i11]     chunk@64 active=0.30GB cache=0.81GB
+[i11]     chunk@96 active=0.40GB cache=0.81GB
+[i11]     chunk@128 active=0.50GB cache=0.81GB
+[i11]     chunk@160 active=0.87GB cache=0.54GB
+[i11]     chunk@192 active=0.97GB cache=0.54GB
+[i11]     chunk@224 active=1.07GB cache=0.54GB
+[i11]     chunk@0 active=1.17GB cache=0.81GB
+[i11]     chunk@32 active=1.01GB cache=0.81GB
+[i11]     chunk@64 active=1.11GB cache=0.81GB
+[i11]     chunk@96 active=1.21GB cache=0.81GB
+[i11]     chunk@128 active=1.31GB cache=0.81GB
+[i11]     chunk@160 active=1.41GB cache=0.81GB
+[i11]     chunk@192 active=1.78GB cache=0.54GB
+[i11]     chunk@224 active=1.61GB cache=0.81GB
+[i11]     chunk@0 active=1.71GB cache=0.81GB
+[i11]     chunk@32 active=2.08GB cache=0.54GB
+[i11]     chunk@64 active=1.91GB cache=0.81GB
+[i11]     chunk@96 active=2.28GB cache=0.54GB
+[i11]     chunk@128 active=2.11GB cache=0.81GB
+[i11]     chunk@160 active=2.21GB cache=0.81GB
+[i11]     chunk@192 active=2.32GB cache=0.81GB
+[i11]     chunk@224 active=2.68GB cache=0.54GB
+[i11]   b=5 raw=484.16 us/call net=471.54 us/call gpu=0.9870339632034302->0.9870339632034302
+[i11]     chunk@0 active=0.08GB cache=0.81GB
+[i11]     chunk@32 active=0.17GB cache=0.81GB
+[i11]     chunk@64 active=0.25GB cache=0.81GB
+[i11]     chunk@96 active=0.34GB cache=0.81GB
+[i11]     chunk@128 active=0.42GB cache=0.81GB
+[i11]     chunk@160 active=0.77GB cache=0.81GB
+[i11]     chunk@192 active=0.59GB cache=0.81GB
+[i11]     chunk@224 active=0.67GB cache=0.81GB
+[i11]     chunk@0 active=0.76GB cache=0.81GB
+[i11]     chunk@32 active=1.11GB cache=0.54GB
+[i11]     chunk@64 active=1.19GB cache=0.54GB
+[i11]     chunk@96 active=1.01GB cache=0.81GB
+[i11]     chunk@128 active=1.09GB cache=0.81GB
+[i11]     chunk@160 active=1.17GB cache=0.81GB
+[i11]     chunk@192 active=1.26GB cache=0.81GB
+[i11]     chunk@224 active=1.61GB cache=0.54GB
+[i11]     chunk@0 active=1.43GB cache=0.81GB
+[i11]     chunk@32 active=1.51GB cache=0.81GB
+[i11]     chunk@64 active=1.59GB cache=0.81GB
+[i11]     chunk@96 active=1.95GB cache=0.54GB
+[i11]     chunk@128 active=1.76GB cache=0.81GB
+[i11]     chunk@160 active=1.85GB cache=0.81GB
+[i11]     chunk@192 active=2.20GB cache=0.81GB
+[i11]     chunk@224 active=2.28GB cache=0.54GB
+[i11]   b=4 raw=402.26 us/call net=389.63 us/call gpu=0.9796352386474609->0.9796352386474609
+[i11] RESULT b=6: net 540.76-544.35 us/call (median 543.37), 486.3 GB/s (89.1% of 546.0), ratio=1.0000 band=SLOW/generic
+[i11] RESULT b=5: net 469.84-472.64 us/call (median 471.04), 480.8 GB/s (88.1% of 546.0), ratio=0.8669 band=FAST
+[i11] RESULT b=4: net 389.63-392.86 us/call (median 390.29), 483.6 GB/s (88.6% of 546.0), ratio=0.7183 band=FAST
+[i11] wrote /tmp/i11_full.json
