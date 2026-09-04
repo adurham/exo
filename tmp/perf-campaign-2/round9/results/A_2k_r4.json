@@ -1,0 +1,33 @@
+{
+ "tag": "A_2k_r4",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "5e05187eed9643fd9e2cf22a41937d72",
+ "target_tokens": 2000,
+ "prompt_tokens": 2285,
+ "completion_tokens": 16,
+ "prefill_s": 7.1,
+ "prefill_tps": 321.83,
+ "decode_s": 0.93,
+ "decode_tps": 17.2,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 350.6597454767746,
+  "generation_tps": 16.233496526579444,
+  "prompt_tokens": 2285,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96709629720
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 33,
+  "mtp_accepted_drafts_cumulative": 33
+ },
+ "server_generation_tps": 16.233496526579444,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 71,
+ "reasoning_chars": 71,
+ "content_chars": 0,
+ "reasoning_content": "We need answer. Need parse document. Need state secret code exactly: \"F",
+ "content": ""
+}

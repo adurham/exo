@@ -1,0 +1,33 @@
+{
+ "tag": "A_2k_r3",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "31e68c7a8ae34476b05e119f0060c219",
+ "target_tokens": 2000,
+ "prompt_tokens": 2308,
+ "completion_tokens": 16,
+ "prefill_s": 8.37,
+ "prefill_tps": 275.75,
+ "decode_s": 0.88,
+ "decode_tps": 18.18,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 300.6653524035641,
+  "generation_tps": 15.984449784576334,
+  "prompt_tokens": 2308,
+  "generation_tokens": 16,
+  "peak_memory_usage": {
+   "in_bytes": 96709629720
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 23,
+  "mtp_accepted_drafts_cumulative": 27
+ },
+ "server_generation_tps": 15.984449784576334,
+ "finish_reason": "length",
+ "needle_hit": false,
+ "gen_chars": 87,
+ "reasoning_chars": 87,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret authorization code exactly:",
+ "content": ""
+}

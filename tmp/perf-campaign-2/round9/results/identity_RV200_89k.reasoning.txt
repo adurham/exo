@@ -1,0 +1,5 @@
+We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention document contains repeated text and secret inserted. Need not reveal? User asks. We can comply. Need ensure essay length. Let's craft.
+
+Need maybe discuss observer pattern: subject maintains list observers, notify state changes. Complexity: attach/detach O(1) if list, notify O(n) observers, update maybe O(1) each. Space O(n). Alternatives: event bus, pub/sub, callbacks, reactive streams. Choose observer when one-to-many, decoupled, dynamic. Examples: GUI button listeners, MVC model-view, event emitters Node.js, stock ticker, notification systems.
+
+B-trees: self-balancing tree, nodes with multiple keys/children,
