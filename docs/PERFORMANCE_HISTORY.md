@@ -8146,3 +8146,64 @@ whether the ~1400us is really local compute drain, plus the async-fence-gate fam
 as the only >=50% lever class on record (+58-67%, 2026-08-22). A consult challenged the
 residual decomposition; its probes ARE the round-4 path. The verdict does not hinge on it
 (notification class bounded at ~150us << 560us bar).
+
+## CAMPAIGN 2 — ROUND 4: fence ARMED (≥98.5%); the residual decode stall is GENUINE local compute; Q3's knob is DEAD CODE (2026-09-03)
+
+Artifacts: tmp/perf-campaign-2/round4/ (REPORT.md, PLAN.md pre-registration, q1-gate-audit.md,
+boot1/2/3 diag+probe extracts, needle JSONs). Commits LOCAL ONLY (unpushed per task constraint;
+supervisor to push): superproject 232d1f6b7, mlx-lm submodule 7f14654. Cluster verified
+healthy on shipped config at end (0 probe/diag flags on runners, API 200, both nodes READY,
+decode smoke 26.6 t/s @ 2K, restored-config needle exact-match).
+
+**Q1 — the async fence is ARMED under today's TP+MTP=1+DSPARK=1 config: ≥98.5% armed
+(bounded by the diag's rate limit; 100% of observed decode events). NO regression of the
+08-22 fix.** Live FENCE_GATE_DIAG on a real 89K needle + decode probes (both nodes identical,
+646 diag lines each): every blocking fallback is at JIT warmup (L=13/L=1), prefill chunks
+(L=2048), or the one prefill→decode transition forward (19:00:52) — all designed blocking.
+After that transition: ZERO fallback lines through ~300 decode steps × 43 layers (~13,000
+gate evaluations; the every-200th rate limit bounds hidden fails <200 → <1.5%). The MTP-on
+config re-arms the two-owner gate exactly as the 08-22 fix designed: DSv4MTPPredictor
+registers "cache" unconditionally (dsv4_mtp.py:1169-1171) and the load-bearing re-arm is
+activate_for_uids' no-transition fast path firing _set_fence_async(True) EVERY spec cycle
+(dsv4_mtp.py:1304) — structurally different from the dead-code regime. Gate cites
+PM-verified: deepseek_v4.py:3115-3150, _fence_key_ok fail-closed :140-147.
+
+**Q2 — the <15% band lands: the fence/handoff mechanism does NOT own the residual stall.
+The decode thread is CLOSED AT THE MODEL LEVEL.** The two round-3-specified falsification
+probes both ran:
+- Probe A (GPU-identity all_sum, NEW env-gated site-specific probe, mlx-lm 7f14654): the
+  pre-existing file-NOP (/tmp/dsv4_nop_targets) was REJECTED — it patches GLOBAL
+  mx.distributed.all_sum and would also NOP the DSpark agree gate (utils_mlx.py:459),
+  changing the workload. Identity output degenerates (needle 0/1, acceptance collapses
+  177→61 tokens) so tok/s is acceptance-confounded exactly as pre-registered; the
+  unconfounded readings: 89K needle TOTAL wall identity 137.7s vs clean 150.4s (≤8.4%,
+  upper bound incl. prefill collectives), and GPU% (below) implies 3-8% of decode step.
+- Probe B (command-buffer GPU timestamps — ALREADY EXISTS in the stack: MLX_GPU_TIME=1 +
+  EXO_DECODE_PROBE=1): **clean decode GPU busy = 117.3% mean (68.8-153.2%) across 17
+  windows, both nodes identical.** If the mechanism owned the stall the GPU would idle
+  waiting on host handoff — it does not; >100% readings are the async fence's overlap
+  working as designed. Removing the collective (identity boot) DROPS GPU busy to 66.6% —
+  the collective+handoff is real queued GPU work, not hidden stall.
+- Boot-1 blocking-fence bracket (ALLSUM_PROBE) reproduces round 2's drain: per-layer p50
+  0.99-1.81ms decode, 14-38ms prefill spikes — what the armed async fence removes
+  (the +58-67% of 08-22).
+**Disposition: decode stall = genuine local compute (GPU-saturated). Confirms rounds 1-3.**
+
+**Q3 — NOT EXECUTABLE in this stack: EXO_DSV4_FENCE_EVERY_N_LAYERS is a DEAD KNOB.**
+_fence_every_n assigned (deepseek_v4.py:2958), ZERO read sites tree-wide; the only reader
+was OPT-7 (230a670), REVERTED (19a07b3, "-23% B=2 prefill" via graph accumulation). With
+the fence armed there is no per-layer blocking eval at c=1 decode at all — the task's
+"~11 fences per forward at FENCE_EVERY_N=4" premise describes a path decode no longer
+takes. Rebuilding the reverted gate to force the ABAB would re-introduce a documented
+prefill regression to test a superseded mechanism. Round 1's fence=8 "+0.7 t/s" row: mark
+HISTORICAL, not actionable. No lever survives; the record's fence on/off experiment IS the
+08-22 fix itself.
+
+**TWO NEW CONFIG-READING FACTS (recorded for all future rounds):**
+1. FENCE_EVERY_N_LAYERS=4 in start_cluster.sh is dead config — cargo-cult from the
+   pre-async-fence era; a cleanup candidate (supervisor's call, not done this round).
+2. EXO_PROFILER=spans SILENTLY RE-BLOCKS THE FENCE: registering any SpanProfilerHook makes
+   finalize(y) a forced mx.eval one line after async_eval (deepseek_v4.py:3151 →
+   profiler.py:109-113). Production is safe today (EXO_PROFILER unset; only
+   EXO_PROFILER_LEVEL=1, which is inert without it — bootstrap.py:117-119) — but ANY
+   fence/drain measurement taken with spans on is INVALID. Pre-registered caveat.
