@@ -1,8 +1,20 @@
 # PERFORMANCE CAMPAIGN 2 — IDEAS (brainstorm, 2026-09-03)
 
+> ## OUTCOME (2026-09-04, after 8 rounds): THROUGHPUT PHASE CLOSED. ZERO SHIPPED.
+> Every lever below is now closed with source-level or GPU-level evidence, or cancelled below
+> the measurement floor. Per-item verdicts are inline. Two supervisor errors in this document
+> were caught by PMs and are corrected inline: (1) the framing below that the 1.75-2.16x gap
+> was "never attacked" — campaign 1 DID attack it (kernel bandwidth measured at 74-87%, jaccl
+> falsified, three fusion attempts); (2) I11's premise that experts were 6-bit — they were
+> mxfp4 4-bit at load the whole time. Full record: docs/PERFORMANCE_HISTORY.md, "CAMPAIGN 2"
+> entries R1-R8 + "REVIEW AFTER R7". Remaining open: I10 (TTFT pivot), I15 (rides on next boot).
+
 Premise correction: campaign 1 closed every SPECIFIC hypothesis it tested. It never established
 a ceiling. The campaign's own byte accounting (P02D/P11) left decode at **1.75-2.16x below the
-memory-bandwidth ceiling**, and that gap was noted, never attacked. Prefill is compute-bound at
+memory-bandwidth ceiling**, and that gap was noted, ~~never attacked~~ **[CORRECTED R1: it WAS
+attacked — see docs/switch-mlp-bandwidth-artifact-retraction-2026-08-22.md and
+.hermes/plans/2026-05-19_phase_f_findings.md; this framing was a supervisor error that caused
+R1 to reproduce a retracted artifact]**. Prefill is compute-bound at
 ~94% GPU busy but achieved-TFLOPS vs peak was never measured. This document enumerates every
 lever across exo / mlx-lm / mlx for prefill and decode, with evidence, expected value, cost, and
 PM instructions.
@@ -25,7 +37,7 @@ Therefore, in priority order:
 
 ## TRANCHE 1 — measure the big unknowns (mostly zero/low cluster cost)
 
-### I1. TP all_sum latency INSIDE the verify forward (decode) — LARGEST SUSPECTED LEVER
+### I1. **[CLOSED R1-R3: jaccl 2.6% of budget; MLX has NO GPU collective; GPU-resident collective INFEASIBLE — stack-level floor]** TP all_sum latency INSIDE the verify forward (decode) — LARGEST SUSPECTED LEVER
 
 **Evidence.** start_cluster.sh fence comments: "43 layers x 2 all_sums per layer" = 86 cross-rank
 collectives per forward. These sit INSIDE the verify bracket (56ms = 81% of cycle) so every
@@ -68,7 +80,7 @@ parallelism advantage.
 **Cost:** 1 relaunch session (~1h) + microbench (zero). **EV:** if 30-50% of verify, this is a
 potential 1.3-1.8x decode lever.
 
-### I2. The "c=2 tax" — settings that cost c=1 throughput and exist ONLY for concurrency the user has DROPPED
+### I2. **[CLOSED R1/R4/R7: 3 knobs dead; FENCE cadence moot with async fence armed; STEEL_BI is correctness-load-bearing at c=1; RENDEZVOUS folds into TTFT]** The "c=2 tax" — settings that cost c=1 throughput and exist ONLY for concurrency the user has DROPPED
 
 **Evidence (all from start_cluster.sh comments, each with a documented c=1 cost):**
 - `EXO_DSV4_FENCE_EVERY_N_LAYERS=4`: "SELECTED for c=2 ... Cost: ~0.7 t/s on c=1 ... Set to 8
@@ -107,7 +119,7 @@ algorithmic risk at c=1.
 
 **Cost:** ~2-3 relaunch sessions for ABAB. **EV:** +8-10% decode, -200ms TTFT, near-zero risk.
 
-### I3. Where does the 1.75-2.16x go? Achieved-bandwidth microbench of the actual kernels
+### I3. **[CLOSED R1: 83.9% of peak; the '53%' was the retracted serial-sync artifact]** Where does the 1.75-2.16x go? Achieved-bandwidth microbench of the actual kernels
 
 **Evidence.** Decode is bandwidth-bound. Verify reads the activated expert weights (13B params
 at ~6-bit ≈ 10GB/token-set, ~5GB/rank at TP=2) once per verify regardless of M. At M4 Max
@@ -132,7 +144,7 @@ achieve a fraction of peak bandwidth, or the time is not in weight streaming at 
 
 **Cost:** zero relaunches. **EV:** decides where the 2x lives.
 
-### I4. Fix B (decode-KV retention) was killed on an INVALID test — re-open
+### I4. **[CLOSED R1: round-4 test was invalid but its conclusion held on a valid >=3-chunk re-test; Fix B stays dead]** Fix B (decode-KV retention) was killed on an INVALID test — re-open
 
 **Evidence.** The round-4 serialization audit used **381-token prompts**. The prefix cache is
 CHUNK-GRANULAR: start_cluster.sh says smaller chunks "produce more chunk-boundary cache
@@ -167,7 +179,7 @@ the "any delta zeros the cache" concern is moot for the client we actually run.
 **Cost:** ~6 requests to re-open; implementation is a real mlx-lm change. **EV:** ~22% TTFT
 on long sessions (the user's actual workload).
 
-### I5. Speculative acceptance re-tune against the TRUE number
+### I5. **[CLOSED R5/R6: all reachable gamma measured on a calibrated ruler; gamma=4 is -4.5 t/s; HOLD gamma=3]** Speculative acceptance re-tune against the TRUE number
 
 **Evidence.** True acceptance is 1.411/cycle at γ=3 (wall-attribution round, direct dump
 deltas). Prior spec tuning (γ sweeps, Eagle K, draft-head selection) used 1.73. Decode =
@@ -191,7 +203,7 @@ cost is the draft phase (9.19ms for 3 drafts = 3ms/draft — itself suspicious, 
 
 **Cost:** 1-2 sessions. **EV:** up to +30% decode if acceptance efficiency rises from 47%.
 
-### I6. Expert weight reads at M=4: once per verify or once per ROW? (zero cost, potentially huge)
+### I6. **[CLOSED R1: 1.42x shared-vs-distinct, ~4-8ms of 56ms, not the 2x]** Expert weight reads at M=4: once per verify or once per ROW? (zero cost, potentially huge)
 
 **Evidence.** "switch_mlp (the expensive expert-gather)" is batched; "FULLBLOCK_MOE=1 forces
 per-row" was rejected for capping throughput. Current default MOE_PARTS_ROWSEQ=shared (only
@@ -208,25 +220,25 @@ expert, read once). Report with line cites. Zero cluster cost.
 
 ## TRANCHE 2 — smaller or user-decision levers
 
-### I7. lm_head vocab-parallel sharding
+### I7. **[CANCELLED after R7 review: ~0.45 t/s, below the measurement floor by design]** lm_head vocab-parallel sharding
 lm_head is REPLICATED per rank (1.059GB bf16/rank per P05 notes; ~0.53GB at mxfp8). Each rank
 reads the whole thing per verify: ~1ms. Vocab-parallel shard halves it; greedy argmax needs only
 a local top-1 + one scalar exchange (already have the coord collective). ~1.5%. mlx-lm change.
 
-### I8. Draft phase: 9.19ms for γ=3 drafts is 3ms/draft
+### I8. **[RESOLVED R6: ~3-6ms per extra draft row from the cycle curve; acceptance does not cover it]** Draft phase: 9.19ms for γ=3 drafts is 3ms/draft
 The DSpark head is depth-1 and small. 3ms per draft token suggests it is paying a full
 attention pass over the KV per draft, or dispatch overhead. Profile the draft sub-phases.
 If drafts can be produced in one batched call or the head's attention scoped, draft could drop
 to ~3ms total (-6ms/cycle = -9%). Also relevant to I5 (cheaper drafts make higher γ free).
 
-### I9. GPU P-state during bandwidth-bound decode (cheap measurement)
+### I9. **[CLOSED R8: decode clock 0.2% ABOVE prefill; no P-state lever]** GPU P-state during bandwidth-bound decode (cheap measurement)
 Bandwidth-bound work has low compute utilization; macOS power management may hold the GPU at a
 lower P-state, and on Apple Silicon the memory controller/fabric clock is coupled. Measure
 `powermetrics --samplers gpu_power` GPU frequency during decode vs prefill vs idle. If decode
 runs at a lower clock than prefill, that is a systems lever (sustained-performance mode,
 `pmset`, or keeping a compute-side kernel resident). Zero relaunch.
 
-### I10. Fix A — prefix-trie persistence across relaunch
+### I10. **[OPEN — THE TTFT PIVOT TARGET]** Fix A — prefix-trie persistence across relaunch
 49% of the real session's uncached tokens were one cold start (92.6K uncached, 282s TTFT).
 Trie is in-memory only (builder.py:156). Persisting KV to disk (multi-GB per node) and reloading
 on launch. Value depends on relaunch frequency in normal use — LOW in steady state, high while
@@ -240,25 +252,25 @@ correctness, the P06-era logit-divergence check), (c) one decode measurement. Do
 without the user reading the quality delta. Also: mixed precision (attention + shared_experts
 stay 6-bit, routed experts 4/5-bit).
 
-### I12. Prefill: serial vs batched code-path parity at c=1
+### I12. **[CLOSED R8: all six optimizations reachable from the serial driver by construction]** Prefill: serial vs batched code-path parity at c=1
 Ask A found production prefill runs the SERIAL driver (generate.py:866), never `prefill_batched`
 (needs queue_len>=2). Audit that every prefill optimization (tiled SDPA, exact top-k, chunk
 handling, clear_cache cadence) applies on the SERIAL path. If the batched path got the
 optimizations and serial did not, c=1 prefill is running the unoptimized branch.
 
-### I13. Idle-gap warmup penalty (perceived speed)
+### I13. **[CANCELLED after R7 review: only matters if warmup is in the shipping loop]** Idle-gap warmup penalty (perceived speed)
 P15 warmup rep: 12 t/s vs 30+ steady. Chat sessions have idle gaps; if every turn after a pause
 pays a warmup, that is perceived throughput. Measure decode t/s vs idle gap before the request
 (0s, 30s, 5min). If real: identify what goes cold (Metal residency, allocator, page-out) — root
 cause, not a keep-alive ping.
 
-### I14. Within-boot decode drift (P12: +1.47 t/s recovered by relaunch after deep-context work)
+### I14. **[CANCELLED after R7 review: measurement artifact, not a lever]** Within-boot decode drift (P12: +1.47 t/s recovered by relaunch after deep-context work)
 Not P16 (no N-boot study). Within ONE boot: measure decode at 89K, then run 300K of prefill
 work, then re-measure at 89K. If decode degrades, correlate with allocator pool size
 (mx.metal.get_cache_memory / active memory) and test whether `mx.metal.clear_cache()` between
 requests restores it — as a DIAGNOSTIC of the mechanism, not a shipped mitigation.
 
-### I15. Dispatch/sync count per decode step
+### I15. **[BLOCKED R8: probe vars are boot-gated; rides free on the TTFT pivot's first boot]** Dispatch/sync count per decode step
 Count mx.eval / synchronize points and kernel launches per decode cycle on the production path
 (not profiler-added ones). 43 layers x (attention + router + experts + norms) — if there are
 >500 launches per step, launch overhead (~10-20us each on Metal) is 5-10ms. The disabled

@@ -1,73 +1,78 @@
 # OVERNIGHT LOOP — STATE
 
-**Mode:** AUTONOMOUS (authorized 2026-09-02, runs until user says STOP)
-**Charter:** `/Users/adam.durham/.hermes/cache/OVERNIGHT-LOOP-CHARTER.md` (read this first on context loss)
+**Mode:** AUTONOMOUS (authorized 2026-09-02, runs until user says STOP). **Currently PAUSED
+awaiting user direction** (2026-09-04 ~11:30 CDT) — no PM in flight.
+**Charter:** `/Users/adam.durham/.hermes/cache/OVERNIGHT-LOOP-CHARTER.md` (read first on context loss;
+includes the mandatory GREP-THE-RECORD-FIRST step).
 **Supervisor model:** claude-opus-5
 
 ---
 
-## ROUND IN FLIGHT
+## WHERE THINGS STAND
 
-- **deleg_fe55c2ab — FINAL decode round: bracket-OFF + cadence sweep + mx.eval audit** (dispatched 00:15)
-  - Every pre-registered band CLOSES the decode-wall thread. No further attribution work.
-  - Reviewer (opus-4-7, fable unavailable — version error) directive: run the pre-registered
-    contingency plus a dump-cadence sweep (the VOIDed cadence=1 run proved dump-writes pollute
-    wall; cadence=50 is cleaner but not zero, X was never bounded) plus an mx.eval close audit
-    (lazy-eval spillover could explain BOTH the 61% unattributed AND the flat per-call cost).
-  - Also required: recompute out-of-bracket DEDUPLICATED (coverage 101.4% means brackets
-    overcount 1.4%) and relabel G1 as "baseline-brackets-only", not "un-instrumented".
-  - Artifacts: `tmp/decode-close-20260903/`
-  - **AFTER THIS ROUND: campaign closes. Pivot to hardening** (regression guards for shipped
-    wins, reproducible perf-baseline harness, closed-thread consolidation; boot-variance
-    unparking rides along with the harness).
+**Campaign 1 (2026-08-30 → 09-03): CLOSED.** The 20-vs-34 tok/s "gap" was a measurement
+convention (94.5% TTFT). Shipped: pad-strip (server cached_tokens 0→351), canonical serializer +
+golden bytes, BatchPoolingCache fix, profiler unit metadata, CI re-enabled + guards live.
 
-- ~~deleg_f38de5cd — Ask B: decode-wall instrumentation~~ COMPLETE (de392010a)
-  - G1 control run (bracket env ON, decode-profiling OFF, patch unapplied) then instrumented
-    S1-S4, attribution of the ~5.0% out-of-bracket wall to candidate A (fenced coord collectives,
-    `dsv4_mtp.py:2259-2310`) vs candidate B (`agree_on_tasks`/`agree_on_cancellations_fast`,
-    `batch_generator.py:678-720`), then revert.
-  - Pre-flight findings already banked: A-fence EXECUTES every decode cycle at c=1 (gate verified
-    verbatim) so the experiment can satisfy its own gate — unlike Ask A's SDPA arm.
-    `decode.step.mlx_next` spans are recorded but never dumped, so the G2 coverage denominator
-    was substituted (documented in `PRE-REGISTRATION-ASKB.md`).
-  - Artifacts: `tmp/prefill-round4-exec-askb-20260902/`
+**Hardening (09-03): DONE.** CI had been `disabled_manually` for 8 months; now runs pytest green
+(1107 passed). Alignment guard, kernel guard, golden-token nondeterminism root-caused (OOB embedding
+read into recycled Metal pages). tmp/ 16GB→34MB + rsync exclude.
 
-## NEXT ACTION WHEN IT COMPLETES
-
-1. Append findings to `docs/PERFORMANCE_HISTORY.md`, commit + push (same turn).
-2. `mcp__consult` fable with the results -> get round-N+1 direction.
-3. Dispatch the next PM (`agent_type='pm'`, `role='orchestrator'`) with a task file in
-   `~/.hermes/cache/`.
-4. Update this file.
+**Campaign 2 (09-03 → 09-04, 8 rounds): THROUGHPUT PHASE CLOSED. ZERO SHIPPED.**
+Every lever closed with source/GPU evidence. Decode is at a physics floor for this model on this
+hardware; prefill at c=1 is exhausted and confirmed on the production path. Full ledger below.
+Five supervisor errors in briefs were caught by PMs and are in the record.
 
 ---
 
-## CAMPAIGN LEDGER (what is closed, so no round re-opens it)
+## CAMPAIGN 2 LEDGER (per-item, with the round that closed it)
 
-| Thread | Status |
-|---|---|
-| BatchPoolingCache overlap-carry defect | FIXED, deployed, verified live (37260bb) |
-| Decode "regression" P12-P15 | Retired as boot variance |
-| V2 acceptance-counter mining | Infeasible-proven (data never written) |
-| V3 SPEC_STATE_RESTORE snapshot cost | CLOSED (rb_snap 0.150ms = 0.218% of cycle) |
-| 11-16% unaccounted decode wall | Corrected to ~5.0% flat (accounting artifact) |
-| Entropy hypothesis | Refuted (natural prose = repetitive) |
-| Temperature hypothesis | Refuted at the premise (no delta exists) |
-| Real-usage 20-vs-34 gap | Measurement convention: 94.5% TTFT, no decode loss |
-| Prefix-cache hit rate | Near-perfect (97.6% session-wide); "0 full hits" correct-by-design |
-| Pad-strip | SHIPPED (bdc9b6f1fc) — live proof cached_tokens 0 -> 351 |
-| Serialization contract | SHIPPED (fb394a378) — canonical serializer + golden byte tests |
-| Fix B (decode-KV retention) | DEAD — 6/9 serialization variants zero the cache |
-| SDPA 4.06x per-call anomaly | CLOSED — batched-path only, production is c=1 serial |
-| Prefill c=1 | Effectively exhausted (chunk overhead <0.02%, indexer 4% closed, clear-cache dead code) |
-| P16 boot-variance characterization | PARKED by user |
-| V4 c=2 concurrency | DROPPED by user (workload shape) |
+| # | lever | verdict | round |
+|---|---|---|---|
+| I1 | TP all_sum latency | CLOSED — jaccl 2.6% of budget; MLX has NO GPU collective (`AllReduce::eval_gpu` throws, jaccl stream is CPU); GPU-resident collective INFEASIBLE (no public GPU→DMA coherence API; jaccl host-bounce by construction). Stack-level floor. | R1-R3 |
+| I2 | c=2 tax knobs | CLOSED — 3 knobs dead code; FENCE cadence live but moot with async fence armed; `MLX_STEEL_BATCH_INVARIANT` is CORRECTNESS-load-bearing at c=1 (byte-identity fails both regimes); RENDEZVOUS=0 safe but unresolvable on the TTFT instrument → folds into TTFT pivot | R1/R4/R7 |
+| I3 | kernel bandwidth | CLOSED — 83.9% of peak (chained-graph). The "53%" was the retracted 08-22 serial-sync artifact reproduced | R1 |
+| I4 | Fix B re-open | CLOSED — round-4 test was invalid (sub-chunk) but conclusion held on a valid re-test | R1 |
+| I5 | γ re-tune | CLOSED — all reachable γ measured on a calibrated ruler; γ=4 is −4.5 t/s vs 1.3 boot spread; cycle 61→74ms monotonic in γ. HOLD γ=3 | R5/R6 |
+| I6 | per-row expert reads | CLOSED — 1.42× shared-vs-distinct, ~4-8ms of 56ms | R1 |
+| I7 | lm_head vocab-sharding | CANCELLED — ~0.45 t/s, below measurement floor | R7 review |
+| I8 | per-draft cost | RESOLVED — ~3-6ms per extra draft row; acceptance doesn't cover it | R6 |
+| I9 | GPU P-state | CLOSED — decode clock 0.2% ABOVE prefill | R8 |
+| I10 | Fix A trie persistence | **OPEN — the TTFT pivot target** (49% of real-session uncached tokens = one cold start) | — |
+| I11 | expert precision | **PREMISE FALSE** — experts are ALREADY mxfp4 4-bit at load (`deepseek_v4.py:952`). "6-bit" was a supervisor error in 3 briefs. 3-bit = +4%, inside boot variance. No change | R8 |
+| I12 | serial-vs-batched prefill parity | CLOSED — all six optimizations reachable from the serial driver by construction | R8 |
+| I13 | idle-gap warmup | CANCELLED — only matters if warmup is in the shipping loop | R7 review |
+| I14 | within-boot drift | CANCELLED — measurement artifact | R7 review |
+| I15 | kernel-launch count | BLOCKED — probe vars boot-gated; rides free on the next boot | R8 |
 
-**Reopen triggers:** prefix-keyed cache redesign + SDPA anomaly only if concurrency returns.
+**Key facts established this campaign** (each source- or GPU-verified): async fence IS armed
+(≥98.5%, the 08-22 +58-67% fix holds under MTP-on); verify GPU is 117% busy on real compute —
+no idle gap; removing the entire collective moves wall ≤8.4%; the 06-26 "fence is load-bearing
+for bit-equiv" story was an algebra bug; `FENCE_EVERY_N_LAYERS` HAS a live reader
+(deepseek_v4.py:2959 — R4's "dead" claim was wrong); `EXO_PROFILER=spans` silently re-blocks the
+fence; `ab_probe_tier1.py` is NOT a pass/fail gate.
 
-## OPEN QUESTIONS FEEDING FUTURE ROUNDS
+**Supervisor errors caught by PMs (all in the record):** R1 "never attacked" framing → reproduced
+a retracted artifact; R3 SHA mis-parse of `git submodule status` (hardening); R4 "FENCE is dead"
+(wrong); R7 cited a nonexistent gate; R8 "experts are 6-bit" (wrong, 3 briefs). Process fix:
+charter now mandates grep-the-record before any brief.
 
-- The ~5.0% out-of-bracket decode wall: Ask B attributed only 38.6% (A=17.1%, B=21.5%);
-  61% unattributed -> FINAL round (deleg_fe55c2ab) closes it on any band.
-- Mild prefill depth degradation 426.0 -> 418.6 -> 406.6 t/s (fable: <1% ROI, low priority).
-- Whether anything else in the client serialization path can cost cache (contract now guards it).
+**Measurement reality:** ~6 t/s between-boot decode variance (P13-P15), 1.3 t/s within bracketed
+boots this week; prefill boot-stable to 0.02%. Server `stats.generation_tps` via
+`bench/long_decode_probe.py` (calibrated 29.1@2K, 32.8@89K) is the only trusted decode ruler.
+Never build a new harness — R5 lost a round to one.
+
+---
+
+## NEXT (needs user direction — loop is paused)
+
+Recommended by the R7 review and the supervisor: **pivot to TTFT via Fix A** (prefix-trie
+persistence across relaunch; trie is in-memory only, `builder.py:156`). Latency, not throughput.
+I15's launch count and I12's runtime check ride along on its first boot. RENDEZVOUS_MS 200→0
+(safe, proven) also belongs to the TTFT thread with a paired-boot design.
+
+Alternatives: STOP the loop; or a user-named target.
+
+**Cluster:** healthy on shipped production config (γ=3, BI=1, RV=200, mxfp4 experts, async
+fence armed), both nodes READY, verified 2026-09-04. No probe/diag env leftover. Tree clean,
+everything pushed (exo main @ 5e9717fe7 + this file).
