@@ -129,11 +129,20 @@
 : "${EXO_DSV4_BATCHED_PREFILL:=1}"
 # Rendezvous window: how long the runner waits for additional concurrent
 # tasks after the first one arrives, before kicking off prefill. Adds the
-# same delay to c=1 first-token. 200ms is the empirically-validated default
-# (50ms / 100ms: cross-rank libp2p broadcast jitter caused m4-1 and m4-2
-# to rendezvous on different iterations, so agree_on_tasks gated to the
-# intersection and batched never fired). Set to 0 to disable rendezvous.
-: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=200}"
+# same delay to c=1 first-token. 200ms was the original empirically-validated
+# default (50ms / 100ms: cross-rank libp2p broadcast jitter caused m4-1 and
+# m4-2 to rendezvous on different iterations, so agree_on_tasks gated to the
+# intersection and batched never fired).
+# 2026-09-04: default changed 200 -> 0 after perf-campaign-2 R7/R9/R10.
+# R10's pre-registered residual-latency gate PASSED: pooled short-prompt
+# residual gap = 224.4ms, RV=0 lower, inside the pre-registered [150,250]ms
+# band (R9 showed raw TTFT was confounded by an arm-independent in-prefill
+# compute term; R7 first saw the effect but was inflated by that confound).
+# V4 c>=2 rationale: the window only pays off once 2+ requests can batch
+# together — at concurrency 1 it is pure added latency, hence 0 by default.
+# KEPT (not removed) so multi-request workloads can restore it by setting
+# EXO_BATCHED_PREFILL_RENDEZVOUS_MS=200 in the environment.
+: "${EXO_BATCHED_PREFILL_RENDEZVOUS_MS:=0}"
 # Optional mlx-lm profiler hook. Comma-separated variants:
 #   spans         — per-span wall-time accumulator (was EXO_MINIMAX_TRACE)
 #   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;
