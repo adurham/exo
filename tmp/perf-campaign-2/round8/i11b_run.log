@@ -1,0 +1,85 @@
+[i11b] mlx 0.32.1.dev20260822+e40a416b2 device Device(gpu, 0)
+[i11b] shapes: E=256 hidden=4096 per_rank_inter=1024 top_k=6 M=4
+[i11b] arms=['affine/gs32/b3', 'mxfp4/gs32/b4', 'affine/gs32/b4', 'affine/gs32/b5', 'affine/gs32/b6', 'mxfp8/gs32/b8']
+[i11b] chain_len=300 n_pool=64 reps=5
+[i11b] PROBE mxfp3/gs32/b3: quantize UNSUPPORTED -- ValueError: [quantize] Invalid quantization mode 'mxfp3'.
+[i11b] PROBE mxfp4/gs32/b3: quantize UNSUPPORTED -- ValueError: [quantize] mxfp4 quantization requires bits to be 4 but got 3.
+[i11b] PROBE mxfp5/gs32/b5: quantize UNSUPPORTED -- ValueError: [quantize] Invalid quantization mode 'mxfp5'.
+[i11b] PROBE mxfp6/gs32/b6: quantize UNSUPPORTED -- ValueError: [quantize] Invalid quantization mode 'mxfp6'.
+[i11b] PROBE mxfp4/gs32/b4: SUPPORTED (biases=False scales=mlx.core.uint8)
+[i11b] PROBE mxfp4/gs64/b4: quantize UNSUPPORTED -- ValueError: [quantize] mxfp4 quantization requires group size 32 but got 64.
+[i11b] PROBE mxfp8/gs32/b8: SUPPORTED (biases=False scales=mlx.core.uint8)
+[i11b] PROBE nvfp4/gs16/b4: SUPPORTED (biases=False scales=mlx.core.uint8)
+[i11b] PROBE affine/gs32/b3: SUPPORTED (biases=True scales=mlx.core.bfloat16)
+[i11b] PROBE affine/gs32/b4: SUPPORTED (biases=True scales=mlx.core.bfloat16)
+[i11b] PROBE affine/gs32/b5: SUPPORTED (biases=True scales=mlx.core.bfloat16)
+[i11b] PROBE affine/gs32/b6: SUPPORTED (biases=True scales=mlx.core.bfloat16)
+[i11b] PROBE affine/gs32/b8: SUPPORTED (biases=True scales=mlx.core.bfloat16)
+[i11b] UNSUPPORTED combinations: ['mxfp3/gs32/b3', 'mxfp4/gs32/b3', 'mxfp5/gs32/b5', 'mxfp6/gs32/b6', 'mxfp4/gs64/b4']
+[i11b] empty-graph baseline: 13.65 us/call (range 12.13-19.06)
+[i11b] --- rep 1/5 order=['affine/gs32/b3', 'mxfp4/gs32/b4', 'affine/gs32/b4', 'affine/gs32/b5', 'affine/gs32/b6', 'mxfp8/gs32/b8'] ---
+[i11b]   affine/gs32/b3 bytes/expert(3 projs)=6,291,456 B  bytes/call=150,994,944 B  biases=True
+[i11b]   affine/gs32/b3 scaling chain_len=100 us/call=338.57
+[i11b]   affine/gs32/b3 scaling chain_len=200 us/call=338.26
+[i11b]   affine/gs32/b3 scaling chain_len=300 us/call=338.48
+[i11b]   affine/gs32/b3 raw=339.46 us/call net=325.81 us/call gpu=0.19875399768352509->0.19875399768352509
+[i11b]   mxfp4/gs32/b4 bytes/expert(3 projs)=6,684,672 B  bytes/call=160,432,128 B  biases=False
+[i11b]   mxfp4/gs32/b4 scaling chain_len=100 us/call=349.68
+[i11b]   mxfp4/gs32/b4 scaling chain_len=200 us/call=349.32
+[i11b]   mxfp4/gs32/b4 scaling chain_len=300 us/call=349.49
+[i11b]   mxfp4/gs32/b4 raw=353.07 us/call net=339.42 us/call gpu=0.9913040399551392->0.9913040399551392
+[i11b]   affine/gs32/b4 bytes/expert(3 projs)=7,864,320 B  bytes/call=188,743,680 B  biases=True
+[i11b]   affine/gs32/b4 scaling chain_len=100 us/call=404.60
+[i11b]   affine/gs32/b4 scaling chain_len=200 us/call=402.42
+[i11b]   affine/gs32/b4 scaling chain_len=300 us/call=401.32
+[i11b]   affine/gs32/b4 raw=403.94 us/call net=390.29 us/call gpu=0.9765729904174805->0.9765729904174805
+[i11b]   affine/gs32/b5 bytes/expert(3 projs)=9,437,184 B  bytes/call=226,492,416 B  biases=True
+[i11b]   affine/gs32/b5 scaling chain_len=100 us/call=482.53
+[i11b]   affine/gs32/b5 scaling chain_len=200 us/call=481.44
+[i11b]   affine/gs32/b5 scaling chain_len=300 us/call=480.57
+[i11b]   affine/gs32/b5 raw=482.75 us/call net=469.10 us/call gpu=0.9942622184753418->0.9942622184753418
+[i11b]   affine/gs32/b6 bytes/expert(3 projs)=11,010,048 B  bytes/call=264,241,152 B  biases=True
+[i11b]   affine/gs32/b6 scaling chain_len=100 us/call=553.76
+[i11b]   affine/gs32/b6 scaling chain_len=200 us/call=553.93
+[i11b]   affine/gs32/b6 scaling chain_len=300 us/call=552.90
+[i11b]   affine/gs32/b6 raw=556.39 us/call net=542.73 us/call gpu=0.9948601722717285->0.9948601722717285
+[i11b]   mxfp8/gs32/b8 bytes/expert(3 projs)=12,976,128 B  bytes/call=311,427,072 B  biases=False
+[i11b]   mxfp8/gs32/b8 scaling chain_len=100 us/call=652.07
+[i11b]   mxfp8/gs32/b8 scaling chain_len=200 us/call=650.98
+[i11b]   mxfp8/gs32/b8 scaling chain_len=300 us/call=651.84
+[i11b]   mxfp8/gs32/b8 raw=655.09 us/call net=641.43 us/call gpu=0.9812353253364563->0.9812353253364563
+[i11b] --- rep 2/5 order=['affine/gs32/b3', 'mxfp8/gs32/b8', 'affine/gs32/b6', 'affine/gs32/b5', 'affine/gs32/b4', 'mxfp4/gs32/b4'] ---
+[i11b]   affine/gs32/b3 raw=340.79 us/call net=327.14 us/call gpu=0.9787639379501343->0.9787639379501343
+[i11b]   mxfp8/gs32/b8 raw=672.31 us/call net=658.66 us/call gpu=0.9904621839523315->0.9904621839523315
+[i11b]   affine/gs32/b6 raw=560.67 us/call net=547.02 us/call gpu=0.9825707674026489->0.9825707674026489
+[i11b]   affine/gs32/b5 raw=484.63 us/call net=470.98 us/call gpu=0.9875742197036743->0.9875742197036743
+[i11b]   affine/gs32/b4 raw=405.37 us/call net=391.71 us/call gpu=0.9875742197036743->0.9872643351554871
+[i11b]   mxfp4/gs32/b4 raw=353.20 us/call net=339.55 us/call gpu=0.9872643351554871->0.9872643351554871
+[i11b] --- rep 3/5 order=['affine/gs32/b4', 'affine/gs32/b5', 'affine/gs32/b6', 'mxfp8/gs32/b8', 'affine/gs32/b3', 'mxfp4/gs32/b4'] ---
+[i11b]   affine/gs32/b4 raw=405.27 us/call net=391.62 us/call gpu=0.9802701473236084->0.9802701473236084
+[i11b]   affine/gs32/b5 raw=482.76 us/call net=469.11 us/call gpu=0.9974401593208313->0.9974401593208313
+[i11b]   affine/gs32/b6 raw=555.10 us/call net=541.45 us/call gpu=0.9974401593208313->0.9920942187309265
+[i11b]   mxfp8/gs32/b8 raw=651.22 us/call net=637.57 us/call gpu=0.9920942187309265->0.9920942187309265
+[i11b]   affine/gs32/b3 raw=339.47 us/call net=325.82 us/call gpu=0.9663643836975098->0.9663643836975098
+[i11b]   mxfp4/gs32/b4 raw=352.28 us/call net=338.63 us/call gpu=0.9910396337509155->0.9910396337509155
+[i11b] --- rep 4/5 order=['affine/gs32/b4', 'mxfp4/gs32/b4', 'affine/gs32/b3', 'mxfp8/gs32/b8', 'affine/gs32/b6', 'affine/gs32/b5'] ---
+[i11b]   affine/gs32/b4 raw=402.97 us/call net=389.31 us/call gpu=0.9910396337509155->0.9910396337509155
+[i11b]   mxfp4/gs32/b4 raw=352.48 us/call net=338.82 us/call gpu=0.9741998314857483->0.9741998314857483
+[i11b]   affine/gs32/b3 raw=339.46 us/call net=325.81 us/call gpu=0.9820265173912048->0.9820265173912048
+[i11b]   mxfp8/gs32/b8 raw=655.00 us/call net=641.35 us/call gpu=0.9820265173912048->0.9820265173912048
+[i11b]   affine/gs32/b6 raw=553.98 us/call net=540.33 us/call gpu=0.9706659913063049->0.9706659913063049
+[i11b]   affine/gs32/b5 raw=482.22 us/call net=468.57 us/call gpu=0.9865293502807617->0.9865293502807617
+[i11b] --- rep 5/5 order=['affine/gs32/b6', 'mxfp8/gs32/b8', 'affine/gs32/b3', 'mxfp4/gs32/b4', 'affine/gs32/b4', 'affine/gs32/b5'] ---
+[i11b]   affine/gs32/b6 raw=556.55 us/call net=542.90 us/call gpu=0.9839684963226318->0.9839684963226318
+[i11b]   mxfp8/gs32/b8 raw=654.44 us/call net=640.79 us/call gpu=0.9779710173606873->0.9779710173606873
+[i11b]   affine/gs32/b3 raw=341.41 us/call net=327.76 us/call gpu=0.9665517210960388->0.9665517210960388
+[i11b]   mxfp4/gs32/b4 raw=354.13 us/call net=340.48 us/call gpu=0.9665517210960388->0.9907609224319458
+[i11b]   affine/gs32/b4 raw=406.19 us/call net=392.54 us/call gpu=0.9907609224319458->0.9907609224319458
+[i11b]   affine/gs32/b5 raw=484.60 us/call net=470.94 us/call gpu=0.983830988407135->0.983830988407135
+[i11b] RESULT affine/gs32/b3: net 325.81-327.76 us/call (median 325.82), 463.4 GB/s (84.9% of 546.0), ratio_vs_deployed=0.9599 byte_ratio=0.9412 band=FAST
+[i11b] RESULT mxfp4/gs32/b4: net 338.63-340.48 us/call (median 339.42), 472.7 GB/s (86.6% of 546.0), ratio_vs_deployed=1.0000 byte_ratio=1.0000 band=reference
+[i11b] RESULT affine/gs32/b4: net 389.31-392.54 us/call (median 391.62), 482.0 GB/s (88.3% of 546.0), ratio_vs_deployed=1.1538 byte_ratio=1.1765 band=UPWARD (costs more)
+[i11b] RESULT affine/gs32/b5: net 468.57-470.98 us/call (median 469.11), 482.8 GB/s (88.4% of 546.0), ratio_vs_deployed=1.3821 byte_ratio=1.4118 band=UPWARD (costs more)
+[i11b] RESULT affine/gs32/b6: net 540.33-547.02 us/call (median 542.73), 486.9 GB/s (89.2% of 546.0), ratio_vs_deployed=1.5990 byte_ratio=1.6471 band=UPWARD (costs more)
+[i11b] RESULT mxfp8/gs32/b8: net 637.57-658.66 us/call (median 641.35), 485.6 GB/s (88.9% of 546.0), ratio_vs_deployed=1.8895 byte_ratio=1.9412 band=UPWARD (costs more)
+[i11b] wrote /tmp/i11b_results.json

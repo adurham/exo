@@ -1,0 +1,1192 @@
+{
+  "mlx_version": "0.32.1.dev20260822+e40a416b2",
+  "chain_len": 300,
+  "n_pool": 64,
+  "reps": 5,
+  "M_rows": 4,
+  "top_k": 6,
+  "n_pairs_per_call": 24,
+  "deployed_arm": "mxfp4/gs32/b4",
+  "arms_requested": [
+    "affine/gs32/b3",
+    "mxfp4/gs32/b4",
+    "affine/gs32/b4",
+    "affine/gs32/b5",
+    "affine/gs32/b6",
+    "mxfp8/gs32/b8"
+  ],
+  "shapes": {
+    "hidden": 4096,
+    "per_rank_inter": 1024,
+    "n_routed_experts": 256,
+    "tp": 2
+  },
+  "gpu_usage_before": 0.02800033986568451,
+  "support_probe": {
+    "mxfp3/gs32/b3": {
+      "mode": "mxfp3",
+      "group_size": 32,
+      "bits": 3,
+      "quantize": "UNSUPPORTED",
+      "error": "ValueError: [quantize] Invalid quantization mode 'mxfp3'."
+    },
+    "mxfp4/gs32/b3": {
+      "mode": "mxfp4",
+      "group_size": 32,
+      "bits": 3,
+      "quantize": "UNSUPPORTED",
+      "error": "ValueError: [quantize] mxfp4 quantization requires bits to be 4 but got 3."
+    },
+    "mxfp5/gs32/b5": {
+      "mode": "mxfp5",
+      "group_size": 32,
+      "bits": 5,
+      "quantize": "UNSUPPORTED",
+      "error": "ValueError: [quantize] Invalid quantization mode 'mxfp5'."
+    },
+    "mxfp6/gs32/b6": {
+      "mode": "mxfp6",
+      "group_size": 32,
+      "bits": 6,
+      "quantize": "UNSUPPORTED",
+      "error": "ValueError: [quantize] Invalid quantization mode 'mxfp6'."
+    },
+    "mxfp4/gs32/b4": {
+      "mode": "mxfp4",
+      "group_size": 32,
+      "bits": 4,
+      "quantize": "OK",
+      "has_biases": false,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.uint8",
+      "weight_shape": [
+        4,
+        64,
+        64
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "mxfp4/gs64/b4": {
+      "mode": "mxfp4",
+      "group_size": 64,
+      "bits": 4,
+      "quantize": "UNSUPPORTED",
+      "error": "ValueError: [quantize] mxfp4 quantization requires group size 32 but got 64."
+    },
+    "mxfp8/gs32/b8": {
+      "mode": "mxfp8",
+      "group_size": 32,
+      "bits": 8,
+      "quantize": "OK",
+      "has_biases": false,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.uint8",
+      "weight_shape": [
+        4,
+        64,
+        128
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "nvfp4/gs16/b4": {
+      "mode": "nvfp4",
+      "group_size": 16,
+      "bits": 4,
+      "quantize": "OK",
+      "has_biases": false,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.uint8",
+      "weight_shape": [
+        4,
+        64,
+        64
+      ],
+      "scales_shape": [
+        4,
+        64,
+        32
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "affine/gs32/b3": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 3,
+      "quantize": "OK",
+      "has_biases": true,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.bfloat16",
+      "weight_shape": [
+        4,
+        64,
+        48
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "affine/gs32/b4": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 4,
+      "quantize": "OK",
+      "has_biases": true,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.bfloat16",
+      "weight_shape": [
+        4,
+        64,
+        64
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "affine/gs32/b5": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 5,
+      "quantize": "OK",
+      "has_biases": true,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.bfloat16",
+      "weight_shape": [
+        4,
+        64,
+        80
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "affine/gs32/b6": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 6,
+      "quantize": "OK",
+      "has_biases": true,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.bfloat16",
+      "weight_shape": [
+        4,
+        64,
+        96
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    },
+    "affine/gs32/b8": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 8,
+      "quantize": "OK",
+      "has_biases": true,
+      "weight_dtype": "mlx.core.uint32",
+      "scales_dtype": "mlx.core.bfloat16",
+      "weight_shape": [
+        4,
+        64,
+        128
+      ],
+      "scales_shape": [
+        4,
+        64,
+        16
+      ],
+      "gather_qmm": "OK",
+      "supported": true
+    }
+  },
+  "arms": {
+    "affine/gs32/b3": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 3,
+      "is_mx_mode": false,
+      "bytes": {
+        "bytes_per_expert_all3_projs": 6291456.0,
+        "bytes_per_call": 150994944.0,
+        "has_biases": true,
+        "arrays": {
+          "gate": {
+            "weight_shape": [
+              256,
+              1024,
+              384
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 402653184,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "up": {
+            "weight_shape": [
+              256,
+              1024,
+              384
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 402653184,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "down": {
+            "weight_shape": [
+              256,
+              4096,
+              96
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 402653184,
+            "scales_shape": [
+              256,
+              4096,
+              32
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          }
+        }
+      },
+      "raw_us_per_call": {
+        "min": 339.462220047911,
+        "median": 339.4705569371581,
+        "max": 341.40958334319293,
+        "samples": [
+          339.462220047911,
+          339.4644435805579,
+          339.4705569371581,
+          340.791386552155,
+          341.40958334319293
+        ]
+      },
+      "net_us_per_call": {
+        "min": 325.8090268354863,
+        "median": 325.8173637247334,
+        "max": 327.75639013076824,
+        "samples": [
+          325.8090268354863,
+          325.8112503681332,
+          325.8173637247334,
+          327.1381933397303,
+          327.75639013076824
+        ]
+      },
+      "gbps": {
+        "at_median": 463.4343064894724,
+        "at_min_us": 463.4461649714919,
+        "at_max_us": 460.69260141581384
+      },
+      "pct_peak_at_median": 84.87807811162499,
+      "gpu_usage_observed": {
+        "min": 0.19875399768352509,
+        "max": 0.9820265173912048
+      },
+      "per_rep": [
+        {
+          "raw_us": 339.4644435805579,
+          "net_us": 325.8112503681332,
+          "gpu_before": 0.19875399768352509,
+          "gpu_after": 0.19875399768352509
+        },
+        {
+          "raw_us": 340.791386552155,
+          "net_us": 327.1381933397303,
+          "gpu_before": 0.9787639379501343,
+          "gpu_after": 0.9787639379501343
+        },
+        {
+          "raw_us": 339.4705569371581,
+          "net_us": 325.8173637247334,
+          "gpu_before": 0.9663643836975098,
+          "gpu_after": 0.9663643836975098
+        },
+        {
+          "raw_us": 339.462220047911,
+          "net_us": 325.8090268354863,
+          "gpu_before": 0.9820265173912048,
+          "gpu_after": 0.9820265173912048
+        },
+        {
+          "raw_us": 341.40958334319293,
+          "net_us": 327.75639013076824,
+          "gpu_before": 0.9665517210960388,
+          "gpu_after": 0.9665517210960388
+        }
+      ],
+      "ratio_vs_deployed_mxfp4_net": 0.9599199497657128,
+      "byte_ratio_vs_deployed_mxfp4": 0.9411764705882353,
+      "time_over_byte_ratio": 1.01991494662607,
+      "band": "FAST"
+    },
+    "mxfp4/gs32/b4": {
+      "mode": "mxfp4",
+      "group_size": 32,
+      "bits": 4,
+      "is_mx_mode": true,
+      "bytes": {
+        "bytes_per_expert_all3_projs": 6684672.0,
+        "bytes_per_call": 160432128.0,
+        "has_biases": false,
+        "arrays": {
+          "gate": {
+            "weight_shape": [
+              256,
+              1024,
+              512
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 536870912,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.uint8",
+            "scales_nbytes": 33554432,
+            "biases_nbytes": null
+          },
+          "up": {
+            "weight_shape": [
+              256,
+              1024,
+              512
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 536870912,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.uint8",
+            "scales_nbytes": 33554432,
+            "biases_nbytes": null
+          },
+          "down": {
+            "weight_shape": [
+              256,
+              4096,
+              128
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 536870912,
+            "scales_shape": [
+              256,
+              4096,
+              32
+            ],
+            "scales_dtype": "mlx.core.uint8",
+            "scales_nbytes": 33554432,
+            "biases_nbytes": null
+          }
+        }
+      },
+      "raw_us_per_call": {
+        "min": 352.2806932839255,
+        "median": 353.0745833025624,
+        "max": 354.1334702943762,
+        "samples": [
+          352.2806932839255,
+          352.47708321549,
+          353.0745833025624,
+          353.2045835163444,
+          354.1334702943762
+        ]
+      },
+      "net_us_per_call": {
+        "min": 338.6275000715008,
+        "median": 339.4213900901377,
+        "max": 340.4802770819515,
+        "samples": [
+          338.6275000715008,
+          338.8238900030653,
+          339.4213900901377,
+          339.55139030391973,
+          340.4802770819515
+        ]
+      },
+      "gbps": {
+        "at_median": 472.66357596789993,
+        "at_min_us": 473.77170479693757,
+        "at_max_us": 471.1936015059838
+      },
+      "pct_peak_at_median": 86.56842050694138,
+      "gpu_usage_observed": {
+        "min": 0.9665517210960388,
+        "max": 0.9913040399551392
+      },
+      "per_rep": [
+        {
+          "raw_us": 353.0745833025624,
+          "net_us": 339.4213900901377,
+          "gpu_before": 0.9913040399551392,
+          "gpu_after": 0.9913040399551392
+        },
+        {
+          "raw_us": 353.2045835163444,
+          "net_us": 339.55139030391973,
+          "gpu_before": 0.9872643351554871,
+          "gpu_after": 0.9872643351554871
+        },
+        {
+          "raw_us": 352.2806932839255,
+          "net_us": 338.6275000715008,
+          "gpu_before": 0.9910396337509155,
+          "gpu_after": 0.9910396337509155
+        },
+        {
+          "raw_us": 352.47708321549,
+          "net_us": 338.8238900030653,
+          "gpu_before": 0.9741998314857483,
+          "gpu_after": 0.9741998314857483
+        },
+        {
+          "raw_us": 354.1334702943762,
+          "net_us": 340.4802770819515,
+          "gpu_before": 0.9665517210960388,
+          "gpu_after": 0.9907609224319458
+        }
+      ],
+      "ratio_vs_deployed_mxfp4_net": 1.0,
+      "byte_ratio_vs_deployed_mxfp4": 1.0,
+      "time_over_byte_ratio": 1.0,
+      "band": "reference"
+    },
+    "affine/gs32/b4": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 4,
+      "is_mx_mode": false,
+      "bytes": {
+        "bytes_per_expert_all3_projs": 7864320.0,
+        "bytes_per_call": 188743680.0,
+        "has_biases": true,
+        "arrays": {
+          "gate": {
+            "weight_shape": [
+              256,
+              1024,
+              512
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 536870912,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "up": {
+            "weight_shape": [
+              256,
+              1024,
+              512
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 536870912,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "down": {
+            "weight_shape": [
+              256,
+              4096,
+              128
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 536870912,
+            "scales_shape": [
+              256,
+              4096,
+              32
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          }
+        }
+      },
+      "raw_us_per_call": {
+        "min": 402.96777655991417,
+        "median": 405.2712500561029,
+        "max": 406.19291675587493,
+        "samples": [
+          402.96777655991417,
+          403.9416663969556,
+          405.2712500561029,
+          405.36527677128714,
+          406.19291675587493
+        ]
+      },
+      "net_us_per_call": {
+        "min": 389.3145833474895,
+        "median": 391.6180568436782,
+        "max": 392.53972354345024,
+        "samples": [
+          389.3145833474895,
+          390.2884731845309,
+          391.6180568436782,
+          391.71208355886245,
+          392.53972354345024
+        ]
+      },
+      "gbps": {
+        "at_median": 481.9585734151698,
+        "at_min_us": 484.8101973912793,
+        "at_max_us": 480.82695503072557
+      },
+      "pct_peak_at_median": 88.27080099178934,
+      "gpu_usage_observed": {
+        "min": 0.9765729904174805,
+        "max": 0.9910396337509155
+      },
+      "per_rep": [
+        {
+          "raw_us": 403.9416663969556,
+          "net_us": 390.2884731845309,
+          "gpu_before": 0.9765729904174805,
+          "gpu_after": 0.9765729904174805
+        },
+        {
+          "raw_us": 405.36527677128714,
+          "net_us": 391.71208355886245,
+          "gpu_before": 0.9875742197036743,
+          "gpu_after": 0.9872643351554871
+        },
+        {
+          "raw_us": 405.2712500561029,
+          "net_us": 391.6180568436782,
+          "gpu_before": 0.9802701473236084,
+          "gpu_after": 0.9802701473236084
+        },
+        {
+          "raw_us": 402.96777655991417,
+          "net_us": 389.3145833474895,
+          "gpu_before": 0.9910396337509155,
+          "gpu_after": 0.9910396337509155
+        },
+        {
+          "raw_us": 406.19291675587493,
+          "net_us": 392.53972354345024,
+          "gpu_before": 0.9907609224319458,
+          "gpu_after": 0.9907609224319458
+        }
+      ],
+      "ratio_vs_deployed_mxfp4_net": 1.1537813121903688,
+      "byte_ratio_vs_deployed_mxfp4": 1.1764705882352942,
+      "time_over_byte_ratio": 0.9807141153618135,
+      "band": "UPWARD (costs more)"
+    },
+    "affine/gs32/b5": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 5,
+      "is_mx_mode": false,
+      "bytes": {
+        "bytes_per_expert_all3_projs": 9437184.0,
+        "bytes_per_call": 226492416.0,
+        "has_biases": true,
+        "arrays": {
+          "gate": {
+            "weight_shape": [
+              256,
+              1024,
+              640
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 671088640,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "up": {
+            "weight_shape": [
+              256,
+              1024,
+              640
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 671088640,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "down": {
+            "weight_shape": [
+              256,
+              4096,
+              160
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 671088640,
+            "scales_shape": [
+              256,
+              4096,
+              32
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          }
+        }
+      },
+      "raw_us_per_call": {
+        "min": 482.2188899076233,
+        "median": 482.76305315084755,
+        "max": 484.63458350549143,
+        "samples": [
+          482.2188899076233,
+          482.75319665359956,
+          482.76305315084755,
+          484.59569341503084,
+          484.63458350549143
+        ]
+      },
+      "net_us_per_call": {
+        "min": 468.5656966951986,
+        "median": 469.10985993842286,
+        "max": 470.98139029306674,
+        "samples": [
+          468.5656966951986,
+          469.10000344117486,
+          469.10985993842286,
+          470.94250020260614,
+          470.98139029306674
+        ]
+      },
+      "gbps": {
+        "at_median": 482.81316455324617,
+        "at_min_us": 483.37387392516064,
+        "at_max_us": 480.89461848814403
+      },
+      "pct_peak_at_median": 88.42731951524655,
+      "gpu_usage_observed": {
+        "min": 0.983830988407135,
+        "max": 0.9974401593208313
+      },
+      "per_rep": [
+        {
+          "raw_us": 482.75319665359956,
+          "net_us": 469.10000344117486,
+          "gpu_before": 0.9942622184753418,
+          "gpu_after": 0.9942622184753418
+        },
+        {
+          "raw_us": 484.63458350549143,
+          "net_us": 470.98139029306674,
+          "gpu_before": 0.9875742197036743,
+          "gpu_after": 0.9875742197036743
+        },
+        {
+          "raw_us": 482.76305315084755,
+          "net_us": 469.10985993842286,
+          "gpu_before": 0.9974401593208313,
+          "gpu_after": 0.9974401593208313
+        },
+        {
+          "raw_us": 482.2188899076233,
+          "net_us": 468.5656966951986,
+          "gpu_before": 0.9865293502807617,
+          "gpu_after": 0.9865293502807617
+        },
+        {
+          "raw_us": 484.59569341503084,
+          "net_us": 470.94250020260614,
+          "gpu_before": 0.983830988407135,
+          "gpu_after": 0.983830988407135
+        }
+      ],
+      "ratio_vs_deployed_mxfp4_net": 1.382086909177541,
+      "byte_ratio_vs_deployed_mxfp4": 1.411764705882353,
+      "time_over_byte_ratio": 0.9789782273340915,
+      "band": "UPWARD (costs more)"
+    },
+    "affine/gs32/b6": {
+      "mode": "affine",
+      "group_size": 32,
+      "bits": 6,
+      "is_mx_mode": false,
+      "bytes": {
+        "bytes_per_expert_all3_projs": 11010048.0,
+        "bytes_per_call": 264241152.0,
+        "has_biases": true,
+        "arrays": {
+          "gate": {
+            "weight_shape": [
+              256,
+              1024,
+              768
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 805306368,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "up": {
+            "weight_shape": [
+              256,
+              1024,
+              768
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 805306368,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          },
+          "down": {
+            "weight_shape": [
+              256,
+              4096,
+              192
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 805306368,
+            "scales_shape": [
+              256,
+              4096,
+              32
+            ],
+            "scales_dtype": "mlx.core.bfloat16",
+            "scales_nbytes": 67108864,
+            "biases_nbytes": 67108864
+          }
+        }
+      },
+      "raw_us_per_call": {
+        "min": 553.9798635678986,
+        "median": 556.3880565265815,
+        "max": 560.6725000931572,
+        "samples": [
+          553.9798635678986,
+          555.1020832111438,
+          556.3880565265815,
+          556.5495831736674,
+          560.6725000931572
+        ]
+      },
+      "net_us_per_call": {
+        "min": 540.3266703554739,
+        "median": 542.7348633141568,
+        "max": 547.0193068807324,
+        "samples": [
+          540.3266703554739,
+          541.4488899987191,
+          542.7348633141568,
+          542.8963899612427,
+          547.0193068807324
+        ]
+      },
+      "gbps": {
+        "at_median": 486.8696851100325,
+        "at_min_us": 489.03962454076014,
+        "at_max_us": 483.05635409247634
+      },
+      "pct_peak_at_median": 89.17027199817446,
+      "gpu_usage_observed": {
+        "min": 0.9706659913063049,
+        "max": 0.9974401593208313
+      },
+      "per_rep": [
+        {
+          "raw_us": 556.3880565265815,
+          "net_us": 542.7348633141568,
+          "gpu_before": 0.9948601722717285,
+          "gpu_after": 0.9948601722717285
+        },
+        {
+          "raw_us": 560.6725000931572,
+          "net_us": 547.0193068807324,
+          "gpu_before": 0.9825707674026489,
+          "gpu_after": 0.9825707674026489
+        },
+        {
+          "raw_us": 555.1020832111438,
+          "net_us": 541.4488899987191,
+          "gpu_before": 0.9974401593208313,
+          "gpu_after": 0.9920942187309265
+        },
+        {
+          "raw_us": 553.9798635678986,
+          "net_us": 540.3266703554739,
+          "gpu_before": 0.9706659913063049,
+          "gpu_after": 0.9706659913063049
+        },
+        {
+          "raw_us": 556.5495831736674,
+          "net_us": 542.8963899612427,
+          "gpu_before": 0.9839684963226318,
+          "gpu_after": 0.9839684963226318
+        }
+      ],
+      "ratio_vs_deployed_mxfp4_net": 1.5990001784213614,
+      "byte_ratio_vs_deployed_mxfp4": 1.6470588235294117,
+      "time_over_byte_ratio": 0.9708215368986838,
+      "band": "UPWARD (costs more)"
+    },
+    "mxfp8/gs32/b8": {
+      "mode": "mxfp8",
+      "group_size": 32,
+      "bits": 8,
+      "is_mx_mode": true,
+      "bytes": {
+        "bytes_per_expert_all3_projs": 12976128.0,
+        "bytes_per_call": 311427072.0,
+        "has_biases": false,
+        "arrays": {
+          "gate": {
+            "weight_shape": [
+              256,
+              1024,
+              1024
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 1073741824,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.uint8",
+            "scales_nbytes": 33554432,
+            "biases_nbytes": null
+          },
+          "up": {
+            "weight_shape": [
+              256,
+              1024,
+              1024
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 1073741824,
+            "scales_shape": [
+              256,
+              1024,
+              128
+            ],
+            "scales_dtype": "mlx.core.uint8",
+            "scales_nbytes": 33554432,
+            "biases_nbytes": null
+          },
+          "down": {
+            "weight_shape": [
+              256,
+              4096,
+              256
+            ],
+            "weight_dtype": "mlx.core.uint32",
+            "weight_nbytes": 1073741824,
+            "scales_shape": [
+              256,
+              4096,
+              32
+            ],
+            "scales_dtype": "mlx.core.uint8",
+            "scales_nbytes": 33554432,
+            "biases_nbytes": null
+          }
+        }
+      },
+      "raw_us_per_call": {
+        "min": 651.2202764861286,
+        "median": 655.0012501732756,
+        "max": 672.3105531030645,
+        "samples": [
+          651.2202764861286,
+          654.4409731092552,
+          655.0012501732756,
+          655.085276812315,
+          672.3105531030645
+        ]
+      },
+      "net_us_per_call": {
+        "min": 637.5670832737038,
+        "median": 641.3480569608508,
+        "max": 658.6573598906398,
+        "samples": [
+          637.5670832737038,
+          640.7877798968304,
+          641.3480569608508,
+          641.4320835998902,
+          658.6573598906398
+        ]
+      },
+      "gbps": {
+        "at_median": 485.58199969569745,
+        "at_min_us": 488.4616539500773,
+        "at_max_us": 472.8210613963348
+      },
+      "pct_peak_at_median": 88.93443217869917,
+      "gpu_usage_observed": {
+        "min": 0.9779710173606873,
+        "max": 0.9920942187309265
+      },
+      "per_rep": [
+        {
+          "raw_us": 655.085276812315,
+          "net_us": 641.4320835998902,
+          "gpu_before": 0.9812353253364563,
+          "gpu_after": 0.9812353253364563
+        },
+        {
+          "raw_us": 672.3105531030645,
+          "net_us": 658.6573598906398,
+          "gpu_before": 0.9904621839523315,
+          "gpu_after": 0.9904621839523315
+        },
+        {
+          "raw_us": 651.2202764861286,
+          "net_us": 637.5670832737038,
+          "gpu_before": 0.9920942187309265,
+          "gpu_after": 0.9920942187309265
+        },
+        {
+          "raw_us": 655.0012501732756,
+          "net_us": 641.3480569608508,
+          "gpu_before": 0.9820265173912048,
+          "gpu_after": 0.9820265173912048
+        },
+        {
+          "raw_us": 654.4409731092552,
+          "net_us": 640.7877798968304,
+          "gpu_before": 0.9779710173606873,
+          "gpu_after": 0.9779710173606873
+        }
+      ],
+      "ratio_vs_deployed_mxfp4_net": 1.8895334109336261,
+      "byte_ratio_vs_deployed_mxfp4": 1.9411764705882353,
+      "time_over_byte_ratio": 0.9733959995718681,
+      "band": "UPWARD (costs more)"
+    }
+  },
+  "rep_order": [
+    [
+      "affine/gs32/b3",
+      "mxfp4/gs32/b4",
+      "affine/gs32/b4",
+      "affine/gs32/b5",
+      "affine/gs32/b6",
+      "mxfp8/gs32/b8"
+    ],
+    [
+      "affine/gs32/b3",
+      "mxfp8/gs32/b8",
+      "affine/gs32/b6",
+      "affine/gs32/b5",
+      "affine/gs32/b4",
+      "mxfp4/gs32/b4"
+    ],
+    [
+      "affine/gs32/b4",
+      "affine/gs32/b5",
+      "affine/gs32/b6",
+      "mxfp8/gs32/b8",
+      "affine/gs32/b3",
+      "mxfp4/gs32/b4"
+    ],
+    [
+      "affine/gs32/b4",
+      "mxfp4/gs32/b4",
+      "affine/gs32/b3",
+      "mxfp8/gs32/b8",
+      "affine/gs32/b6",
+      "affine/gs32/b5"
+    ],
+    [
+      "affine/gs32/b6",
+      "mxfp8/gs32/b8",
+      "affine/gs32/b3",
+      "mxfp4/gs32/b4",
+      "affine/gs32/b4",
+      "affine/gs32/b5"
+    ]
+  ],
+  "unsupported": [
+    "mxfp3/gs32/b3",
+    "mxfp4/gs32/b3",
+    "mxfp5/gs32/b5",
+    "mxfp6/gs32/b6",
+    "mxfp4/gs64/b4"
+  ],
+  "arms_benched": [
+    "affine/gs32/b3",
+    "mxfp4/gs32/b4",
+    "affine/gs32/b4",
+    "affine/gs32/b5",
+    "affine/gs32/b6",
+    "mxfp8/gs32/b8"
+  ],
+  "baseline_us_per_call": {
+    "median": 13.653193212424716,
+    "min": 12.132776513074836,
+    "max": 19.060693060358364,
+    "samples": [
+      19.060693060358364,
+      18.995556359489758,
+      13.653193212424716,
+      12.146526714786887,
+      12.132776513074836
+    ]
+  },
+  "gpu_usage_after": 0.983830988407135,
+  "scaling_check": {
+    "affine/gs32/b3": {
+      "100": {
+        "wall_s": 0.03385745803825557,
+        "us_per_call": 338.5745803825557
+      },
+      "200": {
+        "wall_s": 0.06765112490393221,
+        "us_per_call": 338.25562451966107
+      },
+      "300": {
+        "wall_s": 0.10154379205778241,
+        "us_per_call": 338.4793068592747
+      }
+    },
+    "mxfp4/gs32/b4": {
+      "100": {
+        "wall_s": 0.03496808290947229,
+        "us_per_call": 349.68082909472287
+      },
+      "200": {
+        "wall_s": 0.06986329203937203,
+        "us_per_call": 349.31646019686013
+      },
+      "300": {
+        "wall_s": 0.10484704189002514,
+        "us_per_call": 349.49013963341713
+      }
+    },
+    "affine/gs32/b4": {
+      "100": {
+        "wall_s": 0.040460041956976056,
+        "us_per_call": 404.60041956976056
+      },
+      "200": {
+        "wall_s": 0.08048479200806469,
+        "us_per_call": 402.42396004032344
+      },
+      "300": {
+        "wall_s": 0.12039533304050565,
+        "us_per_call": 401.31777680168545
+      }
+    },
+    "affine/gs32/b5": {
+      "100": {
+        "wall_s": 0.04825324995908886,
+        "us_per_call": 482.5324995908886
+      },
+      "200": {
+        "wall_s": 0.09628841700032353,
+        "us_per_call": 481.44208500161767
+      },
+      "300": {
+        "wall_s": 0.14417079207487404,
+        "us_per_call": 480.56930691624683
+      }
+    },
+    "affine/gs32/b6": {
+      "100": {
+        "wall_s": 0.05537566600833088,
+        "us_per_call": 553.7566600833088
+      },
+      "200": {
+        "wall_s": 0.11078654089942575,
+        "us_per_call": 553.9327044971287
+      },
+      "300": {
+        "wall_s": 0.1658693749923259,
+        "us_per_call": 552.8979166410863
+      }
+    },
+    "mxfp8/gs32/b8": {
+      "100": {
+        "wall_s": 0.06520679197274148,
+        "us_per_call": 652.0679197274148
+      },
+      "200": {
+        "wall_s": 0.13019579206593335,
+        "us_per_call": 650.9789603296667
+      },
+      "300": {
+        "wall_s": 0.1955516670132056,
+        "us_per_call": 651.8388900440186
+      }
+    }
+  }
+}
