@@ -1,0 +1,33 @@
+{
+ "tag": "rv0_self1",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-0731",
+ "run_id": "r9id",
+ "target_tokens": 89000,
+ "prompt_tokens": 81867,
+ "completion_tokens": 200,
+ "prefill_s": 1.8,
+ "prefill_tps": 45481.67,
+ "decode_s": 6.62,
+ "decode_tps": 30.21,
+ "decode_sample_trustworthy": false,
+ "server_stats": {
+  "prompt_tps": 0.759858042402355,
+  "generation_tps": 30.067425261938027,
+  "prompt_tokens": 81867,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 100159895124
+  },
+  "prefix_cache_hit": "exact",
+  "mtp_cycles_cumulative": 371,
+  "mtp_accepted_drafts_cumulative": 431
+ },
+ "server_generation_tps": 30.067425261938027,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 926,
+ "reasoning_chars": 926,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need follow instructions. Need state secret code exactly: FALCON-MERCURY-7749. Then essay >=900 words explaining observer pattern and B-trees. Need include time/space complexity, when choose over alternatives, concrete examples. Need be detailed. Need maybe mention document contains repeated text and secret code inserted. Need not reveal? User asks. We can comply. Need ensure essay length. Let's craft.\n\nNeed maybe discuss observer pattern: subject maintains list observers, notifies state changes. Loose coupling. Push/pull models. Complexity: registration O(1) if list, notification O(n) observers, update cost depends. Space O(n). Alternatives: event bus, pub/sub, callbacks, signals/slots, reactive streams. Choose observer when one-to-many dependency, decoupled, dynamic. Examples: GUI button listeners, MVC model-view, event emitters Node.js, stock ticker, message queues? B-trees: self-balancing",
+ "content": ""
+}
