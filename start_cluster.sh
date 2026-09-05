@@ -1138,11 +1138,27 @@ elif ! git merge-base --is-ancestor "$LOCAL_HEAD" "origin/$PUSH_CHECK_BRANCH" 2>
   echo "║    git push origin $PUSH_CHECK_BRANCH                       "
   echo "╚═══════════════════════════════════════════════════════════════╝"
   echo ""
-  read -p "Continue anyway? (y/N) " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Aborted."
-    exit 1
+  if [ -t 0 ]; then
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 1
+    fi
+  else
+    # No TTY (background/subagent/cron invocation) — `read -p` would block
+    # forever with no one to answer it, silently wedging the caller instead
+    # of failing. Fail loudly and immediately instead. An unattended caller
+    # that genuinely wants to proceed despite the mismatch must pass
+    # EXO_ALLOW_UNPUSHED=1 explicitly (an affirmative opt-in, not a default).
+    if [ "${EXO_ALLOW_UNPUSHED:-0}" = "1" ]; then
+      echo "  EXO_ALLOW_UNPUSHED=1 set — continuing without a TTY prompt."
+    else
+      echo "ERROR: no TTY to prompt (non-interactive/background invocation)."
+      echo "Refusing to guess. Push local HEAD to origin/$PUSH_CHECK_BRANCH first,"
+      echo "or re-run with EXO_ALLOW_UNPUSHED=1 to proceed deliberately."
+      exit 1
+    fi
   fi
 else
   echo "  Local HEAD ($LOCAL_HEAD) is on origin/$PUSH_CHECK_BRANCH ✓"

@@ -19,6 +19,10 @@
 #   ./cluster-diag.sh sha <m4-1|m4-2>         # git rev-parse HEAD in ~/repos/exo
 #   ./cluster-diag.sh ps <m4-1|m4-2>          # list running exo python PIDs
 #   ./cluster-diag.sh gpu <m4-1|m4-2>         # 2s powermetrics GPU power sample
+#   ./cluster-diag.sh marks <m4-1|m4-2> [N]   # tail -N (default 500) lines of
+#                                              # ~/exo.log grepped for PHASE_MARK
+#                                              # (read-only; log path is fixed,
+#                                              # not caller-supplied)
 #
 # Adding a new subcommand requires editing this file (a visible, reviewable
 # diff) — never extend by accepting a raw command string as an argument.
@@ -45,7 +49,7 @@ ALLOWED_ENV_VARS="EXO_PHASE_MARKS EXO_BATCHED_PREFILL_RENDEZVOUS_MS EXO_SPECULAT
 
 cmd="${1:-}"
 node="${2:-}"
-[ -n "$cmd" ] || { echo "usage: $0 <health|env|sha|ps|gpu> <m4-1|m4-2> [VAR]" >&2; exit 1; }
+[ -n "$cmd" ] || { echo "usage: $0 <health|env|sha|ps|gpu|marks> <m4-1|m4-2> [VAR|N]" >&2; exit 1; }
 
 case "$cmd" in
   health)
@@ -80,8 +84,20 @@ case "$cmd" in
     ssh "${SSH_OPTS[@]}" "${SSH_USER}@${host}" \
       "sudo -n powermetrics --samplers gpu_power -i 500 -n 4 2>&1 | grep -i 'gpu power'"
     ;;
+  marks)
+    host="$(resolve_host "$node")"
+    n="${3:-500}"
+    case "$n" in
+      ''|*[!0-9]*) echo "ERROR: N must be a positive integer (got '$n')" >&2; exit 2 ;;
+    esac
+    # Fixed log path (~/exo.log), fixed line count, fixed grep pattern — none
+    # of this is caller-controlled beyond the numeric tail count, so it can't
+    # be turned into an arbitrary read of the node's filesystem.
+    ssh "${SSH_OPTS[@]}" "${SSH_USER}@${host}" \
+      "tail -n ${n} ~/exo.log 2>/dev/null | grep PHASE_MARK || true"
+    ;;
   *)
-    echo "usage: $0 <health|env|sha|ps|gpu> <m4-1|m4-2> [VAR]" >&2
+    echo "usage: $0 <health|env|sha|ps|gpu|marks> <m4-1|m4-2> [VAR|N]"
     exit 1
     ;;
 esac
