@@ -65,110 +65,92 @@ Never build a new harness — R5 lost a round to one.
 
 ---
 
-## NEXT (loop BLOCKED on a NAMED APPARATUS GAP — see R13 below)
+## NEXT (loop BLOCKED — RELAUNCH BUDGET EXHAUSTED, 2 of 2 USED — see R13-continued below)
 
 ### >>> RESUME POINTER (read this first on context loss) <<<
 
-**CLUSTER ACCESS IS RESTORED. The R12 "DO NOT TOUCH THE CLUSTER" block is SUPERSEDED and has
-been deleted.** It described a permission denial that the supervisor has since fixed. Do not
-reinstate it; do not ask the user to re-authorize read-only cluster contact.
+**CLUSTER IS HEALTHY. Verified 2026-09-04 on REAL PIDs after the restore boot, not inherited.**
+API 200; runners **READY 2/2**; a real completion was confirmed against the placed checkpoint.
+`EXO_PHASE_MARKS` **ABSENT**, `EXO_WORKER_PLAN_EVENT_WAKE` **ABSENT**, RV=0, γ=3, steel-BI=1.
+Production config, nothing left behind.
 
 **The ONLY sanctioned path to the nodes is `/Users/adam.durham/repos/exo/cluster-diag.sh`**
-(chmod 555, read-only, committed 062c4117e, allowlisted by exact path in Hermes'
-`command_allowlist`). Subcommands: `health|env|sha|ps|gpu <m4-1|m4-2>` (`env` takes a VAR from a
-fixed 10-name list). **Raw ssh/curl to the cluster is STILL hard-denied and must never be
-attempted** — including indirectly (no config-file IP indirection, no piggybacking data onto
-`/v1/models`, no encoding state into process titles). If a round needs a capability the script
-lacks, that is a REPORTABLE BLOCKER: name it precisely so the supervisor can extend the script
-via a reviewable diff.
+(read-only, allowlisted by exact path). Subcommands: `health|env|sha|ps|gpu|marks <m4-1|m4-2>`.
+`marks <node> [N]` was ADDED and is now PROVEN on hardware — it reads back `PHASE_MARK` lines from
+`~/exo.log`. **Raw ssh/curl to the cluster remains hard-denied**; if a round needs a capability the
+script lacks, name it as a REPORTABLE BLOCKER rather than routing around it.
 
-**CLUSTER IS HEALTHY — FRESHLY VERIFIED 2026-09-04 (R13) ON REAL PIDs, not inherited.**
-API 200; HEAD `096a00a58` identical on both nodes; m4-1 PIDs 16063/16064/16065/16075 (byte-identical
-to R11's set, confirming R12 never touched it), m4-2 PIDs 29674/29675/29676/29685; RV=0 on all four;
-γ=3; steel-BI=1; gemv-BI=1; `EXO_PHASE_MARKS` ABSENT; `EXO_WORKER_PLAN_EVENT_WAKE` ABSENT.
-Production config, nothing left behind. **Relaunch budget: 2 authorized, 0 used.**
+### >>> THE ONE THING BLOCKING GATE A: RELAUNCH BUDGET <<<
 
-### R13 (2026-09-04): PRE-REGISTRATION WAS LATENTLY INVALID. CAUGHT PRE-BOOT. CORRECTED, NOT SPENT.
+**2 authorized, 2 USED. Both spent 2026-09-04.** Gate A needs **ONE more instrumented boot plus its
+restore**. Nothing else is missing — every other piece is built, verified on hardware, and
+pre-registered. **This is a supervisor decision, not a capability gap.**
 
-**R13's PREDICTION.md assumed `EXO_PHASE_MARKS=1` produces Gate A's
-`state-update-applied -> plan_step-observed` pair. IT DOES NOT.** Marks existed only in the API
-process (wrong process/clock) and the runner subprocess (wrong scope). `worker/main.py`, where
-`plan_step` lives, had ZERO marks. **Boot 1 as pre-registered would have burned a relaunch and
-produced no Gate-A data at all.** The apparatus was built this round (`src/exo/worker/phase_marks.py`,
-same EXO_PHASE_MARKS gate, `IndexedEvent.idx` as pairing key, no `mx.eval` near a mark).
-Three further latent Gate-A flaws were found and adjudicated pre-measurement — see the R13 section
-of `docs/PERFORMANCE_HISTORY.md`, including a **dated Gate-A amendment (apparatus/scoping only;
-the median<=10ms / p99<=20ms bands are UNCHANGED)**.
+### R13 (2026-09-04): APPARATUS PROVEN END-TO-END. GATE A **NOT MEASURED**. NOTHING SHIPPED.
 
-**THE BOOT WAS DELIBERATELY NOT TAKEN.** Two required capabilities do not exist in the sanctioned
-path, so a boot could not have yielded a Gate-A number no matter how it went:
-1. **Marks are unreadable** — they land in `~/exo.log` on the worker node; `cluster-diag.sh` has
-   **no log-read subcommand**.
-2. **The workload cannot be driven** — Step 2 needs >=20 POSTs at 90-150K context; the script's only
-   network call is a fixed GET to `/v1/models`.
-Verified, not assumed: the control host (`adams-macbook-pro-m4`) is NOT a cluster node and holds no
-local `exo.log`; `start_cluster.sh` mirrors no logs back (its only `scp` is push-direction, line 2896).
+**Full record: `docs/PERFORMANCE_HISTORY.md`, R13-continued section. Read it before any new brief.**
 
-### WHAT THE SUPERVISOR MUST PROVIDE TO UNBLOCK (the actual next action)
+**Three defects were caught PRE-BOOT** (the third by an adversarial pre-mortem run minutes before
+Boot 1), each of which would have burned a relaunch and produced an unusable number:
+1. **A2 was not mechanically decidable** — the mark lacked the field distinguishing a backoff-gated
+   retry from a request-path dispatch. Fixed: `task=<ClassName>` recorded verbatim.
+2. **A4's pairing was UNDEFINED** — `mark_state_applied` fires for EVERY event, but the wake mark
+   sat AFTER the `task is None` guard, so most wakes left no record and each wake would have paired
+   to a `state_applied` from seconds earlier. **Gate A would have failed for an instrumental reason,
+   and the bands are correctly not renegotiable after seeing data.** Fixed: emit on EVERY wake with
+   `task=None` as a first-class value.
+3. **The OFF-path invariant was weakened** (unconditional `perf_counter()` per wake) **and restored**
+   — immaterial in ns, but it is the safety argument for keeping this instrumentation in the
+   shipping tree. Now gated inline on `MARKS_ENABLED`; verified on both arms.
+Audited and already correct: mark-before-signal ordering (`:248` precedes `:293`).
 
-1. **`cluster-diag.sh marks <node> [n]`** — read back only `PHASE_MARK`-prefixed lines from
-   `~/exo.log`. Stays read-only by construction. **Without this, Gate A is unobtainable, forever.**
-2. **A workload driver** for >=20 POSTs at 90-150K context. **Cannot** be a read-only extension —
-   this is a genuine write capability and is the supervisor's security call (either a
-   `replay <node> <profile>` wrapper around the existing `replay_c1.py`, or a supervisor-run workload).
-3. **`start_cluster.sh` allowlist entry + non-interactive mode.** It is NOT allowlisted and was NOT
-   attempted this round. **LANDMINE:** `start_cluster.sh:1141` has an interactive
-   `read -p "Continue anyway? (y/N)"` that fires when local HEAD is not an ancestor of `origin/main`
-   — **it will hang forever in a background context.** Push before launching. There is no dry-run,
-   single-node, or config-check mode; every invocation does a real rsync + kill + relaunch.
+**APPARATUS SELF-CHECK PASSED ON HARDWARE — the round's durable win.** `EXO_PHASE_MARKS=1` reached
+the real runner PIDs on both nodes; marks emitted, were read back via `cluster-diag.sh marks`, and
+parsed correctly on the first attempt. On the fix-ON arm, `wake_kind=event` pairs showed
+**median 0.436 ms (n=312)** against a pre-registered SUSPECT threshold of ≥1.0 ms.
 
-**DEPLOY MECHANISM (durable fact, established from source this round):** `start_cluster.sh:1337-1344`
-**rsyncs the control host's WORKING TREE** to both nodes; it does NOT `git pull` on the nodes.
-**Uncommitted changes DO ship, and the nodes' `git rev-parse HEAD` does NOT reliably indicate the
-code they run** — verify file CONTENT. Allow-listed env vars are prefixed directly onto the remote
-`.venv/bin/python -m exo -v` (line 2849), i.e. they reach the process containing `plan_step`; an
-unset var is absent, never `0`, never stale.
+> **THIS IS NOT GATE A AND MUST NEVER BE CITED AS ONE.** It is boot/idle traffic. The p95/p99
+> (~16–18 s) are pure startup artifacts. Gate A requires ≥20 request-path completions at 90–150K
+> depth; **ZERO occurred.** It is apparatus validation plus weak mechanism evidence — it does **NOT**
+> authorize a ship.
 
-**Once capability #1 (and #2 or a supervisor-run workload) exists, R13's PREDICTION.md is runnable
-as written** — health/sha/ps/env validation → Boot 1 with `EXO_WORKER_PLAN_EVENT_WAKE=1
-EXO_PHASE_MARKS=1` (verify BOTH vars on real runner PIDs before spending the workload) → Gate A /
-Gate B under the dated amendment → Boot 2 restore at the NEW SHA with the flag OFF → R14 branch table.
-**No supervisor DECISION is pending — only the capability.**
+**WHY THE WORKLOAD PRODUCED NOTHING (root-caused, not guessed):** `replay_c1.py:40` requested
+`deepseek-ai/DeepSeek-V4-Flash` but `start_cluster.sh:379` places
+`deepseek-ai/DeepSeek-V4-Flash-0731`. **Both ids appear in `/v1/models`, so the API ACCEPTS the wrong
+one**, then tries to JIT-load a second ~152 GB checkpoint, fails on memory, and 503s after 120 s.
+**Listing ≠ serveability.** Boot 1 separately never converged (0/2 runners Ready) due to a
+memory-reclaim race at boot; the restore boot hit the same transient message and recovered — **not a
+code defect, instrumentation not implicated.**
+
+**HARDENED so it cannot recur:** `replay_c1.py` now defaults to `-0731` (comment cites
+`start_cluster.sh:379` as source of truth), accepts `--model`, **runs a PRE-FLIGHT probe that proves
+the model is SERVEABLE and exits non-zero BEFORE spending the workload**, aborts if the first 3
+requests all error, and is genuinely Python-3.9 compatible (PEP-604 annotations were crashing it
+instantly under the pinned `/usr/bin/python3`).
 
 ### DEFINITION OF "SHIPPED" (a commit on main is NOT a ship)
 
 **I16 is shipped only when the flag is ON in production AND Gate A has PASSED on hardware.**
-Neither holds. **The 100 ms tick is STILL LIVE IN PRODUCTION.** The fix (`84bdcd756`) is
-committed, pushed, and **env-gated DEFAULT OFF** — dormant code. **Do NOT flip the default to
-ON without a Gate-A pass.**
+Neither holds. **The 100 ms tick is STILL LIVE IN PRODUCTION.** The fix is committed, pushed, and
+**env-gated DEFAULT OFF** — dormant code. **Do NOT flip the default without a Gate-A pass.**
 
-### CLUSTER HEALTH — FRESHLY VERIFIED (R13, 2026-09-04)
+### EXACT RESUME STEPS (everything below is built and verified — only the boot is missing)
 
-Superseding R12's inherited claim: health was re-verified on REAL PIDs in R13 via `cluster-diag.sh`.
-API 200, HEAD identical on both nodes (`096a00a58`), m4-1 PIDs 16063/16064/16065/16075 — **the exact
-same PID set R11 recorded**, which independently confirms R12's by-construction claim that it never
-touched the cluster. RV=0, γ=3, steel-BI=1, gemv-BI=1, `EXO_PHASE_MARKS` absent,
-`EXO_WORKER_PLAN_EVENT_WAKE` absent. No probe/diag leftovers. **Production config, healthy.**
+1. `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1 ./start_cluster.sh` (push first; HEAD must equal
+   origin/main or it now fails LOUDLY rather than hanging).
+2. Verify BOTH vars on real runner PIDs: `./cluster-diag.sh env <node> EXO_PHASE_MARKS`. **If either
+   is absent: STOP, do not spend the workload.**
+3. Confirm runners reached **READY 2/2** — Boot 1 did not, and that alone invalidates the run.
+4. `/usr/bin/python3 tmp/perf-campaign-2/round11/replay_c1.py --requests 40` (≥40, not 20: with ~17
+   samples p99 == max and one GC pause fails the gate). The preflight now blocks a bad-model run.
+5. `./cluster-diag.sh marks <node> 20000 > marks.txt` for BOTH nodes, then
+   `/usr/bin/python3 tmp/perf-campaign-2/round13/parse_worker_marks.py marks.txt` per node
+   (never pool across nodes — no cross-node clock arithmetic).
+6. Apply Gate A / Gate B **VERBATIM** from `round13/PREDICTION.md` (bands UNCHANGED through three
+   amendments: median ≤10 ms, p99 ≤20 ms, request-path timeout-driven wakes == 0).
+7. Restore boot with both flags OFF; re-verify health on real PIDs.
 
-**R12 status:** lost-wakeup safety gate PASSED in unit tests (37 passed, PM re-ran
-independently). OFF-path identity **empirically tested**, not asserted: with the gate unset the
-loop makes exactly `sleep(0.1)` calls, zero `move_on_after`, and the signal is a no-op —
-so `main` is production-identical. No performance number exists; the 100 ms figure is still
-code-read-derived and R11's "do not ship on a code read" gate is UNMET. Relaunch budget:
-2 authorized, **0 used**.
-
-**Free win banked (zero cluster time):** the seam harness RAN against the LOCAL on-disk
-checkpoint (`/dev/disk3s5`, no network mounts — verified, no cluster access involved).
-Tokenizer-level seam rule HOLDS, normalizer inert — but **template position-invariance FAILS**:
-`render(msgs[:4])` is not a byte-prefix of `render(msgs[:5])` (diverges at char 403) because the
-vendored DSv4 encoder re-sorts tool results on every call. **A prefix cache keyed on
-message-list position is provably UNSAFE for multi-tool-result conversations** (44/55 real
-requests end in tool_calls). This pre-constrains Branch T's design before it is funded; it does
-not close it. Branch T is amended accordingly in round13/PREDICTION.md.
-
-**Correction to propagate:** the "basedpyright baseline = 425" figure in R11's REPORT is WRONG
-for this tree. Real baseline (git worktree): 4909 for `src`, 13155 repo-wide. Delta gates the
-change and is 0. **Do not quote 425 again.**
+**Bands are pre-registered and NOT renegotiable after seeing data.**
 
 ---
 

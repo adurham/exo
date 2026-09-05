@@ -1,0 +1,76 @@
+{
+  "apparatus_self_check": {
+    "median_ms": 2.3320000036619604,
+    "n": 482,
+    "reason": "median wake_kind=event delta is >= 1.000 ms -- the apparatus, not necessarily the fix, is suspect; do NOT read this run as a Gate-A result",
+    "threshold_ms": 1.0,
+    "verdict": "SUSPECT"
+  },
+  "backoff_gated_excluded_stats_ms": null,
+  "baseline_fingerprint": {
+    "fingerprint_matches_baseline": false,
+    "median_expected_hi_ms": 65.0,
+    "median_expected_lo_ms": 35.0,
+    "median_match": false,
+    "median_ms": 2.338999998755753,
+    "p95_expected_hi_ms": 110.0,
+    "p95_expected_lo_ms": 85.0,
+    "p95_match": false,
+    "p95_ms": 3.8993500522337836
+  },
+  "coalescing_histogram": {
+    "0": 277,
+    "1": 478,
+    "2": 2,
+    "3": 2
+  },
+  "cold_start_stats_ms": null,
+  "counts": {
+    "paired_n": 488,
+    "paired_n_all": 488,
+    "paired_n_backoff_gated_excluded": 0,
+    "paired_n_request_path": 488,
+    "plan_step_observed_marks_parsed": 759,
+    "plan_step_observed_unpaired": 271,
+    "state_applied_marks_parsed": 488,
+    "state_applied_never_observed": 0
+  },
+  "gate_a": {
+    "median_bound_ms": 10.0,
+    "median_ms": 2.338999998755753,
+    "median_pass": true,
+    "overall_pass": false,
+    "p99_bound_ms": 20.0,
+    "p99_ms": 202.4725999869406,
+    "p99_pass": false,
+    "request_path_timeout_pass": false,
+    "request_path_timeout_wakes": 6
+  },
+  "request_path_distribution_fallback": false,
+  "source": "tmp/perf-campaign-2/round13/marks/smoke_m4-1.txt",
+  "stats_ms": {
+    "max_ms": 334.4509999733418,
+    "median_ms": 2.338999998755753,
+    "min_ms": 0.10699999984353781,
+    "n": 488,
+    "p95_ms": 3.8993500522337836,
+    "p99_ms": 202.4725999869406
+  },
+  "timeout_scoping": {
+    "backoff_gated_true_timeout_wakes": 0,
+    "by_task_type": {
+      "None\u001b[0m": 6
+    },
+    "gate_a_relevant_true_timeout_wakes": 6,
+    "request_path_true_timeout_wakes": 6,
+    "total_true_timeout_wakes": 6,
+    "undetermined": false,
+    "undetermined_reason": null,
+    "undetermined_true_timeout_wakes": 0
+  },
+  "wake_classification": {
+    "event": 482,
+    "event_raced_timeout": 0,
+    "timeout": 6
+  }
+}

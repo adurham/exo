@@ -1,0 +1,34 @@
+[ 2026-09-04 22:00:15.548 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21826 t=865455.547128[0m
+[ 2026-09-04 22:00:15.575 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21826 t=865455.573520 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:15.628 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21827 t=865455.627317[0m
+[ 2026-09-04 22:00:15.656 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21827 t=865455.653841 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:15.708 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21828 t=865455.707284[0m
+[ 2026-09-04 22:00:15.735 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21828 t=865455.733648 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:15.788 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21829 t=865455.787073[0m
+[ 2026-09-04 22:00:15.815 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21829 t=865455.813119 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:15.868 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21830 t=865455.867630[0m
+[ 2026-09-04 22:00:15.896 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21830 t=865455.893860 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:15.949 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21831 t=865455.948133[0m
+[ 2026-09-04 22:00:15.976 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21831 t=865455.974620 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.029 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21832 t=865456.028148[0m
+[ 2026-09-04 22:00:16.056 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21832 t=865456.054640 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.109 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21833 t=865456.107964[0m
+[ 2026-09-04 22:00:16.136 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21833 t=865456.134271 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.188 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21834 t=865456.187521[0m
+[ 2026-09-04 22:00:16.216 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21834 t=865456.213905 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.268 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21835 t=865456.267171[0m
+[ 2026-09-04 22:00:16.295 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21835 t=865456.293736 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.348 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21836 t=865456.347450[0m
+[ 2026-09-04 22:00:16.376 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21836 t=865456.374041 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.428 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21837 t=865456.427259[0m
+[ 2026-09-04 22:00:16.455 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21837 t=865456.453596 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.508 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21838 t=865456.506953[0m
+[ 2026-09-04 22:00:16.535 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21838 t=865456.533281 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.588 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21839 t=865456.587039[0m
+[ 2026-09-04 22:00:16.615 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21839 t=865456.613002 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.667 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21840 t=865456.666299[0m
+[ 2026-09-04 22:00:16.695 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21840 t=865456.692738 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.747 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21841 t=865456.745882[0m
+[ 2026-09-04 22:00:16.775 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21841 t=865456.772763 wake_kind=event task=CreateRunner[0m
+[ 2026-09-04 22:00:16.827 | [1mINFO    [0m | exo.worker.phase_marks:mark_state_applied:104 ] [1mPHASE_MARK state_applied event_idx=21842 t=865456.826530[0m
+[ 2026-09-04 22:00:16.855 | [1mINFO    [0m | exo.worker.phase_marks:mark_plan_step_observed:153 ] [1mPHASE_MARK plan_step_observed event_idx=21842 t=865456.852965 wake_kind=event task=CreateRunner[0m

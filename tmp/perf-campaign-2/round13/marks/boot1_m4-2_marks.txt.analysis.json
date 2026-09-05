@@ -1,0 +1,75 @@
+{
+  "apparatus_self_check": {
+    "median_ms": 0.4360000020824373,
+    "n": 312,
+    "reason": "median wake_kind=event delta is sub-threshold, as expected of a correctly event-driven wake",
+    "threshold_ms": 1.0,
+    "verdict": "PASS"
+  },
+  "backoff_gated_excluded_stats_ms": null,
+  "baseline_fingerprint": {
+    "fingerprint_matches_baseline": false,
+    "median_expected_hi_ms": 65.0,
+    "median_expected_lo_ms": 35.0,
+    "median_match": false,
+    "median_ms": 0.6824999582022429,
+    "p95_expected_hi_ms": 110.0,
+    "p95_expected_lo_ms": 85.0,
+    "p95_match": false,
+    "p95_ms": 16685.44145009364
+  },
+  "coalescing_histogram": {
+    "0": 90,
+    "1": 312,
+    "556": 1
+  },
+  "cold_start_stats_ms": null,
+  "counts": {
+    "paired_n": 402,
+    "paired_n_all": 402,
+    "paired_n_backoff_gated_excluded": 0,
+    "paired_n_request_path": 402,
+    "plan_step_observed_marks_parsed": 403,
+    "plan_step_observed_unpaired": 1,
+    "state_applied_marks_parsed": 868,
+    "state_applied_never_observed": 466
+  },
+  "gate_a": {
+    "median_bound_ms": 10.0,
+    "median_ms": 0.6824999582022429,
+    "median_pass": true,
+    "overall_pass": false,
+    "p99_bound_ms": 20.0,
+    "p99_ms": 18097.876279981574,
+    "p99_pass": false,
+    "request_path_timeout_pass": false,
+    "request_path_timeout_wakes": 89
+  },
+  "request_path_distribution_fallback": false,
+  "source": "tmp/perf-campaign-2/round13/marks/boot1_m4-2_marks.txt",
+  "stats_ms": {
+    "max_ms": 18446.80699997116,
+    "median_ms": 0.6824999582022429,
+    "min_ms": 0.063000014051795,
+    "n": 402,
+    "p95_ms": 16685.44145009364,
+    "p99_ms": 18097.876279981574
+  },
+  "timeout_scoping": {
+    "backoff_gated_true_timeout_wakes": 0,
+    "by_task_type": {
+      "None\u001b[0m": 89
+    },
+    "gate_a_relevant_true_timeout_wakes": 89,
+    "request_path_true_timeout_wakes": 89,
+    "total_true_timeout_wakes": 89,
+    "undetermined": false,
+    "undetermined_reason": null,
+    "undetermined_true_timeout_wakes": 0
+  },
+  "wake_classification": {
+    "event": 312,
+    "event_raced_timeout": 1,
+    "timeout": 89
+  }
+}

@@ -8810,3 +8810,105 @@ The R13 pre-registration remains runnable as written once the apparatus gap is c
 file, process, trigger) and from 2026-06-24 `db9b3384` (which made task *dispatch* non-blocking, a
 different line; the loop-top sleep survived it). No prior round instrumented `worker/main.py`.
 The corrected basedpyright baseline (4909/13155, **not** 425) held again this round.
+
+
+---
+
+## CAMPAIGN 2 - ROUND 13 (CONTINUED): BOTH BOOTS SPENT. APPARATUS VALIDATED END-TO-END. GATE A **NOT MEASURED** - WORKLOAD LOST TO A STALE MODEL ID. (2026-09-04, later)
+
+**HEADLINE, STATED PLAINLY: Gate A is NOT MEASURED, I16 is NOT SHIPPED, and the relaunch budget is
+now EXHAUSTED (2 authorized, 2 USED).** The 100 ms tick is STILL LIVE IN PRODUCTION. What this round
+bought was a fully validated measurement apparatus and three more pre-boot defect catches - not a
+Gate-A number. **The cluster is HEALTHY on production config, verified on real PIDs, inference
+confirmed working.**
+
+### What was fixed BEFORE the boot (three defects, all caught pre-measurement)
+
+R13's earlier pass caught two. An adversarial pre-mortem run immediately before Boot 1 caught a third,
+which was the most dangerous of the set:
+
+1. **A2 was pre-registered but NOT MECHANICALLY DECIDABLE.** `mark_plan_step_observed` emitted only
+   `(event_idx, wake_kind)`, so a KeyedBackoff-gated `CreateRunner`/`DownloadModel` retry was
+   indistinguishable from a request-path dispatch. Any true timeout would have made Gate A's third
+   sub-condition UNDETERMINED. Fixed by recording `task=<ClassName>` verbatim; the disambiguator was
+   already in scope at the mark site and simply unrecorded.
+2. **A4's pairing was UNDEFINED.** `mark_state_applied` fires for EVERY IndexedEvent (`main.py:248`),
+   but `mark_plan_step_observed` sat AFTER the `if task is None: continue` guard - so the
+   overwhelming majority of planner wakes left NO RECORD. "Since the prior wake" could only resolve
+   to "since the prior *task-producing* wake", pairing each wake to a `state_applied` from seconds
+   earlier. **Gate A would have FAILED for a purely instrumental reason, and the bands are correctly
+   not renegotiable after seeing data - a correct fix would have been recorded as refuted.** Fixed
+   by emitting on EVERY wake with `task=None` as a first-class value.
+3. **The OFF-path invariant was briefly weakened and was restored.** The new wake timestamp initially
+   ran `time.perf_counter()` unconditionally, violating R11's "one boolean check and nothing else"
+   guarantee - the safety argument for keeping this instrumentation permanently in the shipping tree.
+   Cost was immaterial (~30-80 ns/wake); fixed anyway, because a quietly-weakened invariant is worse
+   than a slow one. Now gated inline on `MARKS_ENABLED`. Verified both arms.
+
+**Audited and found already correct (checked, not assumed):** mark-before-signal ordering.
+`mark_state_applied` at `:248` precedes the sole `_signal_state_applied()` at `:293`, so no negative
+deltas or orphaned marks are possible.
+
+### THE APPARATUS WORKS. This is the round's durable win.
+
+End-to-end, on real hardware, for the first time: `EXO_PHASE_MARKS=1` reached the real runner PIDs on
+BOTH nodes (verified before spending the workload, per the mandatory gate); marks emitted into
+`~/exo.log`; `cluster-diag.sh marks` read them back; and `parse_worker_marks.py` parsed the real
+loguru-prefixed lines correctly on the first attempt.
+
+**APPARATUS SELF-CHECK: PASS.** On m4-2 (fix-ON arm), `wake_kind=event` pairs showed
+**median 0.436 ms (n=312)** - sub-millisecond, exactly what a correctly event-driven wake looks like,
+against a pre-registered SUSPECT threshold of >=1.0 ms. The 3-way `WakeKind` classification, the
+earliest-unpaired pairing, and the coalescing histogram all behaved as specified on real data.
+
+**This is NOT Gate A and must never be cited as Gate A.** It is boot/idle traffic, not the
+pre-registered request-path workload. Its p95/p99 (~16-18 s) are pure startup artifacts - 466
+`state_applied` marks unclaimed and one wake coalescing 556 of them, i.e. the boot storm. **The
+pre-registered gate requires >=20 request-path completions at 90-150K depth. Zero occurred.**
+
+### WHY THE WORKLOAD PRODUCED NOTHING - root cause, confirmed not guessed
+
+Every replay request failed: alternating `HTTP Error 503` and ~142 s hangs, zero SSE events, empty
+`generation_stats`.
+
+> **`replay_c1.py:40` hardcoded `MODEL = "deepseek-ai/DeepSeek-V4-Flash"`, but `start_cluster.sh:379`
+> auto-places `deepseek-ai/DeepSeek-V4-Flash-0731`.**
+
+**Both ids are listed in `/v1/models` (125 models), so the API ACCEPTS the wrong one** - it then tries
+to JIT-load a SECOND ~152 GB checkpoint alongside the resident one, fails with *"no admissible
+placement (No cycles found with sufficient memory)"* after a 120 s wait, and surfaces a 503.
+Confirmed directly: the identical request against `-0731` returns a normal completion.
+
+**A stale one-line constant silently consumed an irreplaceable relaunch.** Listing was not
+sufficient evidence of serveability - that is the transferable lesson.
+
+**Boot 1 also never converged** ("0/2 runners reached Ready"); m4-1's marks show 17 `CreateRunner`
+dispatches ~80 ms apart, i.e. a crash-looping runner. The restore boot hit the same transient
+placement message and recovered cleanly, so this was a **memory-reclaim race at boot, not a code
+defect** - the instrumentation was not implicated.
+
+### HARDENED SO IT CANNOT RECUR (the fix is not just the string)
+
+`replay_c1.py` now: defaults to `-0731` with a comment citing `start_cluster.sh:379` as source of
+truth; accepts `--model`; **runs a PRE-FLIGHT probe (one cheap request, 240 s budget) that verifies
+the model is actually SERVEABLE, not merely listed, and exits non-zero BEFORE spending the workload**
+if it 503s; and **aborts if the first 3 requests all error** instead of grinding through all N.
+Also made genuinely Python-3.9 compatible via `from __future__ import annotations` - the PEP-604
+annotations were crashing instantly under the pinned `/usr/bin/python3` (3.9.6). (R10's `/usr/bin/python3`
+pin was about httpx; this script is stdlib-only, so either interpreter is fine once annotations are fixed.)
+
+### STATUS - unchanged where it matters
+
+**I16 IS NOT SHIPPED.** Fix remains env-gated DEFAULT OFF and undeployed. **The 100 ms tick is STILL
+LIVE IN PRODUCTION.** Gate A and Gate B remain UNEVALUATED. R11's "do not ship on a code read" gate is
+still UNMET. **Do NOT flip the default without a Gate-A pass.** The 0.436 ms self-check is an
+apparatus validation and weak mechanism evidence - it is NOT a Gate-A pass and does not authorize a ship.
+
+**BLOCKER (needs supervisor action): the relaunch budget is exhausted, 2 of 2 used.** Gate A now needs
+only ONE more instrumented boot plus its restore. Everything else is built, verified, and pre-registered:
+apparatus proven end-to-end on hardware, analyzer proven on real log lines, workload driver corrected
+and hardened with a preflight that makes this exact failure impossible to repeat silently.
+
+**Cluster left HEALTHY:** API 200, runners READY 2/2, real-PID verified `EXO_PHASE_MARKS` ABSENT,
+`EXO_WORKER_PLAN_EVENT_WAKE` ABSENT, RV=0, gamma=3, steel-BI=1. A real completion was confirmed
+against the placed checkpoint. Production config, nothing left behind.
