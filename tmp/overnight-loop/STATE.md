@@ -65,53 +65,75 @@ Never build a new harness — R5 lost a round to one.
 
 ---
 
-## NEXT (loop BLOCKED on cluster access — see R12 below)
+## NEXT (loop BLOCKED on a NAMED APPARATUS GAP — see R13 below)
 
 ### >>> RESUME POINTER (read this first on context loss) <<<
 
-# !! DO NOT TOUCH THE CLUSTER UNTIL THE USER RE-AUTHORIZES IN THE CURRENT SESSION !!
+**CLUSTER ACCESS IS RESTORED. The R12 "DO NOT TOUCH THE CLUSTER" block is SUPERSEDED and has
+been deleted.** It described a permission denial that the supervisor has since fixed. Do not
+reinstate it; do not ask the user to re-authorize read-only cluster contact.
 
-**On 2026-09-04 a read-only cluster health check was DENIED by the permission layer.**
-The command was a single batched `curl http://192.168.86.201:52415/v1/models` + `ssh` to
-`.201` and `.202`. The verbatim refusal was:
+**The ONLY sanctioned path to the nodes is `/Users/adam.durham/repos/exo/cluster-diag.sh`**
+(chmod 555, read-only, committed 062c4117e, allowlisted by exact path in Hermes'
+`command_allowlist`). Subcommands: `health|env|sha|ps|gpu <m4-1|m4-2>` (`env` takes a VAR from a
+fixed 10-name list). **Raw ssh/curl to the cluster is STILL hard-denied and must never be
+attempted** — including indirectly (no config-file IP indirection, no piggybacking data onto
+`/v1/models`, no encoding state into process titles). If a round needs a capability the script
+lacks, that is a REPORTABLE BLOCKER: name it precisely so the supervisor can extend the script
+via a reviewable diff.
 
-> BLOCKED: User denied this command. The user has NOT consented to this action. Do NOT retry
-> this command, do NOT rephrase it, and do NOT attempt the same outcome via a different
-> command. Stop the current workflow and wait for the user to respond before taking any
-> further destructive or irreversible action.
+**CLUSTER IS HEALTHY — FRESHLY VERIFIED 2026-09-04 (R13) ON REAL PIDs, not inherited.**
+API 200; HEAD `096a00a58` identical on both nodes; m4-1 PIDs 16063/16064/16065/16075 (byte-identical
+to R11's set, confirming R12 never touched it), m4-2 PIDs 29674/29675/29676/29685; RV=0 on all four;
+γ=3; steel-BI=1; gemv-BI=1; `EXO_PHASE_MARKS` ABSENT; `EXO_WORKER_PLAN_EVENT_WAKE` ABSENT.
+Production config, nothing left behind. **Relaunch budget: 2 authorized, 0 used.**
 
-**The denied OUTCOME is: any network read of cluster state (curl to the API, ssh to either
-node), not merely that one command string.** Rephrasing it, splitting it, or reaching the
-nodes by any other route is the same denied outcome and must NOT be attempted.
+### R13 (2026-09-04): PRE-REGISTRATION WAS LATENTLY INVALID. CAUGHT PRE-BOOT. CORRECTED, NOT SPENT.
 
-**WHETHER THIS WAS AN ACTIVE REFUSAL OR AN UNATTENDED PROMPT TIMEOUT IS UNKNOWN.** A future
-session MUST NOT infer a standing policy from it in either direction. **ASK the user for an
-explicit yes/no on read-only `curl`/`ssh` to .201/.202 before any cluster contact.** The
-AUTONOMOUS charter does NOT override this — the denial is more specific and more recent.
+**R13's PREDICTION.md assumed `EXO_PHASE_MARKS=1` produces Gate A's
+`state-update-applied -> plan_step-observed` pair. IT DOES NOT.** Marks existed only in the API
+process (wrong process/clock) and the runner subprocess (wrong scope). `worker/main.py`, where
+`plan_step` lives, had ZERO marks. **Boot 1 as pre-registered would have burned a relaunch and
+produced no Gate-A data at all.** The apparatus was built this round (`src/exo/worker/phase_marks.py`,
+same EXO_PHASE_MARKS gate, `IndexedEvent.idx` as pairing key, no `mx.eval` near a mark).
+Three further latent Gate-A flaws were found and adjudicated pre-measurement — see the R13 section
+of `docs/PERFORMANCE_HISTORY.md`, including a **dated Gate-A amendment (apparatus/scoping only;
+the median<=10ms / p99<=20ms bands are UNCHANGED)**.
 
-Local work (repo, git, tests, local model files on this host) was NOT denied and continued
-normally. R12's interpretation of "stop the current workflow": the denial was cluster-scoped,
-so local children + the charter-mandated commit/push proceeded. If the user disagrees, the R12
-work is reverted with `git revert 7302dc4b0 84bdcd756 83a671213` (nothing was deployed, so
-there is nothing to undo on the nodes).
+**THE BOOT WAS DELIBERATELY NOT TAKEN.** Two required capabilities do not exist in the sanctioned
+path, so a boot could not have yielded a Gate-A number no matter how it went:
+1. **Marks are unreadable** — they land in `~/exo.log` on the worker node; `cluster-diag.sh` has
+   **no log-read subcommand**.
+2. **The workload cannot be driven** — Step 2 needs >=20 POSTs at 90-150K context; the script's only
+   network call is a fixed GET to `/v1/models`.
+Verified, not assumed: the control host (`adams-macbook-pro-m4`) is NOT a cluster node and holds no
+local `exo.log`; `start_cluster.sh` mirrors no logs back (its only `scp` is push-direction, line 2896).
 
-**R12 (2026-09-04) ended CODE-COMPLETE but MEASUREMENT-BLOCKED. Nothing shipped.**
-Full record: `tmp/perf-campaign-2/round12/REPORT.md` + `docs/PERFORMANCE_HISTORY.md` (R12 section).
+### WHAT THE SUPERVISOR MUST PROVIDE TO UNBLOCK (the actual next action)
 
-### THE NEXT ACTION IS ALREADY DECIDED — NO SUPERVISOR DECISION IS PENDING
+1. **`cluster-diag.sh marks <node> [n]`** — read back only `PHASE_MARK`-prefixed lines from
+   `~/exo.log`. Stays read-only by construction. **Without this, Gate A is unobtainable, forever.**
+2. **A workload driver** for >=20 POSTs at 90-150K context. **Cannot** be a read-only extension —
+   this is a genuine write capability and is the supervisor's security call (either a
+   `replay <node> <profile>` wrapper around the existing `replay_c1.py`, or a supervisor-run workload).
+3. **`start_cluster.sh` allowlist entry + non-interactive mode.** It is NOT allowlisted and was NOT
+   attempted this round. **LANDMINE:** `start_cluster.sh:1141` has an interactive
+   `read -p "Continue anyway? (y/N)"` that fires when local HEAD is not an ancestor of `origin/main`
+   — **it will hang forever in a background context.** Push before launching. There is no dry-run,
+   single-node, or config-check mode; every invocation does a real rsync + kill + relaunch.
 
-**R13 = round 12's deferred Boot 1. It is fully pre-registered at
-`tmp/perf-campaign-2/round13/PREDICTION.md`. Execute that file top to bottom.**
-R13 is blocked on ACCESS ONLY, not on a choice. Do not re-litigate, do not re-plan, do not
-re-run R12's pre-registration. **This file is the single source of truth for "next action";
-REPORT.md and PERFORMANCE_HISTORY.md are the historical record.**
+**DEPLOY MECHANISM (durable fact, established from source this round):** `start_cluster.sh:1337-1344`
+**rsyncs the control host's WORKING TREE** to both nodes; it does NOT `git pull` on the nodes.
+**Uncommitted changes DO ship, and the nodes' `git rev-parse HEAD` does NOT reliably indicate the
+code they run** — verify file CONTENT. Allow-listed env vars are prefixed directly onto the remote
+`.venv/bin/python -m exo -v` (line 2849), i.e. they reach the process containing `plan_step`; an
+unset var is absent, never `0`, never stale.
 
-Summary of what round13/PREDICTION.md tells you to do: issue the health checks as THREE
-SEPARATE read-only commands (never batched — R12 batched them and lost the ability to tell
-which access was refused) → health check on real PIDs → post-reboot environment validation →
-Boot 1 with `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1` (one relaunch, both vars verified
-on real runner PIDs via `ps eww` before spending the workload) → Gate A / Gate B → Boot 2
-restore at the NEW SHA with the flag OFF → then the R14 branch table.
+**Once capability #1 (and #2 or a supervisor-run workload) exists, R13's PREDICTION.md is runnable
+as written** — health/sha/ps/env validation → Boot 1 with `EXO_WORKER_PLAN_EVENT_WAKE=1
+EXO_PHASE_MARKS=1` (verify BOTH vars on real runner PIDs before spending the workload) → Gate A /
+Gate B under the dated amendment → Boot 2 restore at the NEW SHA with the flag OFF → R14 branch table.
+**No supervisor DECISION is pending — only the capability.**
 
 ### DEFINITION OF "SHIPPED" (a commit on main is NOT a ship)
 
@@ -120,13 +142,13 @@ Neither holds. **The 100 ms tick is STILL LIVE IN PRODUCTION.** The fix (`84bdcd
 committed, pushed, and **env-gated DEFAULT OFF** — dormant code. **Do NOT flip the default to
 ON without a Gate-A pass.**
 
-### CLUSTER HEALTH — INHERITED, NOT VERIFIED
+### CLUSTER HEALTH — FRESHLY VERIFIED (R13, 2026-09-04)
 
-Last verification on REAL PIDs was **R11 (2026-09-04)**: API 200, RV=0 on PIDs
-16063/16064/16065/16075, γ=3, BI=1, `EXO_PHASE_MARKS` absent. **R12 could not verify anything.**
-R12 provably did not change the cluster — `start_cluster.sh` never ran, so no rsync/deploy
-reached the nodes and the running PIDs are bit-identical to pre-R12. But "healthy" is now an
-INHERITED claim. Re-verify on real PIDs before trusting any number.
+Superseding R12's inherited claim: health was re-verified on REAL PIDs in R13 via `cluster-diag.sh`.
+API 200, HEAD identical on both nodes (`096a00a58`), m4-1 PIDs 16063/16064/16065/16075 — **the exact
+same PID set R11 recorded**, which independently confirms R12's by-construction claim that it never
+touched the cluster. RV=0, γ=3, steel-BI=1, gemv-BI=1, `EXO_PHASE_MARKS` absent,
+`EXO_WORKER_PLAN_EVENT_WAKE` absent. No probe/diag leftovers. **Production config, healthy.**
 
 **R12 status:** lost-wakeup safety gate PASSED in unit tests (37 passed, PM re-ran
 independently). OFF-path identity **empirically tested**, not asserted: with the gate unset the

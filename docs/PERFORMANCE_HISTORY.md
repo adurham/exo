@@ -8660,3 +8660,153 @@ Delta is 0 either way, but **do not quote 425 again**.
 This history file is the RECORD; STATE.md is the pointer. R13 is blocked on cluster ACCESS
 only -- no supervisor decision is pending. **Cluster contact requires an explicit user
 re-authorization first (see the denial recorded verbatim at the top of STATE.md).**
+
+## CAMPAIGN 2 - ROUND 13 (I16 Boot 1 attempt): PRE-REGISTRATION FOUND LATENTLY INVALID; APPARATUS BUILT; STILL UNMEASURED, NOTHING SHIPPED (2026-09-04)
+
+**Cluster access was RESTORED this round** via a new read-only allowlisted dispatch script
+(`cluster-diag.sh`, committed 062c4117e). The R12 blocker ("any network read of cluster state is
+denied") is **RESOLVED and SUPERSEDED** — see STATE.md. Fresh verification was performed rather
+than inheriting R11's claim.
+
+**CLUSTER HEALTH — FRESHLY VERIFIED ON REAL PIDs (first time since R11).** API 200 with full model
+list; `git rev-parse HEAD` = `096a00a58` **identical on both nodes**; m4-1 PIDs 16063/16064/16065/16075
+and m4-2 PIDs 29674/29675/29676/29685; `EXO_BATCHED_PREFILL_RENDEZVOUS_MS=0` on all four PIDs
+(R10's ship is live in production); `EXO_SPECULATIVE_GAMMA=3`; `MLX_STEEL_BATCH_INVARIANT=1`;
+`MLX_GEMV_BATCH_INVARIANT=1`; `EXO_PHASE_MARKS` **ABSENT**; `EXO_WORKER_PLAN_EVENT_WAKE` **ABSENT**.
+The PID set is byte-identical to R11's, independently confirming R12's by-construction claim that
+it never touched the cluster. **Cluster is HEALTHY on shipped production config.**
+
+**THE ROUND'S GOVERNING FINDING: R13's PREDICTION.md was latently INVALID, caught BEFORE the boot.**
+R13 (and R12 before it) pre-registered Boot 1 as `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1`,
+assuming `EXO_PHASE_MARKS` would yield Gate A's `state-update-applied -> plan_step-observed` pair.
+**It would not have.** Exhaustive grep established that EXO_PHASE_MARKS instrumentation existed in
+exactly two places, neither usable for Gate A:
+- `src/exo/api/phase_marks.py` — the **API process** (marks a1-a7). Different process, different
+  clock; disqualified by Gate A's explicit "same clock" requirement.
+- `src/exo/worker/engines/mlx/phase_marks.py` — the **runner subprocess** (marks b1-b11), covering
+  only the request lifecycle inside `batch_generate.py`/`runner.py`.
+- `src/exo/worker/main.py`, where `plan_step` actually lives, had **ZERO phase_marks calls.**
+
+Boot 1 as literally pre-registered would have consumed a scarce relaunch and produced **no Gate-A
+data at all**, and the failure would have been discovered only after spending it. **Process lesson,
+now general: a pre-registration must include a "the measurement apparatus exists at HEAD" check.
+Pre-registering a gate does not conjure the instrument that reads it.**
+
+**APPARATUS BUILT THIS ROUND (local, no cluster time).** `src/exo/worker/phase_marks.py` — a new
+worker-process mark stream under the EXISTING `EXO_PHASE_MARKS` gate (read once into a
+`Final[bool]`, no new env var). `mark_state_applied(event_idx)` fires immediately after
+`self.state = apply(...)` in `_event_applier`; `mark_plan_step_observed(event_idx, wake_kind)`
+fires in `plan_step` once a non-None task is produced. Pairing key is `IndexedEvent.idx` — a
+pre-existing master-assigned monotonic id, **not an invented counter**. No `mx.eval()` anywhere
+near a mark. Gate-OFF path is behaviourally identical to before (only a return type changed).
+
+**THREE FURTHER LATENT GATE-A FLAWS FOUND AND ADJUDICATED (all pre-measurement, the only honest time):**
+
+1. **"ZERO timeout-driven wakes" is WRONG AS WRITTEN — it would spuriously FAIL a correct fix.**
+   `KeyedBackoff.should_proceed` (`src/exo/utils/keyed_backoff.py:20`) is `now - last >= delay` —
+   **purely clock-driven, no state precondition.** `plan()` gates `CreateRunner` on it
+   (`src/exo/worker/plan.py:131`) and the download path likewise (`plan.py:204`). Therefore
+   `plan()` **can legitimately return a non-None task with no new state applied**, driven only by
+   a backoff timer expiring — work the old unconditional `sleep(0.1)` was quietly serving. A
+   timeout-driven wake that dispatches a backoff-gated retry is **correct behaviour**, and Gate A's
+   literal "zero" would charge it against the fix. **Verified directly against source, not taken on
+   a subagent's report.** The band is NOT renegotiated here; see the dated amendment below.
+2. **`cancelled_caught` alone MISCLASSIFIES a delivered wakeup.** Confirmed against the installed
+   anyio 4.11.0 source (`_backends/_asyncio.py:492-509`): cancellation delivery and the event's
+   `set()` are independent scheduling events, so if both land in the same window the scope reports
+   `cancelled_caught=True` even though the event WAS set and the wakeup WAS delivered. Under a
+   strict "zero", a single photo-finish would fail the fix. **Fixed:** `waiting_on.is_set()` is now
+   ALSO read at wait-return and `WakeKind` is an honest 3-way
+   `Literal["event", "event_raced_timeout", "timeout"]` — a true timeout is only when the event was
+   never set. The race is recorded as a race instead of being silently charged against the fix.
+3. **Coalescing is not a lost wake.** Several `state_applied` marks landing between two planner
+   wakes is correct, intended behaviour. Pre-registered pairing semantics, fixed now: join each
+   `plan_step_observed` to the **EARLIEST unpaired `state_applied`** since the prior wake. Gate A
+   exists to detect a removed polling delay, so worst-case observation latency is the honest
+   statistic; pairing to the latest would launder coalesced-but-late observations into a falsely
+   good number. Note `tmp/perf-campaign-2/round11/analyze_marks.py` parses a DIFFERENT stream
+   (API-side JSON from replay captures) and does **not** understand these worker log-line marks —
+   **a parser for this stream still needs writing.**
+
+### DATED AMENDMENT TO GATE A (2026-09-04) — apparatus/scoping only, bands UNCHANGED
+
+> Gate A's "ZERO timeout-driven wakes on the request path" is scoped to dispatches NOT gated by
+> `KeyedBackoff.should_proceed` — i.e. it excludes `CreateRunner`/`DownloadModel` retries whose
+> eligibility is time-based **by design** (`src/exo/utils/keyed_backoff.py:20`, consumed at
+> `src/exo/worker/plan.py:131` and `:204`). A timeout-driven wake that dispatches a backoff-gated
+> retry is expected and does not count against the zero. All other timeout-driven dispatches still
+> count exactly as before. A wake classified `event_raced_timeout` (event set AND cancellation
+> delivered in the same scheduling window) is an event-driven wake and does not count against the
+> zero. **The numeric bands are UNCHANGED: median <=10 ms, p99 <=20 ms.** This amendment is
+> recorded BEFORE any measurement exists and corrects the apparatus, not the bar.
+
+**SAFETY EVIDENCE STRENGTHENED (local).** A randomized lost-wakeup fuzz test now runs 300 seeded
+trials against the **real** `Worker` class, randomizing applier/planner interleavings including the
+adversarial window, asserting zero missed wakes and zero timeout-driven wakes. It has **real
+negative controls**: against a deliberately broken capture-after-check variant it fails 77/200
+trials; against a reused-Event variant it fails 49/50 rounds. A lost-wakeup test that passes
+against a broken implementation is worthless — this one demonstrably does not.
+Suite: **40 passed** (37 from R12 + 3 new). `ruff check` clean, `ruff format --check` clean.
+`basedpyright` **4909 (src) / 13155 (repo-wide) — delta 0** vs the pre-registered baseline.
+(`nix fmt` is unavailable on this host: **skipped, not faked.**)
+
+**BOOT NOT TAKEN — DELIBERATE, AND THE RELAUNCH BUDGET IS UNSPENT (2 authorized, 0 used).**
+Two capabilities the round genuinely requires do not exist in the sanctioned access path:
+- **(a) The Gate-A marks are unreadable.** They emit via loguru into `~/exo.log` on the worker
+  node. `cluster-diag.sh` has **no log-read subcommand**, so even a perfect Boot 1 leaves the data
+  unreadable.
+- **(b) The pre-registered workload cannot be driven.** Step 2 requires POSTing >=20 chat
+  completions at 90-150K context. The script's only network call is a **fixed GET** to `/v1/models`.
+Booting anyway would have burned a relaunch, left the cluster in a non-production config (marks on,
+flag on) with the workload unrunnable, produced zero Gate-A data, and then required the second
+relaunch just to restore. It would also have been a **misleading** safety signal: an idle
+post-formation cluster never exercises the concurrent-state-update path where a lost wakeup would
+manifest, and `health` 200 is served by the API process — it stays green with a wedged planner.
+The fuzz test with negative controls is already the stronger evidence on that exact risk.
+**Routes that were considered and REJECTED as routing-around-the-restriction:** surfacing mark
+summaries through the `/v1/models` response that `health` hits; encoding data into process titles
+readable via `ps`; pointing `replay_c1.py` at the cluster via a config file so the classifier
+doesn't see the IP. Each works only by hiding private-IP access. None attempted.
+**Verified, not assumed:** the control host is `adams-macbook-pro-m4`, is **not** a cluster node
+(no local `~/exo.log`, no local exo PIDs), and `start_cluster.sh` contains no log-mirroring path
+back to the control host (its only `scp` is push-direction, line 2896). There is no local copy of
+the data.
+
+**DEPLOY MECHANISM ESTABLISHED FROM SOURCE (durable, reusable fact).** `start_cluster.sh:1337-1344`
+**rsyncs the control host's WORKING TREE** to both nodes
+(`rsync -a --delete --exclude '.venv/' --exclude 'tmp/' ... ~/repos/exo/ $NODE:~/repos/exo/`); it
+does **NOT** `git pull` on the nodes (that approach was removed after DNS blips caused per-node
+commit divergence, per the comments at 1294-1330). **Consequence: uncommitted working-tree changes
+DO ship, and the nodes' `git rev-parse HEAD` is NOT a reliable indicator of the code they run.**
+Verify file CONTENT, not `git log`. Env propagation confirmed sound: allow-listed vars accumulate
+into an `EXO_ENV` string prefixed directly onto the remote `.venv/bin/python -m exo -v` command
+(line 2849) — the very process containing `plan_step`. An unset var is **absent** (the `[ -n ... ]`
+test short-circuits), never `0` and never stale.
+**LANDMINE for unattended runs:** `start_cluster.sh:1141` has an interactive
+`read -p "Continue anyway? (y/N)"` that fires when local HEAD is not an ancestor of `origin/main`.
+**It will hang forever with no timeout in a background context — push before launching.**
+There is **no dry-run, single-node, or config-check mode**; every invocation does a real
+rsync + kill + relaunch.
+
+**CAPABILITY GAP — NAMED PRECISELY (this is the blocker; it needs a supervisor-reviewable diff):**
+1. `cluster-diag.sh marks <node> [n]` — read back only `PHASE_MARK`-prefixed lines from `~/exo.log`.
+   Preserves "read-only by construction". **Without this, no Gate-A number can ever be obtained.**
+2. A workload driver for >=20 POSTs at 90-150K context. This **cannot** be a read-only extension —
+   it is a genuine write capability and therefore the supervisor's security call: either a
+   `replay <node> <profile>` wrapper around the existing `replay_c1.py`, or a supervisor-run
+   workload. **Flagged, not decided here.**
+3. `start_cluster.sh` itself is **not** allowlisted and was **not attempted** this round. It ssh/rsyncs
+   to the node IPs — the exact denied outcome, merely wrapped in a script. If subagent-driven boots
+   are intended it needs an explicit allowlist entry **plus** a non-interactive mode (see the
+   line-1141 hang above). Until then the relaunch budget is not actually exercisable from this context.
+
+**STATUS UNCHANGED WHERE IT MATTERS: I16 IS NOT SHIPPED.** The fix remains env-gated DEFAULT OFF and
+undeployed. **The 100 ms tick is STILL LIVE IN PRODUCTION.** Gate A and Gate B remain UNEVALUATED;
+R11's "do not ship on a code read" gate is still UNMET. Do NOT flip the default without a Gate-A pass.
+The R13 pre-registration remains runnable as written once the apparatus gap is closed — it was
+**corrected, not spent**.
+
+**Reconciliation with prior record:** I16 is still distinct from R10's rendezvous sleep (different
+file, process, trigger) and from 2026-06-24 `db9b3384` (which made task *dispatch* non-blocking, a
+different line; the loop-top sleep survived it). No prior round instrumented `worker/main.py`.
+The corrected basedpyright baseline (4909/13155, **not** 425) held again this round.

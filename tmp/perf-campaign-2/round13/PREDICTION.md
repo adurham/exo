@@ -118,3 +118,86 @@ naive position-keyed design is off the table before it is funded.
 - Building a new measurement harness instead of using the existing capture path.
 - Quoting "basedpyright baseline 425" — that figure is WRONG for this tree. Real baseline via
   `git worktree`: 4909 (`src`) / 13155 (repo-wide). The delta is what gates a change, and it is 0.
+
+---
+
+# DATED AMENDMENT — 2026-09-04, written BEFORE any measurement exists
+
+**Nothing above this line is edited. The numeric bands are UNCHANGED.** This amendment records
+apparatus corrections found while validating the plan pre-boot. It exists because the plan above
+was found to be latently unrunnable as written; recording that honestly is preferable to silently
+fixing it or to discovering it after spending a scarce relaunch.
+
+## A1. The apparatus this plan depends on DID NOT EXIST when the plan was written
+
+Step 1 pre-registers Boot 1 as `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1`, assuming
+`EXO_PHASE_MARKS` yields Gate A's `state-update-applied -> plan_step-observed` pair. **It does not.**
+At the time this plan was written, EXO_PHASE_MARKS instrumentation existed only in:
+- `src/exo/api/phase_marks.py` — API process (a1-a7). Different process, different clock;
+  **disqualified by Gate A's own "same clock" requirement.**
+- `src/exo/worker/engines/mlx/phase_marks.py` — runner subprocess (b1-b11), request lifecycle only.
+- `src/exo/worker/main.py` (where `plan_step` lives): **ZERO marks.**
+
+Boot 1 as written would have consumed a relaunch and produced **no Gate-A data whatsoever**.
+Apparatus added this round: `src/exo/worker/phase_marks.py`, under the SAME `EXO_PHASE_MARKS` gate
+(no new env var), pairing on the pre-existing `IndexedEvent.idx`, no `mx.eval()` near any mark,
+gate-OFF path behaviourally identical.
+
+**General lesson for every future pre-registration: include a "the measurement apparatus exists at
+HEAD" check. Pre-registering a gate does not conjure the instrument that reads it.**
+
+## A2. Gate A's "ZERO timeout-driven wakes" is SCOPED (it would otherwise fail a CORRECT fix)
+
+`KeyedBackoff.should_proceed` (`src/exo/utils/keyed_backoff.py:20`) is `now - last >= delay` —
+**purely clock-driven, with no state precondition.** `plan()` gates `CreateRunner` on it
+(`src/exo/worker/plan.py:131`) and the download path likewise (`plan.py:204`). So `plan()` can
+legitimately return a non-None task with **no new state applied**, driven only by a backoff timer
+expiring — work the old unconditional `sleep(0.1)` was quietly serving. Under the unscoped wording,
+that correct behaviour would be charged against the fix.
+
+> **SCOPING (binding):** "ZERO timeout-driven wakes on the request path" excludes dispatches gated
+> by `KeyedBackoff.should_proceed` — i.e. `CreateRunner`/`DownloadModel` retries whose eligibility
+> is time-based by design. A timeout-driven wake dispatching a backoff-gated retry is expected and
+> does not count against the zero. **All other timeout-driven dispatches count exactly as before.**
+
+## A3. Wake classification is 3-way, because `cancelled_caught` alone is not honest
+
+Confirmed against installed anyio 4.11.0 (`_backends/_asyncio.py:492-509`): cancellation delivery
+and the event's `set()` are independent scheduling events. If both land in the same window,
+`cancelled_caught` reads True even though the event WAS set and the wakeup WAS delivered. Under a
+strict "zero", one photo-finish would fail the fix for a scheduling coincidence.
+
+`WakeKind` is therefore `Literal["event", "event_raced_timeout", "timeout"]`, derived from
+`cancelled_caught` AND `waiting_on.is_set()`. **`event_raced_timeout` is an EVENT-driven wake and
+does NOT count against the zero.** A true timeout is only when the event was never set.
+
+## A4. Pairing semantics for the Gate-A delta (fixed now, before any data exists)
+
+Several `state_applied` marks landing between two planner wakes is **correct coalescing, not a lost
+wake.** Each `plan_step_observed` pairs to the **EARLIEST unpaired `state_applied`** since the prior
+wake. Justification: Gate A exists to detect the removal of a polling delay, so worst-case
+observation latency is the honest statistic; pairing to the latest would launder
+coalesced-but-late observations into a falsely good number. Group by "state_applied marks not yet
+claimed by a prior plan_step_observed" — `event_idx` is monotonic but not contiguous per window,
+so do not pair by counting.
+
+**Note:** `tmp/perf-campaign-2/round11/analyze_marks.py` parses a DIFFERENT stream (API-side JSON
+from replay captures) and does **not** understand these worker log-line marks. A parser for this
+stream **still needs to be written.**
+
+## A5. Why Boot 1 was NOT taken this round (the plan is corrected, NOT spent)
+
+Two capabilities required by this plan do not exist in the sanctioned access path, so **no boot
+could have produced a Gate-A number**:
+1. **Marks are unreadable.** They emit into `~/exo.log` on the worker node; the only allowlisted
+   cluster path (`cluster-diag.sh`) has **no log-read subcommand**.
+2. **The Step-2 workload cannot be driven.** It needs >=20 POSTs at 90-150K context; the script's
+   only network call is a fixed GET to `/v1/models`.
+
+Verified rather than assumed: the control host is NOT a cluster node (no local `~/exo.log`, no local
+exo PIDs) and `start_cluster.sh` mirrors no logs back to it. Indirect workarounds (piggybacking
+data onto the `/v1/models` response, encoding state into process titles, config-file IP indirection)
+were considered and **rejected as routing around the restriction**; none were attempted.
+
+**Relaunch budget remains 2 authorized, 0 used.** Steps 0-5 above stand as written, subject to
+A2/A3/A4, and become runnable the moment a `marks` read capability exists.

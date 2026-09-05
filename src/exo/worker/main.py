@@ -60,6 +60,11 @@ from exo.utils.info_gatherer.info_gatherer import GatheredInfo, InfoGatherer
 from exo.utils.info_gatherer.net_profile import check_reachable
 from exo.utils.keyed_backoff import KeyedBackoff
 from exo.utils.task_group import TaskGroup
+from exo.worker.phase_marks import (
+    WakeKind,
+    mark_plan_step_observed,
+    mark_state_applied,
+)
 from exo.worker.plan import plan
 from exo.worker.runner.supervisor import RunnerSupervisor
 
@@ -128,6 +133,15 @@ class Worker:
         # (see `_signal_state_applied` / `_wait_for_state_change`).
         self._state_applied: anyio.Event = anyio.Event()
 
+        # Round-13 Gate-A phase marks: the `IndexedEvent.idx` most recently
+        # applied by `_event_applier`, used as the pairing key between the
+        # `state_applied` mark (emitted at apply time) and the
+        # `plan_step_observed` mark (emitted when `plan_step` wakes and acts
+        # on it). Written unconditionally (cheap int assignment) so the field
+        # always reflects reality regardless of the marks gate; only the
+        # `mark_*` calls themselves are gated on EXO_PHASE_MARKS.
+        self._last_applied_event_idx: int = -1
+
     def _signal_state_applied(self) -> None:
         """Wake `plan_step`. MUST be called AFTER the state mutation it reports.
 
@@ -143,23 +157,40 @@ class Worker:
         self._state_applied = anyio.Event()
         previously_waited_on.set()
 
-    async def _wait_for_state_change(self, waiting_on: anyio.Event) -> None:
+    async def _wait_for_state_change(self, waiting_on: anyio.Event) -> WakeKind:
         """The `plan_step` loop-top wait.
 
         Gate OFF (default): exactly the historical plain
         ``await anyio.sleep(0.1)``; `waiting_on` is not consulted at all.
+        Returns ``"timeout"`` unconditionally in this branch -- true by
+        construction, since the only way this branch returns is the sleep
+        elapsing.
 
         Gate ON: park on the event the caller captured BEFORE its last
         `plan()` state read, bounded by the same 0.1s as a FALLBACK timeout.
         A missed signal therefore degrades to exactly today's 100ms polling
         rather than hanging.
+
+        `cancelled_caught` ALONE cannot classify the wake: if the event's
+        `set()` and the `move_on_after` deadline land in the same scheduling
+        window, the fallback's cancellation can still be delivered to this
+        task even though `waiting_on` WAS set and the wakeup WAS, in effect,
+        event-driven -- `cancelled_caught` would read True regardless. So
+        `waiting_on.is_set()` is ALSO read, immediately after the wait
+        returns, and the two booleans together give an honest 3-way
+        classification (see `WakeKind` in `phase_marks.py` for the full
+        truth table): a true timeout only when the event was never set.
         """
         if not _PLAN_EVENT_WAKE_ENABLED:
             await anyio.sleep(_PLAN_TICK_SECONDS)
-            return
+            return "timeout"
 
-        with anyio.move_on_after(_PLAN_TICK_SECONDS):
+        with anyio.move_on_after(_PLAN_TICK_SECONDS) as scope:
             await waiting_on.wait()
+        event_was_set = waiting_on.is_set()
+        if not event_was_set:
+            return "timeout"
+        return "event_raced_timeout" if scope.cancelled_caught else "event"
 
     async def run(self):
         logger.info("Starting Worker")
@@ -204,6 +235,17 @@ class Worker:
             async for event in events:
                 # 2. for each event, apply it to the state
                 self.state = apply(self.state, event=event)
+
+                # Round-13 Gate-A mark 1 (state-update-applied): must be
+                # emitted right after the mutation above and BEFORE `event`
+                # is rebound to `event.event` below, since `event.idx` (the
+                # pairing key) only exists on the `IndexedEvent`, not on the
+                # inner `Event`. `_last_applied_event_idx` is also updated
+                # here, unconditionally, for `plan_step` to read at wake
+                # time regardless of whether marks are enabled.
+                self._last_applied_event_idx = event.idx
+                mark_state_applied(event.idx)
+
                 event = event.event
 
                 if isinstance(event, InstanceDeleted):
@@ -270,8 +312,13 @@ class Worker:
         # lost-wakeup window is closed by the capture ordering, not by luck.
         waiting_on: anyio.Event = self._state_applied
         while True:
-            await self._wait_for_state_change(waiting_on)
+            wake_kind = await self._wait_for_state_change(waiting_on)
             waiting_on = self._state_applied
+            # Read right after the wait returns, before `plan()` runs, so it
+            # reflects the state this `plan()` call is actually about to
+            # read (a concurrent apply landing mid-`plan()` would otherwise
+            # attribute the wrong event_idx to this dispatch).
+            observed_event_idx = self._last_applied_event_idx
             task: Task | None = plan(
                 self.node_id,
                 self.runners,
@@ -287,6 +334,14 @@ class Worker:
             )
             if task is None:
                 continue
+
+            # Round-13 Gate-A mark 2 (plan_step-observed): `plan_step` woke
+            # AND produced a non-None task, i.e. observed the dispatch --
+            # exactly the round-13 pre-registration's definition of Gate A's
+            # right edge. `wake_kind` lets the analyzer count timeout-driven
+            # wakes on this (request) path explicitly, per Gate A's PASS
+            # condition.
+            mark_plan_step_observed(observed_event_idx, wake_kind)
 
             if isinstance(task, CreateRunner):
                 iid = task.instance_id
