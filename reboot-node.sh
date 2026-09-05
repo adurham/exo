@@ -59,11 +59,14 @@ for NODE in "$@"; do
     continue
   fi
   if [ "$CHECK" = "1" ]; then
-    # Dry run: confirm NOPASSWD sudo for fdesetup is wired (no reboot).
-    if ssh -o ConnectTimeout=8 "$NODE" 'sudo -n fdesetup status' >/dev/null 2>&1; then
-      echo "  OK: reachable, authrestart supported, NOPASSWD sudo wired. (dry run)"
+    # Dry run: confirm NOPASSWD sudo for the ACTUAL authrestart command is
+    # wired (no reboot). `sudo -n fdesetup status` tests the wrong command —
+    # `status` isn't the NOPASSWD-scoped subcommand, only `authrestart*` is,
+    # so that probe always reports WARN even when correctly configured.
+    if ssh -o ConnectTimeout=8 "$NODE" 'sudo -n -l 2>/dev/null | grep -q "NOPASSWD:.*fdesetup authrestart"'; then
+      echo "  OK: reachable, authrestart supported, NOPASSWD sudo wired for 'fdesetup authrestart'. (dry run)"
     else
-      echo "  WARN: NOPASSWD sudo for fdesetup not wired — authrestart will prompt for sudo pw." >&2
+      echo "  WARN: NOPASSWD sudo for 'fdesetup authrestart' not wired — authrestart will prompt for sudo pw." >&2
     fi
     continue
   fi
