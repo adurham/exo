@@ -51,6 +51,14 @@ _MARKS_ENABLED: Final[bool] = os.environ.get("EXO_PHASE_MARKS", "") not in (
     "False",
 )
 
+# Public alias of `_MARKS_ENABLED`, exported for call sites outside this
+# module (e.g. `exo.worker.main`'s `plan_step` loop) that need to gate their
+# OWN work -- such as the `time.perf_counter()` capture for Gate-A mark 2 --
+# on the exact same OFF/ON decision, without a second `os.environ` read and
+# without introducing a second, potentially-divergent source of truth. Bound
+# to `_MARKS_ENABLED` at import time, not recomputed.
+MARKS_ENABLED: Final[bool] = _MARKS_ENABLED
+
 # Distinguishes how the `plan_step` loop-top wait returned. `cancelled_caught`
 # alone is not a safe classifier: if the state-apply `set()` and the
 # `move_on_after` deadline land in the same scheduling window, the task can
@@ -100,11 +108,20 @@ def mark_state_applied(event_idx: int) -> None:
 
 
 def mark_plan_step_observed(
-    event_idx: int, wake_kind: WakeKind, task: Task
+    event_idx: int, wake_observed_at: float, wake_kind: WakeKind, task: Task | None
 ) -> None:
-    """Gate A mark 2: `plan_step` woke, ran `plan()`, and produced a
-    non-None task -- the literal "moment plan_step OBSERVED it" the
-    round-13 pre-registration defines Gate A's right edge as.
+    """Gate A mark 2: `plan_step` woke and ran `plan()` -- the literal
+    "moment plan_step OBSERVED it" the round-13 pre-registration defines
+    Gate A's right edge as.
+
+    Emitted on EVERY wake of the `plan_step` loop, regardless of whether
+    `plan()` produced a task, so amendment A4's pairing ("each wake pairs
+    to the earliest unpaired state_applied since the PRIOR WAKE") has a
+    complete record of every wake -- not just the ones that happened to
+    dispatch something. Most wakes produce no task; recording only the
+    task-producing subset (the pre-fix behavior) left A4's "prior wake"
+    unresolvable except as "prior plan_step_observed", which silently
+    pairs a wake to a stale state_applied from seconds earlier.
 
     `event_idx` is the pairing key: the `IndexedEvent.idx` most recently
     recorded by `mark_state_applied` as of the instant this wake occurred
@@ -112,10 +129,17 @@ def mark_plan_step_observed(
     before `plan()` runs, to minimize the race against a concurrent new
     state apply).
 
-    `task` is the dispatched task itself (already non-None at the call
-    site, after the `task is None` guard); its concrete class name is
-    recorded VERBATIM as the `task=` field. This function is DUMB by
-    design: it does not classify the task as backoff-gated vs
+    `wake_observed_at` is the `time.perf_counter()` value captured by the
+    caller immediately after the loop-top wait returns and BEFORE `plan()`
+    runs, NOT a timestamp taken here after `plan()` has already executed.
+    This keeps the emitted `t=` representing THE WAKE itself; stamping it
+    here instead would bias every measured delta upward by `plan()`'s
+    runtime.
+
+    `task` is the dispatched task, or `None` if this wake's `plan()` call
+    found nothing to do. Its concrete class name is recorded VERBATIM as
+    the `task=` field, or the literal string `None`. This function is DUMB
+    by design: it does not classify the task as backoff-gated vs
     request-path -- that policy lives in the round-13 analyzer, where it
     can be audited against the PREDICTION.md pre-registration (amendment
     A2), not hardcoded into worker instrumentation. Accepting the task
@@ -125,8 +149,9 @@ def mark_plan_step_observed(
     """
     if not _MARKS_ENABLED:
         return
+    task_field = "None" if task is None else task.__class__.__name__
     logger.info(
         f"{_MARK_PREFIX} plan_step_observed event_idx={event_idx} "
-        f"t={time.perf_counter():.6f} wake_kind={wake_kind} "
-        f"task={task.__class__.__name__}"
+        f"t={wake_observed_at:.6f} wake_kind={wake_kind} "
+        f"task={task_field}"
     )

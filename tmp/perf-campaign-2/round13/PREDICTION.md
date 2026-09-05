@@ -277,3 +277,103 @@ classifications, the backoff-gated exclusions, and empty/garbage input.
 
 **Relaunch budget still 2 authorized, 0 used at the time of writing.** Steps 0-5 are now runnable
 as written. No gate, band, or threshold has been altered by this amendment.
+
+---
+
+# THIRD DATED AMENDMENT - 2026-09-04 (later still), written BEFORE any measurement exists
+
+**Nothing above this line is edited. The numeric bands are STILL UNCHANGED.** This amendment
+records a THIRD latent apparatus defect, found in an adversarial pre-mortem run immediately before
+Boot 1 and fixed pre-boot. Like the first two, it would have consumed a scarce relaunch and
+produced an unusable number.
+
+## C1. A4's pairing was UNDEFINED, because most planner wakes emitted NOTHING
+
+Verified in source, not theorized:
+- `mark_state_applied(event.idx)` sits at `worker/main.py:248`, inside `_event_applier`'s
+  `async for event in events:` loop. It fires **unconditionally for EVERY IndexedEvent** - runner
+  status updates, task status updates, per-token chunk events, gathered-info events, everything.
+- `mark_plan_step_observed(...)` sat at `worker/main.py:344`, emitted **only AFTER** the
+  `if task is None: continue` guard - i.e. only on the small minority of wakes where `plan()`
+  actually produced a task.
+
+**Consequence: the overwhelming majority of planner wakes left no record at all.** The planner
+woke (correctly, on the event), ran `plan()`, got `None`, and continued silently. A4 says each wake
+pairs to the earliest unpaired `state_applied` **since the prior wake** - but with no record of
+task-less wakes, "prior wake" could only resolve to "prior `plan_step_observed`". The earliest
+unpaired `state_applied` after that point would be a token or status event from **seconds** earlier.
+
+**The measured median would have landed in the hundreds of ms or seconds, and Gate A would have
+FAILED for a purely instrumental reason** - while the pre-registration correctly forbids
+renegotiating the bands after seeing data. A correct fix would have been recorded as refuted.
+
+**FIX (instrumentation correction; no band moves).** The mark is now emitted on **EVERY** wake of
+the `plan_step` loop, before and regardless of the `task is None` guard, with `task=None` as a
+first-class value meaning "the planner woke, ran `plan()`, and correctly found nothing to do."
+Every `state_applied` now has a genuine successor wake, so A4's "since the prior wake" is
+well-defined and coalescing becomes directly observable instead of inferred.
+
+## C2. The wake timestamp is captured BEFORE `plan()`, not after
+
+`t=` must represent **the wake**, not the wake plus `plan()`'s runtime; stamping inside the mark
+function (which runs after `plan()` returns) would bias every delta upward by `plan()`'s cost.
+`time.perf_counter()` is therefore captured at the top of the loop iteration, immediately after the
+wait returns and before `plan()`, and passed in as `wake_observed_at`. Evidence recorded for the
+record: `plan()` (`worker/plan.py`) is a plain synchronous function - no `await`, no I/O, no
+subprocess or sleep - so stamping after it would likely have been harmless in practice; capturing
+before it removes the question at zero cost rather than relying on that argument.
+
+## C3. Mark-before-signal ordering: AUDITED, already correct
+
+If the applier signalled the planner's event **before** emitting `state_applied`, the planner could
+log `plan_step_observed` first, yielding negative deltas and orphaned marks. Checked rather than
+assumed: `mark_state_applied` is at `worker/main.py:248`; `self._signal_state_applied()` is at
+`:293`, the sole signal site, at the end of the same loop body. **Mark precedes signal. No change
+needed.**
+
+## C4. A2 refinement, decided NOW, before any data exists
+
+Backoff-gated dispatches (`CreateRunner`/`DownloadModel`) are excluded from the Gate-A **delta
+distribution** (median/p95/p99), not merely from the timeout count. Rationale: their eligibility is
+purely clock-driven, so such a dispatch pairs to a stale `state_applied` and would pollute p99 with
+a value that measures a backoff timer rather than wake latency. The excluded population is reported
+separately with its own count and stats, so the exclusion is auditable rather than asserted. This
+tightens A2 in the direction it already pointed; it does not move a threshold.
+
+## C5. Apparatus self-check, replacing the un-measured baseline arm
+
+The pre-registration gates on absolute thresholds against a flag-OFF baseline asserted *by
+construction* (a 100 ms poll implies ~uniform arrival phase, median ~50 ms). Boot 2 restores
+production with marks OFF and yields no baseline data, so no measured OFF arm will exist.
+
+**Internal validity check, pre-registered here:** within the fix-ON arm, wakes with
+`wake_kind=event` must show **sub-millisecond** deltas - that is what an event-driven wake means.
+If `wake_kind=event` pairs to ~40 ms deltas, **the APPARATUS is wrong, not the fix**, and the run
+must NOT be read as a Gate-A result. The analyzer prints this as an explicit PASS/SUSPECT line.
+This is a falsifier for the instrument, deliberately fixed before data exists.
+
+**Cold-start handling corrected:** marks carry no request id, so discarding "the first 3 requests"
+positionally is unsound. Cold/startup marks are identified by TASK TYPE
+(`CreateRunner`/`LoadModel`/`DownloadModel`/`StartWarmup`) and reported separately.
+
+## C6. The OFF-path invariant was briefly weakened, and is restored
+
+R11 established a load-bearing invariant: with `EXO_PHASE_MARKS` unset, the production path
+executes **one boolean check of a module constant and nothing else**. That invariant is the safety
+argument for leaving this instrumentation permanently in the shipping tree. C2's timestamp capture
+initially ran unconditionally, quietly violating it (a `perf_counter()` call per wake, forever, in
+production, immediately discarded by the early-return).
+
+The wall-clock cost was immaterial (~30-80 ns at ~10 wakes/sec). **It was fixed anyway, because a
+quietly-weakened invariant is worse than a slow one.** The capture is now gated inline on the same
+module-level constant (`MARKS_ENABLED`, a public alias of `_MARKS_ENABLED` - no second source of
+truth, no new `os.environ` read). Deliberately NOT wrapped in a helper function: a Python call
+would cost more than the `perf_counter()` it avoids. Verified on both arms: `MARKS_ENABLED` is
+`False` when unset and `True` under `EXO_PHASE_MARKS=1`.
+
+**Gates on all of C1-C6:** 40 analyzer unit tests pass (up from 25; the new ones prove a wake pairs
+to the correct nearby `state_applied` and NOT to a stale seconds-old one - the exact defect above).
+`pytest src/exo/worker/tests`: 291 passed, 0 failed. basedpyright delta **0**; repo-wide count
+unchanged at 4909. ruff clean. `nix fmt` unavailable on this host - skipped, not faked.
+
+**Relaunch budget: 2 authorized, 0 used. No gate, band, or threshold has been altered.**

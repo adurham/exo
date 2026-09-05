@@ -434,5 +434,293 @@ class TestEndToEndAnalyze(unittest.TestCase):
         self.assertTrue(json_summary["timeout_scoping"]["undetermined"])
 
 
+class TestTaskNoneWakesParticipateInPairing(unittest.TestCase):
+    """Round-13 fix: task=None wakes are real, valid pairing anchors -- they
+    must participate in A4 pairing exactly like task-producing wakes, not
+    be treated as missing/invalid data."""
+
+    def test_task_none_wake_pairs_normally(self):
+        lines = [
+            sa(1, 900.000000),
+            pso(1, 900.002000, "event", task="None"),
+        ]
+        marks = pwm.parse_lines(lines)
+        # Parsed as the STRING "None", not Python None -- a determined value.
+        self.assertEqual(marks[1].task, "None")
+        result = pwm.pair_marks(marks)
+        self.assertEqual(len(result.pairs), 1)
+        self.assertAlmostEqual(result.pairs[0][2], 2.0, places=3)
+
+    def test_task_none_wake_distinct_from_missing_task_field(self):
+        """task=None (parsed as the string "None") must never be confused
+        with a wholly absent task= field (parsed as Python None, old-format
+        data, UNDETERMINED)."""
+        with_none_value = pwm.parse_lines([pso(1, 100.0, "event", task="None")])
+        without_field = pwm.parse_lines([pso(1, 100.0, "event")])
+        self.assertEqual(with_none_value[0].task, "None")
+        self.assertIsNone(without_field[0].task)
+        self.assertIsNot(with_none_value[0].task, without_field[0].task)
+
+    def test_task_none_wakes_mixed_with_task_producing_wakes_all_pair(self):
+        lines = [
+            sa(1, 910.000000),
+            pso(1, 910.001000, "event", task="None"),
+            sa(2, 910.010000),
+            pso(2, 910.011000, "event", task="CreateRunner"),
+            sa(3, 910.020000),
+            pso(3, 910.021000, "event", task="None"),
+        ]
+        marks = pwm.parse_lines(lines)
+        result = pwm.pair_marks(marks)
+        self.assertEqual(len(result.pairs), 3)
+        self.assertEqual(len(result.unpaired_observed), 0)
+        self.assertEqual(len(result.unclaimed_state_applied), 0)
+
+    def test_analyze_source_accepts_task_none_wakes_end_to_end(self):
+        lines = [
+            sa(1, 920.000000),
+            pso(1, 920.001000, "event", task="None"),
+            sa(2, 920.100000),
+            pso(2, 920.101000, "event", task="None"),
+        ]
+        report_text, json_summary = pwm.analyze_source("task_none_e2e", lines)
+        self.assertEqual(json_summary["counts"]["paired_n_request_path"], 2)
+        self.assertFalse(json_summary["timeout_scoping"]["undetermined"])
+
+
+class TestTaskNoneWakesFixTheStaleParingDefect(unittest.TestCase):
+    """THE EXACT DEFECT BEING FIXED: before this round's fix, wakes that
+    produced no task were never marked at all, so a later wake's
+    plan_step_observed could only pair to a stale, seconds-old
+    state_applied left over from before a long run of silent no-task
+    wakes. With every wake now marked (including task=None ones), a
+    task-producing wake occurring after many task=None wakes must still
+    pair to the CORRECT nearby state_applied, not a stale one."""
+
+    def test_many_task_none_wakes_do_not_cause_stale_pairing(self):
+        lines = [
+            # A stale state_applied from "seconds ago" -- if pairing were
+            # broken (as in the pre-fix instrumentation, where only
+            # task-producing wakes were marked), a much later wake would
+            # wrongly claim this ancient entry, producing a multi-second
+            # delta instead of a millisecond one.
+            sa(1, 1000.000000),
+            pso(1, 1000.001000, "event", task="None"),
+            # A long run of task=None wakes, each with its own
+            # state_applied immediately before it -- simulating many idle
+            # planner wakes between two real dispatches.
+            sa(2, 1000.100000),
+            pso(2, 1000.100500, "event", task="None"),
+            sa(3, 1000.200000),
+            pso(3, 1000.200400, "event", task="None"),
+            sa(4, 1000.300000),
+            pso(4, 1000.300300, "event", task="None"),
+            sa(5, 1000.400000),
+            pso(5, 1000.400600, "event", task="None"),
+            sa(6, 1000.500000),
+            pso(6, 1000.500200, "event", task="None"),
+            # The state_applied immediately preceding the REAL dispatch --
+            # this is the one the final wake must pair to.
+            sa(7, 5000.000000),  # arrives seconds later, real-time
+            pso(7, 5000.000700, "event", task="TextGeneration"),
+        ]
+        marks = pwm.parse_lines(lines)
+        result = pwm.pair_marks(marks)
+        self.assertEqual(len(result.pairs), 7)
+        # The final (task-producing) pair must claim event_idx=7 -- the
+        # NEAREST state_applied -- not event_idx=1 (the ancient one from
+        # ~4000 seconds earlier, which the pre-fix instrumentation's
+        # "pair to prior plan_step_observed" logic would have left as the
+        # only candidate once task=None wakes went unmarked).
+        final_sa, final_obs, final_delta = result.pairs[-1]
+        self.assertEqual(final_sa.event_idx, 7)
+        self.assertEqual(final_obs.task, "TextGeneration")
+        self.assertAlmostEqual(final_delta, 0.7, places=3)
+        # Prove the defect this guards against: pairing to the stale
+        # event_idx=1 entry would have produced a delta on the order of
+        # 4,000,000 ms, not << 1ms. Assert the measured delta is nowhere
+        # near that magnitude.
+        self.assertLess(final_delta, 10.0)
+
+        # Every OTHER (task=None) wake also pairs to its own nearby
+        # state_applied, not to some earlier stale entry -- prove no
+        # cross-contamination happened anywhere in the chain.
+        for sa_mark, obs_mark, delta_ms in result.pairs[:-1]:
+            self.assertEqual(obs_mark.task, "None")
+            self.assertLess(delta_ms, 5.0)
+            self.assertEqual(sa_mark.event_idx, obs_mark.event_idx)
+
+
+class TestBackoffGatedExcludedFromDeltaDistribution(unittest.TestCase):
+    """A2 REFINEMENT: backoff-gated (CreateRunner/DownloadModel) dispatches
+    are clock-driven, not request-path, and must be excluded from the
+    Gate-A delta DISTRIBUTION (median/p95/p99) -- reported separately with
+    its own count/stats, never silently folded in or silently dropped."""
+
+    def test_backoff_gated_pair_excluded_from_main_stats_reported_separately(self):
+        lines = [
+            # A single request-path pair with a small, clean delta.
+            sa(1, 2000.000000),
+            pso(1, 2000.001000, "event", task="TextGeneration"),
+            # A backoff-gated retry whose FIFO pairing partner is stale
+            # (arrived seconds earlier) -- exactly the kind of clock-driven
+            # noise that would pollute p99 if left in the main distribution.
+            sa(2, 2000.500000),
+            pso(2, 2050.000000, "timeout", task="CreateRunner"),
+        ]
+        report_text, json_summary = pwm.analyze_source("backoff_split_test", lines)
+        # Main distribution: only the clean request-path delta.
+        self.assertEqual(json_summary["stats_ms"]["n"], 1)
+        self.assertAlmostEqual(json_summary["stats_ms"]["median_ms"], 1.0, places=3)
+        # Excluded population reported separately, with its own count/stats.
+        self.assertEqual(json_summary["counts"]["paired_n_backoff_gated_excluded"], 1)
+        self.assertIsNotNone(json_summary["backoff_gated_excluded_stats_ms"])
+        self.assertEqual(json_summary["backoff_gated_excluded_stats_ms"]["n"], 1)
+        self.assertAlmostEqual(
+            json_summary["backoff_gated_excluded_stats_ms"]["median_ms"],
+            49500.0,
+            places=1,
+        )
+        self.assertIn(
+            "backoff-gated (CreateRunner/DownloadModel) pairs EXCLUDED", report_text
+        )
+
+    def test_all_backoff_gated_falls_back_and_flags_explicitly(self):
+        """If EVERY paired delta happens to be backoff-gated, the analyzer
+        must not hard-fail (a real short capture could legitimately look
+        like this) -- but it must flag the fallback prominently rather than
+        silently presenting the unfiltered numbers as a clean result."""
+        lines = [
+            sa(1, 2100.000000),
+            pso(1, 2150.000000, "timeout", task="CreateRunner"),
+        ]
+        report_text, json_summary = pwm.analyze_source("all_backoff_gated", lines)
+        self.assertTrue(json_summary["request_path_distribution_fallback"])
+        self.assertIn("FALLBACK", report_text)
+
+
+class TestCoalescingHistogram(unittest.TestCase):
+    """Round-13 amendment (part c): the coalescing histogram must make A4's
+    behavior visible -- how many state_applied marks each wake coalesced."""
+
+    def test_histogram_counts_simple_and_coalesced_wakes(self):
+        lines = [
+            # Wake 1: exactly 1 pending state_applied (simple case).
+            sa(1, 3000.000000),
+            pso(1, 3000.001000, "event", task="None"),
+            # Wake 2: 3 pending state_applied (coalescing).
+            sa(2, 3000.100000),
+            sa(3, 3000.101000),
+            sa(4, 3000.102000),
+            pso(2, 3000.103000, "event", task="None"),
+            # Wake 3: 0 pending (no state_applied since the prior wake).
+            pso(3, 3000.104000, "event", task="None"),
+        ]
+        marks = pwm.parse_lines(lines)
+        histogram = pwm.compute_coalescing_histogram(marks)
+        self.assertEqual(histogram.get(1), 1)
+        self.assertEqual(histogram.get(3), 1)
+        self.assertEqual(histogram.get(0), 1)
+
+    def test_histogram_reported_in_analyze_source(self):
+        lines = [
+            sa(1, 3100.000000),
+            sa(2, 3100.001000),
+            pso(1, 3100.002000, "event", task="None"),
+        ]
+        report_text, json_summary = pwm.analyze_source("histogram_e2e", lines)
+        self.assertIn("Coalescing histogram", report_text)
+        self.assertEqual(json_summary["coalescing_histogram"].get(2), 1)
+
+
+class TestApparatusSelfCheck(unittest.TestCase):
+    """Round-13 amendment (part d): the apparatus self-check must fire
+    SUSPECT when wake_kind=event pairs show large (non-sub-millisecond)
+    deltas -- proving the measurement apparatus, not necessarily the fix,
+    is broken -- and PASS when they are genuinely sub-millisecond."""
+
+    def test_self_check_passes_on_submillisecond_event_deltas(self):
+        lines = [
+            sa(1, 4000.000000),
+            pso(1, 4000.000300, "event", task="None"),
+            sa(2, 4000.100000),
+            pso(2, 4000.100200, "event", task="TextGeneration"),
+        ]
+        _, json_summary = pwm.analyze_source("apparatus_pass_test", lines)
+        check = json_summary["apparatus_self_check"]
+        self.assertEqual(check["verdict"], "PASS")
+        self.assertLess(check["median_ms"], 1.0)
+
+    def test_self_check_fires_suspect_on_large_event_deltas(self):
+        """If wake_kind=event pairs to ~40ms deltas, the APPARATUS is wrong,
+        not the fix -- this must be surfaced as SUSPECT, prominently."""
+        lines = [
+            sa(1, 4100.000000),
+            pso(1, 4100.040000, "event", task="None"),
+            sa(2, 4100.100000),
+            pso(2, 4100.142000, "event", task="TextGeneration"),
+        ]
+        report_text, json_summary = pwm.analyze_source("apparatus_suspect_test", lines)
+        check = json_summary["apparatus_self_check"]
+        self.assertEqual(check["verdict"], "SUSPECT")
+        self.assertGreaterEqual(check["median_ms"], 1.0)
+        self.assertIn("SUSPECT", report_text)
+        self.assertIn("APPARATUS", report_text)
+
+    def test_self_check_reports_na_when_no_event_wakes_present(self):
+        lines = [
+            sa(1, 4200.000000),
+            pso(1, 4200.100000, "timeout", task="TextGeneration"),
+        ]
+        _, json_summary = pwm.analyze_source("apparatus_na_test", lines)
+        check = json_summary["apparatus_self_check"]
+        self.assertEqual(check["verdict"], "N/A")
+        self.assertEqual(check["n"], 0)
+
+
+class TestColdStartIdentifiedByTaskType(unittest.TestCase):
+    """Round-13 amendment (part e): cold/startup marks must be identified
+    by task type, never by discarding the first N marks by position."""
+
+    def test_cold_start_task_types_separated_from_steady_state(self):
+        lines = [
+            sa(1, 5100.000000),
+            pso(1, 5100.050000, "event", task="CreateRunner"),
+            sa(2, 5100.100000),
+            pso(2, 5100.150000, "event", task="LoadModel"),
+            sa(3, 5100.200000),
+            pso(3, 5100.201000, "event", task="TextGeneration"),
+        ]
+        _, json_summary = pwm.analyze_source("cold_start_test", lines)
+        cold_stats = json_summary["cold_start_stats_ms"]
+        self.assertIsNotNone(cold_stats)
+        self.assertEqual(cold_stats["n"], 2)
+
+    def test_no_cold_start_marks_reports_none_not_error(self):
+        lines = [
+            sa(1, 5200.000000),
+            pso(1, 5200.001000, "event", task="TextGeneration"),
+        ]
+        _, json_summary = pwm.analyze_source("no_cold_start_test", lines)
+        self.assertIsNone(json_summary["cold_start_stats_ms"])
+
+    def test_cold_start_identified_regardless_of_position_in_stream(self):
+        """A cold-start task type appearing LATE in the stream (not among
+        the first N marks) must still be classified as cold-start -- proof
+        that classification is by task type, not by discarding a prefix."""
+        lines = [
+            sa(1, 5300.000000),
+            pso(1, 5300.001000, "event", task="TextGeneration"),
+            sa(2, 5300.100000),
+            pso(2, 5300.101000, "event", task="TextGeneration"),
+            sa(3, 5300.200000),
+            pso(3, 5300.250000, "event", task="DownloadModel"),  # late, still cold-start
+        ]
+        _, json_summary = pwm.analyze_source("late_cold_start_test", lines)
+        cold_stats = json_summary["cold_start_stats_ms"]
+        self.assertIsNotNone(cold_stats)
+        self.assertEqual(cold_stats["n"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

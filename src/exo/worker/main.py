@@ -1,5 +1,6 @@
 import hashlib
 import os
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Final
@@ -61,6 +62,7 @@ from exo.utils.info_gatherer.net_profile import check_reachable
 from exo.utils.keyed_backoff import KeyedBackoff
 from exo.utils.task_group import TaskGroup
 from exo.worker.phase_marks import (
+    MARKS_ENABLED,
     WakeKind,
     mark_plan_step_observed,
     mark_state_applied,
@@ -319,6 +321,25 @@ class Worker:
             # read (a concurrent apply landing mid-`plan()` would otherwise
             # attribute the wrong event_idx to this dispatch).
             observed_event_idx = self._last_applied_event_idx
+            # Round-13 Gate-A mark 2 (plan_step-observed) timestamp: captured
+            # HERE, immediately after the wait returns and BEFORE `plan()`
+            # runs, so the recorded `t=` represents THE WAKE itself, not the
+            # wake plus `plan()`'s runtime. `plan()` (src/exo/worker/plan.py)
+            # is a plain synchronous function -- no `await`, no I/O, no
+            # subprocess/sleep calls anywhere in it, just in-memory dict/tuple
+            # lookups and Python-level branching over already-fetched state --
+            # so capturing the timestamp after plan() would still be safe in
+            # practice, but capturing it here removes the question entirely
+            # and costs nothing.
+            #
+            # Gated on `MARKS_ENABLED` -- the same module-level constant
+            # `phase_marks.mark_plan_step_observed` itself checks -- so that
+            # with EXO_PHASE_MARKS unset this line is an inline boolean
+            # check and nothing else, preserving the OFF-path invariant: NOT
+            # a wasted `time.perf_counter()` call that is computed only to
+            # be discarded by that function's own `if not _MARKS_ENABLED:
+            # return`.
+            wake_observed_at = time.perf_counter() if MARKS_ENABLED else 0.0
             task: Task | None = plan(
                 self.node_id,
                 self.runners,
@@ -332,16 +353,23 @@ class Worker:
                 self._download_backoff,
                 self.state.node_network,
             )
+
+            # Round-13 Gate-A mark 2 (plan_step-observed): emitted on EVERY
+            # wake of this loop, regardless of whether `plan()` produced a
+            # task, so amendment A4 ("each wake pairs to the earliest
+            # unpaired state_applied since the PRIOR WAKE") has a real,
+            # complete record of every wake to pair against -- not just the
+            # wakes that happened to dispatch something. `task=None` is
+            # itself a valid, informative pairing anchor: it means the
+            # planner woke, ran `plan()`, and correctly found nothing to do.
+            # `wake_kind` lets the analyzer count timeout-driven wakes on
+            # this (request) path explicitly, per Gate A's PASS condition.
+            mark_plan_step_observed(
+                observed_event_idx, wake_observed_at, wake_kind, task
+            )
+
             if task is None:
                 continue
-
-            # Round-13 Gate-A mark 2 (plan_step-observed): `plan_step` woke
-            # AND produced a non-None task, i.e. observed the dispatch --
-            # exactly the round-13 pre-registration's definition of Gate A's
-            # right edge. `wake_kind` lets the analyzer count timeout-driven
-            # wakes on this (request) path explicitly, per Gate A's PASS
-            # condition.
-            mark_plan_step_observed(observed_event_idx, wake_kind, task)
 
             if isinstance(task, CreateRunner):
                 iid = task.instance_id
