@@ -201,3 +201,79 @@ were considered and **rejected as routing around the restriction**; none were at
 
 **Relaunch budget remains 2 authorized, 0 used.** Steps 0-5 above stand as written, subject to
 A2/A3/A4, and become runnable the moment a `marks` read capability exists.
+
+---
+
+# SECOND DATED AMENDMENT — 2026-09-04 (later same day), written BEFORE any measurement exists
+
+**Nothing above this line is edited. The numeric bands are STILL UNCHANGED**
+(median <=10 ms, p99 <=20 ms, request-path timeout-driven wakes == 0; Gate B |gap| <=10 ms;
+actionability floor 75 ms). This amendment records (a) the three blockers named in A5 being
+resolved, and (b) one further apparatus gap found and closed while building the reader — again
+found pre-boot, again recorded rather than silently fixed.
+
+## B1. All three A5 blockers are RESOLVED (two by the supervisor, one verified empirically here)
+
+1. **Marks are now readable.** `cluster-diag.sh marks <m4-1|m4-2> [N]` (commit `7c441e110`) runs
+   `tail -n N ~/exo.log | grep PHASE_MARK` on the node. Read-only by construction: fixed log path,
+   fixed grep pattern, only the numeric tail count is caller-controlled. **A5 blocker 1 CLOSED.**
+2. **`start_cluster.sh`'s silent-hang risk is gone.** Its pre-deploy push-check had a bare
+   `read -p` with no TTY guard, which would have blocked forever in a background context. It now
+   tests `[ -t 0 ]` first and fails loudly and immediately instead (`start_cluster.sh:1141`).
+   **A5 blocker 3 CLOSED.**
+3. **The workload CAN be driven — verified empirically this round, not assumed.** The existing
+   round-11 capture path was launched and confirmed live: `passive_capture_proxy.py` binds
+   127.0.0.1:52416 and forwards to the cluster; `curl http://127.0.0.1:52416/v1/models` returned
+   **HTTP 200 in 0.098 s**. No new harness was built (R5's lesson). **A5 blocker 2 CLOSED.**
+
+## B2. Amendment A2 was pre-registered but NOT MECHANICALLY DECIDABLE. Apparatus added.
+
+A2 (binding, above) scopes Gate A's "ZERO timeout-driven wakes" to EXCLUDE dispatches gated by
+`KeyedBackoff.should_proceed` — `CreateRunner`/`DownloadModel` retries whose eligibility is
+time-based by design (`keyed_backoff.py:20` is `now - last >= delay`, no state precondition).
+
+**But the mark did not carry the information needed to apply that exclusion.**
+`mark_plan_step_observed(event_idx, wake_kind)` emitted only those two fields, so a backoff-gated
+retry and a request-path dispatch were **indistinguishable in the data**. Any true timeout wake in
+the run would have made Gate A's third sub-condition **UNDETERMINED — and would have partly wasted
+one of only two authorized relaunches.**
+
+Closed pre-boot. The dispatched `task` is already in scope at the mark site (`worker/main.py:344`,
+after `plan()` at :322 and after the `task is None` guard at :335) — the disambiguator was present
+and simply unrecorded. The mark now appends `task=<ClassName>` **verbatim**:
+
+```
+PHASE_MARK plan_step_observed event_idx=<int> t=<%.6f> wake_kind=<...> task=<ClassName>
+```
+
+**Deliberate design split: the emitter is DUMB, the policy lives in the ANALYZER.**
+`phase_marks.py` records the class name and classifies nothing. The backoff-gated set
+(`{CreateRunner, DownloadModel}`) lives only in `parse_worker_marks.py`, where it is auditable
+against this pre-registration instead of being hardcoded into worker instrumentation. An
+unanticipated task type therefore appears in the data **as itself** rather than being silently
+bucketed into either side of the gate.
+
+**OFF-path identity preserved (the binding constraint).** The call site passes the task *object*;
+`__class__.__name__` and all string formatting happen **after** `if not _MARKS_ENABLED: return`,
+which remains the first statement. Verified, not asserted: with `EXO_PHASE_MARKS` unset,
+`_MARKS_ENABLED` imports as `False`. No `mx.eval()` was added (hard gate G1). Mark position,
+control flow, and ordering relative to `plan()` are untouched. `state_applied`'s format is
+unchanged. basedpyright delta **0**, ruff delta **0** on both changed files.
+
+## B3. The A4 reader now exists (it did not when A4 was written)
+
+A4 noted `round11/analyze_marks.py` parses a DIFFERENT stream (API-side JSON) and that a parser
+for the worker log-line stream "still needs to be written." It is now written:
+`tmp/perf-campaign-2/round13/parse_worker_marks.py` (stdlib-only, `/usr/bin/python3`), implementing
+A2/A3/A4 exactly: earliest-unpaired pairing (never pair by counting — `event_idx` is monotonic but
+NOT contiguous), 3-way `WakeKind` with `event_raced_timeout` counted as EVENT-driven, per-node
+analysis only (no cross-node clock arithmetic, gate G2), medians and RANGES never bare means.
+
+**Fail-loud properties, deliberate:** zero parseable marks exits non-zero; a Gate verdict is never
+printed from an empty set; and old-format lines lacking `task=` raise the UNDETERMINED path rather
+than silently defaulting to a clean pass. 25 synthetic unit tests pass under `/usr/bin/python3`
+(PM re-ran them independently), covering coalescing, non-contiguous indices, both timeout
+classifications, the backoff-gated exclusions, and empty/garbage input.
+
+**Relaunch budget still 2 authorized, 0 used at the time of writing.** Steps 0-5 are now runnable
+as written. No gate, band, or threshold has been altered by this amendment.

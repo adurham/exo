@@ -42,6 +42,8 @@ from typing import Final, Literal
 
 from loguru import logger
 
+from exo.shared.types.tasks import Task
+
 _MARKS_ENABLED: Final[bool] = os.environ.get("EXO_PHASE_MARKS", "") not in (
     "",
     "0",
@@ -97,7 +99,9 @@ def mark_state_applied(event_idx: int) -> None:
     )
 
 
-def mark_plan_step_observed(event_idx: int, wake_kind: WakeKind) -> None:
+def mark_plan_step_observed(
+    event_idx: int, wake_kind: WakeKind, task: Task
+) -> None:
     """Gate A mark 2: `plan_step` woke, ran `plan()`, and produced a
     non-None task -- the literal "moment plan_step OBSERVED it" the
     round-13 pre-registration defines Gate A's right edge as.
@@ -107,10 +111,22 @@ def mark_plan_step_observed(event_idx: int, wake_kind: WakeKind) -> None:
     (captured by the caller immediately after the loop-top wait returns,
     before `plan()` runs, to minimize the race against a concurrent new
     state apply).
+
+    `task` is the dispatched task itself (already non-None at the call
+    site, after the `task is None` guard); its concrete class name is
+    recorded VERBATIM as the `task=` field. This function is DUMB by
+    design: it does not classify the task as backoff-gated vs
+    request-path -- that policy lives in the round-13 analyzer, where it
+    can be audited against the PREDICTION.md pre-registration (amendment
+    A2), not hardcoded into worker instrumentation. Accepting the task
+    object (not a pre-formatted string) keeps the attribute access behind
+    the `_MARKS_ENABLED` gate below, so it costs nothing when marks are
+    disabled.
     """
     if not _MARKS_ENABLED:
         return
     logger.info(
         f"{_MARK_PREFIX} plan_step_observed event_idx={event_idx} "
-        f"t={time.perf_counter():.6f} wake_kind={wake_kind}"
+        f"t={time.perf_counter():.6f} wake_kind={wake_kind} "
+        f"task={task.__class__.__name__}"
     )

@@ -341,7 +341,7 @@ class Worker:
             # right edge. `wake_kind` lets the analyzer count timeout-driven
             # wakes on this (request) path explicitly, per Gate A's PASS
             # condition.
-            mark_plan_step_observed(observed_event_idx, wake_kind)
+            mark_plan_step_observed(observed_event_idx, wake_kind, task)
 
             if isinstance(task, CreateRunner):
                 iid = task.instance_id
