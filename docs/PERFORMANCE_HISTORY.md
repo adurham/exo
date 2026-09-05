@@ -8584,3 +8584,73 @@ Task 2 first to confirm ≥75 ms measured; do not ship on a code read alone.
 **Supervisor note:** after the reboot the loop resumes at Task 2 (one instrumented boot + closure
 check), then R12 on whichever phase the marks rank first — the plan_step tick is the leading
 candidate but the marks decide.
+
+## CAMPAIGN 2 - ROUND 12 (I16 plan_step tick): FIX CODE-COMPLETE, MEASUREMENT BLOCKED, NOTHING SHIPPED (2026-09-04)
+
+Artifacts: tmp/perf-campaign-2/round12/{PREDICTION,REPORT}.md + seam_harness/. Commits
+b3cd50bed (pre-registration), 83a671213 (seam harness), 84bdcd756 (the fix).
+
+**BLOCKER - cluster access denied at the tool-permission layer.** A batched health/env check
+(curl to .201:52415 + ssh to both nodes) was BLOCKED with an explicit do-not-retry instruction.
+That was honoured; NO further cluster access was attempted. Boot 1 never ran. **Gate A and
+Gate B are UNEVALUATED.** Relaunch budget 2 authorized, **0 used**. This is PREDICTION.md's own
+round-time-checkpoint branch (commit the fix + unit tests, defer the live boot) taken verbatim -
+access loss is a stronger trigger for it than a clock overrun.
+
+**Cluster state: UNVERIFIED but UNCHANGED.** start_cluster.sh never ran, so no rsync/deploy
+reached the nodes; running PIDs are bit-identical to pre-round. Health could not be confirmed on
+real PIDs and is NOT asserted here. Next session with access must run the standard check first
+(API 200, both nodes READY, RV=0, gamma=3, BI=1, EXO_PHASE_MARKS absent, and now also
+EXO_WORKER_PLAN_EVENT_WAKE absent).
+
+**The fix (84bdcd756, pushed, env-gated DEFAULT OFF - ships no behaviour change).**
+worker/main.py:195's loop-top `await anyio.sleep(0.1)` replaced by a wait on an `anyio.Event`
+signalled at the single state-apply point, with the 100ms sleep retained as a FALLBACK timeout
+(`move_on_after`), never a bare await-forever. PM verified every pre-registered constraint against
+the actual diff: fresh Event per wake (anyio.Event has no clear()), reference captured BEFORE the
+state read, mutate-then-signal ordering, one signal site (grep for the self.state assignment
+returns exactly one hit), `Final[bool]` gate read once at import, allow-list line at
+start_cluster.sh:1618. **Not a shortened sleep** - no spin-wait. **Cross-context question RESOLVED
+from source:** plan_step and _event_applier are both tg.start_soon-ed into ONE task group
+(main.py:112-113) -> same loop, same thread -> bare set() is correct, no threadsafe hop needed.
+
+**Safety gate 5 (lost wakeup) PASSED.** 425-line test file, assertions A-E incl. the exact
+check->signal->await interleaving, made deterministic by statement order not scheduling luck.
+PM re-ran independently: **37 passed in 0.36s**. Worker also ran buggy-variant negative controls
+confirming tests C and D actually fail against a wrong implementation. basedpyright delta 0
+(4909->4909, baseline via git worktree); ruff clean; nix fmt unavailable -> skipped, not faked.
+
+**NOT established: any performance number.** The 100ms figure is still code-read-derived. The gate
+has never run on hardware. Byte-identity, error counts, idle CPU, wake-storm all unmeasured.
+**The tick is still live in production.** R11's "do not ship on a code read" gate remains unmet.
+
+**BRANCH-T PREP - a real finding for zero cluster time.** Seam harness built AND RUN against the
+real checkpoint + real vendored encoder (PM reproduced the output).
+(1) Tokenizer seam rule HOLDS: all safe seams (immediately after an added token, found via
+offset_mapping) satisfy cached_prefix + tok(suffix, add_special_tokens=False) == tok(full) - 11
+and 18 safe seams across two corpora, plus combining chars / ZWJ emoji / digit runs / whitespace
+runs; BOS exactly once; mid-token negative controls correctly REJECTED (the harness has teeth).
+(2) normalizer = Sequence with 0 sub-normalizers -> present but INERT for this checkpoint.
+(3) **TEMPLATE POSITION-INVARIANCE FAILS** - `render(msgs[:4])` is NOT a byte-prefix of
+`render(msgs[:5])`, diverging at char 403 ("SF: 60F foggy" vs "NYC: 75F sunny"):
+merge_tool_messages()/sort_tool_results_by_call_order() re-sort tool results on EVERY
+encode_messages() call, so appending a later message REWRITES already-rendered prefix bytes.
+**Consequence: a prefix cache keyed on message-list position is provably UNSAFE for
+multi-tool-result conversations** - the dominant agentic shape (R11: 44/55 real requests end in
+tool_calls). Tokenizer seam safety is necessary but NOT sufficient. This does not close Branch T
+(the full ~150K re-tokenize-every-turn prize is untouched) but removes the naive design from the
+table before it could be funded, and would NOT have been caught by a single-tool-call corpus.
+
+**R13 BRANCH SELECTION IMPOSSIBLE.** Branches H/T/W/U and the close-out condition are ALL keyed to
+Boot 1 marks or Gate B; none exist. The tie-break rule presupposes measurements. Selecting a branch
+now would mean inventing the data the table reads from. **R13 is nevertheless fully determined and
+needs no new decision:** post-reboot env validation, then Boot 1 exactly as pre-registered (fix +
+EXO_PHASE_MARKS=1, one relaunch), then Gate A/B and mechanical branch selection. The fix and its
+allow-list line are already in place, so Boot 1 needs no further prep.
+
+**Reconciliation:** I16 != R10's rendezvous sleep (different file, process, trigger). The 2026-06-24
+db9b3384 change also touched plan_step but made task DISPATCH non-blocking - a different line and
+a different problem; the loop-top sleep survived it. grep "I16" over docs/ had no prior hits.
+**Supervisor-brief error caught:** the brief carried "basedpyright baseline 425" forward from R11;
+the real baseline on this tree is 4909 (src) / 13155 (repo-wide), established via git worktree.
+Delta is 0 either way, but **do not quote 425 again**.

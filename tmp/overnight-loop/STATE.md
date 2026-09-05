@@ -65,7 +65,52 @@ Never build a new harness — R5 lost a round to one.
 
 ---
 
-## NEXT (needs user direction — loop is paused)
+## NEXT (loop BLOCKED on cluster access — see R12 below)
+
+### >>> RESUME POINTER (read this first on context loss) <<<
+
+**R12 (2026-09-04) ended CODE-COMPLETE but MEASUREMENT-BLOCKED. Nothing shipped.**
+Full record: `tmp/perf-campaign-2/round12/REPORT.md` + `docs/PERFORMANCE_HISTORY.md` (R12 section).
+
+**THE BLOCKER:** cluster access is denied at the tool-permission layer. A batched
+`curl` (.201:52415) + `ssh` (.201/.202) health check was BLOCKED with an explicit
+do-not-retry-and-do-not-route-around instruction. That was honoured — no further cluster
+access was attempted all round. **This is a genuine blocker under charter rule 10 (the loop
+cannot proceed without the hardware), NOT a decision awaiting judgement.**
+
+**THE FIRST THING TO DO WHEN ACCESS RETURNS** (no new decision required, all pre-registered):
+1. Standard health check on REAL PIDs: API 200, both nodes READY, RV=0, gamma=3, BI=1,
+   `EXO_PHASE_MARKS` ABSENT, and now also `EXO_WORKER_PLAN_EVENT_WAKE` ABSENT.
+   R12 could not verify cluster health — it is UNVERIFIED (though provably UNCHANGED:
+   `start_cluster.sh` never ran, so nothing was deployed to the nodes).
+2. Post-reboot environment validation per round12/PREDICTION.md (tunables, TB5 RDMA link,
+   git SHA both nodes, background load, discard 3 cold requests, baseline 29.1 t/s @2K +/-3%).
+3. Boot 1 exactly as pre-registered: `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1 ./start_cluster.sh`
+   — the fix AND the marks together, ONE relaunch. Then the mandatory `ps eww` gate on real
+   runner PIDs for BOTH vars before spending the workload.
+4. Evaluate Gate A (ships the fix) and Gate B (informational) per round12/PREDICTION.md.
+5. Select the R13 branch MECHANICALLY from the branch table. **Do not re-litigate it.**
+
+**R12's state:** the I16 fix is committed and pushed (`84bdcd756`), **env-gated DEFAULT OFF**,
+so `main` is production-identical and the 100 ms tick is STILL LIVE. Allow-list line is already
+at `start_cluster.sh:1618`. Lost-wakeup safety gate PASSED in unit tests (37 passed, PM re-ran).
+No performance number exists — the 100 ms figure is still code-read-derived, and R11's
+"do not ship on a code read" gate is UNMET. Relaunch budget: 2 authorized, **0 used**.
+
+**Free win banked (no cluster time):** the seam harness RAN. Tokenizer-level seam rule HOLDS,
+normalizer inert — but **template position-invariance FAILS**: `render(msgs[:4])` is not a
+byte-prefix of `render(msgs[:5])` (diverges at char 403) because the vendored DSv4 encoder
+re-sorts tool results on every call. **A prefix cache keyed on message-list position is provably
+UNSAFE for multi-tool-result conversations** (44/55 real requests end in tool_calls). This
+pre-constrains Branch T's design before it is funded; it does not close it.
+
+**Correction to propagate:** the "basedpyright baseline = 425" figure in R11's REPORT is WRONG
+for this tree. Real baseline (git worktree): 4909 for `src`, 13155 repo-wide. Delta gates the
+change and is 0. **Do not quote 425 again.**
+
+---
+
+## (historical) NEXT as of R11
 
 **User's standing bar (09-04): "every possible performance enhancement we can get without impacting
 quality matters."** Sub-second wins earn a bounded round if quality is provably untouched.
@@ -86,6 +131,9 @@ under "small but quality-free": the R7 steel-BI re-test IF the self-control void
 (relaunches are not part of normal sessions). I15 CLOSED (no launch-count probe exists on the
 decode path). Everything else in the ledger is closed.
 
-**Cluster:** healthy on shipped production config (γ=3, BI=1, RV=200, mxfp4 experts, async
-fence armed), both nodes READY, verified 2026-09-04. No probe/diag env leftover. Tree clean,
-everything pushed (exo main @ 5e9717fe7 + this file).
+**Cluster (as of R11, 2026-09-04 — NOT re-verified since):** was healthy on shipped production
+config (γ=3, BI=1, RV=200→0 per R10, mxfp4 experts, async fence armed), both nodes READY. No
+probe/diag env leftover. **R12 could NOT re-verify this** — cluster access was denied at the
+tool-permission layer. R12 provably did not change it (`start_cluster.sh` never ran, so no deploy
+reached the nodes), but "healthy" is now an INHERITED claim, not a fresh measurement. Re-verify on
+real PIDs before trusting any number.
