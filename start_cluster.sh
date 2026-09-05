@@ -1609,6 +1609,13 @@ for NODE in "${NODES[@]}"; do
   # processes never see it and the whole boot measures nothing (R4/Ask-A
   # lesson).
   [ -n "${EXO_PHASE_MARKS:-}" ] && EXO_ENV="$EXO_ENV EXO_PHASE_MARKS=$EXO_PHASE_MARKS"
+  # Round-12 I16: event-triggered wake for the worker's plan_step loop
+  # (exo.worker.main._PLAN_EVENT_WAKE_ENABLED), replacing the 100ms poll tick
+  # with an Event signalled at the state-apply point; the 100ms sleep stays as
+  # a fallback timeout. Default OFF; export EXO_WORKER_PLAN_EVENT_WAKE=1 to
+  # enable. Same allow-list rule as EXO_PHASE_MARKS above: without this line
+  # the runner PIDs never see the var and the gate silently stays OFF.
+  [ -n "${EXO_WORKER_PLAN_EVENT_WAKE:-}" ] && EXO_ENV="$EXO_ENV EXO_WORKER_PLAN_EVENT_WAKE=$EXO_WORKER_PLAN_EVENT_WAKE"
   [ "${MLX_DISABLE_COMPILE:-}" = "1" ] && EXO_ENV="$EXO_ENV MLX_DISABLE_COMPILE=1"
   [ "${MALLOC_STACK_LOGGING:-}" = "1" ] && EXO_ENV="$EXO_ENV MallocStackLogging=1 MallocStackLoggingNoCompact=1"
   [ -n "${MLX_LOG_NEW_BUFFER_PATH:-}" ] && EXO_ENV="$EXO_ENV MLX_LOG_NEW_BUFFER_PATH=$MLX_LOG_NEW_BUFFER_PATH"

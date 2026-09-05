@@ -1,6 +1,8 @@
 import hashlib
+import os
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Final
 
 import anyio
 from anyio import fail_after, to_thread
@@ -61,6 +63,27 @@ from exo.utils.task_group import TaskGroup
 from exo.worker.plan import plan
 from exo.worker.runner.supervisor import RunnerSupervisor
 
+# The historical `plan_step` loop-top poll interval. Under the default (gate
+# OFF) path this is the plain sleep it always was; under the event-wake path it
+# becomes the FALLBACK timeout on the wait, so a missed signal degrades to
+# exactly this polling behaviour rather than hanging.
+_PLAN_TICK_SECONDS: Final[float] = 0.1
+
+# I16 (round 12): event-triggered wake for `plan_step`, replacing the
+# unconditional 100ms tick at the top of its loop. Read ONCE at import into a
+# module-level `Final[bool]` -- never `os.environ` in the loop body -- mirroring
+# `exo.api.phase_marks` / `exo.worker.engines.mlx.phase_marks`. Default OFF:
+# unset or "0" leaves the loop-top wait byte-for-byte the historical
+# `await anyio.sleep(0.1)`.
+_PLAN_EVENT_WAKE_ENABLED: Final[bool] = os.environ.get(
+    "EXO_WORKER_PLAN_EVENT_WAKE", ""
+) not in (
+    "",
+    "0",
+    "false",
+    "False",
+)
+
 
 class Worker:
     def __init__(
@@ -98,6 +121,45 @@ class Worker:
             base=0.5, cap=10.0
         )
         self._stopped: anyio.Event = anyio.Event()
+
+        # I16: signalled by `_event_applier` after EVERY state apply, awaited at
+        # the top of `plan_step`. `anyio.Event` has no `clear()`, so the wake
+        # path REPLACES this object with a fresh Event rather than resetting it
+        # (see `_signal_state_applied` / `_wait_for_state_change`).
+        self._state_applied: anyio.Event = anyio.Event()
+
+    def _signal_state_applied(self) -> None:
+        """Wake `plan_step`. MUST be called AFTER the state mutation it reports.
+
+        `anyio.Event` has no `clear()`, so this swaps in a FRESH Event before
+        setting the old one: every waiter already parked on the old object is
+        released, and the next capture sees a new, unset object.
+
+        No-op under the gate so the default path allocates nothing.
+        """
+        if not _PLAN_EVENT_WAKE_ENABLED:
+            return
+        previously_waited_on = self._state_applied
+        self._state_applied = anyio.Event()
+        previously_waited_on.set()
+
+    async def _wait_for_state_change(self, waiting_on: anyio.Event) -> None:
+        """The `plan_step` loop-top wait.
+
+        Gate OFF (default): exactly the historical plain
+        ``await anyio.sleep(0.1)``; `waiting_on` is not consulted at all.
+
+        Gate ON: park on the event the caller captured BEFORE its last
+        `plan()` state read, bounded by the same 0.1s as a FALLBACK timeout.
+        A missed signal therefore degrades to exactly today's 100ms polling
+        rather than hanging.
+        """
+        if not _PLAN_EVENT_WAKE_ENABLED:
+            await anyio.sleep(_PLAN_TICK_SECONDS)
+            return
+
+        with anyio.move_on_after(_PLAN_TICK_SECONDS):
+            await waiting_on.wait()
 
     async def run(self):
         logger.info("Starting Worker")
@@ -177,6 +239,16 @@ class Worker:
                                 )
                             ] = img
 
+                # I16: the SINGLE state-apply signal site. Placed at the END of
+                # the loop body so EVERY mutation this event makes -- `self.state`
+                # above, plus `input_chunk_buffer` / `image_cache`, all of which
+                # `plan()` reads -- has already landed before the wake fires
+                # (mutate first, THEN set). Same task group and therefore the
+                # same event loop and thread as `plan_step` (both are
+                # `tg.start_soon`-ed in `run`), so a bare `set()` is correct
+                # here; no cross-thread scheduling hop is required.
+                self._signal_state_applied()
+
     async def _reconcile_custom_cards(self) -> None:
         while True:
             await anyio.sleep(1)
@@ -191,8 +263,15 @@ class Worker:
                     await card_cache.pop(card.model_id)
 
     async def plan_step(self):
+        # Captured BEFORE the first `plan()` state read, and re-captured at the
+        # same point on every iteration. A signal that lands after the capture
+        # but before/during `plan()` sets THIS object, so the next wait returns
+        # immediately instead of parking for the full fallback -- the
+        # lost-wakeup window is closed by the capture ordering, not by luck.
+        waiting_on: anyio.Event = self._state_applied
         while True:
-            await anyio.sleep(0.1)
+            await self._wait_for_state_change(waiting_on)
+            waiting_on = self._state_applied
             task: Task | None = plan(
                 self.node_id,
                 self.runners,
