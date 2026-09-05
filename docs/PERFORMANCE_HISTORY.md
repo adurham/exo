@@ -8654,3 +8654,9 @@ a different problem; the loop-top sleep survived it. grep "I16" over docs/ had n
 **Supervisor-brief error caught:** the brief carried "basedpyright baseline 425" forward from R11;
 the real baseline on this tree is 4909 (src) / 13155 (repo-wide), established via git worktree.
 Delta is 0 either way, but **do not quote 425 again**.
+
+**NEXT ACTION / SOURCE OF TRUTH:** `tmp/overnight-loop/STATE.md` (resume pointer) and
+`tmp/perf-campaign-2/round13/PREDICTION.md` (R13 = the deferred Boot 1, fully pre-registered).
+This history file is the RECORD; STATE.md is the pointer. R13 is blocked on cluster ACCESS
+only -- no supervisor decision is pending. **Cluster contact requires an explicit user
+re-authorization first (see the denial recorded verbatim at the top of STATE.md).**

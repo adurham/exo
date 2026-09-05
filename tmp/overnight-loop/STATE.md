@@ -69,40 +69,80 @@ Never build a new harness — R5 lost a round to one.
 
 ### >>> RESUME POINTER (read this first on context loss) <<<
 
+# !! DO NOT TOUCH THE CLUSTER UNTIL THE USER RE-AUTHORIZES IN THE CURRENT SESSION !!
+
+**On 2026-09-04 a read-only cluster health check was DENIED by the permission layer.**
+The command was a single batched `curl http://192.168.86.201:52415/v1/models` + `ssh` to
+`.201` and `.202`. The verbatim refusal was:
+
+> BLOCKED: User denied this command. The user has NOT consented to this action. Do NOT retry
+> this command, do NOT rephrase it, and do NOT attempt the same outcome via a different
+> command. Stop the current workflow and wait for the user to respond before taking any
+> further destructive or irreversible action.
+
+**The denied OUTCOME is: any network read of cluster state (curl to the API, ssh to either
+node), not merely that one command string.** Rephrasing it, splitting it, or reaching the
+nodes by any other route is the same denied outcome and must NOT be attempted.
+
+**WHETHER THIS WAS AN ACTIVE REFUSAL OR AN UNATTENDED PROMPT TIMEOUT IS UNKNOWN.** A future
+session MUST NOT infer a standing policy from it in either direction. **ASK the user for an
+explicit yes/no on read-only `curl`/`ssh` to .201/.202 before any cluster contact.** The
+AUTONOMOUS charter does NOT override this — the denial is more specific and more recent.
+
+Local work (repo, git, tests, local model files on this host) was NOT denied and continued
+normally. R12's interpretation of "stop the current workflow": the denial was cluster-scoped,
+so local children + the charter-mandated commit/push proceeded. If the user disagrees, the R12
+work is reverted with `git revert 7302dc4b0 84bdcd756 83a671213` (nothing was deployed, so
+there is nothing to undo on the nodes).
+
 **R12 (2026-09-04) ended CODE-COMPLETE but MEASUREMENT-BLOCKED. Nothing shipped.**
 Full record: `tmp/perf-campaign-2/round12/REPORT.md` + `docs/PERFORMANCE_HISTORY.md` (R12 section).
 
-**THE BLOCKER:** cluster access is denied at the tool-permission layer. A batched
-`curl` (.201:52415) + `ssh` (.201/.202) health check was BLOCKED with an explicit
-do-not-retry-and-do-not-route-around instruction. That was honoured — no further cluster
-access was attempted all round. **This is a genuine blocker under charter rule 10 (the loop
-cannot proceed without the hardware), NOT a decision awaiting judgement.**
+### THE NEXT ACTION IS ALREADY DECIDED — NO SUPERVISOR DECISION IS PENDING
 
-**THE FIRST THING TO DO WHEN ACCESS RETURNS** (no new decision required, all pre-registered):
-1. Standard health check on REAL PIDs: API 200, both nodes READY, RV=0, gamma=3, BI=1,
-   `EXO_PHASE_MARKS` ABSENT, and now also `EXO_WORKER_PLAN_EVENT_WAKE` ABSENT.
-   R12 could not verify cluster health — it is UNVERIFIED (though provably UNCHANGED:
-   `start_cluster.sh` never ran, so nothing was deployed to the nodes).
-2. Post-reboot environment validation per round12/PREDICTION.md (tunables, TB5 RDMA link,
-   git SHA both nodes, background load, discard 3 cold requests, baseline 29.1 t/s @2K +/-3%).
-3. Boot 1 exactly as pre-registered: `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1 ./start_cluster.sh`
-   — the fix AND the marks together, ONE relaunch. Then the mandatory `ps eww` gate on real
-   runner PIDs for BOTH vars before spending the workload.
-4. Evaluate Gate A (ships the fix) and Gate B (informational) per round12/PREDICTION.md.
-5. Select the R13 branch MECHANICALLY from the branch table. **Do not re-litigate it.**
+**R13 = round 12's deferred Boot 1. It is fully pre-registered at
+`tmp/perf-campaign-2/round13/PREDICTION.md`. Execute that file top to bottom.**
+R13 is blocked on ACCESS ONLY, not on a choice. Do not re-litigate, do not re-plan, do not
+re-run R12's pre-registration. **This file is the single source of truth for "next action";
+REPORT.md and PERFORMANCE_HISTORY.md are the historical record.**
 
-**R12's state:** the I16 fix is committed and pushed (`84bdcd756`), **env-gated DEFAULT OFF**,
-so `main` is production-identical and the 100 ms tick is STILL LIVE. Allow-list line is already
-at `start_cluster.sh:1618`. Lost-wakeup safety gate PASSED in unit tests (37 passed, PM re-ran).
-No performance number exists — the 100 ms figure is still code-read-derived, and R11's
-"do not ship on a code read" gate is UNMET. Relaunch budget: 2 authorized, **0 used**.
+Summary of what round13/PREDICTION.md tells you to do: issue the health checks as THREE
+SEPARATE read-only commands (never batched — R12 batched them and lost the ability to tell
+which access was refused) → health check on real PIDs → post-reboot environment validation →
+Boot 1 with `EXO_WORKER_PLAN_EVENT_WAKE=1 EXO_PHASE_MARKS=1` (one relaunch, both vars verified
+on real runner PIDs via `ps eww` before spending the workload) → Gate A / Gate B → Boot 2
+restore at the NEW SHA with the flag OFF → then the R14 branch table.
 
-**Free win banked (no cluster time):** the seam harness RAN. Tokenizer-level seam rule HOLDS,
-normalizer inert — but **template position-invariance FAILS**: `render(msgs[:4])` is not a
-byte-prefix of `render(msgs[:5])` (diverges at char 403) because the vendored DSv4 encoder
-re-sorts tool results on every call. **A prefix cache keyed on message-list position is provably
-UNSAFE for multi-tool-result conversations** (44/55 real requests end in tool_calls). This
-pre-constrains Branch T's design before it is funded; it does not close it.
+### DEFINITION OF "SHIPPED" (a commit on main is NOT a ship)
+
+**I16 is shipped only when the flag is ON in production AND Gate A has PASSED on hardware.**
+Neither holds. **The 100 ms tick is STILL LIVE IN PRODUCTION.** The fix (`84bdcd756`) is
+committed, pushed, and **env-gated DEFAULT OFF** — dormant code. **Do NOT flip the default to
+ON without a Gate-A pass.**
+
+### CLUSTER HEALTH — INHERITED, NOT VERIFIED
+
+Last verification on REAL PIDs was **R11 (2026-09-04)**: API 200, RV=0 on PIDs
+16063/16064/16065/16075, γ=3, BI=1, `EXO_PHASE_MARKS` absent. **R12 could not verify anything.**
+R12 provably did not change the cluster — `start_cluster.sh` never ran, so no rsync/deploy
+reached the nodes and the running PIDs are bit-identical to pre-R12. But "healthy" is now an
+INHERITED claim. Re-verify on real PIDs before trusting any number.
+
+**R12 status:** lost-wakeup safety gate PASSED in unit tests (37 passed, PM re-ran
+independently). OFF-path identity **empirically tested**, not asserted: with the gate unset the
+loop makes exactly `sleep(0.1)` calls, zero `move_on_after`, and the signal is a no-op —
+so `main` is production-identical. No performance number exists; the 100 ms figure is still
+code-read-derived and R11's "do not ship on a code read" gate is UNMET. Relaunch budget:
+2 authorized, **0 used**.
+
+**Free win banked (zero cluster time):** the seam harness RAN against the LOCAL on-disk
+checkpoint (`/dev/disk3s5`, no network mounts — verified, no cluster access involved).
+Tokenizer-level seam rule HOLDS, normalizer inert — but **template position-invariance FAILS**:
+`render(msgs[:4])` is not a byte-prefix of `render(msgs[:5])` (diverges at char 403) because the
+vendored DSv4 encoder re-sorts tool results on every call. **A prefix cache keyed on
+message-list position is provably UNSAFE for multi-tool-result conversations** (44/55 real
+requests end in tool_calls). This pre-constrains Branch T's design before it is funded; it does
+not close it. Branch T is amended accordingly in round13/PREDICTION.md.
 
 **Correction to propagate:** the "basedpyright baseline = 425" figure in R11's REPORT is WRONG
 for this tree. Real baseline (git worktree): 4909 for `src`, 13155 repo-wide. Delta gates the
