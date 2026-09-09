@@ -1474,6 +1474,29 @@ class ExoBatchGenerator:
                 on_prefill_progress,
                 distributed_prompt_progress_callback,
                 prefill_step_size=self.prefill_step_size,
+                # Phase 4d residual gap (2026-09-09): the sibling
+                # ``run_prefill`` above forwards exactly these two values to
+                # ``prefill``; this path forwarded NEITHER, so its
+                # ``_pipeline_parallel_prefill_steps`` call planned against
+                # zero spans at a hardcoded offset 0 -- the same class of
+                # bug 4d fixed at the other call sites.
+                #
+                # ``media_regions`` is [] whenever ``vision is None``, which
+                # the guard above already guarantees for every request that
+                # reaches here, so this changes nothing today. Passed
+                # explicitly rather than left to default so the wiring is
+                # correct by construction if that guard is ever relaxed,
+                # rather than silently planning against no spans.
+                #
+                # ``cache_offset`` is load-bearing NOW, independent of
+                # vision: ``_submit_batched_decode_deferred``'s caller passes
+                # ``prefix_hit_length=0`` (the batched-decode path skips the
+                # KVPrefixCache lookup entirely and builds a cold cache), so
+                # it is 0 today -- but reading it from the real variable
+                # instead of an implicit default is what keeps that true by
+                # derivation rather than by coincidence.
+                media_regions=media_regions,
+                cache_offset=prefix_hit_length,
             )
 
         self._deferred_prefill_by_uid[uid] = _DeferredPrefill(

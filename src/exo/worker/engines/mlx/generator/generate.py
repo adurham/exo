@@ -1151,6 +1151,8 @@ def prefill_interruptible_start(
     on_prefill_progress: Callable[[int, int], None] | None,
     distributed_prompt_progress_callback: Callable[[], None] | None,
     prefill_step_size: int | None = None,
+    media_regions: "Iterable[object] | None" = None,
+    cache_offset: int = 0,
 ) -> "ChunkedPrefillDrive | None":
     """Sibling to ``prefill()`` (2026-08-07, Phase 2 live-wiring),
     mirroring the SAME eligibility gate ``prefill()`` itself uses
@@ -1196,7 +1198,22 @@ def prefill_interruptible_start(
     collective before it has sent the very ack rank 0 is waiting to
     receive). ``mx.clear_cache()`` IS kept (purely local Metal-allocator
     hygiene, zero synchronization content, real memory-regression risk
-    on long prompts if dropped)."""
+    on long prompts if dropped).
+
+    Phase 4d residual gap (2026-09-09): ``media_regions``/``cache_offset``
+    are threaded to ``_pipeline_parallel_prefill_steps`` exactly as
+    ``prefill`` -> ``pipeline_parallel_prefill`` does, so the image-span
+    chunk guard is reached from THIS path too. Both callers pass them
+    (``ExoBatchGenerator.try_start_chunked_prefill`` has the request's own
+    ``media_regions`` and its ``prefix_hit_length`` in scope, the same two
+    values its sibling ``run_prefill`` already forwards to ``prefill``).
+    Today ``try_start_chunked_prefill`` returns ``None`` for any request
+    with ``vision is not None`` before ever reaching here, so the spans it
+    passes are empty in practice -- threaded anyway, and explicitly rather
+    than by omission, so the guard reads real spans the day that gate
+    admits vision rather than silently planning against none. ``cache_offset``
+    is load-bearing regardless of vision: it is what the planner's own
+    offset guard inspects."""
     num_tokens = len(prompt_tokens)
     if num_tokens == 0:
         return None
@@ -1242,6 +1259,12 @@ def prefill_interruptible_start(
             distributed_prompt_progress_callback,
             group,
             interruptible=True,
+            # Phase 4d residual gap: same two arguments `prefill` ->
+            # `pipeline_parallel_prefill` threads. Without them this call
+            # site plans against zero spans at a hardcoded offset 0 -- the
+            # exact shape the 4d fix removed from the other call sites.
+            media_regions=media_regions,
+            cache_offset=cache_offset,
         ),
     )
     try:
