@@ -715,7 +715,126 @@ could itself create the failure it was meant to avoid.
 
 ---
 
-## 8. Post-run outcome
+## 8. Post-run outcome — EXECUTED 2026-09-09, VISION VERIFIED
 
-Appended after execution.
+**Result: Phase 5 passed.** DSv4 vision works end to end on real hardware, but
+only after this run found and fixed a real bug that made every image request
+silently degrade to text-only. Cluster was restored to the known-good `-0731`
+production state afterwards.
+
+### 8.1 Timeline
+
+| time (UTC) | event |
+|---|---|
+| 11:45 | pre-flight; last real user request confirmed 34.7 h earlier (idle) |
+| 11:45:44 | gate G1–G4: both nodes SIGTERM, **clean exit in 1 s, no SIGKILL**; RDMA PORT_ACTIVE, 0% ping loss; memory drained to 3.7/3.3 GB |
+| 11:46:48 | deploy #1 launched (branch `dsv4-vision-port` @ `568077d2`) |
+| 11:49:5x | `HEALTHY! (Nodes: 2, Identities: 2)` → `READY (2/2)`, `EXIT_CODE=0` |
+| 11:50 | catalog gap **resolved**: 125 → 126 models, Vision-Exp listed, `vision: True` on both ranks |
+| 11:51:07 | smoke test #1 **FAILED** — HTTP 200 but `prompt_tokens=31`, "There is no image attached" |
+| 11:51–11:58 | root-caused to the API adapter; fix + regression tests written, RED→GREEN on hardware |
+| 12:00:06 | deploy #2 launched (`f76a4da3`, the fix) |
+| 12:03:0x | `READY (2/2)`, `EXIT_CODE=0` |
+| 12:03:19 | smoke test #2 **PASSED** — `"HARBOR, 4"`, `prompt_tokens` 31 → **239** |
+| 12:04:05 | second image **PASSED** — `"LANTERN, 0"` (7 squares, correctly reported 0 circles) |
+| 12:05:20 | rollback to `main` @ `11bf2e29c` / `-0731` |
+| 12:08:5x | `READY (2/2)`, `EXIT_CODE=0`; real completion returned |
+
+### 8.2 The bug this phase existed to find
+
+`chat_request_to_text_generation` emitted a bare `{"type": "image"}` marker into
+`chat_template_messages`. The vendored DSv4 encoder rejects it
+(`_extract_image` → `ValueError: Image block does not contain a valid source`),
+and both generators swallow that into the text-only fallback. Net effect: **every
+image request returned HTTP 200 with a confident, entirely image-free answer.**
+
+Fixed at the adapter (not the vendored encoder) by emitting an ordered
+reference, `{"type": "image", "url": "exo-image:<n>"}` — a real non-empty source
+that satisfies the encoder's existing invariant without weakening it, adds
+nothing meaningful to the wire, and keeps the vendored file byte-identical to
+upstream. Commit `f76a4da3`, with 5 regression tests covering the seam from both
+ends (verified RED against the old adapter, GREEN with the fix; full API suite
+82 passed).
+
+The §3.5 pass criteria did exactly their job: criterion P1 alone (HTTP 200,
+non-empty answer) would have declared this a **false pass**.
+
+### 8.3 Smoke test evidence
+
+```
+POST /v1/chat/completions   model=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+content: [{"type":"text",...},{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}]
+
+--- IMAGE 1 (word HARBOR, 4 red circles; sha256 9c86b483…) ---
+http 200, 9.1s, usage.prompt_tokens=239, completion_tokens=69, finish_reason=stop
+reasoning: 'the word is "HARBOR" ... Below the word, there are four red circles.'
+content:   'HARBOR, 4'
+
+--- IMAGE 2 (word LANTERN, 7 blue squares; sha256 86449b35…) ---
+http 200, 4.7s, usage.prompt_tokens=239, finish_reason=stop
+reasoning: 'the word is "LANTERN". Below the word, there are seven blue squares.
+            The user asks for the number of circles. There are zero circles.'
+content:   'LANTERN, 0'
+
+--- CONTROL (identical prompt, NO image) ---
+usage.prompt_tokens=31
+content: 'There is no image attached to your prompt.'
+
+--- server-side ---
+DSv4 vision: 1 image(s), prompt 32 -> 239 tokens after placeholder expansion
+  image 0: patches=(1610, 3, 14, 14) grid=35x46 block=208 tokens at [29, 237)
+grep 'Vision processing failed' since redeploy: 0
+```
+
+All six criteria met — P1 ✓, P2 ✓ (exact word), P3 ✓ (exact count), P4 ✓ (no
+fallback), P5 ✓ (31→239 token expansion), P6 ✓ (control cannot know).
+
+Image 2 is the strongest single piece of evidence: asked how many *circles* were
+below the word, the model reported the 7 squares it actually saw and answered
+**0 circles**, refusing a leading prompt. That is not pattern-matching.
+
+### 8.4 Memory — §1.4 predictions vs measured
+
+Predicted 69.488 GiB/node loaded (spec-off). Measured `wired+compressor` stayed
+at **3.6–3.9 GB/node** throughout load and both vision requests, with runner RSS
+~7.5–8.0 GB. MLX maps the safetensors and lazily faults pages, so neither figure
+is the resident weight set — but the operative fact is that the §3.6 abort
+threshold (100 GB/node) was never approached. **No memory pressure whatsoever.**
+Vision-inference runtime peak is therefore no longer an unmeasured risk at this
+image size (one 640×480 image, 208 image tokens).
+
+Spec-off was the right call and cost nothing observable: 4.7–9.1 s end to end.
+
+### 8.5 Final state (restored, verified)
+
+```
+both nodes:  main @ 11bf2e29c   (exact pre-Phase-5 commit)
+             mlx e40a416b, mlx-lm 7f14654
+instance:    79db83e1-…  MlxJacclInstance  deepseek-ai/DeepSeek-V4-Flash-0731
+runners:     da419875 RunnerReady, a696b12a RunnerReady
+env:         EXO_SPECULATIVE=1 EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1  (both nodes)
+completion:  'The capital of Japan is Tokyo.'  finish_reason=stop
+catalog:     125 models, Vision-Exp not listed (expected — card lives on the branch)
+```
+
+Restored deliberately rather than left on Vision-Exp: the card still says TREAT
+AS UNVERIFIED for quality, spec-off would cost ~36% decode on the text traffic
+this cluster actually serves, and switching production models was not the
+authorized scope. Doing it also **proved the rollback path works** rather than
+leaving it a paper plan.
+
+### 8.6 What is now known, and what is still not
+
+**Established:** the DSv4 vision path — catalog → placement → TP-replicated
+vision tower → image processor → sentinel expansion → embedding merge → serving
+API — works on real hardware for real images. The model card's "NOT VERIFIED
+END-TO-END ON HARDWARE" warning can be lifted for *functionality*.
+
+**Still not established:** vision *quality* at scale (two synthetic images is a
+functional test, not an eval); multi-image requests in production (unit-tested
+only); vision with speculative decoding on (never run — Vision-Exp's
+`num_nextn_predict_layers=3` would load 3 MTP stages, +3.19 GiB/node, of which
+only stage 0 is ever used); large/high-resolution images; and the sampling
+defaults, which are still carried over verbatim from `-0731` and un-A/B'd.
+
 

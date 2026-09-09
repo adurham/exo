@@ -25,11 +25,28 @@
 # loaded RAM after any strip-if-unused gate is somewhat lower -- storage_size
 # is a conservative placement estimate, not an exact loaded footprint.
 #
-# NOT VERIFIED END-TO-END ON HARDWARE. The vision port's Phase 1 (ViT +
-# Aligner MLX port) reached fp32 parity vs the DeepSeek torch reference (ViT
-# max abs 4.29e-06, Aligner max abs 3.04e-06) and Phase 2 (image processor)
-# reproduces reference token ids exactly, but no full-cluster inference run
-# against this checkpoint has happened yet. TREAT AS UNVERIFIED.
+# VERIFIED END-TO-END ON HARDWARE 2026-09-09 (Phase 5). The full serving path
+# -- catalog -> placement -> TP-replicated vision tower -> in-tree image
+# processor -> sentinel expansion -> embedding merge -> /v1/chat/completions --
+# ran on the 2-node M4 Ultra cluster (Tensor/JACCL, world_size=2, spec-off).
+# Two real images through the real API: a 640x480 PNG reading "HARBOR" above 4
+# red circles returned "HARBOR, 4"; a second reading "LANTERN" above 7 blue
+# squares returned "LANTERN, 0" when asked for CIRCLES -- i.e. it reported what
+# was actually there and refused the leading premise. Prompt tokens expanded
+# 32 -> 239 (208 image tokens, patches (1610,3,14,14), grid 35x46); a no-image
+# control run with the identical prompt could not name either fact. See
+# docs/DSV4_VISION_PORT_PHASE5_PROCEDURE.md section 8.
+#
+# Phase 5 also found and fixed a real bug in that path: exo's API adapter emitted
+# a bare `{"type": "image"}` block, which the vendored encoder rejected, and both
+# generators swallowed the resulting ValueError into a silent text-only fallback
+# -- every image request returned HTTP 200 with an image-free answer. Fixed in
+# f76a4da3 (`exo-image:<n>` reference + 5 regression tests).
+#
+# STILL UNVERIFIED: vision QUALITY at scale (two synthetic images is a functional
+# test, not an eval), multi-image requests in production, vision with speculative
+# decoding enabled (never run -- see the num_nextn_predict_layers note below),
+# large/high-resolution images, and the [sampling_defaults] below.
 model_id = "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"
 n_layers = 43
 hidden_size = 4096
