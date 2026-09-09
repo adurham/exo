@@ -236,13 +236,85 @@ so boundary 3 is respected: no file content originates on the Studio.
 
 ### 1.9 sudo
 
-`sudo -n` fails on both nodes (no cached credential, no TTY). `start_cluster.sh`
-uses sudo in exactly two places: `sysctl iogpu.wired_limit_mb` and
-`xcode-select -s`. Both are already at their desired values
-(`iogpu.wired_limit_mb: 115000`; xcode-select correctly on CommandLineTools),
-the script has **no `set -e`**, and neither call's exit status is checked — so
-both degrade to a printed sudo error and the deploy proceeds. This is expected
-and benign. It must not be "fixed" by trying to obtain sudo.
+`sudo -n -l` on both nodes shows a general `(ALL) ALL` rule that **does** require
+a password, plus three NOPASSWD exceptions:
+
+```
+(root) NOPASSWD: /usr/sbin/sysctl iogpu.wired_limit_mb\=*
+(root) NOPASSWD: /sbin/route delete -net *
+(root) NOPASSWD: /usr/bin/fdesetup authrestart*
+```
+
+`start_cluster.sh` uses sudo in exactly two places: `sysctl
+iogpu.wired_limit_mb` (covered by NOPASSWD → succeeds) and `xcode-select -s`
+(not covered → fails, but it is inside an `if [ -d /Applications/Xcode.app... ]`
+guard that is false since Xcode was removed, so it never runs). The script has
+**no `set -e`** and neither exit status is checked. Benign; must not be "fixed"
+by trying to obtain a password.
+
+### 1.10 ⚠ THE DOMINANT CONSTRAINT: I cannot reboot a wedged node
+
+This was surfaced by the pre-execution consult (§8) and is the single most
+important fact in this document.
+
+The documented escape hatch for the two worst failure modes — a Thunderbolt/RDMA
+stack wedge from leaked queue pairs, and stuck wired memory with no owning
+process — is **"reboot the node"** (`start_cluster.sh:1200-1210`,
+`docs/incidents/`). That escape hatch is **not available to this session**:
+
+```
+$ ssh macstudio-m4-1 'fdesetup status; fdesetup supportsauthrestart'
+FileVault is On.
+true
+$ ssh macstudio-m4-1 'sudo -n /sbin/reboot --help'
+sudo: a password is required
+```
+
+FileVault is ON, so a plain reboot halts at the pre-boot unlock screen and the
+node never comes back on the network. The project's `reboot-node.sh` solves this
+with `fdesetup authrestart` (NOPASSWD-allowed) fed the FileVault password from
+1Password — but the `op` CLI in this sandbox has no broker socket:
+
+```
+$ op account list
+op: OP_BROKER_SOCK is not set in this environment ...
+```
+
+**So: if either node wedges in a way that needs a reboot, I cannot recover it,
+and the cluster stays down until a human intervenes.** Everything below is
+shaped by making that outcome unreachable rather than merely unlikely.
+
+The only path to that state is the `pkill -9` escalation (skips the C++ static
+destructors that free RDMA QPs) or a failed memory reclaim. §2.0 therefore
+converts both into **pre-flight gates that fail safely before anything is
+mutated**, instead of hazards encountered mid-deploy.
+
+---
+
+## 2.0 Pre-emptive verified graceful shutdown (gate)
+
+Rather than let `start_cluster.sh` discover a stuck process 40 minutes into an
+unattended run, do the shutdown **first, by hand, with verification**, while the
+deployed tree is still untouched and the rollback is a no-op.
+
+```bash
+# G1. graceful SIGTERM on both nodes (never -9)
+for N in macstudio-m4-1 macstudio-m4-2; do
+  ssh $N "pkill -TERM -f 'python.*exo' 2>/dev/null || true"
+done
+# G2. confirm clean exit within 15s, on both
+# G3. confirm RDMA ports still PORT_ACTIVE and the direct TB link still pings
+# G4. confirm wired+compressor memory drained below 25 GB on both
+```
+
+**GATE: if any of G2/G3/G4 fails, STOP.** Do not deploy. Relaunch `-0731`
+via `~/relaunch_exo.sh` (which the last `start_cluster.sh` generated on each
+node from the same `EXO_ENV`) and report. Reaching this gate cleanly proves the
+processes tear down without needing `-9`, which is precisely the property that
+makes the rest of the run recoverable.
+
+After the gate passes, `start_cluster.sh`'s own `pkill` finds nothing to kill
+and its `-9` escalation branch is unreachable by construction.
 
 ---
 
@@ -398,6 +470,27 @@ or P2/P3 wrong while P6 shows the model *could* have known.
 count, or a hedged "I can't see an image" — that is a functional failure of the
 vision path even at HTTP 200.
 
+### 3.6 Live memory instrumentation (added post-consult)
+
+Every number in §1.4 is **load-time** safetensors arithmetic. Nothing here
+measures what vision *inference* adds on top — ViT activations for a 384-token
+image, the aligner projection, and the extra KV for the expanded sentinel block.
+Against a ceiling that `-0731` already approaches (92–99 GB measured vs
+112.3 GiB), that is an unmeasured risk, so measure it rather than assume:
+
+```bash
+# poll both nodes throughout load + smoke test
+for N in macstudio-m4-1 macstudio-m4-2; do ssh $N "vm_stat | awk '
+  /page size of/{ps=\$8} /Pages wired down:/{w=\$4} /Pages occupied by compressor:/{c=\$5}
+  END{printf \"%s wired+compressor = %.1f GB\n\", \"'\$N'\", (w+c)*ps/1e9}'"; done
+```
+
+Record: (a) post-load steady state, (b) peak during the image request. If either
+node exceeds **100 GB**, abort the run and roll back — that is inside the band
+where the documented Metal-allocator wedge appears
+(`start_cluster.sh:1218-1234`), and a wedge is unrecoverable for this session
+(§1.10).
+
 ---
 
 ## 4. Rollback plan
@@ -411,39 +504,88 @@ before Phase 5 started, including the production speculative env (the defaults
 `EXO_SPECULATIVE=1 EXO_DSV4_MTP=1 EXO_DSV4_DSPARK=1` restore themselves once
 the overrides are dropped).
 
+### 4.1 Two independent rollback paths
+
+The consult (§8) correctly flagged that "re-run the same script backwards"
+shares fate with the forward deploy: if a network-dependent step (`uv sync`,
+the mlx-lm reinstall, `npm`) is what broke, both directions break identically.
+So there are **two** paths, tried in order.
+
+**PATH A — fast, offline, no rebuild (preferred).** The insight is that
+`-0731` does not need the `main` *code* to run: the Vision-Exp deploy changes
+only `resources/`, `docs/`, `src/exo/**` vision files and mlx-lm. Nothing in
+that set removes `-0731` support — the branch is purely *additive* to the
+serving path. Therefore, if the branch is deployed and healthy but Vision-Exp
+itself misbehaves, `-0731` can be re-placed **on the deployed branch**, with no
+rsync, no pip, no npm, no network:
+
 ```bash
-# R1. restore the canonical checkout on the control host
+# A1. delete the Vision-Exp instance
+curl -s -X DELETE "http://192.168.86.201:52415/instance/<instance_id>"
+# A2. place -0731 via the same two-step flow start_cluster.sh uses
+curl -sG "http://192.168.86.201:52415/instance/placement" \
+  --data-urlencode "model_id=deepseek-ai/DeepSeek-V4-Flash-0731" \
+  --data-urlencode "sharding=Tensor" --data-urlencode "instance_meta=MlxJaccl" \
+  --data-urlencode "min_nodes=2"   # -> POST /instance with the result
+# A3. prove with a real completion
+```
+
+This is the fastest route back to serving and depends on **zero** fragile
+steps. It is the correct first response to "Vision-Exp is bad but the cluster
+is fine."
+
+**PATH B — full redeploy of `main`** (for when the branch deploy itself is
+suspect):
+
+```bash
 ssh macstudio-m4-1 'cd ~/repos/exo && git checkout main && \
   git submodule update --init --recursive && git rev-parse HEAD && git submodule status'
 # expect 11bf2e29c…, mlx e40a416b…, mlx-lm 7f14654…
-
-# R2. redeploy + replace the known-good instance (default DSV4_MODEL_ID, default spec env)
 ssh macstudio-m4-1 "cd ~/repos/exo && EXO_TARGET_BRANCH=main QWEN36_ENABLED=0 \
   nohup ./start_cluster.sh > /tmp/phase5_rollback.log 2>&1 &"
+```
 
-# R3. prove it
+**Path B's network dependency is verified symmetric**, so the consult's
+shared-fate concern is bounded: both mlx-lm refs the deploy needs already exist
+on `origin`, so neither direction depends on a fetch the other didn't —
+
+```
+$ git -C mlx-lm ls-remote origin dsv4-vision-port
+513d6dbec624ea533619ada052458edb9b04b868   refs/heads/dsv4-vision-port
+$ git -C mlx-lm ls-remote origin main
+7f146542811dd774d2cb3ab38b13c4b25a8e8063   refs/heads/main
+```
+
+and the branch touches **no** `dashboard/` or `package.json` files, so the npm
+step has identical inputs in both directions and cannot fail one way only.
+
+**PATH C — process-level relaunch.** If the API is unresponsive but the nodes
+are healthy, each node still carries `~/relaunch_exo.sh`, regenerated by the
+last `start_cluster.sh` from the same `EXO_ENV`. It restarts the exo process
+only (no deploy, no placement) and is fully offline.
+
+### 4.2 Proof of rollback
+
+```bash
 curl -s http://192.168.86.201:52415/state   # instance modelId == ...-0731, 2x RunnerReady
 curl -s http://192.168.86.201:52415/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"deepseek-ai/DeepSeek-V4-Flash-0731","max_tokens":16,"temperature":0,
        "messages":[{"role":"user","content":"Say hello."}]}'
 ```
 
-**Rollback validity is established, not assumed.** R2 is the *same script, same
-mechanism* that Phase 5 itself uses; if the script can deploy the branch it can
-deploy `main`. The rollback is additionally proven by the fact that the current
-live cluster was itself brought up this way. The rollback is considered
-**verified only when R3 returns a coherent completion** — a `RunnerReady` pair
-alone is not proof of serving.
+Rollback is **verified only when a real completion comes back**. A
+`RunnerReady` pair is not proof of serving.
 
-**Escalation if rollback itself fails:**
-- Runners won't reach Ready → check `~/exo.log` on both nodes; if a node has
-  stuck wired memory (`vm_stat` wired+compressor > 25 GB with no owning
-  process), the documented escape hatch is a node reboot
-  (`start_cluster.sh:1200-1210`); `./reboot-node.sh` exists for this.
-- Thunderbolt/RDMA wedge after a `-9` escalation → reboot the affected node.
-  Never bounce the TB interface MTU (`start_cluster.sh:963-971`).
-- If neither works, stop and report with the cluster left with no instance
-  placed rather than a half-loaded one.
+### 4.3 If rollback itself fails
+
+Per §1.10 I cannot reboot a FileVault-locked node. So:
+
+- Runners won't reach Ready → read `~/exo.log` on both nodes, try PATH C.
+- Stuck wired memory or a TB/RDMA wedge → **I cannot fix this.** Report
+  immediately and explicitly, naming `./reboot-node.sh <node>` (run from a host
+  with a 1Password-authenticated `op` CLI) as the required human action.
+- Never escalate to `pkill -9` to try to force progress — that is the specific
+  action most likely to *create* the unrecoverable state.
 
 ---
 
@@ -472,3 +614,108 @@ completion before stopping.
 ## 6. Execution log
 
 Filled in during execution — see §7 (appended after the run).
+
+---
+
+## 7. Pre-execution consult record
+
+Two consult calls were made before touching the cluster (a third, to the
+default reviewer, failed with an internal server error, and a second attempt
+against `gemini-3-pro` timed out at 420 s — both are tool failures, not
+refusals).
+
+### 7.1 Consult 1 — `pkill -f` self-kill analysis
+
+**Asked:** running `start_cluster.sh` *on* macstudio-m4-1 means its own
+per-node `pkill -TERM -f 'python.*exo'` targets the host running the script.
+Could that regex match my own deploy process?
+
+**Answer:** No. BSD `pkill -f` matches a case-sensitive POSIX ERE against the
+full argv. `python.*exo` requires the literal lowercase substring `python`
+before any `exo`; my invocation string
+(`... DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp ... ./start_cluster.sh`)
+contains **no** `python` substring at all, so the regex cannot match regardless
+of the `.*exo` part. It also confirmed the 4-process kill (SCREEN/login/zsh/
+python all carry the launch string in their argv) is fine: pkill signals each
+PID directly from the kernel, so python's own SIGTERM handler and C++ static
+destructors run independently of the wrappers dying.
+
+**Actionable caveat it raised, and the result of checking it:** it warned that
+a *later* defensive pkill in the script would be a real hazard, because by then
+my own build subprocesses (`uv`, `maturin`, `pip install ./mlx-lm`) legitimately
+match `python.*exo`. Verified:
+
+```
+$ grep -n 'pkill\|kill -\|killall' start_cluster.sh
+1246:  ssh "$NODE" "pkill -TERM -f 'python.*exo' ...; pkill -TERM -f 'exo.main' ..."
+1259:    ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 ..."
+1260:    ssh "$NODE" "pkill -9 -f 'exo.main' || true"
+1261:    ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
+2883:pkill -TERM -f 'python.*exo' 2>/dev/null || true
+2890:  pkill -9 -f 'python.*exo' 2>/dev/null || true
+```
+
+Lines 1246/1259-1261 are all at loop-top, **before** any build step. Lines
+2883/2890 are inside the quoted `RELAUNCH_BODY` heredoc — they are *written to*
+`~/relaunch_exo.sh`, never executed by the deploy. **No stray pkill. Cleared.**
+
+Also confirmed the process-group question it flagged: `ps -o pid,ppid,pgid`
+shows python (4000) in pgid 3987 shared with the zsh wrapper — the wrapper is
+`login`, whose session is already detached under SCREEN, so no controlling
+terminal exists to deliver a racing SIGHUP.
+
+### 7.2 Consult 2 — unattended risk, rollback soundness, spec-off decision
+
+**What it changed in this procedure (all three were real gaps):**
+
+1. **The reboot capability gate (§1.10) — the most valuable finding.** It said,
+   correctly, that verifying unattended reboot capability "dwarfs every other
+   risk," because a wedged TB/RDMA stack is otherwise permanently unrecoverable
+   by me. I had documented "reboot the node" as my escape hatch **without ever
+   checking that I could do it.** I checked: FileVault is ON, `sudo -n reboot`
+   requires a password, and this sandbox's `op` CLI has no broker socket, so
+   `reboot-node.sh` is unusable from here. My escape hatch did not exist.
+   → Added §1.10, and added §2.0, which converts the `-9`-escalation and
+   memory-reclaim hazards into **pre-flight gates that fail before anything is
+   mutated**, so the unrecoverable state becomes unreachable rather than merely
+   unlikely.
+
+2. **Rollback shared-fate (§4.1).** It flagged that re-running the same script
+   backwards is not an independent recovery path. → Added PATH A (re-place
+   `-0731` on the *already-deployed branch* via the REST API — no rsync, no
+   pip, no npm, no network, since the branch is purely additive and does not
+   remove `-0731` support) as the preferred rollback, with the full redeploy
+   demoted to PATH B and a process-only PATH C added. Also verified and
+   documented that PATH B's network dependency is *symmetric* (both mlx-lm refs
+   already on origin; no dashboard/package.json changes), which bounds the
+   concern rather than leaving it open.
+
+3. **Runtime memory is unmeasured.** It noted all my numbers are *load-time*
+   safetensors math with zero data on vision-inference runtime peak (image
+   encoder activations, extra KV) against an already-tight ceiling.
+   → Added live wired-memory polling during the smoke test (§3.6).
+
+**On the spec-off decision, it challenged my reasoning and I accepted the
+correction.** I had framed it as "known-good config vs unexercised config." That
+framing is wrong: `-0731` has only ever run `num_nextn_predict_layers=1`, so
+running Vision-Exp with spec ON (which would load 3 MTP stages) is *equally*
+unexercised. Both options introduce a novel variable; the real question is which
+one. Spec-off remains correct, but for the better reason: it preserves memory
+headroom against an **unmeasured runtime peak** (measured `-0731` already peaks
+92–99 GB against a 112.3 GiB ceiling), and it removes an entire subsystem from
+the causal chain so a smoke-test failure isolates to vision rather than to a
+vision×MTP interaction. §1.4's rationale is written accordingly.
+
+**One recommendation I did not adopt:** staging a full blue-green copy of the
+venv/tree for an offline rollback. PATH A already achieves the goal it was
+aimed at (a rollback with no fragile steps) without the 1.8 GB venv copy, and
+copying the venv aside would risk the `direct_url.json` provenance check that
+keeps the no-Metal-compiler MLX rebuild-skip firing (§1.7) — i.e. the mitigation
+could itself create the failure it was meant to avoid.
+
+---
+
+## 8. Post-run outcome
+
+Appended after execution.
+
