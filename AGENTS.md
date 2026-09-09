@@ -120,6 +120,39 @@ From .cursorrules:
 
 Tests use pytest-asyncio with `asyncio_mode = "auto"`. Tests are in `tests/` subdirectories alongside the code they test. The `EXO_TESTS=1` env var is set during tests.
 
+### Shared-venv `.pth` import landmine (Mac Studio cluster nodes)
+
+On the cluster nodes, dispatching tests against a scratch checkout or worktree
+uses the shared production venv's Python interpreter
+(`/Users/adam.durham/repos/exo/.venv/bin/python`), because that venv already
+has every compiled/native dependency (MLX, exo_rs, etc.) built for that
+machine. That venv's `site-packages` carries `.pth` files (`exo.pth`,
+`_editable_impl_exo_bench.pth`, `_editable_impl_exo_tools.pth`) installed by
+`uv sync` against the **live production checkout** at
+`/Users/adam.durham/repos/exo`. `.pth` entries are appended to `sys.path` at
+interpreter startup unconditionally, so `import exo` (and `import mlx_lm`,
+via `mlx-lm`'s own editable install if present) can silently resolve to that
+OLD checkout instead of the scratch/worktree copy you actually meant to test
+— a false pass or false failure with **no indication anything is wrong**.
+
+**Always put your scratch/worktree `src/` and `mlx-lm/` FIRST on
+`PYTHONPATH`** for every test invocation on those nodes:
+
+```bash
+PYTHONPATH=<scratch>/exo/src:<scratch>/exo/mlx-lm \
+  /Users/adam.durham/repos/exo/.venv/bin/python -m pytest ...
+```
+
+A git-tracked root `conftest.py` enforces this: it asserts at
+`pytest_configure` time that the imported `exo` and `mlx_lm` modules resolve
+inside the repo root the tests actually live in, and raises a
+`pytest.UsageError` naming the wrong resolved path and the exact fix if they
+don't. It runs for both the `src/exo/**/tests/` trees and `mlx-lm/tests/`
+(pytest walks up from each collected file's directory looking for
+`conftest.py`). This means a WRONG `PYTHONPATH` now fails loudly and
+immediately instead of silently testing the wrong checkout — do not rely on
+`PYTHONPATH` discipline alone; the conftest is the actual safety net.
+
 ## Dashboard UI Testing & Screenshots
 
 ### Building and Running the Dashboard

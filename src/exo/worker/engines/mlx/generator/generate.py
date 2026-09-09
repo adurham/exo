@@ -373,6 +373,44 @@ def patch_embed_tokens(
     end_offset = start_offset + token_count
     offset = [start_offset]
 
+    # Row count of the real embedding table, generically -- works for both
+    # plain `nn.Embedding` (num_embeddings == weight.shape[0]) and
+    # `nn.QuantizedEmbedding` (which additionally exposes `.num_embeddings`
+    # directly, since its packed `.weight` has a different column count but
+    # the same row count). Used below to (a) clamp ids before every call
+    # into `original_embed` -- DeepSeek-V4's image sentinel ids
+    # (`vocab_size + {0..4}`) are deliberately out-of-range and MLX's gather
+    # does not bounds-check, so this must never depend on the undocumented
+    # "OOB returns zero" behaviour, even though those rows get overwritten a
+    # few lines later -- and (b) assert that ids OUTSIDE the injection
+    # window are never out-of-range, which would mean this splice's window
+    # doesn't actually cover the caller's image span (a real caller bug,
+    # not an expected sentinel).
+    _num_embeddings = getattr(
+        original_embed, "num_embeddings", None
+    ) or original_embed.weight.shape[0]  # type: ignore
+
+    def _assert_text_in_range(ids: mx.array, where: str) -> None:
+        if ids.size == 0:
+            return
+        highest = int(mx.max(ids).item())
+        if highest < _num_embeddings:
+            return
+        offending = sorted(
+            {int(t) for t in ids.reshape(-1).tolist() if t >= _num_embeddings}
+        )
+        raise ValueError(
+            f"patch_embed_tokens: {where} token id(s) at or past the "
+            f"embedding table's {_num_embeddings} rows (offending ids: "
+            f"{offending[:8]}{', ...' if len(offending) > 8 else ''}; "
+            f"highest={highest}). These positions are outside this "
+            f"splice's injection window [{start_offset}, {end_offset}), so "
+            "they were expected to be ordinary text tokens -- an "
+            "out-of-range id here means the window does not actually cover "
+            "the image span it was built for (a caller bug in the chunk/ "
+            "window computation), not an expected DSv4 image sentinel."
+        )
+
     def _inject(input_ids: mx.array) -> mx.array:
         chunk_start = offset[0]
         chunk_len = input_ids.shape[-1]
@@ -381,6 +419,10 @@ def patch_embed_tokens(
 
         # The injection window is [start_offset, end_offset).
         if chunk_end <= start_offset or chunk_start >= end_offset:
+            # Entirely outside the window: every id here is expected to be
+            # an ordinary (in-range) text token -- assert that before
+            # trusting the real gather with it.
+            _assert_text_in_range(input_ids, "chunk entirely outside the")
             return original_embed(input_ids)  # type: ignore
 
         # Mixed chunk: splice the pre-computed embeddings for the overlap
@@ -389,7 +431,16 @@ def patch_embed_tokens(
         overlap_end = min(chunk_end, end_offset)
         dst_start = overlap_start - chunk_start
         dst_end = overlap_end - chunk_start
-        text_embeds: mx.array = original_embed(input_ids)  # type: ignore
+        # Fringe columns (before dst_start, after dst_end) are expected to
+        # be ordinary text; assert that before trusting the gather. The
+        # overlap columns [dst_start, dst_end) are the expected sentinel
+        # span -- not asserted here, and clamped below before the gather so
+        # the call never depends on undefined out-of-range behaviour (their
+        # computed values are discarded by the splice regardless).
+        _assert_text_in_range(input_ids[:, :dst_start], "leading fringe")
+        _assert_text_in_range(input_ids[:, dst_end:], "trailing fringe")
+        clamped_ids = mx.minimum(input_ids, _num_embeddings - 1)
+        text_embeds: mx.array = original_embed(clamped_ids)  # type: ignore
         return mx.concatenate(
             [
                 text_embeds[:, :dst_start, :],
@@ -403,6 +454,15 @@ def patch_embed_tokens(
         if not attr.startswith("_") and not hasattr(_inject, attr):
             with contextlib.suppress(AttributeError, TypeError):
                 setattr(_inject, attr, getattr(original_embed, attr))  # type: ignore
+
+    # Tells the model's own `_assert_embeddable` defense-in-depth check
+    # (mlx_lm.models.deepseek_v4.DeepseekV4Model._forward_steps) that this
+    # callable -- not a plain `nn.Embedding` -- now owns `embed_tokens`, and
+    # that it is responsible for (and does) handle out-of-range sentinel ids
+    # correctly itself (clamp-before-gather + splice, both above). Without
+    # this marker the model-level check would reject every vision prefill
+    # chunk that legitimately carries sentinel ids in its injection window.
+    _inject.handles_out_of_range_ids = True  # type: ignore[attr-defined]
 
     inner.embed_tokens = _inject
 

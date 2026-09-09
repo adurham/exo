@@ -278,7 +278,19 @@ def test_end_to_end_vision_pipeline(encoder_config, image_bytes, model):
     inner = model.model
     original_embed = inner.embed_tokens
     try:
-        inner.embed_tokens = lambda _ids: embeddings
+
+        def _inject(_ids: mx.array) -> mx.array:
+            return embeddings
+
+        # Stand-in for exo's real `patch_embed_tokens` splice: this
+        # callable owns embed_tokens for the duration and returns the
+        # already-merged (real-image-embedded) tensor unconditionally,
+        # ignoring `_ids`. Marked `handles_out_of_range_ids = True` so
+        # `DeepseekV4Model._forward_steps`'s `_assert_embeddable`
+        # defense-in-depth check defers to it -- `expanded` legitimately
+        # carries raw sentinel ids (>= vocab_size) here.
+        _inject.handles_out_of_range_ids = True
+        inner.embed_tokens = _inject
         logits = model(mx.array(expanded)[None], cache=model.make_cache())
         mx.eval(logits)
     finally:
