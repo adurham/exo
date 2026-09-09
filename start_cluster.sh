@@ -2082,8 +2082,21 @@ for NODE in "${NODES[@]}"; do
   # runner wedged in a native jaccl collective under c>=2 load (self-heal).
   # Raise it for diagnostics to widen the sampling window before the kill.
   [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
-  # Batch-invariant matmul (mlx-lm deepseek_v4): per-row gemv for small M so
-  # c>=2 decode bitwise-matches c=1 — the bf16 batch-drift corruption fix.
+  # Runner PRE-SERVING watchdog (supervisor _check_stuck_init, default 180s).
+  # This one has its own documented override, but until 2026-09-09 it was NOT
+  # forwarded into the runner env here, so setting it on the controller had no
+  # effect and the only reachable knob was the 45s _check_hang timeout.
+  #
+  # That gap is not academic. A cold-start bring-up of DSv4-Flash-0731 on these
+  # nodes measured 283s of warmup (17:32:27 "warming up inference" ->
+  # 17:37:10 "warmed up by generating 50 tokens"), which is past BOTH defaults:
+  # _check_hang SIGKILLed at 48s of silence, and once that was raised,
+  # _check_stuck_init SIGKILLed at 180s. Each kill fed the instance's retry
+  # budget until "exceeded 5 retries, requesting deletion" tore the instance
+  # down entirely -- so the cluster could not bring the model up AT ALL from a
+  # cold box without both knobs raised. Forwarding this one makes the
+  # documented override actually reachable from start_cluster.sh.
+  [ -n "${EXO_RUNNER_CONNECT_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_CONNECT_TIMEOUT_SECONDS=$EXO_RUNNER_CONNECT_TIMEOUT_SECONDS"
   [ -n "${EXO_DSV4_BATCH_INVARIANT_MM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM=$EXO_DSV4_BATCH_INVARIANT_MM"
   [ -n "${EXO_DSV4_BATCH_INVARIANT_MM_MAX_M:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCH_INVARIANT_MM_MAX_M=$EXO_DSV4_BATCH_INVARIANT_MM_MAX_M"
   [ -n "${EXO_DSV4_BATCHED_PREFILL_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BATCHED_PREFILL_DEBUG=$EXO_DSV4_BATCHED_PREFILL_DEBUG"
