@@ -103,21 +103,21 @@ mlx-cuda-13 = [
 # incl. Gemma 4 KV-projection fix). To switch back to Leo's
 # fork: { git = "https://github.com/rltakashige/mlx-lm", branch = "leo/deepseek-v4" }
 #
-# TEMPORARILY pinned to `dsv4-vision-port` rather than `main` for the duration
-# of the DSv4 vision port. The exo-side vision code calls into mlx-lm APIs that
-# exist ONLY on that branch (`Model.encode_image`, the `vision`/`aligner`
-# modules, the four sentinel embedding parameters, the `bias_vl` MoE gate, and
-# the image-span visibility mask). While this pointed at `main`, uv.lock pinned
-# 7f14654 while the committed gitlink was a dsv4-vision-port commit, so CI
-# installed an mlx-lm WITHOUT any of the vision work and validated code the
-# cluster does not run -- exactly what
-# `src/exo/shared/tests/test_submodule_lock_pin_alignment.py` exists to catch.
+# Pin tracks `main` again as of 2026-09-09. The DSv4 vision work has LANDED on
+# mlx-lm's `main` (adurham/mlx-lm main == 04381d9, which carries `Model.encode_image`,
+# the `vision`/`aligner` modules, the four sentinel embedding parameters, the
+# `bias_vl` MoE gate, the image-span visibility mask, and the embed_tokens
+# bounds check), so the temporary `dsv4-vision-port` pin that existed for the
+# duration of the port is no longer needed -- and leaving CI pointed at a
+# feature branch that may be deleted was the reason that pin carried a
+# TODO(merge) to undo it.
 #
-# TODO(merge): when dsv4-vision-port lands on mlx-lm's `main`, flip this back
-# to `branch = "main"` (or a pinned rev) and re-lock. Leaving it pointed at a
-# feature branch after the merge would make CI depend on a branch that may be
-# deleted.
-mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "dsv4-vision-port" }
+# The invariant this pin has to satisfy is enforced mechanically by
+# `src/exo/shared/tests/test_submodule_lock_pin_alignment.py`: the committed
+# `mlx-lm` gitlink and the `uv.lock` pin must be the SAME sha. Advancing the
+# submodule WITHOUT `uv lock --upgrade-package mlx-lm` leaves the lock behind
+# and makes CI validate an mlx-lm the cluster does not run.
+mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "main" }
 mflux = { git = "https://github.com/evanev7/mflux", branch = "exo2" }
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'linux' and extra == 'mlx-cpu' and extra != 'mlx-cuda13' and extra != 'mlx-cuda12'" },
