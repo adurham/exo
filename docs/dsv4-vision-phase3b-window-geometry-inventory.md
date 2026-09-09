@@ -93,7 +93,7 @@ Ordered by how dangerous they are to Phase 3b.
 | C5 | `_extend_mask` | 1695-1727 | no — computes `local_len` from the caller's `N`; clamps `mask[..., -local_len:]` | safe **iff** the KV ring is wide enough to hold the extra visible keys (see §3) |
 | C6 | `_clamp_mask_to_kv` | 1670-1692 | no | safe, same caveat |
 | C7 | **`_query_tiled_ok` + the query-tiled SDPA block** (`EXO_DSV4_QUERY_TILED_SDPA=1`, default OFF) | gate 3904-3930, body 4827-4900 | **YES — hardcodes `_sw = self.config.sliding_window` and slices `kv[:, :, _key_lo : min(_local_len, _key_lo + _b - 1 + _sw)]`** | **UNSAFE.** It re-derives the visible key range from `sliding_window` instead of reading the mask, so any key made visible by an image span but further than `sw` back is silently dropped from the slice. Must fall back. |
-| C8 | `_sparse_fused_sdpa` (`EXO_DSV4_SPARSE_FUSED_SDPA`) | 2506-2660, `_norm_mask` at 2543 | **YES — `_norm_mask(local_mask, sw)` requires the mask's trailing dim to equal `sw` exactly, and there is a hard `sw + k_sel > 768 → return None` register bound** | self-declining. Gated `L <= 16` (decode/verify) which is `start_pos > 0` where the reference never sets `visible` anyway. Falls back on its own contract check. Documented, no change needed. |
+| C8 | `_sparse_fused_sdpa` (`EXO_DSV4_SPARSE_FUSED_SDPA`) | 2506-2660, `_norm_mask` at 2543 | **YES — `_norm_mask(local_mask, sw)` requires the mask's trailing dim to equal `sw` exactly, and there is a hard `sw + k_sel > 768 → return None` register bound** | ~~self-declining, decode-only~~ **CORRECTED 2026-09-09 — see §5.** C8 IS reachable during a prefill-with-images and is CORRECT there (it reads the mask it is handed; `_norm_mask` only reshapes/clamps). |
 | C9 | `_sparse_verify_rows_batched` / `_cached_verify_mask` | 2694-2877 | partially (`sw` arg) | `L <= _SPARSE_VERIFY_MAX_L` (16) — decode/verify only. Never coincident with visibility. |
 | C10 | seq-split row-band mask slicing (`_SEQ_SPLIT_ENABLED`) | 4820-4822, 5208-5209, 4340-4352 | no — slices mask **rows** only, keeps all columns | safe (visibility adds columns, not rows) |
 | C11 | `_SPARSE_SDPA_TILE` query-row tiling + `EXO_DSV4_SINGLE_GATHER` | 5290-5330 | no — slices mask rows `[_s:_e]`, columns untouched | safe |
@@ -188,3 +188,94 @@ needs no change — not by choice, by construction.
    instead of from `sliding_window` — tractable, but it is a second
    optimization port with its own A/B burden and is not what Phase 3 is
    chartered to deliver. Recorded here as the next attack vector.
+
+---
+
+## 5. CORRECTIONS from the Phase 3 correctness-gap review (2026-09-09)
+
+Added after `tests/test_deepseek_v4_visibility_fastpaths.py` exercised every
+reachable path with the flag ON **and a real image span present** — the case the
+original Phase 3b tests never covered (they had the flag ON with no span, where
+the visibility mask equals the ordinary causal mask and nothing can fail).
+
+### 5.1 §3's "corollary" was wrong: C8 is REACHABLE
+
+> *"because visibility is prefill-only … and prefill is `L ≫ 16`, **every**
+> decode- and verify-side optimized path (C8, C9, C16) is structurally out of
+> reach"*
+
+The premise `prefill ⇒ L ≫ 16` is false. A **short prefill is still a prefill**:
+a 16-token prompt containing a 6-token image span has `offset == 0` (so
+visibility activates) *and* `L <= 16` (so C8's gate passes). Measured: with
+`head_dim=128`, `_sparse_fused_sdpa` **FIRES**, with the visibility mask live.
+
+Two things kept this hidden. First the inference above, which no test checked.
+Second, the Phase 3b test config used `head_dim=32`, and C8's contract is
+`D in (128, 512)` — so in those tests it declined on **dtype/shape**, not on
+prefill-vs-decode, which looked like confirmation.
+
+**C8 is nonetheless CORRECT under visibility**, and this is now proven rather
+than assumed: unlike C7, it *reads the mask it is handed* (`_norm_mask` only
+reshapes and trailing-clamps it) instead of re-deriving reach from
+`sliding_window`. Against a float64 gather oracle at KV width 144:
+
+| mask | fused max err | legacy max err |
+| --- | --- | --- |
+| causal-only | 4.439e-04 | 4.400e-04 |
+| visibility-widened | 4.400e-04 | 4.400e-04 |
+
+Widening does not degrade it, and a control confirms it is not *ignoring* the
+extra bits (fused(widened) vs fused(causal-only) differs by 4.047e-02 on a mask
+carrying 66 extra keys). **No code change needed for C8** — but the reason is
+"it reads the mask", not "it never runs".
+
+C9 and C16 remain genuinely excluded, for a reason that does hold: they require
+`offset > 0`, and `_apply_image_visibility` raises `ValueError` if any image
+token appears at a nonzero cache offset. That guard, not the `L <= 16` bound, is
+the real structural exclusion.
+
+### 5.2 C11 runs by default under visibility (it was never "decode-only")
+
+`_SPARSE_SDPA_TILE=128` + `EXO_DSV4_SINGLE_GATHER=1` are **production defaults**
+and do execute during a vision prefill: a 384-token prefill issues three
+`(1,4,128,32)` sparse-SDPA tiles. Verified correct — tiling slices mask ROWS
+only, so widened COLUMNS survive. tile=128/single_gather ∈ {0,1} are bitwise
+identical to the untiled path (196608/196608 logits); tile=64 differs by
+2.980e-08 (fp reassociation, pre-existing and unrelated to visibility).
+
+### 5.3 C15 (tree-verify) needed an actual fix
+
+The tree-drafting branch in `_forward_steps` returns the caller's tree mask and
+**never calls `_apply_image_visibility`**, so `_IMAGE_VISIBILITY_CTX["active"]`
+kept whatever the previous prefill left it. A stale `True` makes
+`_query_tiled_ok` decline forever after — a lasting performance leak, not a
+wrong answer. The branch now clears the flag explicitly.
+
+### 5.4 What "C12 untouched" can actually mean
+
+The Indexer scores the pooled axis from the **current layer's hidden states**.
+Once layer 0's attention is (correctly) widened, later layers' top-k
+legitimately differ — that is the feature working. "All top-k identical across
+the forward" is therefore the wrong specification (measured 2411/3072). The
+right one, now asserted: on a `compress_ratios=(4,4)` model where **layer 0** is
+the sparse layer, its indexer input is the embedding and precedes every widened
+attention — its top-k is **3072/3072 bit-identical**. Visibility does not reach
+into the compressed half.
+
+### 5.5 UNRELATED PRE-EXISTING BUG found in passing: C8 is nondeterministic
+
+With a **plain causal mask, no image span, no visibility flag, no Phase 3 code
+on the stack**, `_sparse_fused_sdpa` returns different results across repeated
+calls on byte-identical, pre-materialized inputs — up to 10 distinct outputs
+from 10 identical calls, worst spread 7.031e-02 on outputs of magnitude ~0.383
+(tens of percent). The legacy path is bitwise stable on the same inputs at every
+width tested. It is intermittent and state-dependent, so it must NOT be
+characterized as a small-`sw` band; `sw=128` was stable in one sweep and
+unstable in another within the same process.
+
+`EXO_DSV4_SPARSE_FUSED_SDPA` **defaults OFF**, so production is not exposed
+today. Recorded in `TestC8FusedKernelDeterminism`, which asserts the invariant
+that does hold (legacy is deterministic) and the gate's default-OFF, and prints
+the fused path's behavior rather than asserting a stability the kernel does not
+provide. **This predates Phase 3 and is out of Phase 3's scope to fix; it should
+be triaged before that flag is ever turned on.**
