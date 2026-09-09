@@ -53,7 +53,13 @@ from exo.worker.engines.mlx.generator.generate import (
     prefill_batched,
     safe_think_token_id,
 )
-from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.generator.remote_prefill import (
+    REMOTE_PREFILL_MIN_TOKENS as _REMOTE_PREFILL_MIN_TOKENS,
+)
+from exo.worker.engines.mlx.generator.remote_prefill import (
+    remote_prefill,
+    should_use_remote_prefill,
+)
 from exo.worker.engines.mlx.phase_marks import runner_phase_marks
 from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.types import KVCacheType, Model
@@ -81,7 +87,10 @@ if TYPE_CHECKING:
     )
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
-REMOTE_PREFILL_MIN_TOKENS = 1000
+# Re-exported from `remote_prefill`, which now owns the whole remote-routing
+# rule (threshold + the vision exclusion) in one place. Kept as a module
+# attribute here because callers and tests import it from this module.
+REMOTE_PREFILL_MIN_TOKENS = _REMOTE_PREFILL_MIN_TOKENS
 
 
 _MEM_PROFILE_PATH = os.environ.get("EXO_MEMORY_PROFILE_PATH")
@@ -1382,9 +1391,15 @@ class ExoBatchGenerator:
                 else contextlib.nullcontext()
             )
             uncached_count = len(prompt_tokens)
-            use_remote = (
-                uncached_count > REMOTE_PREFILL_MIN_TOKENS
-                and task_params.prefill_endpoint is not None
+            # Phase 4d residual gap: remote prefill cannot serve a vision
+            # request -- see `should_use_remote_prefill`. This closure already
+            # builds `vision_ctx` from the same `vision` above, which is
+            # exactly the condition that makes the request unservable
+            # remotely.
+            use_remote = should_use_remote_prefill(
+                uncached_token_count=uncached_count,
+                prefill_endpoint=task_params.prefill_endpoint,
+                has_vision=vision is not None,
             )
 
             _prefill_tps: float = 0.0
@@ -1454,9 +1469,13 @@ class ExoBatchGenerator:
             if vision is not None:
                 return None
             uncached_count = len(prompt_tokens)
-            use_remote = (
-                uncached_count > REMOTE_PREFILL_MIN_TOKENS
-                and task_params.prefill_endpoint is not None
+            use_remote = should_use_remote_prefill(
+                uncached_token_count=uncached_count,
+                prefill_endpoint=task_params.prefill_endpoint,
+                # Unreachable-by-construction given the `vision is not None`
+                # early return directly above; passed as the real expression
+                # anyway so this stays correct if that guard moves.
+                has_vision=vision is not None,
             )
             if use_remote:
                 return None
@@ -2548,9 +2567,15 @@ class ExoBatchGenerator:
             else contextlib.nullcontext()
         )
         uncached_count = len(prompt_tokens)
-        use_remote = (
-            uncached_count > REMOTE_PREFILL_MIN_TOKENS
-            and task_params.prefill_endpoint is not None
+        # Phase 4d residual gap: remote prefill cannot serve a vision request
+        # -- see `should_use_remote_prefill`. This is the serial `submit()`
+        # path, which is exactly where the heterogeneity gate above routes
+        # every `task_params.images` request, so it is the site that matters
+        # most of the three.
+        use_remote = should_use_remote_prefill(
+            uncached_token_count=uncached_count,
+            prefill_endpoint=task_params.prefill_endpoint,
+            has_vision=vision is not None,
         )
 
         _prefill_tps: float = 0.0

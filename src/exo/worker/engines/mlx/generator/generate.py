@@ -61,7 +61,13 @@ from exo.worker.engines.mlx.constants import (
     KV_GROUP_SIZE,
     MAX_TOKENS,
 )
-from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.generator.remote_prefill import (
+    REMOTE_PREFILL_MIN_TOKENS as _REMOTE_PREFILL_MIN_TOKENS,
+)
+from exo.worker.engines.mlx.generator.remote_prefill import (
+    remote_prefill,
+    should_use_remote_prefill,
+)
 from exo.worker.engines.mlx.pp_cancel import (
     abort_prefill_chunk_boundary_if_requested,
 )
@@ -98,7 +104,10 @@ from exo.worker.engines.mlx.vision import (
 )
 from exo.worker.runner.bootstrap import logger
 
-REMOTE_PREFILL_MIN_TOKENS = 1000
+# Re-exported from `remote_prefill`, which now owns the whole remote-routing
+# rule (threshold + the vision exclusion) in one place. Kept as a module
+# attribute here because callers and tests import it from this module.
+REMOTE_PREFILL_MIN_TOKENS = _REMOTE_PREFILL_MIN_TOKENS
 
 
 def _heap_census_mx_arrays(top_n: int = 15) -> str:
@@ -2335,9 +2344,14 @@ def mlx_generate(
         if vision is not None
         else contextlib.nullcontext()
     )
-    use_remote = (
-        len(prompt_tokens) > REMOTE_PREFILL_MIN_TOKENS
-        and task.prefill_endpoint is not None
+    # Phase 4d residual gap: `has_vision` is the new term -- remote prefill
+    # cannot serve a vision request at all (the prefill server never receives
+    # the vision tower's embeddings and never installs `patch_embed_tokens`).
+    # See `should_use_remote_prefill` for the full reasoning.
+    use_remote = should_use_remote_prefill(
+        uncached_token_count=len(prompt_tokens),
+        prefill_endpoint=task.prefill_endpoint,
+        has_vision=vision is not None,
     )
     remote_prefilled = False
     prefill_tps = 0.0
