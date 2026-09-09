@@ -221,16 +221,65 @@ def _assert_schedule_valid(
 
 def image_spans_from_media_regions(
     regions: "Iterable[object] | None",
+    *,
+    cache_offset: int = 0,
 ) -> list[ImageSpan]:
-    """Adapt `vision.MediaRegion`s to `ImageSpan`s.
+    """Adapt `vision.MediaRegion`s to `ImageSpan`s, re-based to the local stream.
 
     Kept structural rather than typed against `MediaRegion` so this module has
     no import dependency on the vision layer (which pulls in mlx-vlm).
+
+    COORDINATE FRAMES -- the reason this takes `cache_offset`. A `MediaRegion`
+    carries ABSOLUTE positions: `vision._find_media_regions` scans
+    `VisionResult.prompt_tokens`, the WHOLE prompt, so `start_pos`/`end_pos`
+    index the full token stream. `plan_prefill_chunks`, by its own documented
+    contract, wants positions within the stream ACTUALLY BEING PREFILLED. On a
+    KV-prefix-cache hit those are different frames: the caller passes only the
+    post-hit suffix (`all_prompt_tokens[prefix_hit_length:]`) to `prefill`, so
+    local position 0 is absolute position `cache_offset`.
+
+    Mixing the two silently mis-sizes chunk 0 by exactly `cache_offset` tokens
+    -- and it mis-sizes it in the UNSAFE direction, because absolute positions
+    are always >= local ones, so an image the planner believes it must stretch
+    chunk 0 to cover may in truth sit past that stretched boundary (or, in the
+    other direction, an already-cached image can force a needless stretch).
+    This function is the one seam where the two frames meet, so the rebasing
+    belongs here rather than inside the planner: the planner stays a pure
+    single-frame scheduler, and its own `cache_offset` guard keeps working on
+    the spans that are genuinely still pending.
+
+    Three exhaustive cases per span:
+
+    * ``end <= cache_offset`` -- the whole span was prefilled by an earlier
+      request (at ITS cache offset 0) and is being restored from the prefix
+      cache. Nothing of it is prefilled now, so it constrains nothing: DROP.
+    * ``start >= cache_offset`` -- entirely still to prefill. Re-base by
+      subtracting `cache_offset`.
+    * ``start < cache_offset < end`` -- the span STRADDLES the restore point:
+      part of it lives in the restored cache, the rest would have to be
+      prefilled at a non-zero cache offset. No chunk schedule can fix that,
+      and silently dropping or clipping it would hand the model a half-merged
+      image. Raise, with the same remedy the planner's own offset guard names.
     """
+    if cache_offset < 0:
+        raise ValueError(f"cache_offset must be non-negative, got {cache_offset}")
+
     spans: list[ImageSpan] = []
     for region in regions or ():
         start = getattr(region, "start_pos", None)
         end = getattr(region, "end_pos", None)
-        if isinstance(start, int) and isinstance(end, int) and end > start:
-            spans.append(ImageSpan(start=start, end=end))
+        if not (isinstance(start, int) and isinstance(end, int) and end > start):
+            continue
+        if end <= cache_offset:
+            continue
+        if start < cache_offset:
+            raise ImageSpanPrefillError(
+                f"image span [{start}, {end}) straddles the prefix-cache restore "
+                f"point at {cache_offset}: {cache_offset - start} of its tokens "
+                f"are restored from cache and the remaining {end - cache_offset} "
+                "would be prefilled at a non-zero cache offset, where DeepSeek-V4 "
+                "cannot merge image embeddings. Prefill this request without the "
+                "prefix cache."
+            )
+        spans.append(ImageSpan(start=start - cache_offset, end=end - cache_offset))
     return spans
