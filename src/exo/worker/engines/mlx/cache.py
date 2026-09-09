@@ -1301,6 +1301,57 @@ class KVPrefixCache:
         restore_pos, snapshot = self._resolve_restore_position(
             donor_leaf, target, has_non_sliceable
         )
+
+        # Phase 4d: DeepSeek-V4 merges image embeddings ONLY at cache offset 0
+        # (see `prefill_chunking`'s module docstring and the model's own
+        # `_apply_image_visibility`). A partial hit that stops BEFORE the last
+        # image token would restore `restore_pos` tokens and then ask prefill
+        # to process the image at offset `restore_pos` != 0, which no chunk
+        # schedule can satisfy -- `plan_prefill_chunks` rejects exactly that,
+        # and this is where the decision it names ("prefill this request
+        # without the prefix cache") actually gets made. Deciding it here, at
+        # the point that owns whether the cache is used at all, is what keeps
+        # the planner free to be a hard error instead of a soft one.
+        #
+        # Two accepting cases, everything else falls through to the existing
+        # cold-miss return below:
+        #   - restore_pos >= last image end: every image is already merged
+        #     inside the restored prefix; only text remains to prefill.
+        #   - no images in this request: unconstrained.
+        # A partial hit landing inside or before an image span is refused.
+        #
+        # Deliberately NOT clamped to `last_image_end` instead: a restore
+        # position must be a real snapshot/trie depth this donor can actually
+        # materialize, and rounding one up to satisfy an unrelated constraint
+        # would restore state the donor never held.
+        #
+        # Cross-rank: `query_regions` is a pure function of the prompt tokens,
+        # so it is identical on every rank, while `match_length` can genuinely
+        # differ. Ranks reconcile downstream through
+        # `pipeline_agree_prefix_hit_length`, which takes min() across ranks --
+        # and this clamp composes with min() safely in both directions: if any
+        # rank refuses (0), min is 0; if none refuses, every local value is
+        # already >= last_image_end, so min is too.
+        if query_regions and restore_pos > 0:
+            last_image_end = max(r.end_pos for r in query_regions)
+            if restore_pos < last_image_end:
+                logger.info(
+                    f"Prefix-cache hit at {restore_pos} lands before the last "
+                    f"image token ({last_image_end}); serving this vision "
+                    "request cold. DeepSeek-V4 can only merge image embeddings "
+                    "at cache offset 0."
+                )
+                return (
+                    make_kv_cache(
+                        model,
+                        max_kv_size=self._max_kv_tokens,
+                        kv_cache_bits=self._kv_cache_bits,
+                    ),
+                    prompt_tokens,
+                    None,
+                    False,
+                )
+
         if has_non_sliceable and snapshot is None:
             # No usable snapshot for SSM/rotating layers — force a full prefill.
             return (

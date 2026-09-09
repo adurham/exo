@@ -574,9 +574,47 @@ class TestRadixTrieStorage:
 
         # Query with the same tokens but a different image hash at pos 2.
         regions_b = [MediaRegion(content_hash="img-B", start_pos=2, end_pos=5)]
-        _, remaining, _, _ = cache.get_kv_cache(model, tokens, media_regions=regions_b)
-        # Match should be truncated to pos 2 (start of the mismatching region).
-        assert int(remaining.shape[0]) == 5  # tokens 2..6
+        _, remaining, matched_index, is_exact = cache.get_kv_cache(
+            model, tokens, media_regions=regions_b
+        )
+
+        # `_longest_prefix_match` still truncates the match to pos 2 (the start
+        # of the mismatching region) -- that logic is unchanged and is what
+        # stops the stale img-A KV from being reused for img-B.
+        #
+        # Phase 4d (2026-09-09) changed what happens NEXT. Restoring that
+        # 2-token prefix would leave the image span pending at cache offset 2,
+        # and DeepSeek-V4 merges image embeddings ONLY at cache offset 0 -- so
+        # the follow-up prefill would hit `_apply_image_visibility`'s
+        # ValueError ("image spans must be prefilled in a single chunk"), and
+        # `plan_prefill_chunks` rejects the same schedule for the same reason.
+        # This assertion previously expected `remaining == 5`, i.e. it encoded
+        # that unservable partial restore as correct.
+        #
+        # `get_kv_cache` now declines a hit that lands before the last image
+        # token and serves the request cold, which is the remedy the planner's
+        # own error message names. A 2-token "saving" was never worth a hard
+        # failure at prefill.
+        assert int(remaining.shape[0]) == 7, (
+            "a vision request whose hit stops before its image must be served "
+            "cold, not restored into an unprefillable cache offset"
+        )
+        assert matched_index is None
+        assert not is_exact
+
+        # CONTROL: the same query with the MATCHING hash must still hit, so
+        # this test keeps proving that the truncation is what caused the cold
+        # serve above -- without it, "always cold" would pass just as well.
+        cache_ok = KVPrefixCache(None)
+        cache_ok.add_kv_cache(
+            tokens, _fake_kv_cache(num_layers=1, num_tokens=7), media_regions=regions_a
+        )
+        _, remaining_ok, matched_ok, is_exact_ok = cache_ok.get_kv_cache(
+            model, tokens, media_regions=regions_a
+        )
+        assert int(remaining_ok.shape[0]) == 1
+        assert matched_ok is not None
+        assert is_exact_ok
 
 
 def _load_gpt_oss() -> tuple[Model, object]:
