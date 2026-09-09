@@ -1,14 +1,31 @@
 # type: ignore
 """
-DeepSeek-V4 Encoding
+DeepSeek-V4 Text and Vision Encoding
 
-From upstream
+From upstream: deepseek-ai/DeepSeek-V4-Flash-Vision-Exp,
+`encoding/encoding_dsv4.py` (957 lines). Supersedes the copy vendored from
+DeepSeek-V4-Flash-0731 (760 lines).
+
+The Vision-Exp drift is NOT vision-only -- it changes the TEXT path too:
+`merge_tool_messages` now preserves the original user message object (and all
+its metadata) and extends any pre-existing `content_blocks`, where -0731 built
+a fresh 3-key dict and copied forward only ("task", "wo_eos", "mask").
+`encode_messages` was split into `_encode_messages_text` plus a vision-aware
+`encode_messages` wrapper taking `return_multi_modal_data`.
+
+FORK-LOCAL CHANGE preserved through this refresh (exo commit 7e7b1c45, "Fix
+DeepSeek-V4-Flash encoding crash on multimodal payloads"): in the `user`
+branch of `merge_tool_messages`, a `content` that arrives as a LIST (the
+OpenAI multimodal shape) is flattened to text blocks instead of being stuffed
+into a single `{"type": "text", "text": <list>}` block. Upstream only handles
+that shape when the caller routes through `process_image_messages` first;
+exo has callers that do not, and they crashed. See the comment at the site.
 """
 
+from typing import Any, Dict, List, Union, Optional, Tuple
 import copy
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 # ============================================================
 # Special Tokens
@@ -23,6 +40,8 @@ dsml_token: str = "｜DSML｜"
 USER_SP_TOKEN = "<｜User｜>"
 ASSISTANT_SP_TOKEN = "<｜Assistant｜>"
 LATEST_REMINDER_SP_TOKEN = "<｜latest_reminder｜>"
+IMAGE_PLACEHOLDER = "<｜deepseek_image｜>"
+IMAGE_TAG_PATTERN = re.compile(r"<image>(.*?)</image>", re.DOTALL)
 
 # Task special tokens for internal classification tasks
 DS_TASK_SP_TOKENS = {
@@ -46,29 +65,24 @@ assistant_msg_template: str = "{reasoning}{content}{tool_calls}" + eos_token
 assistant_msg_wo_eos_template: str = "{reasoning}{content}{tool_calls}"
 thinking_template: str = "{reasoning_content}"
 
-response_format_template: str = "## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n{schema}"
+response_format_template: str = (
+    "## Response Format:\n\nYou MUST strictly adhere to the following schema to reply:\n{schema}"
+)
 tool_call_template: str = (
-    '<{dsml_token}invoke name="{name}">\n{arguments}\n</{dsml_token}invoke>'
+    "<{dsml_token}invoke name=\"{name}\">\n{arguments}\n</{dsml_token}invoke>"
 )
 tool_calls_template = (
     "<{dsml_token}{tc_block_name}>\n{tool_calls}\n</{dsml_token}{tc_block_name}>"
 )
 tool_calls_block_name: str = "tool_calls"
 
-tool_output_template: str = "<tool_result>{content}</tool_result>"
+tool_output_template: str = (
+    "<tool_result>{content}</tool_result>"
+)
 
 # Reasoning effort levels. In thinking mode, the prompt for the selected level is
 # prepended at the very beginning of the conversation. `low` is the default and
 # adds nothing.
-#
-# Updated 2026-08-03 for DeepSeek-V4-Flash-0731 (official release, supersedes
-# the preview this file was originally vendored from): -0731 added a "low"
-# tier and REMAPPED the semantics -- the preview's REASONING_EFFORT_MAX text
-# (previously only injected for "max") now fires on "high", and "max" gets a
-# new, more extreme prompt. Source: deepseek-ai/DeepSeek-V4-Flash-0731's
-# encoding/encoding_dsv4.py (huggingface.co), diffed against the preview's
-# encoding_dsv4.py this vendored file was copied from -- verified byte-exact
-# semantic match to upstream's REASONING_EFFORT_PROMPTS dict before porting.
 REASONING_EFFORT_PROMPTS: Dict[str, str] = {
     "low": "",
     "high": (
@@ -115,12 +129,11 @@ You MUST strictly follow the above defined tool name and parameter schemas to in
 # Utility Functions
 # ============================================================
 
-
 def to_json(value: Any) -> str:
     """Serialize a value to JSON string."""
     try:
         return json.dumps(value, ensure_ascii=False)
-    except:  # noqa: E722
+    except:
         return json.dumps(value, ensure_ascii=True)
 
 
@@ -148,7 +161,7 @@ def tool_calls_to_openai_format(tool_calls):
             "function": {
                 "name": tool_call["name"],
                 "arguments": tool_call["arguments"],
-            },
+            }
         }
         for tool_call in tool_calls
     ]
@@ -165,11 +178,11 @@ def encode_arguments_to_dsml(tool_call: Dict[str, str]) -> str:
         DSML-formatted parameter string.
     """
     p_dsml_template = '<{dsml_token}parameter name="{key}" string="{is_str}">{value}</{dsml_token}parameter>'
-    P_dsml_strs = []  # noqa: N806
+    P_dsml_strs = []
 
     try:
         arguments = json.loads(tool_call["arguments"])
-    except Exception:
+    except Exception as err:
         arguments = {"arguments": tool_call["arguments"]}
 
     for k, v in arguments.items():
@@ -184,9 +197,7 @@ def encode_arguments_to_dsml(tool_call: Dict[str, str]) -> str:
     return "\n".join(P_dsml_strs)
 
 
-def decode_dsml_to_arguments(
-    tool_name: str, tool_args: Dict[str, Tuple[str, str]]
-) -> Dict[str, str]:
+def decode_dsml_to_arguments(tool_name: str, tool_args: Dict[str, Tuple[str, str]]) -> Dict[str, str]:
     """
     Decode DSML parameters back to a tool call dict.
 
@@ -197,19 +208,12 @@ def decode_dsml_to_arguments(
     Returns:
         Dict with "name" and "arguments" (JSON string) keys.
     """
-
     def _decode_value(key: str, value: str, string: str):
         if string == "true":
             value = to_json(value)
         return f"{to_json(key)}: {value}"
 
-    tool_args_json = (
-        "{"
-        + ", ".join(
-            [_decode_value(k, v, string=is_str) for k, (v, is_str) in tool_args.items()]
-        )
-        + "}"
-    )
+    tool_args_json = "{" + ", ".join([_decode_value(k, v, string=is_str) for k, (v, is_str) in tool_args.items()]) + "}"
     return dict(name=tool_name, arguments=tool_args_json)
 
 
@@ -247,14 +251,7 @@ def find_last_user_index(messages: List[Dict[str, Any]]) -> int:
 # Message Rendering
 # ============================================================
 
-
-def render_message(
-    index: int,
-    messages: List[Dict[str, Any]],
-    thinking_mode: str,
-    drop_thinking: bool = True,
-    reasoning_effort: Optional[str] = None,
-) -> str:
+def render_message(index: int, messages: List[Dict[str, Any]], thinking_mode: str, drop_thinking: bool = True, reasoning_effort: Optional[str] = None) -> str:
     """
     Render a single message at the given index into its encoded string form.
 
@@ -273,9 +270,7 @@ def render_message(
         Encoded string for this message.
     """
     assert 0 <= index < len(messages)
-    assert thinking_mode in ["chat", "thinking"], (
-        f"Invalid thinking_mode `{thinking_mode}`"
-    )
+    assert thinking_mode in ["chat", "thinking"], f"Invalid thinking_mode `{thinking_mode}`"
 
     prompt = ""
     msg = messages[index]
@@ -296,9 +291,8 @@ def render_message(
 
     # Reasoning effort prefix (only at index 0 in thinking mode; "low" adds nothing)
     reasoning_effort = reasoning_effort or DEFAULT_REASONING_EFFORT
-    assert reasoning_effort in REASONING_EFFORT_PROMPTS, (
+    assert reasoning_effort in REASONING_EFFORT_PROMPTS, \
         f"Invalid reasoning effort: {reasoning_effort}, expected one of {list(REASONING_EFFORT_PROMPTS)}"
-    )
     if index == 0 and thinking_mode == "thinking":
         prompt += REASONING_EFFORT_PROMPTS[reasoning_effort]
 
@@ -307,9 +301,7 @@ def render_message(
         if tools:
             prompt += "\n\n" + render_tools(tools)
         if response_format:
-            prompt += "\n\n" + response_format_template.format(
-                schema=to_json(response_format)
-            )
+            prompt += "\n\n" + response_format_template.format(schema=to_json(response_format))
 
     elif role == "developer":
         assert content, f"Invalid message for role `{role}`: {msg}"
@@ -320,9 +312,7 @@ def render_message(
         if tools:
             content_developer += "\n\n" + render_tools(tools)
         if response_format:
-            content_developer += "\n\n" + response_format_template.format(
-                schema=to_json(response_format)
-            )
+            content_developer += "\n\n" + response_format_template.format(schema=to_json(response_format))
 
         prompt += user_msg_template.format(content=content_developer)
 
@@ -355,14 +345,10 @@ def render_message(
             prompt += content or ""
 
     elif role == "latest_reminder":
-        prompt += LATEST_REMINDER_SP_TOKEN + latest_reminder_msg_template.format(
-            content=content
-        )
+        prompt += LATEST_REMINDER_SP_TOKEN + latest_reminder_msg_template.format(content=content)
 
     elif role == "tool":
-        raise NotImplementedError(
-            "deepseek_v4 merges tool messages into user; please preprocess with merge_tool_messages()"
-        )
+        raise NotImplementedError("deepseek_v4 merges tool messages into user; please preprocess with merge_tool_messages()")
 
     elif role == "assistant":
         thinking_part = ""
@@ -373,11 +359,11 @@ def render_message(
                 tool_call_template.format(
                     dsml_token=dsml_token,
                     name=tc.get("name"),
-                    arguments=encode_arguments_to_dsml(tc),
+                    arguments=encode_arguments_to_dsml(tc)
                 )
                 for tc in tool_calls
             ]
-            tc_content += "\n\n" + tool_calls_template.format(
+            tc_content += '\n\n' + tool_calls_template.format(
                 dsml_token=dsml_token,
                 tool_calls="\n".join(tc_list),
                 tc_block_name=tool_calls_block_name,
@@ -391,9 +377,7 @@ def render_message(
 
         if thinking_mode == "thinking" and not prev_has_task:
             if not drop_thinking or index > last_user_idx:
-                thinking_part = (
-                    thinking_template.format(reasoning_content=rc) + thinking_end_token
-                )
+                thinking_part = thinking_template.format(reasoning_content=rc) + thinking_end_token
             else:
                 thinking_part = ""
 
@@ -413,18 +397,13 @@ def render_message(
         raise NotImplementedError(f"Unknown role: {role}")
 
     # Append transition tokens based on what follows
-    if index + 1 < len(messages) and messages[index + 1].get("role") not in [
-        "assistant",
-        "latest_reminder",
-    ]:
+    if index + 1 < len(messages) and messages[index + 1].get("role") not in ["assistant", "latest_reminder"]:
         return prompt
 
     task = messages[index].get("task")
     if task is not None:
         # Task special token for internal classification tasks
-        assert task in VALID_TASKS, (
-            f"Invalid task: '{task}'. Valid tasks are: {list(VALID_TASKS)}"
-        )
+        assert task in VALID_TASKS, f"Invalid task: '{task}'. Valid tasks are: {list(VALID_TASKS)}"
         task_sp_token = DS_TASK_SP_TOKENS[task]
 
         if task != "action":
@@ -433,23 +412,15 @@ def render_message(
         else:
             # Action task: append Assistant + thinking token + action sp token
             prompt += ASSISTANT_SP_TOKEN
-            prompt += (
-                thinking_end_token
-                if thinking_mode != "thinking"
-                else thinking_start_token
-            )
+            prompt += thinking_end_token if thinking_mode != "thinking" else thinking_start_token
             prompt += task_sp_token
 
     elif messages[index].get("role") in ["user", "developer"]:
         # Normal generation: append Assistant + thinking token
         prompt += ASSISTANT_SP_TOKEN
-        if (
-            not drop_thinking
-            and thinking_mode == "thinking"
-            or drop_thinking
-            and thinking_mode == "thinking"
-            and index >= last_user_idx
-        ):
+        if not drop_thinking and thinking_mode == "thinking":
+            prompt += thinking_start_token
+        elif drop_thinking and thinking_mode == "thinking" and index >= last_user_idx:
             prompt += thinking_start_token
         else:
             prompt += thinking_end_token
@@ -460,7 +431,6 @@ def render_message(
 # ============================================================
 # Preprocessing
 # ============================================================
-
 
 def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -493,50 +463,47 @@ def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "content": msg.get("content", ""),
             }
             # Merge into previous message if it's already a user (merged tool)
-            if (
-                merged
-                and merged[-1].get("role") == "user"
-                and "content_blocks" in merged[-1]
-            ):
+            if merged and merged[-1].get("role") == "user" and "content_blocks" in merged[-1]:
                 merged[-1]["content_blocks"].append(tool_block)
             else:
-                merged.append(
-                    {
-                        "role": "user",
-                        "content_blocks": [tool_block],
-                    }
-                )
-        elif role == "user":
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                text_blocks = []
-                for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        text_blocks.append(
-                            {"type": "text", "text": part.get("text", "")}
-                        )
-                if not text_blocks:
-                    text_blocks = [{"type": "text", "text": ""}]
-            else:
-                text_blocks = [{"type": "text", "text": content}]
-
-            if (
-                merged
-                and merged[-1].get("role") == "user"
-                and "content_blocks" in merged[-1]
-                and merged[-1].get("task") is None
-            ):
-                merged[-1]["content_blocks"].extend(text_blocks)
-            else:
-                new_msg = {
+                merged.append({
                     "role": "user",
-                    "content": content,
-                    "content_blocks": text_blocks,
-                }
-                # Preserve extra fields (task, wo_eos, mask, etc.)
-                for key in ("task", "wo_eos", "mask"):
-                    if key in msg:
-                        new_msg[key] = msg[key]
+                    "content_blocks": [tool_block],
+                })
+        elif role == "user":
+            content_blocks = msg.get("content_blocks")
+            if not content_blocks:
+                # FORK-LOCAL (exo 7e7b1c45): upstream assumes `content` is a
+                # str here, because its own `encode_messages` always runs
+                # `process_image_messages` first, which lifts a list-valued
+                # `content` into `content_blocks`. exo also calls this module
+                # with raw OpenAI messages, where `content` may still be a
+                # list of parts -- wrapping that list in a single text block
+                # produced `{"type": "text", "text": [...]}` and crashed the
+                # renderer downstream. Flatten to text parts instead.
+                #
+                # `not content_blocks` (rather than `is None`) also covers an
+                # EMPTY list, which `process_image_messages` can leave behind
+                # when it pops an empty `content` list -- upstream would then
+                # emit a message with neither usable blocks nor a `content`
+                # key.
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    content_blocks = [
+                        {"type": "text", "text": part.get("text", "")}
+                        for part in content
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    ]
+                    if not content_blocks:
+                        content_blocks = [{"type": "text", "text": ""}]
+                else:
+                    content_blocks = [{"type": "text", "text": content}]
+            if merged and merged[-1].get("role") == "user" and "content_blocks" in merged[-1] and merged[-1].get("task") is None:
+                merged[-1]["content_blocks"].extend(content_blocks)
+            else:
+                # Preserve structured content and all message-level metadata.
+                new_msg = msg
+                new_msg["content_blocks"] = content_blocks
                 merged.append(new_msg)
         else:
             merged.append(msg)
@@ -544,9 +511,7 @@ def merge_tool_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return merged
 
 
-def sort_tool_results_by_call_order(
-    messages: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+def sort_tool_results_by_call_order(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Sort tool_result blocks within user messages by the order of tool_calls
     in the preceding assistant message.
@@ -569,13 +534,11 @@ def sort_tool_results_by_call_order(
                     last_tool_call_order[tc_id] = idx
 
         elif role == "user" and msg.get("content_blocks"):
-            tool_blocks = [
-                b for b in msg["content_blocks"] if b.get("type") == "tool_result"
-            ]
+            tool_blocks = [b for b in msg["content_blocks"] if b.get("type") == "tool_result"]
             if len(tool_blocks) > 1 and last_tool_call_order:
                 sorted_blocks = sorted(
                     tool_blocks,
-                    key=lambda b: last_tool_call_order.get(b.get("tool_use_id", ""), 0),
+                    key=lambda b: last_tool_call_order.get(b.get("tool_use_id", ""), 0)
                 )
                 sorted_idx = 0
                 new_blocks = []
@@ -594,8 +557,7 @@ def sort_tool_results_by_call_order(
 # Main Encoding Function
 # ============================================================
 
-
-def encode_messages(
+def _encode_messages_text(
     messages: List[Dict[str, Any]],
     thinking_mode: str,
     context: Optional[List[Dict[str, Any]]] = None,
@@ -629,7 +591,7 @@ def encode_messages(
 
     # Preprocess: merge tool messages and sort tool results
     messages = merge_tool_messages(messages)
-    messages = sort_tool_results_by_call_order(context + messages)[len(context) :]
+    messages = sort_tool_results_by_call_order(context + messages)[len(context):]
     if context:
         context = merge_tool_messages(context)
         context = sort_tool_results_by_call_order(context)
@@ -638,6 +600,7 @@ def encode_messages(
 
     prompt = bos_token if add_default_bos_token and len(context) == 0 else ""
 
+    # Resolve drop_thinking: if any message has tools defined, don't drop thinking
     effective_drop_thinking = drop_thinking
     if any(m.get("tools") for m in full_messages):
         effective_drop_thinking = False
@@ -692,13 +655,170 @@ def _drop_thinking_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, An
 
 
 # ============================================================
+# Vision Message Preprocessing
+# ============================================================
+
+def parse_tagged_text(text: str) -> Union[str, List[Dict[str, Any]]]:
+    """Convert ``<image>path</image>`` text into standard content blocks."""
+    matches = list(IMAGE_TAG_PATTERN.finditer(text))
+    remaining = IMAGE_TAG_PATTERN.sub("", text)
+    if "<image>" in remaining or "</image>" in remaining:
+        raise ValueError("Malformed <image>path</image> tag")
+    if not matches:
+        return text
+
+    blocks: List[Dict[str, Any]] = []
+    cursor = 0
+    for match in matches:
+        if match.start() > cursor:
+            blocks.append({"type": "text", "text": text[cursor:match.start()]})
+        path = match.group(1)
+        if not path:
+            raise ValueError("Image path must not be empty")
+        blocks.append({
+            "type": "image_url",
+            "image_url": {"url": path},
+        })
+        cursor = match.end()
+    if cursor < len(text):
+        blocks.append({"type": "text", "text": text[cursor:]})
+    return blocks
+
+
+def _is_image_block(block: Dict[str, Any]) -> bool:
+    """Return whether a content block is an OpenAI/Anthropic/internal image."""
+    return isinstance(block, dict) and block.get("type") in ("image", "image_url")
+
+
+def _extract_image(block: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a supported image block into an internal image record."""
+    record: Dict[str, Any] = {"type": "image"}
+    if block.get("type") == "image_url":
+        image_url = block.get("image_url")
+        if isinstance(image_url, str):
+            record["url"] = image_url
+        else:
+            record["url"] = (image_url or {}).get("url", "")
+    else:
+        for key in ("source", "url", "data"):
+            if key in block:
+                record[key] = block[key]
+    if not any(record.get(key) for key in ("source", "url", "data")):
+        raise ValueError("Image block does not contain a valid source")
+    return record
+
+
+def _process_image_blocks(
+    blocks: List[Any], image_placeholder: str = IMAGE_PLACEHOLDER
+) -> Tuple[List[Any], List[Dict[str, Any]]]:
+    """Replace image blocks and collect their records in one ordered traversal."""
+    new_blocks: List[Any] = []
+    images: List[Dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            new_blocks.append(block)
+            continue
+        if _is_image_block(block):
+            new_blocks.append({"type": "text", "text": image_placeholder})
+            images.append(_extract_image(block))
+        elif block.get("type") == "tool_result" and isinstance(block.get("content"), list):
+            block = copy.copy(block)
+            block["content"], nested_images = _process_image_blocks(
+                block["content"], image_placeholder)
+            new_blocks.append(block)
+            images.extend(nested_images)
+        elif block.get("type") == "text":
+            text = block.get("text") or ""
+            if IMAGE_PLACEHOLDER in text:
+                raise ValueError(
+                    f"Text block contains image placeholder '{IMAGE_PLACEHOLDER}': "
+                    f"'{text[:100]}'. Images should be separate content blocks."
+                )
+            new_blocks.append(block)
+        else:
+            new_blocks.append(block)
+    return new_blocks, images
+
+
+def _validate_no_image_sp_tokens(msg: Dict[str, Any]) -> None:
+    """Reject user-supplied image placeholder tokens in textual fields."""
+    content = msg.get("content")
+    if isinstance(content, str) and IMAGE_PLACEHOLDER in content:
+        raise ValueError(
+            f"Message content contains image special token '{IMAGE_PLACEHOLDER}'. "
+            "Images should be provided as image content blocks."
+        )
+    reasoning_content = msg.get("reasoning_content")
+    if isinstance(reasoning_content, str) and IMAGE_PLACEHOLDER in reasoning_content:
+        raise ValueError(
+            f"reasoning_content contains image special token '{IMAGE_PLACEHOLDER}'"
+        )
+
+
+def process_image_messages(
+    messages: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Normalize image blocks and return their records in prompt order."""
+    processed: List[Dict[str, Any]] = []
+    images: List[Dict[str, Any]] = []
+    for msg in messages:
+        msg = copy.deepcopy(msg)
+        _validate_no_image_sp_tokens(msg)
+
+        if isinstance(msg.get("content"), list) and "content_blocks" not in msg:
+            msg["content_blocks"] = msg.pop("content")
+
+        if msg.get("content_blocks"):
+            msg["content_blocks"], message_images = _process_image_blocks(
+                msg["content_blocks"])
+            images.extend(message_images)
+            if not isinstance(msg.get("content"), str):
+                texts = [
+                    block.get("text", "")
+                    for block in msg["content_blocks"]
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ]
+                msg["content"] = "\n\n".join(texts)
+
+        processed.append(msg)
+    return processed, images
+
+
+def encode_messages(
+    messages: List[Dict[str, Any]],
+    thinking_mode: str,
+    context: Optional[List[Dict[str, Any]]] = None,
+    drop_thinking: bool = True,
+    add_default_bos_token: bool = True,
+    reasoning_effort: Optional[str] = None,
+    return_multi_modal_data: bool = False,
+) -> Any:
+    """Encode text or multimodal messages through one canonical public entrypoint.
+
+    Text-only calls preserve the original string-returning API. When
+    return_multi_modal_data is true, the result is ``(prompt, media_data)``.
+    """
+    context = context or []
+    processed_context, _ = process_image_messages(context) if context else ([], [])
+    processed_messages, images = process_image_messages(messages)
+    prompt = _encode_messages_text(
+        processed_messages,
+        thinking_mode=thinking_mode,
+        context=processed_context if processed_context else None,
+        drop_thinking=drop_thinking,
+        add_default_bos_token=add_default_bos_token,
+        reasoning_effort=reasoning_effort,
+    )
+    if return_multi_modal_data:
+        return prompt, {"images": images}
+    return prompt
+
+
+# ============================================================
 # Parsing (Decoding model output)
 # ============================================================
 
-
-def _read_until_stop(
-    index: int, text: str, stop: List[str]
-) -> Tuple[int, str, Optional[str]]:
+def _read_until_stop(index: int, text: str, stop: List[str]) -> Tuple[int, str, Optional[str]]:
     """
     Read text from index until one of the stop strings is found.
 
@@ -722,9 +842,7 @@ def _read_until_stop(
         return len(text), content, None
 
 
-def parse_tool_calls(
-    index: int, text: str
-) -> Tuple[int, Optional[str], List[Dict[str, str]]]:
+def parse_tool_calls(index: int, text: str) -> Tuple[int, Optional[str], List[Dict[str, str]]]:
     """
     Parse DSML tool calls from text starting at the given index.
 
@@ -741,9 +859,7 @@ def parse_tool_calls(
     tool_calls_end_token = f"</{dsml_token}{tool_calls_block_name}>"
 
     while index < len(text):
-        index, _, stop_token = _read_until_stop(
-            index, text, [f"<{dsml_token}invoke", tool_calls_end_token]
-        )
+        index, _, stop_token = _read_until_stop(index, text, [f"<{dsml_token}invoke", tool_calls_end_token])
         if _ != ">\n":
             raise ValueError(f"Tool call format error: expected '>\\n' but got '{_}'")
 
@@ -753,28 +869,18 @@ def parse_tool_calls(
         if stop_token is None:
             raise ValueError("Missing special token in tool calls")
 
-        index, tool_name_content, stop_token = _read_until_stop(
-            index, text, [f"<{dsml_token}parameter", f"</{dsml_token}invoke"]
-        )
+        index, tool_name_content, stop_token = _read_until_stop(index, text, [f"<{dsml_token}parameter", f"</{dsml_token}invoke"])
 
-        p_tool_name = re.findall(
-            r'^\s*name="(.*?)">\n$', tool_name_content, flags=re.DOTALL
-        )
+        p_tool_name = re.findall(r'^\s*name="(.*?)">\n$', tool_name_content, flags=re.DOTALL)
         if len(p_tool_name) != 1:
             raise ValueError(f"Tool name format error: '{tool_name_content}'")
         tool_name = p_tool_name[0]
 
         tool_args: Dict[str, Tuple[str, str]] = {}
         while stop_token == f"<{dsml_token}parameter":
-            index, param_content, stop_token = _read_until_stop(
-                index, text, [f"/{dsml_token}parameter"]
-            )
+            index, param_content, stop_token = _read_until_stop(index, text, [f"/{dsml_token}parameter"])
 
-            param_kv = re.findall(
-                r'^ name="(.*?)" string="(true|false)">(.*?)<$',
-                param_content,
-                flags=re.DOTALL,
-            )
+            param_kv = re.findall(r'^ name="(.*?)" string="(true|false)">(.*?)<$', param_content, flags=re.DOTALL)
             if len(param_kv) != 1:
                 raise ValueError(f"Parameter format error: '{param_content}'")
             param_name, string, param_value = param_kv[0]
@@ -783,13 +889,9 @@ def parse_tool_calls(
                 raise ValueError(f"Duplicate parameter name: '{param_name}'")
             tool_args[param_name] = (param_value, string)
 
-            index, content, stop_token = _read_until_stop(
-                index, text, [f"<{dsml_token}parameter", f"</{dsml_token}invoke"]
-            )
+            index, content, stop_token = _read_until_stop(index, text, [f"<{dsml_token}parameter", f"</{dsml_token}invoke"])
             if content != ">\n":
-                raise ValueError(
-                    f"Parameter format error: expected '>\\n' but got '{content}'"
-                )
+                raise ValueError(f"Parameter format error: expected '>\\n' but got '{content}'")
 
         tool_call = decode_dsml_to_arguments(tool_name=tool_name, tool_args=tool_args)
         tool_calls.append(tool_call)
@@ -826,17 +928,11 @@ def parse_message_from_completion_text(text: str, thinking_mode: str) -> Dict[st
     is_tool_calling = False
 
     if is_thinking:
-        index, content_delta, stop_token = _read_until_stop(
-            index, text, [thinking_end_token, tool_calls_start_token]
-        )
+        index, content_delta, stop_token = _read_until_stop(index, text, [thinking_end_token, tool_calls_start_token])
         reasoning_content = content_delta
-        assert stop_token == thinking_end_token, (
-            "Invalid thinking format: missing </think>"
-        )
+        assert stop_token == thinking_end_token, "Invalid thinking format: missing </think>"
 
-    index, content_delta, stop_token = _read_until_stop(
-        index, text, [eos_token, tool_calls_start_token]
-    )
+    index, content_delta, stop_token = _read_until_stop(index, text, [eos_token, tool_calls_start_token])
     summary_content = content_delta
     if stop_token == tool_calls_start_token:
         is_tool_calling = True
@@ -849,24 +945,15 @@ def parse_message_from_completion_text(text: str, thinking_mode: str) -> Dict[st
         index, tool_ends_text, stop_token = _read_until_stop(index, text, [eos_token])
         assert not tool_ends_text, "Unexpected content after tool calls"
 
-    assert len(text) == index and stop_token in [eos_token, None], (
-        "Unexpected content at end"
-    )
+    assert len(text) == index and stop_token in [eos_token, None], "Unexpected content at end"
 
-    for sp_token in [
-        bos_token,
-        eos_token,
-        thinking_start_token,
-        thinking_end_token,
-        dsml_token,
-    ]:
-        assert sp_token not in summary_content and sp_token not in reasoning_content, (
+    for sp_token in [bos_token, eos_token, thinking_start_token, thinking_end_token, dsml_token]:
+        assert sp_token not in summary_content and sp_token not in reasoning_content, \
             f"Unexpected special token '{sp_token}' in content"
-        )
 
     return {
         "role": "assistant",
         "content": summary_content,
         "reasoning_content": reasoning_content,
-        "tool_calls": tool_calls_to_openai_format(tool_calls),
+        "tool_calls": tool_calls_to_openai_format(tool_calls)
     }
