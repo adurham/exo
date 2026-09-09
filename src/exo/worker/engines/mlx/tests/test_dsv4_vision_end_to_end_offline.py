@@ -146,7 +146,7 @@ def model():
     return built
 
 
-def test_end_to_end_vision_pipeline(encoder_config, image_bytes, model, capsys):
+def test_end_to_end_vision_pipeline(encoder_config, image_bytes, model):
     from exo.worker.engines.mlx import deepseek_v4_vision as dsvision
 
     # ---------------------------------------------- 1. expand placeholders
@@ -291,8 +291,144 @@ def test_end_to_end_vision_pipeline(encoder_config, image_bytes, model, capsys):
     assert logits_array.shape == (1, len(expanded), VOCAB)
     assert np.isfinite(logits_array).all()
 
-    with capsys.disabled():
-        pass
+
+def test_multiple_images_in_one_prompt(encoder_config, image_bytes, model):
+    """TWO images in one prompt, at different positions.
+
+    Single-image coverage cannot catch a merge that assumes at most one block:
+    a second image exercises `img.start` bookkeeping (the reference records
+    `len(tokens)` BEFORE appending each block, so image 2's start already
+    accounts for image 1's expansion), the per-image `perm`/`types` pairing,
+    and `merge_image_embeddings`' loop over multiple non-overlapping writes.
+    """
+    from exo.worker.engines.mlx import deepseek_v4_vision as dsvision
+
+    # A visually different second image, so the two encodings cannot coincide.
+    rng = np.random.default_rng(7)
+    second = Image.fromarray(
+        np.clip(rng.normal(128, 40, (320, 480, 3)), 0, 255).astype(np.uint8), "RGB"
+    )
+    buffer = io.BytesIO()
+    second.save(buffer, format="PNG")
+    second_bytes = buffer.getvalue()
+
+    prompt_token_ids = [10, 11, PLACEHOLDER_ID, 12, 13, PLACEHOLDER_ID, 14]
+    expanded, image_inputs = expand_image_placeholders(
+        prompt_token_ids,
+        [{"data": image_bytes}, {"data": second_bytes}],
+        PLACEHOLDER_ID,
+        encoder_config,
+    )
+    assert len(image_inputs) == 2
+    first, sec = image_inputs
+
+    print("\n=== TWO images in one prompt ===")
+    for index, img in enumerate(image_inputs):
+        print(
+            f"image {index}: grid={img.n_vit_h}x{img.n_vit_w} "
+            f"block={len(img.types)} at [{img.start}, {img.start + len(img.types)})"
+        )
+    print(f"prompt tokens: {len(prompt_token_ids)} -> {len(expanded)}")
+
+    # Blocks must not overlap, and must sit in prompt order.
+    first_end = first.start + len(first.types)
+    assert first.start < first_end <= sec.start
+    assert sec.start + len(sec.types) <= len(expanded)
+    assert len(expanded) == len(prompt_token_ids) - 2 + len(first.types) + len(
+        sec.types
+    )
+
+    embeddings = dsvision.build_embeddings(model, expanded, image_inputs, VOCAB)
+    mx.eval(embeddings)
+    array = np.asarray(embeddings, dtype=np.float32)
+    assert array.shape == (1, len(expanded), HIDDEN)
+    assert np.isfinite(array).all()
+
+    # Each block's IMAGE rows must equal ITS OWN aligner output -- the check
+    # that catches a merge writing the wrong image into the wrong span.
+    span_ids = np.asarray(expanded)
+    for index, img in enumerate(image_inputs):
+        encoded = model.encode_image(mx.array(img.patches), img.n_vit_h, img.n_vit_w)
+        mx.eval(encoded)
+        permuted = np.asarray(encoded[mx.array(img.perm)], dtype=np.float32)
+        block_ids = span_ids[img.start : img.start + len(img.types)]
+        positions = np.nonzero(block_ids == VOCAB + IMAGE)[0] + img.start
+        rows = array[0, positions, :]
+        diff = float(np.abs(rows - permuted).max())
+        print(f"image {index}: {positions.size} IMAGE rows, max diff {diff:.3e}")
+        assert diff == 0.0
+
+    # The two images must actually differ, or the check above is vacuous.
+    enc0 = np.asarray(
+        model.encode_image(mx.array(first.patches), first.n_vit_h, first.n_vit_w),
+        dtype=np.float32,
+    )
+    enc1 = np.asarray(
+        model.encode_image(mx.array(sec.patches), sec.n_vit_h, sec.n_vit_w),
+        dtype=np.float32,
+    )
+    n = min(enc0.shape[0], enc1.shape[0])
+    assert float(np.abs(enc0[:n] - enc1[:n]).max()) > 0.0, (
+        "the two test images encode identically; the per-image check is vacuous"
+    )
+
+    # Text rows between and around the blocks stay untouched.
+    for position, token_id in ((0, 10), (1, 11)):
+        reference = np.asarray(
+            model.model.embed_tokens(mx.array([token_id])[None]), dtype=np.float32
+        )
+        assert np.array_equal(array[:, position, :], reference[:, 0, :])
+
+    # Both spans must land in chunk 0 of the prefill schedule.
+    spans = [ImageSpan(img.start, img.start + len(img.types)) for img in image_inputs]
+    assert dsvision.image_span_bounds(image_inputs) == [(s.start, s.end) for s in spans]
+    chunks = plan_prefill_chunks(
+        total_tokens=len(expanded) - 1, prefill_step_size=64, image_spans=spans
+    )
+    print(f"chunks @64: {chunks}  (both spans must be inside chunk 0)")
+    assert all(s.end <= chunks[0] for s in spans)
+    assert sum(chunks) == len(expanded) - 1
+
+
+def test_card_image_token_id_matches_the_tokenizer(encoder_config):
+    """Regression guard for the 129264 vs 129280 confusion.
+
+    `image_token_id` is the TOKENIZER id of IMAGE_PLACEHOLDER (129264), an
+    ordinary in-vocabulary token. It is NOT `vocab_size + IMAGE_START`
+    (129280), which is a SENTINEL deliberately outside the embedding table.
+    The two are 16 apart and easy to transpose; this pins the distinction so a
+    future edit cannot silently swap them.
+    """
+    import tomllib
+    from pathlib import Path
+
+    from exo.shared.constants import RESOURCES_DIR
+    from exo.worker.engines.mlx.vendor.deepseek_v4_encoding import IMAGE_PLACEHOLDER
+
+    card_path = (
+        Path(str(RESOURCES_DIR))
+        / "inference_model_cards"
+        / "deepseek-ai--DeepSeek-V4-Flash-Vision-Exp.toml"
+    )
+    card = tomllib.loads(card_path.read_text())
+    vision = card["vision"]
+
+    assert vision["scheme"] == "deepseek_v4"
+    assert vision["placeholder_token"] == IMAGE_PLACEHOLDER
+
+    token_id = vision["image_token_id"]
+    real_vocab_size = 129280  # DSv4-Flash-Vision-Exp config.json
+    print(f"\ncard image_token_id = {token_id}")
+    print(f"vocab_size          = {real_vocab_size}")
+    print(f"sentinel range      = {real_vocab_size}..{real_vocab_size + 4}")
+    assert token_id == 129264, (
+        "image_token_id must be the tokenizer id of IMAGE_PLACEHOLDER"
+    )
+    assert token_id < real_vocab_size, (
+        f"image_token_id {token_id} is a SENTINEL, not a real token -- it must "
+        f"be < vocab_size ({real_vocab_size}). 129280 is vocab_size + "
+        "IMAGE_START and must never be used here."
+    )
 
 
 if __name__ == "__main__":
