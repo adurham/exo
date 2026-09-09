@@ -1498,7 +1498,10 @@ class KVPrefixCache:
                 break
             query_r = query_by_start.get(cached_r.start_pos)
             if query_r is None:
-                continue
+                # Fail closed, for the same reason as _longest_prefix_match:
+                # a cached image region with no query counterpart is not
+                # evidence of equal content, it is absence of evidence.
+                return cached_r.start_pos
             if query_r.content_hash != cached_r.content_hash:
                 return cached_r.start_pos
         return match_length
@@ -1696,7 +1699,26 @@ class KVPrefixCache:
                     break
                 query_r = query_by_start.get(cached_r.start_pos)
                 if query_r is None:
-                    continue
+                    # FAIL CLOSED (2026-09-09 cache-poisoning review). The
+                    # cached node holds KV for an IMAGE at these positions, and
+                    # the query supplied no region there to prove it is the
+                    # same image. Continuing would reuse that image's KV for a
+                    # request that never identified an image -- and under
+                    # DeepSeek-V4's sentinel scheme the token ids alone cannot
+                    # tell two different images apart (two 448x448 images
+                    # expand to byte-identical ids), so the token match that
+                    # got us here is NOT evidence of equal content.
+                    #
+                    # Measured before this change: request B (different image,
+                    # same resolution) querying with `media_regions=[]` reused
+                    # 278/279 of request A's cached tokens.
+                    logger.info(
+                        f"Cached media region at pos {cached_r.start_pos} has "
+                        "no counterpart in this query's media regions; "
+                        f"truncating match to {cached_r.start_pos} rather than "
+                        "reusing image KV this request did not identify."
+                    )
+                    return node, cached_r.start_pos
                 if query_r.content_hash != cached_r.content_hash:
                     logger.info(
                         f"Media region mismatch at pos {cached_r.start_pos}: "

@@ -6,6 +6,7 @@ import inspect
 import io
 import json
 import re
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -180,6 +181,25 @@ def build_vision_prompt(
             i += 1
 
     return "".join(result)
+
+
+def unresolvable_content_hash(reason: str) -> str:
+    """A content hash for a media region whose real content could not be hashed.
+
+    NEVER return `""` for this. The prefix cache compares two regions'
+    `content_hash` for equality to decide whether a cached image's KV state may
+    be reused for a query at the same token positions -- and under DeepSeek-V4's
+    sentinel scheme two DIFFERENT images at the same resolution produce
+    BYTE-IDENTICAL token ids (measured: 448x448 random noise, seeds 11 and 22,
+    both expand to the same 279 ids with the image span at [3, 277)). The hash
+    is therefore the ONLY thing distinguishing them, and a shared sentinel value
+    like `""` makes every unhashable region compare equal to every other one --
+    i.e. it hands request B request A's image KV.
+
+    A per-call random token can never equal another region's, so an
+    unresolvable region always fails closed (cold serve) instead of aliasing.
+    """
+    return f"unresolvable:{reason}:{uuid.uuid4().hex}"
 
 
 @dataclass
@@ -698,12 +718,20 @@ def _find_media_regions(
             in_run = True
         elif not pad and in_run:
             regions.append(
-                MediaRegion(content_hash="", start_pos=run_start, end_pos=pos)
+                MediaRegion(
+                    content_hash=unresolvable_content_hash("pending"),
+                    start_pos=run_start,
+                    end_pos=pos,
+                )
             )
             in_run = False
     if in_run:
         regions.append(
-            MediaRegion(content_hash="", start_pos=run_start, end_pos=len(tokens_np))
+            MediaRegion(
+                content_hash=unresolvable_content_hash("pending"),
+                start_pos=run_start,
+                end_pos=len(tokens_np),
+            )
         )
 
     for i, region in enumerate(regions):
@@ -711,7 +739,14 @@ def _find_media_regions(
             img = decode_base64_image(images[i])
             region.content_hash = hashlib.sha256(img.tobytes()).hexdigest()
         else:
-            logger.warning(f"Media region {i} has no corresponding image")
+            # Leave the fail-closed placeholder in place. A region with no
+            # image behind it cannot be content-addressed, and `""` here would
+            # make it compare EQUAL to every other unhashable region -- see
+            # `unresolvable_content_hash`.
+            logger.warning(
+                f"Media region {i} has no corresponding image; it will never "
+                "match a cached region, so this request is served cold."
+            )
 
     return regions
 
@@ -778,7 +813,11 @@ class VisionProcessor:
         )
         media_regions = [
             MediaRegion(
-                content_hash=hashes[i] if i < len(hashes) else "",
+                content_hash=(
+                    hashes[i]
+                    if i < len(hashes)
+                    else unresolvable_content_hash("no-hash")
+                ),
                 start_pos=start,
                 end_pos=end,
             )
