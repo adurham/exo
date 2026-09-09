@@ -1426,6 +1426,9 @@ class ExoBatchGenerator:
                         distributed_prompt_progress_callback,
                         prefill_step_size=self.prefill_step_size,
                         snapshot_offset=prefix_hit_length,
+                        # Phase 4d: image spans must all land in the offset-0
+                        # chunk; the planner needs them to size chunk 0.
+                        media_regions=media_regions,
                     )
 
             return _finalize_prefill(_prefill_tps, _prefill_tokens, cache_snapshots)
@@ -2575,6 +2578,9 @@ class ExoBatchGenerator:
                     distributed_prompt_progress_callback,
                     prefill_step_size=self.prefill_step_size,
                     snapshot_offset=prefix_hit_length,
+                    # Phase 4d: image spans must all land in the offset-0
+                    # chunk; the planner needs them to size chunk 0.
+                    media_regions=media_regions,
                 )
 
         # Round-11 b7 (prefill_done): delta since b6 prefill_start. G1: no

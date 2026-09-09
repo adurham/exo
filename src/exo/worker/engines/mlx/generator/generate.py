@@ -6,6 +6,7 @@ import socket
 import sys
 import time
 import uuid
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable, Generator, Iterator, Literal, cast, get_args
@@ -72,6 +73,10 @@ from exo.worker.engines.mlx.pp_prefill_session import (
     PrefillSessionError,
     ResumablePrefillSession,
     supports_chunked_prefill_interruption,
+)
+from exo.worker.engines.mlx.prefill_chunking import (
+    image_spans_from_media_regions,
+    plan_prefill_chunks,
 )
 from exo.worker.engines.mlx.sampling import card_sampling_values, resolve_sampling
 from exo.worker.engines.mlx.types import KVCacheType, Model
@@ -478,6 +483,7 @@ def _pipeline_parallel_prefill_steps(
     *,
     interruptible: bool = False,
     prefill_batch_request_uids: list[int] | None = None,
+    media_regions: "Iterable[object] | None" = None,
 ) -> "Iterator[tuple[Literal['chunk'], int, mx.array] | tuple[Literal['done'], None, None]]":
     """2026-08-06 (Phase 2 Stage 4, generator-core split, consult-
     reviewed before implementation): the ORIGINAL ``pipeline_parallel_
@@ -540,14 +546,25 @@ def _pipeline_parallel_prefill_steps(
     rank = group.rank()
     world_size = group.size()
 
-    # Build list of real prompt chunk sizes
+    # Build list of real prompt chunk sizes.
+    #
+    # Phase 4d: `plan_prefill_chunks` is the SAME uniform greedy schedule when
+    # there are no image spans (byte-for-byte, so the text path is unchanged),
+    # but when `media_regions` are present it extends the FIRST chunk to cover
+    # the last image token. DeepSeek-V4 can only merge image embeddings at
+    # cache offset 0 -- an image reaching a later chunk raises in
+    # `_apply_image_visibility` even if no boundary split the span. See
+    # `prefill_chunking` for the full invariant.
+    #
+    # Computed independently on every rank from (total, spans, step size),
+    # which pipeline-parallel prefill already requires to be identical across
+    # ranks, so no collective is needed and ranks cannot desync.
     total = len(prompt)
-    real_chunk_sizes: list[int] = []
-    remaining = total - 1
-    while remaining:
-        n = min(prefill_step_size, remaining)
-        real_chunk_sizes.append(n)
-        remaining -= n
+    real_chunk_sizes = plan_prefill_chunks(
+        total_tokens=total - 1,
+        prefill_step_size=prefill_step_size,
+        image_spans=image_spans_from_media_regions(media_regions),
+    )
     n_real = len(real_chunk_sizes)
 
     # Each rank does: [rank leading dummies] [N real chunks] [world_size-1-rank trailing dummies]
@@ -712,6 +729,7 @@ def pipeline_parallel_prefill(
     group: mx.distributed.Group,
     *,
     prefill_batch_request_uids: list[int] | None = None,
+    media_regions: "Iterable[object] | None" = None,
 ) -> None:
     """Thin eager wrapper (2026-08-06, Phase 2 Stage 4, consult-
     reviewed) -- drains ``_pipeline_parallel_prefill_steps`` to
@@ -734,6 +752,7 @@ def pipeline_parallel_prefill(
         group,
         interruptible=False,
         prefill_batch_request_uids=prefill_batch_request_uids,
+        media_regions=media_regions,
     ):
         pass
 
@@ -749,6 +768,7 @@ def prefill(
     distributed_prompt_progress_callback: Callable[[], None] | None,
     prefill_step_size: int | None = None,
     snapshot_offset: int = 0,
+    media_regions: "Iterable[object] | None" = None,
 ) -> tuple[float, int, list[CacheSnapshot]]:
     """Prefill the KV cache with prompt tokens.
 
@@ -918,6 +938,7 @@ def prefill(
                     prompt_progress_callback=progress_callback,
                     distributed_prompt_progress_callback=distributed_prompt_progress_callback,
                     group=group,
+                    media_regions=media_regions,
                 )
         else:
             with T("prefill.stream_generate"):
@@ -2198,6 +2219,9 @@ def mlx_generate(
                 distributed_prompt_progress_callback,
                 prefill_step_size=prefill_step_size,
                 snapshot_offset=prefix_hit_length,
+                # Phase 4d: the chunk planner needs the image spans so it can
+                # keep every image token inside the offset-0 chunk.
+                media_regions=media_regions,
             )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
