@@ -75,6 +75,8 @@ from exo.worker.engines.mlx.pp_prefill_session import (
     supports_chunked_prefill_interruption,
 )
 from exo.worker.engines.mlx.prefill_chunking import (
+    ImageSpan,
+    ImageSpanPrefillError,
     image_spans_from_media_regions,
     plan_prefill_chunks,
 )
@@ -484,6 +486,7 @@ def _pipeline_parallel_prefill_steps(
     interruptible: bool = False,
     prefill_batch_request_uids: list[int] | None = None,
     media_regions: "Iterable[object] | None" = None,
+    cache_offset: int = 0,
 ) -> "Iterator[tuple[Literal['chunk'], int, mx.array] | tuple[Literal['done'], None, None]]":
     """2026-08-06 (Phase 2 Stage 4, generator-core split, consult-
     reviewed before implementation): the ORIGINAL ``pipeline_parallel_
@@ -556,14 +559,33 @@ def _pipeline_parallel_prefill_steps(
     # `_apply_image_visibility` even if no boundary split the span. See
     # `prefill_chunking` for the full invariant.
     #
-    # Computed independently on every rank from (total, spans, step size),
-    # which pipeline-parallel prefill already requires to be identical across
-    # ranks, so no collective is needed and ranks cannot desync.
+    # `cache_offset` is the KV-prefix-cache hit length (`prefill`'s
+    # `snapshot_offset`), threaded all the way down from the real call sites.
+    # It does TWO distinct jobs and both are load-bearing:
+    #
+    #   1. It re-bases `media_regions`' ABSOLUTE positions into this call's
+    #      local (post-hit) stream, which is the frame `total - 1` is already
+    #      in. Without it the two operands are in different coordinate frames
+    #      and chunk 0 is mis-sized by exactly the hit length.
+    #   2. It reaches `plan_prefill_chunks`'s own offset guard, which rejects
+    #      the genuinely unsatisfiable case: images still to prefill while the
+    #      cache is already past offset 0.
+    #
+    # Both were unreachable before this was wired: the parameter defaulted to
+    # 0 at every call site, so the guard was dead code in production and the
+    # spans were silently absolute.
+    #
+    # Computed independently on every rank from (total, spans, step size,
+    # offset), which pipeline-parallel prefill already requires to be identical
+    # across ranks, so no collective is needed and ranks cannot desync.
     total = len(prompt)
     real_chunk_sizes = plan_prefill_chunks(
         total_tokens=total - 1,
         prefill_step_size=prefill_step_size,
-        image_spans=image_spans_from_media_regions(media_regions),
+        image_spans=image_spans_from_media_regions(
+            media_regions, cache_offset=cache_offset
+        ),
+        cache_offset=cache_offset,
     )
     n_real = len(real_chunk_sizes)
 
@@ -730,6 +752,7 @@ def pipeline_parallel_prefill(
     *,
     prefill_batch_request_uids: list[int] | None = None,
     media_regions: "Iterable[object] | None" = None,
+    cache_offset: int = 0,
 ) -> None:
     """Thin eager wrapper (2026-08-06, Phase 2 Stage 4, consult-
     reviewed) -- drains ``_pipeline_parallel_prefill_steps`` to
@@ -753,6 +776,7 @@ def pipeline_parallel_prefill(
         interruptible=False,
         prefill_batch_request_uids=prefill_batch_request_uids,
         media_regions=media_regions,
+        cache_offset=cache_offset,
     ):
         pass
 
@@ -939,8 +963,63 @@ def prefill(
                     distributed_prompt_progress_callback=distributed_prompt_progress_callback,
                     group=group,
                     media_regions=media_regions,
+                    # Phase 4d: the prefix-cache hit length is this prefill's
+                    # cache offset. See _pipeline_parallel_prefill_steps for
+                    # the two jobs it does (span re-basing + offset guard).
+                    cache_offset=snapshot_offset,
                 )
         else:
+            # Phase 4d: THIS branch is the one every request on a
+            # TENSOR-parallel cluster takes. `is_pipeline` is
+            # `_has_pipeline_communication_layer(model)`, true only when a
+            # Pipeline{First,Last}Layer / MetaFramedPipeline{First,Last}Layer
+            # is installed -- i.e. under pipeline-parallel sharding. Under TP
+            # sharding (what the DSv4-Flash cluster actually runs: one
+            # TensorShardMetadata per rank, both spanning all 43 layers) it is
+            # FALSE, so the image-span guard living inside
+            # `pipeline_parallel_prefill` was never reached by a real request
+            # no matter what was fixed on that side.
+            #
+            # `stream_generate` chunks the prompt with mlx-lm's own uniform
+            # loop, which has no image-span concept at all, so the same
+            # invariant has to be enforced here BEFORE handing the prompt
+            # over. `plan_prefill_chunks` is the single source of truth for
+            # both paths -- it is called for its VERDICT here rather than for
+            # a schedule we execute ourselves, because mlx-lm owns this loop.
+            #
+            # What the verdict means: the planner returns a schedule whose
+            # chunk 0 covers every image token. If that schedule is exactly
+            # the uniform one mlx-lm is about to run (i.e. no stretch was
+            # needed), stream_generate's own chunking is already correct and
+            # we let it run untouched -- the common case, since a 384-token
+            # span inside a >=2048 first chunk needs no adjustment. If a
+            # stretch WAS required, mlx-lm cannot be told to do it, so raising
+            # here is the honest outcome: the alternative is letting the model
+            # hit `_apply_image_visibility`'s ValueError several chunks deep,
+            # after the cache is already dirty. Unsatisfiable inputs (images
+            # pending at a non-zero cache offset) raise from the planner
+            # itself, identically to the pipeline path.
+            image_spans = image_spans_from_media_regions(
+                media_regions, cache_offset=snapshot_offset
+            )
+            if image_spans:
+                planned = plan_prefill_chunks(
+                    total_tokens=num_tokens,
+                    prefill_step_size=prefill_step_size,
+                    image_spans=image_spans,
+                    cache_offset=snapshot_offset,
+                )
+                if planned and planned[0] != min(prefill_step_size, num_tokens):
+                    raise ImageSpanPrefillError(
+                        f"image spans require a first prefill chunk of "
+                        f"{planned[0]} tokens, but this request is served by "
+                        f"mlx-lm's stream_generate, whose uniform chunking is "
+                        f"fixed at {prefill_step_size}. DeepSeek-V4 merges image "
+                        "embeddings only at cache offset 0, so an image past the "
+                        "first chunk cannot be attended. Raise "
+                        "EXO_PREFILL_STEP_SIZE above the last image token's "
+                        "position, or move the image earlier in the prompt."
+                    )
             with T("prefill.stream_generate"):
                 # THE LEAK FIX: stream_generate is a GENERATOR. The old
                 # `for _ in stream_generate(...): break` pulled one item then
@@ -1330,6 +1409,7 @@ def prefill_batched(
     on_prefill_progress: Callable[[int, int], None] | None,
     distributed_prompt_progress_callback: Callable[[], None] | None,
     prefill_step_size: int | None = None,
+    media_regions_list: "list[Iterable[object] | None] | None" = None,
 ) -> tuple[list[float], list[int], list[KVCacheType], list[list[CacheSnapshot]]]:
     """TP-aware batched prefill: process N prompts together at shape (B, L_chunk).
 
@@ -1382,6 +1462,7 @@ def prefill_batched(
             on_prefill_progress,
             distributed_prompt_progress_callback,
             prefill_step_size,
+            media_regions_list,
         )
 
     # Caller passes prompt[:-1] (matching ``prefill()``'s contract: cache lands
@@ -1407,6 +1488,7 @@ def prefill_batched(
             on_prefill_progress,
             distributed_prompt_progress_callback,
             prefill_step_size,
+            media_regions_list,
         )
 
     # Drop the last token of each prompt — the cache will land at
@@ -1431,6 +1513,38 @@ def prefill_batched(
 
     if prefill_step_size is None:
         prefill_step_size = int(os.environ.get("EXO_PREFILL_STEP_SIZE", "4096"))
+
+    # Phase 4d: this path had its OWN uniform chunk loop
+    # (``while offset < max_length: min(prefill_step_size, ...)``) with no
+    # image-span awareness whatsoever -- a second, independent way to put an
+    # image token into a forward pass at a non-zero cache offset, which
+    # DeepSeek-V4 cannot merge. Route it through the SAME planner the serial
+    # path uses rather than reimplementing the rule here; sharing the planner
+    # is what keeps the two paths from drifting apart.
+    #
+    # Every stream shares ONE chunk schedule (they are prefilled together at
+    # shape (B, L_chunk)), so the constraint is the UNION of all streams'
+    # spans: chunk 0 must cover the last image token across the whole batch.
+    # Right-padding is appended at the END of each stream, so a position below
+    # that stream's own length means the same token in both the padded and
+    # unpadded frames -- no per-stream re-basing is needed.
+    #
+    # ``cache_offset=0`` is correct here and is not an assumption being papered
+    # over: the only caller (``_submit_batched_eligible``) builds a FRESH
+    # ``make_kv_cache`` per stream and never consults the KV prefix cache, so
+    # these caches are structurally cold. Passing it explicitly keeps that fact
+    # checkable at the seam instead of implicit.
+    batch_image_spans: list[ImageSpan] = []
+    for stream_regions in media_regions_list or []:
+        batch_image_spans.extend(
+            image_spans_from_media_regions(stream_regions, cache_offset=0)
+        )
+    batched_chunk_sizes = plan_prefill_chunks(
+        total_tokens=max_length,
+        prefill_step_size=prefill_step_size,
+        image_spans=batch_image_spans,
+        cache_offset=0,
+    )
 
     from exo.worker.engines.mlx.trace import T
 
@@ -1505,7 +1619,13 @@ def prefill_batched(
             offset = 0
             chunk_idx = 0
             while offset < max_length:
-                n_to_process = min(prefill_step_size, max_length - offset)
+                # Phase 4d: sizes come from `plan_prefill_chunks` (built
+                # above) instead of `min(prefill_step_size, remaining)`. With
+                # no image spans the planner IS that same uniform greedy
+                # schedule, byte-for-byte, so the text path is unchanged; with
+                # spans present, chunk 0 is stretched to cover the last image
+                # token.
+                n_to_process = batched_chunk_sizes[chunk_idx]
                 _t_fwd = time.perf_counter()
                 model(
                     padded_tokens[:, offset : offset + n_to_process],
@@ -1673,16 +1793,27 @@ def _serial_prefill_fallback(
     on_prefill_progress: Callable[[int, int], None] | None,
     distributed_prompt_progress_callback: Callable[[], None] | None,
     prefill_step_size: int | None,
+    media_regions_list: "list[Iterable[object] | None] | None" = None,
 ) -> tuple[list[float], list[int], list[KVCacheType], list[list[CacheSnapshot]]]:
     """Fallback when batched prefill can't be applied (SSM caches, empty prompt).
 
     Runs the original ``prefill()`` per stream in sequence. Caller still gets
     the same return shape as the batched path.
+
+    Phase 4d: each stream's own ``media_regions`` follow it into ``prefill()``,
+    so a vision request that lands here is guarded by the SAME planner as the
+    batched path rather than losing the guard on the way through. Streams'
+    caches are built cold by the caller, so no ``snapshot_offset`` applies.
     """
     per_stream_tps: list[float] = []
     per_stream_tokens: list[int] = []
     per_stream_snapshots: list[list[CacheSnapshot]] = []
-    for prompt_tokens, cache in zip(prompt_tokens_list, cache_list, strict=True):
+    regions_per_stream: "list[Iterable[object] | None]" = list(
+        media_regions_list or [None] * len(prompt_tokens_list)
+    )
+    for prompt_tokens, cache, stream_regions in zip(
+        prompt_tokens_list, cache_list, regions_per_stream, strict=True
+    ):
         tps, tokens, snapshots = prefill(
             model,
             tokenizer,
@@ -1693,6 +1824,7 @@ def _serial_prefill_fallback(
             on_prefill_progress,
             distributed_prompt_progress_callback,
             prefill_step_size=prefill_step_size,
+            media_regions=stream_regions,
         )
         per_stream_tps.append(tps)
         per_stream_tokens.append(tokens)

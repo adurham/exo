@@ -3092,6 +3092,14 @@ class ExoBatchGenerator:
                 on_prefill_progress,
                 distributed_prompt_progress_callback,
                 prefill_step_size=self.prefill_step_size,
+                # Phase 4d: `submit_batched`'s heterogeneity gate currently
+                # routes every ``task_params.images`` task to the serial
+                # ``submit()`` path, so this is [] per stream TODAY. It is
+                # threaded anyway, and explicitly rather than by omission: the
+                # batched path's chunk loop is now planner-driven, and the day
+                # that gate admits vision the guard has to already be reading
+                # real spans instead of silently planning against none.
+                media_regions_list=[[] for _ in prompt_inputs],
             )
 
         # ---- Insert each task's last-2 tokens into mlx-lm BatchGenerator ----
