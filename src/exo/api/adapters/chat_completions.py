@@ -130,11 +130,43 @@ async def chat_request_to_text_generation(
             if has_images:
                 multimodal_content: list[dict[str, Any]] = []
                 assert isinstance(msg.content, list)
+                # Image BYTES are deliberately not inlined here. They travel
+                # out of band in `TextGenerationTaskParams.images`, because
+                # `chat_template_messages` is serialized and shipped to every
+                # worker -- inlining would duplicate a multi-MB base64 payload
+                # on the wire alongside the copy already in `.images`.
+                #
+                # What crosses here is an ordered REFERENCE per image. The
+                # `exo-image:<n>` URI is a real, non-empty source value, so a
+                # consumer that validates "an image block must declare where
+                # its content comes from" is satisfied without weakening that
+                # check for genuinely malformed blocks. The custom scheme also
+                # fails loudly rather than silently fetching the wrong bytes if
+                # anything ever tries to dereference it.
+                #
+                # A bare `{"type": "image"}` was emitted here until 2026-09-09.
+                # It is indistinguishable from "an image was dropped upstream",
+                # and the vendored DSv4 encoder rightly rejected it
+                # (`_extract_image` -> ValueError: "Image block does not
+                # contain a valid source"). That exception was swallowed by the
+                # vision-processing fallback in the generators, so EVERY image
+                # request silently degraded to text-only with HTTP 200 -- found
+                # by the Phase 5 on-hardware smoke test, which is the first
+                # thing to exercise this seam end to end.
+                #
+                # Ordering is the contract: the n-th image block corresponds to
+                # `images[n]`. `deepseek_v4_vision.process` independently
+                # asserts placeholder_count == len(images) before expansion, so
+                # a mismatch fails loudly instead of pairing the wrong image.
+                image_index = 0
                 for part in msg.content:
                     if isinstance(part, ChatCompletionMessageText):
                         multimodal_content.append({"type": "text", "text": part.text})
                     else:
-                        multimodal_content.append({"type": "image"})
+                        multimodal_content.append(
+                            {"type": "image", "url": f"exo-image:{image_index}"}
+                        )
+                        image_index += 1
                 multimodal_msg: dict[str, Any] = {
                     "role": msg.role,
                     "content": multimodal_content,
