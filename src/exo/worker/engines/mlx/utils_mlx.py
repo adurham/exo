@@ -1507,12 +1507,21 @@ def render_chat_template(
                     0, {"role": "system", "content": "", "tools": task_params.tools}
                 )
 
-        prompt = encode_messages_v4(
-            messages=v4_messages,
-            thinking_mode="chat"
-            if task_params.enable_thinking is False
-            else "thinking",
-            reasoning_effort=_v4_reasoning_effort(task_params),
+        # Phase 4a: the refreshed Vision-Exp encoder's `encode_messages` is now
+        # a vision-aware wrapper returning `Any` -- `str` for a text-only call
+        # (this one), `(prompt, media_data)` only when
+        # `return_multi_modal_data=True`, which this call does not pass. Narrow
+        # it back to `str` here so the annotation matches what this branch can
+        # actually receive.
+        prompt = cast(
+            str,
+            encode_messages_v4(
+                messages=v4_messages,
+                thinking_mode="chat"
+                if task_params.enable_thinking is False
+                else "thinking",
+                reasoning_effort=_v4_reasoning_effort(task_params),
+            ),
         )
         if partial_assistant_content:
             prompt += partial_assistant_content

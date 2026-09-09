@@ -723,16 +723,74 @@ class VisionProcessor:
     2. Replace image placeholders with the features
     3. Build vision prompt
     4. Provide media regions for prefix caching
+
+    Two schemes share this interface. `"mlx_vlm"` (the default, and every
+    pre-existing card) runs the `VisionEncoder` path below. `"deepseek_v4"`
+    routes to `deepseek_v4_vision`, whose tower lives inside the main
+    checkpoint and whose image tokens are sentinel TYPES rather than one
+    repeated placeholder id -- see that module's docstring. Downstream
+    consumers see the same `VisionResult` either way.
     """
 
     def __init__(self, config: VisionCardConfig, model_id: ModelId):
         self.vision_config = config
-        self._encoder = VisionEncoder(config, model_id)
+        self._model_id = model_id
+        self._is_deepseek_v4 = config.scheme == "deepseek_v4"
+        # The DSv4 tower is part of the text model and is already loaded by the
+        # time a request arrives, so it has no separate encoder to build.
+        self._encoder = (
+            None if self._is_deepseek_v4 else VisionEncoder(config, model_id)
+        )
         self._feature_cache: dict[str, tuple[mx.array, list[int]]] = {}
         self._feature_cache_max = 32
 
     def load(self) -> None:
-        self._encoder.ensure_loaded()
+        if self._encoder is not None:
+            self._encoder.ensure_loaded()
+
+    def _load_model_config(self) -> dict[str, Any]:
+        path = build_model_path(self._model_id) / "config.json"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"DeepSeek-V4 vision: config.json not found at {path}"
+            )
+        with open(path) as f:
+            return cast(dict[str, Any], json.load(f))
+
+    def _process_deepseek_v4(
+        self,
+        images: list[Base64Image],
+        chat_template_messages: list[dict[str, Any]],
+        tokenizer: TokenizerWrapper,
+        model: Model,
+        task_params: TextGenerationTaskParams,
+    ) -> VisionResult:
+        from exo.worker.engines.mlx import deepseek_v4_vision
+
+        prompt, prompt_tokens, embeddings, spans, hashes = deepseek_v4_vision.process(
+            images=images,
+            chat_template_messages=chat_template_messages,
+            tokenizer=tokenizer,
+            model=model,
+            task_params=task_params,
+            vision_config=self.vision_config,
+            model_config=self._load_model_config(),
+        )
+        media_regions = [
+            MediaRegion(
+                content_hash=hashes[i] if i < len(hashes) else "",
+                start_pos=start,
+                end_pos=end,
+            )
+            for i, (start, end) in enumerate(spans)
+        ]
+        return VisionResult(
+            prompt=prompt,
+            prompt_tokens=prompt_tokens,
+            embeddings=embeddings,
+            media_regions=media_regions,
+            image_token_id=self.vision_config.image_token_id,
+        )
 
     def _image_cache_key(self, images: list[Base64Image]) -> str:
         h = hashlib.sha256()
@@ -749,7 +807,17 @@ class VisionProcessor:
         model: Model,
         task_params: TextGenerationTaskParams,
     ) -> VisionResult:
+        if self._is_deepseek_v4:
+            return self._process_deepseek_v4(
+                images=images,
+                chat_template_messages=chat_template_messages,
+                tokenizer=tokenizer,
+                model=model,
+                task_params=task_params,
+            )
+
         logger.info(f"Vision pipeline: {len(images)} image(s)")
+        assert self._encoder is not None
 
         cache_key = self._image_cache_key(images)
         cached = self._feature_cache.pop(cache_key, None)

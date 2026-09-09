@@ -56,17 +56,22 @@ in_bytes = 167811372792
 # model repo, and image tokens emitted as SENTINEL TYPES offset past the
 # vocabulary (`vocab_size + {0..4}`) rather than one repeated placeholder id.
 #
-# `image_token_id = 129280` is `vocab_size + IMAGE_START`, i.e. the first
-# sentinel and the id that marks the start of an image span. It is NOT a
-# lookup index -- it is deliberately OUT OF RANGE of the 129280-row embedding
-# table, because the real embeddings are merged in, not looked up.
+# `image_token_id = 129264` is the tokenizer id of IMAGE_PLACEHOLDER
+# ("<|deepseek_image|>"), verified against the checkpoint's own tokenizer
+# (`convert_tokens_to_ids` -> 129264; it round-trips as a single token). This
+# is the PRE-EXPANSION marker: `expand_image_placeholders` replaces each
+# occurrence with a full sentinel block.
 #
-# `placeholder_token` is the encoder's IMAGE_PLACEHOLDER, the marker that
-# `expand_image_placeholders` replaces with a full sentinel block.
+# Do NOT confuse it with the SENTINEL ids the expansion emits, which are
+# `vocab_size + {0..4}` = 129280..129284 for
+# IMAGE_START/IMAGE_PAD/IMAGE/IMAGE_NEW_LINE/IMAGE_END. Those are deliberately
+# OUT OF RANGE of the 129280-row embedding table -- their embeddings are
+# merged in, never looked up. 129264 is a real in-vocabulary token; 129280 is
+# not, so the two must not be interchanged.
 [vision]
 scheme = "deepseek_v4"
 model_type = "deepseek_v4"
-image_token_id = 129280
+image_token_id = 129264
 placeholder_token = "<｜deepseek_image｜>"
 
 # UNVERIFIED FOR THIS CHECKPOINT. These are carried over verbatim from the
