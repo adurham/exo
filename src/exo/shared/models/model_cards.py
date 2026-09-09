@@ -1,6 +1,6 @@
 import json
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import aiofiles
 import aiofiles.os as aios
@@ -132,11 +132,47 @@ class ComponentInfo(FrozenModel):
 
 
 class VisionCardConfig(FrozenModel):
+    """How a model's vision tower is wired up.
+
+    The original fields describe the mlx-vlm-shaped scheme: a single
+    `image_token_id` placeholder repeated once per output token, an HF
+    `AutoImageProcessor` from `processor_repo`, and an mlx-vlm architecture
+    named by `model_type`.
+
+    DeepSeek-V4-Flash-Vision-Exp does not fit that shape, so it gets its own
+    explicit branch rather than having these fields bent around it:
+
+    - Its vision keys are TOP-LEVEL in config.json (`vision_dim`,
+      `vision_n_layers`, ...), not under a `vision_config` sub-dict, and it has
+      no `image_token_id` at all -- so `detect_vision_from_config` cannot
+      autodetect it and the card must declare `vision` explicitly.
+    - It ships no HF image-processor config; the processor is ported in-tree
+      (`vendor/deepseek_v4_image_processor.py`).
+    - Its image tokens are not one repeated id but five SENTINEL TYPES offset
+      past the vocabulary (`vocab_size + {0..4}` for
+      IMAGE_START/IMAGE_PAD/IMAGE/IMAGE_NEW_LINE/IMAGE_END), deliberately
+      outside the embedding table.
+    - Its tower weights live under `vision.` / `aligner.` prefixes inside the
+      SAME repo as the text weights, with four top-level sentinel embedding
+      parameters alongside.
+
+    `scheme` selects which code path `VisionProcessor` takes. `"mlx_vlm"`
+    keeps today's behaviour for every existing card.
+    """
+
     image_token_id: int
     model_type: str
     weights_repo: str = ""
     image_token: str | None = None
     processor_repo: str | None = None
+
+    scheme: Literal["mlx_vlm", "deepseek_v4"] = "mlx_vlm"
+    #: Text used in the rendered prompt to mark where an image goes. For the
+    #: DSv4 scheme this is the encoder's `IMAGE_PLACEHOLDER`
+    #: ("<|deepseek_image|>"), which is expanded into a full sentinel block by
+    #: `expand_image_placeholders` -- unlike the mlx-vlm scheme, where the
+    #: placeholder is repeated once per image token before tokenization.
+    placeholder_token: str | None = None
 
 
 class SamplingValues(FrozenModel):
