@@ -100,9 +100,24 @@ mlx-cuda-13 = [
   { url = "https://github.com/rltakashige/mlx-jaccl-fix-small-recv/releases/download/mlx_cuda/mlx_cuda_13-0.32.0-py3-none-manylinux_2_35_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine != 'aarch64'" },
 ]
 # mlx-lm: our fork's main (= former eagle-soft-emb perf work + upstream sync,
-# incl. Gemma 4 KV-projection fix). Pin tracks main now. To switch back to Leo's
+# incl. Gemma 4 KV-projection fix). To switch back to Leo's
 # fork: { git = "https://github.com/rltakashige/mlx-lm", branch = "leo/deepseek-v4" }
-mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "main" }
+#
+# TEMPORARILY pinned to `dsv4-vision-port` rather than `main` for the duration
+# of the DSv4 vision port. The exo-side vision code calls into mlx-lm APIs that
+# exist ONLY on that branch (`Model.encode_image`, the `vision`/`aligner`
+# modules, the four sentinel embedding parameters, the `bias_vl` MoE gate, and
+# the image-span visibility mask). While this pointed at `main`, uv.lock pinned
+# 7f14654 while the committed gitlink was a dsv4-vision-port commit, so CI
+# installed an mlx-lm WITHOUT any of the vision work and validated code the
+# cluster does not run -- exactly what
+# `src/exo/shared/tests/test_submodule_lock_pin_alignment.py` exists to catch.
+#
+# TODO(merge): when dsv4-vision-port lands on mlx-lm's `main`, flip this back
+# to `branch = "main"` (or a pinned rev) and re-lock. Leaving it pointed at a
+# feature branch after the merge would make CI depend on a branch that may be
+# deleted.
+mlx-lm = { git = "https://github.com/adurham/mlx-lm.git", branch = "dsv4-vision-port" }
 mflux = { git = "https://github.com/evanev7/mflux", branch = "exo2" }
 torch = [
   { index = "pytorch-cpu", marker = "sys_platform == 'linux' and extra == 'mlx-cpu' and extra != 'mlx-cuda13' and extra != 'mlx-cuda12'" },
