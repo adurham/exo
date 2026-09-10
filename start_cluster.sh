@@ -872,6 +872,13 @@ echo "-----------------------------------------------------"
 NODES=("macstudio-m4-1" "macstudio-m4-2")
 # NODES=("macstudio-m4-1" "macstudio-m4-2" "macbook-m4")
 
+# Self-match-immune graceful shutdown helper, resolved relative to THIS
+# script so the deploy works from any cwd and from any node. Shipped to each
+# node over ssh STDIN (never as a command argument) — see the "Killing
+# existing Exo processes" block and the helper's own header for why that
+# matters (docs/incidents/pkill-self-match-forces-sigkill-2026-09-10.md).
+EXO_SHUTDOWN_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/exo_graceful_shutdown.sh"
+
 # Thunderbolt Connectivity Check
 echo "Discovering active Thunderbolt IPs..."
 
@@ -1243,24 +1250,55 @@ for NODE in "${NODES[@]}"; do
   # clean exit (static destructors run on normal interpreter exit → QPs
   # freed), and only escalate to -9 as a last resort. (root cause: warm-mem
   # fact 526; 2026-06-08)
-  ssh "$NODE" "pkill -TERM -f 'python.*exo' 2>/dev/null || true; pkill -TERM -f 'exo.main' 2>/dev/null || true"
-  # Wait up to ~15s for graceful exit so jaccl tears down RDMA cleanly.
-  _gone=false
-  for i in {1..15}; do
-    if ssh "$NODE" "pgrep -f 'python.*exo'" >/dev/null 2>&1; then
-      sleep 1
-    else
-      _gone=true
-      break
-    fi
-  done
-  if [ "$_gone" = false ]; then
-    echo "  WARNING: Exo on $NODE did not exit on SIGTERM after 15s — escalating to SIGKILL (may leak RDMA QPs; reboot if TB wedges)."
-    ssh "$NODE" "lsof -ti:52415,52416 | xargs kill -9 2>/dev/null || true"
-    ssh "$NODE" "pkill -9 -f 'exo.main' || true"
-    ssh "$NODE" "pkill -9 -f 'python.*exo' || true"
-    sleep 1
+  #
+  # 2026-09-10: this block used to inline the kill/probe as
+  #   ssh "$NODE" "pkill -TERM -f 'python.*exo' ..."
+  #   ssh "$NODE" "pgrep -f 'python.*exo'"          # liveness probe
+  # which SELF-MATCHED whenever $NODE was the node the deploy was driven
+  # FROM. The ssh client's own argv carries the literal text `python.*exo`,
+  # and the ERE `python.*exo` matches that text, so the probe saw itself and
+  # reported exo alive even when exo was already dead. The 15s graceful wait
+  # could therefore NEVER succeed on the coordinator, so every deploy driven
+  # from a Studio escalated to `pkill -9` — the exact SIGKILL this block
+  # exists to avoid — silently spending the RDMA-cleanup guarantee on every
+  # single run. Reproduced 4/4 on the coordinator, 0/4 on the secondary.
+  # Full writeup + reproduction: 29160a880,
+  # docs/incidents/pkill-self-match-forces-sigkill-2026-09-10.md.
+  #
+  # The shutdown now lives in scripts/exo_graceful_shutdown.sh and is
+  # delivered over ssh STDIN (`bash -s`), so no pattern text appears in ANY
+  # argv on either end and pgrep physically cannot see it. That script also
+  # uses the bracket trick, excludes its own pids, and is PATTERN-COMPLETE
+  # (python.*exo AND exo.main AND the 52415/52416 port holders — the old
+  # probe checked only the first of the three things the kill sweep
+  # targeted, so "gone" was never actually proven). Same technique as the
+  # hand-run gate that produced CLEAN_EXIT on both nodes for the 2026-09-10
+  # deploy. See that script's header for the full rationale.
+  if [ ! -r "$EXO_SHUTDOWN_HELPER" ]; then
+    echo "  FATAL: shutdown helper not found at $EXO_SHUTDOWN_HELPER" >&2
+    echo "  Refusing to fall back to the inline pkill/pgrep form: it self-matches" >&2
+    echo "  on the coordinator and force-SIGKILLs exo, leaking RDMA queue pairs." >&2
+    echo "  See docs/incidents/pkill-self-match-forces-sigkill-2026-09-10.md." >&2
+    exit 1
   fi
+  # `bash -s 15` => grace period as a bare integer positional arg. Bare
+  # integers carry no pattern text, so this stays argv-clean.
+  _shutdown_out=$(ssh "$NODE" "bash -s ${EXO_SHUTDOWN_GRACE_SECONDS:-15}" <"$EXO_SHUTDOWN_HELPER" 2>&1)
+  echo "$_shutdown_out"
+  case "$_shutdown_out" in
+    *EXO_SHUTDOWN_VERDICT=CLEAN_EXIT* | *EXO_SHUTDOWN_VERDICT=ALREADY_DEAD*)
+      : # graceful — destructors ran, RDMA queue pairs released
+      ;;
+    *EXO_SHUTDOWN_VERDICT=SIGKILLED*)
+      echo "  WARNING: Exo on $NODE needed SIGKILL (may leak RDMA QPs; reboot if TB wedges)."
+      ;;
+    *EXO_SHUTDOWN_VERDICT=SURVIVED_SIGKILL*)
+      echo "  ERROR: Exo on $NODE survived SIGKILL — node is wedged, reboot required." >&2
+      ;;
+    *)
+      echo "  WARNING: shutdown helper on $NODE returned no verdict (ssh failure?)." >&2
+      ;;
+  esac
 
   ssh "$NODE" "screen -wipe || true"
 
@@ -2893,14 +2931,36 @@ for NODE in "${NODES[@]}"; do
 # `screen -X quit` / `pkill -9` here: both skip the destructors, leaking QPs
 # (TB-stack wedge) and orphaning ~60-80 GB of wired pages the OS then takes
 # ~a minute (or a reboot) to reclaim.
-pkill -TERM -f 'python.*exo' 2>/dev/null || true
+#
+# Patterns use the bracket trick (`[p]ython.*exo` matches the string
+# "python..." but NOT the literal text "[p]ython...") and exclude this
+# script's own pid, so the check cannot match the shell that is running it.
+# This script runs ON the node rather than over ssh, so it is not exposed to
+# the ssh-client self-match that forced a SIGKILL on every coordinator-driven
+# deploy (docs/incidents/pkill-self-match-forces-sigkill-2026-09-10.md) — but
+# a `zsh -l -c '...'` invocation carrying the pattern IS visible to pgrep, so
+# the same discipline applies. Liveness is PATTERN-COMPLETE: python.*exo AND
+# exo.main AND the 52415/52416 port holders, matching everything the kill
+# sweep targets. The old form probed only python.*exo, so a survivor visible
+# only to the other two signals would have been declared "gone".
+_p1='[p]ython.*exo'
+_p2='[e]xo.main'
+_self=$$
+_live() {
+  {
+    pgrep -f "$_p1" 2>/dev/null
+    pgrep -f "$_p2" 2>/dev/null
+    lsof -ti:52415,52416 2>/dev/null
+  } | grep -v "^${_self}\$" | sort -u
+}
+for _p in $(_live); do kill -TERM "$_p" 2>/dev/null; done
 for _i in {1..20}; do
-  pgrep -f 'python.*exo' >/dev/null 2>&1 || break
+  [ -z "$(_live | tr -d '\n ')" ] && break
   sleep 1
 done
-if pgrep -f 'python.*exo' >/dev/null 2>&1; then
+if [ -n "$(_live | tr -d '\n ')" ]; then
   echo 'WARNING: exo did not exit on SIGTERM after 20s — escalating to SIGKILL (may leak RDMA QPs; reboot if TB wedges).'
-  pkill -9 -f 'python.*exo' 2>/dev/null || true
+  for _p in $(_live); do kill -9 "$_p" 2>/dev/null; done
   sleep 1
 fi
 screen -wipe >/dev/null 2>&1 || true
