@@ -417,7 +417,7 @@ class MTPBatchGenerator(BatchGenerator):
         ``GenerationBatch.next()`` would discard them.
         """
         gen_batch = self._generation_batch
-        stop_matcher = gen_batch.stop_matchers[idx]
+        stop_matcher = gen_batch._matchers[idx]
         max_tokens_limit = gen_batch.max_tokens[idx]
 
         responses: list[GenerationBatch.Response] = []
@@ -427,19 +427,16 @@ class MTPBatchGenerator(BatchGenerator):
             if gen_batch._num_tokens[idx] >= max_tokens_limit:
                 finish_reason = "length"
 
-            # mlx-lm upstream (2026-07, "Text-based state machine for
-            # tool/reasoning parsing") replaced the old state-machine stop
-            # matcher (which returned a 3-tuple of
-            # (new_state, match_sequence, current_state)) with a trie-based
-            # StopSequenceMatcher.match(state, trie, token) -> (new_state,
-            # matched: bool). GenerationBatch.Response no longer carries
-            # current_state/match_sequence fields at all -- mirror upstream's
-            # own GenerationBatch.next() exactly here.
-            gen_batch._matcher_states[idx], matched = stop_matcher.match(
-                gen_batch._matcher_states[idx],
-                stop_matcher._trie,
-                token_int,
-            )
+            # mlx-lm upstream (2026-09, full sync at 640f692) replaced the
+            # old StopSequenceMatcher (a trie + static
+            # ``match(state, trie, token) -> (new_state, matched)``) with an
+            # immutable ``StopSequences`` automaton whose per-stream
+            # ``Matcher.advance(token) -> bool`` carries its own position.
+            # GenerationBatch now stores ``self._matchers`` (a list of
+            # ``StopSequences.Matcher``) instead of ``stop_matchers`` +
+            # ``_matcher_states``. Mirror upstream's own
+            # ``GenerationBatch.next()`` exactly here.
+            matched = stop_matcher.advance(token_int)
             if matched:
                 finish_reason = "stop"
 
