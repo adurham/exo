@@ -155,7 +155,7 @@
 : "${EXO_TRACEMALLOC_PATH:=}"
 : "${EXO_TRACEMALLOC_INTERVAL:=2000}"
 : "${EXO_TRACEMALLOC_TOP_N:=20}"
-: "${EXO_MLX_CLEAR_CACHE_INTERVAL:=0}"
+: "${EXO_MLX_CLEAR_CACHE_INTERVAL:=64}"
 : "${EXO_GC_COLLECT_INTERVAL:=0}"
 : "${EXO_MALLOC_RELIEF_INTERVAL:=0}"
 : "${EXO_LAYER_EVAL_INTERVAL:=1}"
@@ -2029,6 +2029,16 @@ for NODE in "${NODES[@]}"; do
   # speculate are byte-identical to before; the dead ones reclaim ~10 GB.
   : "${EXO_DSV4_DSPARK:=1}"
   [ -n "${EXO_DSV4_DSPARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK=$EXO_DSV4_DSPARK"
+  # EXO_DSV4_DSPARK_TP_SHARD=1 (2026-08-27, commit 2d85ccdcb): TP-shard the
+  # DSpark draft-head FFN weights (shared_experts + switch_mlp gate/up/down)
+  # across the TP group instead of loading them fully replicated on every
+  # rank. Validated in docs/dspark-352k-memory-regression-2026-08-27.md:
+  # 0/8 collapses at 352.6K depth (vs 4/16 pre-fix), +17.57% median decode,
+  # ~3-3.5 GB/node wired recovery. PROMOTED TO PRODUCTION CONFIG 2026-08-28
+  # (docs/dspark-mtp-master-history-2026-08-28.md). Default ON for spec-ON
+  # serving; set EXO_DSV4_DSPARK_TP_SHARD=0 to disable.
+  : "${EXO_DSV4_DSPARK_TP_SHARD:=1}"
+  [ -n "${EXO_DSV4_DSPARK_TP_SHARD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_TP_SHARD=$EXO_DSV4_DSPARK_TP_SHARD"
   # Force the head to attach even when no consumer is reachable (the M0
   # gate above). Opt-in; used to measure the head's own memory/load cost.
   [ -n "${EXO_DSV4_DSPARK_FORCE_LOAD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_FORCE_LOAD=$EXO_DSV4_DSPARK_FORCE_LOAD"
