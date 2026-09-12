@@ -113,7 +113,7 @@ def nhd_to_bhsd(t: mx.array) -> mx.array:
 # ---------------------------------------------------------------------------
 
 _COMPOSITE_MAGIC: Final[int] = 0x584C31  # "XL1"; < 2**24 so float32-exact
-_COMPOSITE_VERSION: Final[int] = 1
+_COMPOSITE_VERSION: Final[int] = 2
 
 CompositeCacheType: TypeAlias = CacheList | PoolingCache | RotatingKVCache | ArraysCache
 
@@ -130,6 +130,7 @@ _CACHE_TYPE_CODES: Final[dict[str, _CacheTypeCode]] = {
 _STATE_NONE: Final[int] = 0
 _STATE_ARRAY: Final[int] = 1
 _STATE_SEQUENCE: Final[int] = 2
+_STATE_INT: Final[int] = 3
 
 # Meta-state tree node tags. ``meta_state`` is plain Python data: mlx caches
 # use nested tuples/lists of ints, of decimal-int strings, or the empty string.
@@ -149,7 +150,10 @@ def _read_state(cache: CompositeCacheType) -> object:
 
 
 def _read_meta_state(cache: CompositeCacheType) -> object:
-    return cast(object, cache.meta_state)
+    # mlx-lm 2026-09 removed meta_state from CacheList / RotatingKVCache /
+    # QuantizedKVCache (their bookkeeping now rides in .state). PoolingCache
+    # still has it (ratio).
+    return cast(object, getattr(cache, "meta_state", None))
 
 
 class UnsupportedCacheStateError(RuntimeError):
@@ -237,6 +241,11 @@ def _encode_state_tree(
             words.append(len(state_items))
             for item in state_items:
                 _encode_state_tree(item, words, blobs)
+        case int() as value:
+            # mlx-lm 2026-09: .state now carries scalar bookkeeping
+            # (offset, keep, max_size, _idx, group_size, bits).
+            words.append(_STATE_INT)
+            words.append(value)
         case _:
             raise UnsupportedCacheStateError(
                 f"Unsupported cache state element of type {type(state).__name__}"
@@ -265,6 +274,8 @@ def _decode_state_tree(
                 )
                 items.append(item)
             return list(items), pos, blob_index
+        case 3:  # _STATE_INT
+            return words[pos], pos + 1, blob_index
         case _:
             raise UnsupportedCacheStateError(f"Bad state tag {tag}")
 
@@ -290,7 +301,8 @@ def _encode_cache_tree(
             _encode_cache_tree(member, words, blobs)
         return
     _encode_state_tree(_read_state(cache), words, blobs)
-    _encode_meta_state(_read_meta_state(cache), words)
+    if hasattr(cache, "meta_state"):
+        _encode_meta_state(_read_meta_state(cache), words)
 
 
 def _decode_into_cache_tree(
@@ -331,10 +343,12 @@ def _decode_into_cache_tree(
             )
         return pos, blob_index
     state, pos, blob_index = _decode_state_tree(words, pos, blobs, blob_index)
-    meta, pos = _decode_meta_state(words, pos)
-    # meta_state FIRST: PoolingCache.state's setter re-buffers the remainder
-    # through accumulate_windows(), which needs the restored ``ratio``.
-    cache.meta_state = meta
+    if hasattr(cache, "meta_state"):
+        meta, pos = _decode_meta_state(words, pos)
+        # meta_state FIRST: PoolingCache.state's setter re-buffers the
+        # remainder through accumulate_windows(), which needs the restored
+        # ``ratio``.
+        cache.meta_state = meta
     cache.state = state
     return pos, blob_index
 
@@ -466,7 +480,7 @@ def send_mlx_kv_cache(
                 tokens_sent = num_tokens
             case ArraysCache():
                 blobs: list[TensorBlob] = []
-                for a in c.state:
+                for a in c.cache:
                     if a is None:
                         continue
                     with mx.stream(mx.Device(mx.cpu)):
@@ -532,7 +546,9 @@ def inject_rotating_kv_chunk(
 
 
 def inject_arrays_cache(cache: ArraysCache, blobs: list[TensorBlob]) -> None:
-    cache.state = [blob_to_mlx(b) for b in blobs]
+    # mlx-lm 2026-09: ArraysCache.state is now (cache, left_padding, lengths);
+    # the wire carries only the array list, so set .cache directly.
+    cache.cache = [blob_to_mlx(b) for b in blobs]
 
 
 def write_cache_to_wire(

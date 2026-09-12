@@ -3409,9 +3409,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
 
         # 7. Bookkeeping.
         total_yielded = sum(len(t) for t in all_tokens_per)
-        self._gen_tokens_counter += total_yielded
-        self._steps_counter += 1
-        if self._steps_counter % 512 == 0:
+        self._counters.generation_tokens += total_yielded
+        self._counters.generation_steps += 1
+        if self._counters.generation_steps % 512 == 0:
             mx.clear_cache()
 
         # 8. State machine + length checks per yielded token, per uid.
@@ -5429,9 +5429,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             prof.end_cycle(1)
 
         # 10. Bookkeeping.
-        self._gen_tokens_counter += len(all_tokens)
-        self._steps_counter += 1
-        if self._steps_counter % 512 == 0:
+        self._counters.generation_tokens += len(all_tokens)
+        self._counters.generation_steps += 1
+        if self._counters.generation_steps % 512 == 0:
             mx.clear_cache()
 
         # 11. State machine + length checks per yielded token.
@@ -5773,9 +5773,9 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
             prof.end_cycle(1)
 
         # 9. Bookkeeping + state machine.
-        self._gen_tokens_counter += len(all_tokens)
-        self._steps_counter += 1
-        if self._steps_counter % 512 == 0:
+        self._counters.generation_tokens += len(all_tokens)
+        self._counters.generation_steps += 1
+        if self._counters.generation_steps % 512 == 0:
             mx.clear_cache()
 
         # 2026-05-20 drain-elimination: see _speculative_next_batch comment.

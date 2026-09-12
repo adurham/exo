@@ -2353,19 +2353,23 @@ def trim_cache(
                 restored = copy_snapshot_entry(snapshot.states[i])
                 if restored is not None:
                     cache[i] = restored  # type: ignore
-            elif isinstance(c, (ArraysCache, RotatingKVCache)):
+            elif isinstance(c, ArraysCache):
+                # mlx-lm 2026-09: ArraysCache.state is a 3-tuple; zero the
+                # array list directly.
+                c.cache = [None] * len(c.cache)
+            elif isinstance(c, RotatingKVCache):
                 c.state = [None] * len(c.state)
-                if isinstance(c, RotatingKVCache):
-                    c.offset = 0
-                    c._idx = 0
+                c.offset = 0
+                c._idx = 0
             else:
                 # CacheList without a snapshot — zero each inner cache's state
                 for inner in c:  # type: ignore[reportUnknownVariableType]
-                    if isinstance(inner, (ArraysCache, RotatingKVCache)):
+                    if isinstance(inner, ArraysCache):
+                        inner.cache = [None] * len(inner.cache)
+                    elif isinstance(inner, RotatingKVCache):
                         inner.state = [None] * len(inner.state)
-                        if isinstance(inner, RotatingKVCache):
-                            inner.offset = 0
-                            inner._idx = 0
+                        inner.offset = 0
+                        inner._idx = 0
         else:
             c.trim(num_tokens)
 

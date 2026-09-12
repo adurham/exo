@@ -314,8 +314,10 @@ def test_session_driven_chunk_matches_eager_pipeline_parallel_prefill() -> None:
     for layer_idx, (c_eager, c_session) in enumerate(
         zip(cache_eager, cache_session, strict=True)
     ):
-        state_eager = c_eager.state
-        state_session = c_session.state
+        # mlx-lm 2026-09: KVCache.state now includes the scalar offset;
+        # keys_and_values() is the canonical (keys, values) accessor.
+        state_eager = c_eager.keys_and_values()
+        state_session = c_session.keys_and_values()
         assert len(state_eager) == len(state_session)
         for part_idx, (a, b) in enumerate(zip(state_eager, state_session, strict=True)):
             if a is None:

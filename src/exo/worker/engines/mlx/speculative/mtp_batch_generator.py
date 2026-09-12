@@ -385,9 +385,9 @@ class MTPBatchGenerator(BatchGenerator):
         mx.async_eval(gen_batch._next_tokens)
 
         # 10. Bookkeeping the parent normally does in _next()
-        self._gen_tokens_counter += len(all_tokens)
-        self._steps_counter += 1
-        if self._steps_counter % 512 == 0:
+        self._counters.generation_tokens += len(all_tokens)
+        self._counters.generation_steps += 1
+        if self._counters.generation_steps % 512 == 0:
             mx.clear_cache()
 
         # 11. Apply state machine + length checks per token, build responses.
@@ -417,7 +417,7 @@ class MTPBatchGenerator(BatchGenerator):
         ``GenerationBatch.next()`` would discard them.
         """
         gen_batch = self._generation_batch
-        stop_matcher = gen_batch.stop_matchers[idx]
+        stop_matcher = gen_batch._matchers[idx]
         max_tokens_limit = gen_batch.max_tokens[idx]
 
         responses: list[GenerationBatch.Response] = []
@@ -427,20 +427,13 @@ class MTPBatchGenerator(BatchGenerator):
             if gen_batch._num_tokens[idx] >= max_tokens_limit:
                 finish_reason = "length"
 
-            # mlx-lm upstream (2026-07, "Text-based state machine for
-            # tool/reasoning parsing") replaced the old state-machine stop
-            # matcher (which returned a 3-tuple of
-            # (new_state, match_sequence, current_state)) with a trie-based
-            # StopSequenceMatcher.match(state, trie, token) -> (new_state,
-            # matched: bool). GenerationBatch.Response no longer carries
+            # mlx-lm upstream (2026-09) replaced the trie-based
+            # StopSequenceMatcher.match(state, trie, token) with
+            # StopSequences.Matcher.advance(token) -> bool, holding its own
+            # automaton position. GenerationBatch.Response no longer carries
             # current_state/match_sequence fields at all -- mirror upstream's
             # own GenerationBatch.next() exactly here.
-            gen_batch._matcher_states[idx], matched = stop_matcher.match(
-                gen_batch._matcher_states[idx],
-                stop_matcher._trie,
-                token_int,
-            )
-            if matched:
+            if stop_matcher.advance(token_int):
                 finish_reason = "stop"
 
             gen_batch.tokens[idx].append(token_int)
