@@ -2079,9 +2079,22 @@ for NODE in "${NODES[@]}"; do
   # for checkpoints like deepseek-ai/DeepSeek-V4-Flash-0731 whose draft
   # head wasn't trained on the SAME checkpoint as EXO_DSV4_DSPARK_DIR's
   # local conversion (that dir was converted from the PREVIEW checkpoint's
-  # mtp shards). Default off -- opt in per-checkpoint. See
-  # docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md for the full
-  # background/validation writeup.
+  # mtp shards). See docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md
+  # for the full background/validation writeup.
+  #
+  # DEFAULT FLIPPED ON 2026-09-12: the local head dir is a PREVIEW
+  # (text-only) conversion whose decoder.N.ffn.gate keys carry no bias_vl
+  # variant, while the vision checkpoint's DSparkStage allocates
+  # e_score_correction_bias_vl params (vision_n_layers>0) -- strict load
+  # fails with "Missing 3 parameters: stages.{0,1,2}.ffn.gate.
+  # e_score_correction_bias_vl" and the runtime silently falls back to
+  # MTP-1 drafting (~11 tok/s vs the 26-31 tok/s DSpark baseline). The
+  # native path reads mtp.* from the serving checkpoint itself, which
+  # carries BOTH bias and bias_vl keys, and was validated end-to-end
+  # against Vision-Exp (strict load 0 missing, draft forward OK).
+  # Set =0 to force the local converted head (e.g. text-only checkpoints
+  # whose mtp.* shards lack the DSpark head).
+  : "${EXO_DSV4_DSPARK_NATIVE:=1}"
   [ -n "${EXO_DSV4_DSPARK_NATIVE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_DSPARK_NATIVE=$EXO_DSV4_DSPARK_NATIVE"
   # Confidence-pruning threshold (0 = full-gamma verifies; pair tau=0
   # with EXO_DSV4_VERIFY_ROWSEQ_VEC=1 + MLX_STEEL_BATCH_INVARIANT=1 —
