@@ -48,6 +48,38 @@ pub fn cfg(identity: &str, listen_port: u16) -> Result<zenoh::Config> {
             }
         }"#,
     )?;
+    // Static peering escape hatch (env-gated; unset == previous behaviour).
+    //
+    // exo's only peering path is the custom IPv6 multicast beacon in
+    // discovery.rs (group ff12::e0a1:de89). On macOS 26/27 that beacon never
+    // reaches the peer, so both nodes elect themselves Master and split-brain.
+    //
+    // Root cause (proven 2026-09-10): TCC's LocalNetwork restriction denies a
+    // DETACHED process (screen -dmS / nohup / ppid==1 -- how exo is launched)
+    // all access to every LOCAL subnet, unicast and multicast alike, for both
+    // IPv4 and IPv6. The identical binary run from an interactive ssh session
+    // is permitted, which is why in-session probes kept passing while the live
+    // daemon failed. Loopback, WAN and Tailscale/utun are NOT treated as local
+    // and work normally from a detached process.
+    //
+    // EXO_ZENOH_CONNECT holds a comma-separated list of host:port zenoh
+    // endpoints to dial directly, e.g. "192.168.86.202:52414". zenoh's
+    // connect/retry defaults (period_init_ms 1000, period_max_ms 4000,
+    // timeout_ms router:-1, exit_on_failure router:false) mean a node started
+    // before its peer retries forever instead of failing at startup, so launch
+    // order does not matter.
+    if let Ok(raw) = std::env::var("EXO_ZENOH_CONNECT") {
+        let endpoints: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("\"tcp/{s}\""))
+            .collect();
+        if !endpoints.is_empty() {
+            log::info!("EXO_ZENOH_CONNECT static peers: {endpoints:?}");
+            cfg.insert_json5("connect/endpoints", &format!("[{}]", endpoints.join(",")))?;
+        }
+    }
     Ok(cfg)
 }
 
@@ -86,11 +118,21 @@ pub async fn open(
                 continue;
             }
 
-            let Ok(locator) =
-                Locator::new("tcp", discovered.addr.to_string(), "").inspect_err(|e| {
-                    log::warn!("failed to parse locator from addr: {e}");
-                })
-            else {
+            // Unmap ::ffff:a.b.c.d -> a.b.c.d so zenoh dials a native v4
+            // locator rather than a v4-mapped one.
+            //
+            // (An earlier comment blamed macOS 27 for "refusing v4-mapped
+            // destinations". That was wrong -- v4-mapped sends succeed fine;
+            // the real blocker was TCC LocalNetwork denying the detached
+            // process every local-subnet destination. Emitting a native v4
+            // locator is still preferable for readability.)
+            let addr_str = match discovered.addr.ip().to_ipv4_mapped() {
+                Some(v4) => std::net::SocketAddrV4::new(v4, discovered.addr.port()).to_string(),
+                None => discovered.addr.to_string(),
+            };
+            let Ok(locator) = Locator::new("tcp", addr_str, "").inspect_err(|e| {
+                log::warn!("failed to parse locator from addr: {e}");
+            }) else {
                 continue;
             };
 

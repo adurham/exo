@@ -819,10 +819,53 @@ export IBV_FORK_SAFE=1
 export PYTHONUNBUFFERED=1
 
 # Define Node Constants
+# zenoh's TCP listen port (exo --zenoh-port default). Used to build the static
+# EXO_ZENOH_CONNECT peer targets below.
+EXO_ZENOH_PORT="${EXO_ZENOH_PORT:-52414}"
+# UDP port the discovery beacon binds (exo --discovery-port default).
+EXO_DISCOVERY_PORT="${EXO_DISCOVERY_PORT:-52413}"
 M4_1_IP="192.168.86.201"
 M4_1_PEER_ID="12D3KooWDGQKAJUYpqTHzBhVpGzYxQagWRwFqJPzkEYzHxt3SSUg"
 M4_2_IP="192.168.86.202"
 M4_2_PEER_ID="12D3KooWQDzFqvjsgFRfheeV7uvtVUP1gruphpgoVELP9pkHBses"
+
+# --- Tailscale addresses used for peer DISCOVERY only -------------------------
+# macOS 27 TCC "LocalNetwork" blocks every local-subnet packet (LAN *and* both
+# Thunderbolt subnets) from a process launched in a DETACHED context -- which is
+# precisely how this script launches exo (screen -dmS ... zsh -l -c). Verified
+# 2026-09-10 on both nodes: an identical binary run from an interactive ssh
+# session reaches 192.168.86.x fine, while the same binary under `screen -dmS`
+# gets EHOSTUNREACH (errno 65) on LAN, en3 and en4 -- but still reaches
+# loopback, the WAN and Tailscale. The console user is `root` (login window),
+# so no GUI Local-Network grant can be issued, and there is no sudo password
+# available to reset the TCC database.
+#
+# The Tailscale interface (utun0) is NOT a local subnet from TCC's perspective
+# and is therefore exempt. tailscale ping confirms a DIRECT path (1 ms, no DERP
+# relay), so this costs nothing measurable for a 1/s discovery datagram.
+#
+# ONLY discovery moves to Tailscale. Model tensors continue to ride RDMA/JACCL
+# over Thunderbolt: the topology's connections still resolve rdma_en3/rdma_en4
+# after this change (verified).
+#
+# Resolved at runtime from each node so a tailnet re-address cannot silently
+# reintroduce the split-brain. Override with EXO_DISCOVERY_UNICAST_OVERRIDE.
+resolve_tailscale_ip() {
+  local node="$1"
+  ssh -o ConnectTimeout=8 -o BatchMode=yes "$node" \
+    '/opt/homebrew/opt/tailscale/bin/tailscale ip -4 2>/dev/null | head -1' 2>/dev/null | tr -d "\r\n"
+}
+M4_1_TS_IP="$(resolve_tailscale_ip macstudio-m4-1)"
+M4_2_TS_IP="$(resolve_tailscale_ip macstudio-m4-2)"
+if [ -z "$M4_1_TS_IP" ] || [ -z "$M4_2_TS_IP" ]; then
+  echo "WARNING: could not resolve Tailscale IPs (m4-1='$M4_1_TS_IP' m4-2='$M4_2_TS_IP')." >&2
+  echo "         Falling back to LAN IPs for discovery -- expect split-brain under" >&2
+  echo "         macOS 27 unless exo is launched from an interactive session." >&2
+  M4_1_TS_IP="$M4_1_IP"
+  M4_2_TS_IP="$M4_2_IP"
+else
+  echo "Discovery over Tailscale: m4-1=$M4_1_TS_IP  m4-2=$M4_2_TS_IP"
+fi
 MBP_IP="192.168.86.203"
 MBP_PEER_ID="12D3KooWGtRYJcQpFLQBc3AFbES1A3BrFy55GyNLMNLNm64bHv16"
 
@@ -1604,6 +1647,7 @@ echo "Nodes synchronized on commit $COMMIT_M4_1."
 # 3. Start Exo on each node
 for NODE in "${NODES[@]}"; do
   echo "Starting Exo on $NODE..."
+
 
   # Reclaim-curve check (item 1b): make stuck post-kill memory an explicit,
   # named alert at launch time instead of a mysterious placement 503 later.
@@ -2904,16 +2948,52 @@ for NODE in "${NODES[@]}"; do
   # one from the other closes that class of drift permanently.
   if [ "$NODE" == "macstudio-m4-1" ]; then
     NODE_PEERS="/ip4/$M4_2_TO_M4_1/tcp/52415/p2p/$M4_2_PEER_ID"
+    NODE_DISCOVERY_UNICAST="$M4_2_TS_IP"
   elif [ "$NODE" == "macstudio-m4-2" ]; then
     NODE_PEERS="/ip4/$M4_1_TO_M4_2/tcp/52415/p2p/$M4_1_PEER_ID"
+    NODE_DISCOVERY_UNICAST="$M4_1_TS_IP"
   else
     NODE_PEERS="/ip4/$M4_1_TO_MBP/tcp/52415/p2p/$M4_1_PEER_ID"
+    NODE_DISCOVERY_UNICAST="$M4_1_TS_IP"
+  fi
+  # Unicast peer discovery (see rust/networking/src/discovery.rs). macOS 26/27
+  # silently drop ALL userspace multicast TX, which is exo's ONLY peer-discovery
+  # path -- verified 2026-09-10: multicast RX works, group joins succeed, kernel
+  # ping6 ff02::1 crosses the direct TB cable, but zero userspace multicast
+  # datagrams reach the peer on any interface, v4 or v6. Both nodes then elect
+  # themselves Master and the cluster never stabilizes.
+  #
+  # Unicast is unaffected, so we send the SAME discovery Hello directly to the
+  # peer. This reuses the entire proven beacon path: it re-announces every 1s
+  # forever, learns the peer's real zid from the WhatsUp reply, and defers to
+  # the existing lower-zid-connects rule in lib.rs::open().
+  #
+  # Chosen over zenoh's connect/endpoints, which was tried first and rejected:
+  # that static connect is ONE-SHOT. zenoh only re-arms its retry loop on a
+  # connect FAILURE, so a connect landing on a not-yet-ready or about-to-be-
+  # killed peer is recorded as success and never retried -- proven by starting
+  # the dialer with the peer down, then bringing the peer up: no connection was
+  # ever made and zero retries were logged. That made bring-up depend on start
+  # order and timing. The beacon has no such requirement.
+  #
+  # Deliberately the LAN IP, not a Thunderbolt IP: discovery is a tiny 1/s
+  # datagram (model tensors ride RDMA/JACCL over TB regardless), the TB
+  # interfaces swap which IP they hold across reboots, and one TB subnet has a
+  # standing 9000/1500 MTU asymmetry. Set EXO_DISCOVERY_UNICAST_OVERRIDE to
+  # force a different target.
+  NODE_DISCOVERY_UNICAST="${EXO_DISCOVERY_UNICAST_OVERRIDE:-$NODE_DISCOVERY_UNICAST}"
+  if [ -n "$NODE_DISCOVERY_UNICAST" ]; then
+    # Always pin the port explicitly. A bare host falls back to the SENDING
+    # node's own discovery port, which is only correct by coincidence.
+    ZENOH_CONNECT_ENV="EXO_DISCOVERY_UNICAST_PEERS=$NODE_DISCOVERY_UNICAST:$EXO_DISCOVERY_PORT"
+  else
+    ZENOH_CONNECT_ENV=""
   fi
   # LAUNCH_TAIL is single-quote-assigned so $!/$EXO_PID stay LITERAL until the
   # node's zsh runs them (double-quoted \$ escapes expanded locally when this
   # string was interpolated into ssh args — caffeinate got an empty pid).
   LAUNCH_TAIL='& EXO_PID=$!; caffeinate -s -w $EXO_PID 2>/dev/null & wait $EXO_PID'
-  LAUNCH_CMD="cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1 $LAUNCH_TAIL"
+  LAUNCH_CMD="cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS $ZENOH_CONNECT_ENV .venv/bin/python -m exo -v >> ~/exo.log 2>&1 $LAUNCH_TAIL"
   # Generate the file LOCALLY (printf does not expand $ in arguments) and scp
   # it — a remote unquoted heredoc would expand $!/$EXO_PID a second time.
   RELAUNCH_TMP=$(mktemp)
@@ -2989,7 +3069,7 @@ RELAUNCH_BODY
   if [ "$NODE" == "macstudio-m4-1" ] || [ "$NODE" == "macstudio-m4-2" ]; then
     ssh "$NODE" "screen -dmS exorun zsh -l -c '$LAUNCH_CMD'"
   else
-    ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
+    ssh "$NODE" "screen -dmS exorun zsh -l -c 'cd ~/repos/exo && $EXO_ENV EXO_DISCOVERY_PEERS=$NODE_PEERS $ZENOH_CONNECT_ENV .venv/bin/python -m exo -v >> ~/exo.log 2>&1'"
   fi
 done
 
