@@ -1967,6 +1967,11 @@ for NODE in "${NODES[@]}"; do
   # unless set, so the OFF arm of the A/B is a genuine unset env.
   [ -n "${EXO_DSV4_QUERY_TILED_SDPA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_SDPA=$EXO_DSV4_QUERY_TILED_SDPA"
   [ -n "${EXO_DSV4_QUERY_TILED_B:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QUERY_TILED_B=$EXO_DSV4_QUERY_TILED_B"
+  # Phase 3b image-span attention visibility (deepseek_v4.py). Default OFF ->
+  # absent unless set, so Stage B's proven vision config (flag off) is
+  # unchanged; this only wires the plumbing to flip it on as an isolated
+  # follow-up without editing this launcher again.
+  [ -n "${EXO_DSV4_IMAGE_VISIBILITY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_IMAGE_VISIBILITY=$EXO_DSV4_IMAGE_VISIBILITY"
   [ -n "${EXO_DSV4_MTP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP=$EXO_DSV4_MTP"
   # DSpark 3-stage draft head (task #19, arXiv:2607.05147): replaces the
   # MTP-1 chained draft at c=1. DEFAULT RE-ENABLED 2026-08-02: the
