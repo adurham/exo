@@ -1869,9 +1869,18 @@ for NODE in "${NODES[@]}"; do
   [ -n "$EXO_DEFAULT_TOP_K" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_TOP_K=$EXO_DEFAULT_TOP_K"
   [ -n "$EXO_DEFAULT_MIN_P" ] && EXO_ENV="$EXO_ENV EXO_DEFAULT_MIN_P=$EXO_DEFAULT_MIN_P"
 
-  # DSv4 fused MoE gate+up (single gather_qmm dispatch). Off by default
-  # while we validate decode quality vs unfused.
+  # DSv4 fused MoE gate+up (single gather_qmm dispatch, separate flag from
+  # the EXO_DSV4_FUSED_MOE knob below). Off by default while we validate
+  # decode quality vs unfused.
   [ -n "$EXO_DSV4_FUSED_MOE" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FUSED_MOE=$EXO_DSV4_FUSED_MOE"
+  # DEFAULT ON 2026-09-12: this is HALF of the locked 2026-08-22 known-good
+  # decode baseline (EXO_DSV4_MOE_FUSED_GATE_UP=1 + EXO_DSV4_FENCE_ASYNC=1,
+  # docs/PERFORMANCE_HISTORY.md section 1) -- 26.91-31.1 tok/s decode.
+  # FENCE_ASYNC already defaults on elsewhere in this file; this one never
+  # had a `:=` default and silently regressed decode to ~11 tok/s on every
+  # launch that didn't export it by hand (confirmed via live A/B on
+  # 2026-09-12: DSPARK_TP_SHARD on/off made no difference, this flag did).
+  : "${EXO_DSV4_MOE_FUSED_GATE_UP:=1}"
   [ -n "${EXO_DSV4_MOE_FUSED_GATE_UP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MOE_FUSED_GATE_UP=$EXO_DSV4_MOE_FUSED_GATE_UP"
   # wq_a+wkv fusion (2026-08-21, c=1-only -- see deepseek_v4.py header near
   # _try_fuse_two_quantized_linears for the B>1-unvalidated caveat).
