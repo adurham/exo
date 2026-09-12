@@ -153,8 +153,12 @@ def _copy_leaf(x: Any) -> Any:  # pyright: ignore[reportAny]
     real, reachable case, not a defensive-only guard -- confirmed by a
     live runner crash the first time this fix ran against real traffic.
     """
-    if x is None:
-        return None
+    if x is None or isinstance(x, (int, float, bool, str)):
+        # mlx-lm 2026-09: .state tuples now carry scalar bookkeeping
+        # (offset, keep, max_size, ...). Pass scalars through unchanged --
+        # mx.array(offset) would restore the int as an array and silently
+        # corrupt the cache's type.
+        return x
     return mx.array(x)  # pyright: ignore[reportAny]
 
 

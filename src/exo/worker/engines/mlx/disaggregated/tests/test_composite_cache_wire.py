@@ -73,7 +73,9 @@ def _state_of(cache: CacheList | PoolingCache) -> object:
 
 
 def _meta_of(cache: CacheList | PoolingCache) -> object:
-    return cast(object, cache.meta_state)
+    # mlx-lm 2026-09 removed meta_state from CacheList (bookkeeping now
+    # rides in .state); PoolingCache still has it.
+    return cast(object, getattr(cache, "meta_state", None))
 
 
 _RATIO_A = 4
@@ -136,6 +138,11 @@ def _assert_state_equal(expected: object, actual: object) -> None:
         return
     if expected is None:
         assert actual is None
+        return
+    if isinstance(expected, (int, str)):
+        # mlx-lm 2026-09: .state carries scalar bookkeeping and CacheList
+        # state carries member type names.
+        assert actual == expected
         return
     assert isinstance(expected, tuple | list) and isinstance(actual, tuple | list)
     expected_items = cast(Sequence[object], expected)
@@ -246,7 +253,7 @@ def test_existing_kv_and_arrays_wire_format_unchanged() -> None:
     kv.offset = _SEQ_LEN
 
     arrays = ArraysCache(size=2)
-    arrays.state = [_fixed((3,), 61), _fixed((2, 4), 62)]
+    arrays.cache = [_fixed((3,), 61), _fixed((2, 4), 62)]
 
     buf = io.BytesIO()
     write_header(
@@ -269,8 +276,8 @@ def test_existing_kv_and_arrays_wire_format_unchanged() -> None:
     original_keys = kv.keys
     assert restored_keys is not None and original_keys is not None
     assert _equal(restored_keys, original_keys)
-    expected_arrays = cast(Sequence[mx.array], arrays.state)
-    restored_arrays = cast(Sequence[mx.array], dst_arrays.state)
+    expected_arrays = cast(Sequence[mx.array], arrays.cache)
+    restored_arrays = cast(Sequence[mx.array], dst_arrays.cache)
     for expected, actual in zip(expected_arrays, restored_arrays, strict=True):
         assert _equal(expected, actual)
 
