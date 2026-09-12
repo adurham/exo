@@ -376,7 +376,7 @@ fi
 # DIFFERENT PP layer splits and therefore different cross-rank parity --
 # exactly what hid the Section 45 advance-budget deadlock from Section
 # 40's investigation (Section 49's "still open" item 2).
-: "${DSV4_MODEL_ID:=deepseek-ai/DeepSeek-V4-Flash-0731}"
+: "${DSV4_MODEL_ID:=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}"
 : "${DSV4_ENABLED:=1}"
 # DEFAULT ON 2026-07-23: Pipeline sharding + PP DSpark speculative decode is
 # now the validated production config (see refs/pp-dspark-required-flags-
