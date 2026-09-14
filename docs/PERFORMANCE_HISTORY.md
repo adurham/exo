@@ -890,6 +890,101 @@ identification:
   attribution wrong) and `PREFILL_CLIFF_HANDOFF.md` (symptom-resolved
   banner + sync-span rescoping note).
 
+**Live re-test on the CURRENT Vision-Exp checkpoint (2026-09-14) — no new
+cliff, one real instrumentation gap found, mechanism remains the same
+open state as 2026-08-24.** Production runs `deepseek-ai/DeepSeek-V4-Flash-
+Vision-Exp` (167.8 GB on disk, shipped 2026-09-09), heavier than the
+checkpoint the 2026-08-24 closure doc used for its "today's stack"
+arithmetic (`weights=80 GB` assumed there vs a live-measured **87.9 GB**
+idle baseline today — a genuine ~10% upward drift in one of the two
+free arithmetic parameters). Recomputing the doc's own watermark formula
+`W(C,k_eff) = weights + (10.9e-6 + 1.25e-5·k_eff)·C GB` with this
+corrected weight baseline moves the `k_eff∈{3,3.5}` crossing point back
+into the 300-390K band even at today's `MB=200` config — worth flagging
+since it means the "comfortably safe" framing in the 2026-08-24 doc's
+§13.4 was calibrated against a since-stale weight figure, not that the
+fix is in danger.
+
+Four real HTTP requests were sent through production (`/v1/chat/
+completions`, needle-in-haystack prompts, real tokenizer-verified
+depths, read-only — no relaunch, no env change):
+
+| target | real depth (tokens) | outcome |
+|---|---|---|
+| 500K | 349,408 | runner SIGKILLed by the hang-watchdog at 75,776 tok (unrelated JACCL bug, see below) |
+| 300K | 209,794 | **completed clean.** `active` 87.87→92.07 GB. One transient slowdown 419→157-202 tok/s at ~110-115K, traced to the SAME known JACCL `Event::wait` stall (§2, already tracked, ~0.17%/call rate) on both ranks simultaneously — NOT the gc_limit mechanism |
+| 400K | 279,959 | runner SIGKILLed again by the hang-watchdog (same JACCL bug) at ~147K tok |
+| 500K | **349,641** | **completed clean, straight through the exact historical 340K cliff band.** `active` 87.85→94.81 GB (11.9 GB under `gc_limit`=106.70 GB). Interval-level throughput smooth and monotonic the entire way: 472→404 tok/s, worst/median ratio ~1.0x (a real cliff would show ~0.15-0.2x). No discontinuity anywhere in the 173-sample trajectory. |
+
+Two incidental findings, correctly scoped OUT of this mechanism (not
+conflated with it):
+
+1. **The JACCL `Event::wait` "slow wait...self-abort" stall hit twice in
+   four long requests tonight**, each time triggering the supervisor's
+   45s hang-watchdog SIGKILL + auto-restart (production self-healed both
+   times, confirmed via `/state` + a real completion after each). This
+   is the SAME low-probability (~0.17%/call), already-documented,
+   separately-tracked RDMA reliability issue from §2 ("Metal Event::wait
+   stalls at 220K+ context") — not a new bug, and not the ~340K cliff
+   mechanism (it hit at ~76K and ~147K depth, both far below 340K, and
+   the doc's own repro estimated ~8/4730 calls, so 2 hits in ~4 long
+   requests is within the expected noisy-Bernoulli range, not evidence of
+   a rate change). Flagged here only because it consumed 2 of 4 live
+   test attempts and is worth the next investigator knowing about before
+   attributing a killed request to this cliff.
+2. **`active_memory` does not reset to the idle baseline between
+   back-to-back requests on a live runner.** After the 209,794-token
+   request, active stayed at 92.07/92.50 GB (not the ~87.9 GB idle
+   baseline) until the runner was restarted by the SIGKILL/recovery
+   cycle from finding 1, which happened to reset it. Whether this is a
+   genuine slow leak (worth a dedicated investigation) or an artifact of
+   `mx.get_cache_memory()`/`mx.clear_cache()` timing was NOT determined
+   this session — flagged as a new, real, open question, not concluded.
+
+**Confirmed durably (structural, not new this session, but only directly
+verified now): production's TP prefill path has ZERO per-chunk
+active-memory instrumentation.** `generate.py`'s only per-chunk `[MEM]`
+log line lives inside `pipeline_parallel_prefill()`, gated on
+`is_pipeline` (`_has_pipeline_communication_layer(model)`), which is
+`False` under TP — the same structural fact already noted elsewhere in
+this doc for a different flag (§13, `EXO_DSV4_DSPARK_NATIVE`). The TP
+path instead calls mlx-lm's own `stream_generate`, which has no
+active/cache-memory logging at all (confirmed: `grep get_active_memory
+get_cache_memory` in `mlx-lm/mlx_lm/generate.py` matches only a final
+`peak_memory` field, no per-chunk trace). **This means the single
+highest-value remaining test from the 2026-08-24 doc's own "what would
+discriminate" list (§16: "sample `get_active_memory`/`get_cache_memory`
+per prefill chunk at 340K, expect cache oscillating in lockstep with
+per-chunk stalls") cannot be run as originally envisioned without either
+(a) a small, low-risk instrumentation patch adding a periodic
+`[MEM]`-style log line inside `stream_generate`'s or `prefill()`'s
+existing per-chunk loop (mirroring the pattern already used in
+`prefill_batched`), or (b) an external sampler thread polling
+`mx.get_active_memory()` via a debug hook.** No such patch was written
+this session (kept read-only per the task's cluster-time-conservation
+instruction) — this is the concrete, actionable next step for whoever
+picks this back up.
+
+**Honest bottom line**: the mechanism identification from 2026-08-24
+(`active_memory > gc_limit_` threshold family, amplitude/bimodality at
+Studio scale unproven) is NEITHER newly confirmed NOR contradicted by
+tonight's live test — production simply isn't close enough to the
+threshold today to observe the crossing (by design; that's the whole
+point of the `MB=200` fix). The corrected weight-baseline arithmetic
+narrows the safety margin on paper but the live 349,641-token run shows
+no practical risk at today's actual depths. The three residual
+uncertainties named in the 2026-08-24 doc's own §16 (amplitude gap,
+`k_eff`'s true value, and the discrete-vs-ramp shape) remain exactly as
+open as they were then. This session's real contribution: (1) a fresh
+live data point at the exact historical cliff depth on the current,
+heavier checkpoint showing the fix still holds; (2) discovery that the
+TP path has no per-chunk memory telemetry, which is why no one has
+closed the amplitude/bimodality question yet — the instrumentation to
+do so doesn't exist on the code path that matters; (3) two correctly-
+disambiguated non-mechanism incidental findings (the JACCL stall,
+the cross-request memory non-reset) that a less careful investigation
+could have misattributed to this cliff.
+
 ### 3.3 Step-size / chunk-size tuning
 
 
@@ -2619,6 +2714,56 @@ unstarted angles remain: a real Instruments trace of the
 done, needs the richer capture config), and/or a clock-synced two-rank
 capture for the skew test.
 
+**NEW (2026-09-14): item (2), the clock-synced two-rank skew test, was
+finally attempted — result INCONCLUSIVE, but for a specific, actionable
+reason, not a dead end.** Full detail:
+`docs/clock-synced-allsum-skew-vs-overhead-2026-09-14.md`. A direct UDP
+Cristian's-algorithm clock-offset exchange over the RDMA interconnect
+subnet (not the management LAN) achieved genuinely excellent precision
+(~30-75µs error bound, best-decile offset stdev 1.5-2.4µs) — more than
+sufficient for a 1-4ms-scale question. **But the read-only measurement
+instrument available without root (`xctrace`/Instruments `--attach`,
+the same technique used safely in
+`docs/live-decode-two-rank-instruments-trace-2026-08-21.md`) has its OWN
+internal launch-to-recording-start latency that varies by ~300ms between
+two invocations fired within ~75µs of each other** — 100-1000x coarser
+than the clock sync and than the phenomenon under study, confirmed via
+two independent methods (direct launch-timestamp measurement, and an
+aperiodic-landmark cross-trace correlation that converged on the same
+~300-500ms ballpark). A blind full-signal FFT cross-correlation of the
+two ranks' GPU busy/idle envelopes initially looked promising (230x
+noise-floor peak) but was proven to be a periodicity-aliasing artifact
+via a sub-window stability check (5 independent 2s windows disagreed by
+tens of ms) — a real, reusable methodology trap for anyone tempted to
+cross-correlate two periodic per-token signals without that check.
+**dtrace and powermetrics (which could plausibly instrument at the
+needed precision) both require root, unavailable to this session; `sample`
+works without root but produces an aggregated call-tree, not a
+cross-machine-correlatable timestamp stream.** Root cause of jaccl's
+existing `JACCL_TRACE_TIMING` not being a ready substitute: confirmed by
+reading `mesh.cpp` directly — it records only a per-call *duration*
+(`transport_us`), never an absolute timestamp, so it is local-clock-only
+by construction and cannot be correlated cross-machine regardless of an
+external clock sync. **The verdict is genuinely INCONCLUSIVE — this
+determination is a precision-ceiling finding, not a disguised "shared
+overhead" or "genuine skew" answer; reporting either would be
+false-confidence the achieved measurement doesn't support.** Concrete,
+ready-to-run next step identified but NOT executed (would require a
+production relaunch, out of scope for this session's read-only brief):
+run the same proven UDP clock-sync protocol at the same time as a
+`JACCL_TRACE_CALLS=1 JACCL_TRACE_TIMING=1` relaunch, and apply the
+measured offset to bring rank1's per-call `steady_clock` trace into
+rank0's frame — this measures the actual quantity in question directly
+and entirely avoids xctrace's launch-jitter problem, using only
+mechanisms already proven safe in this exact codebase. Zero production
+impact this session (read-only `xctrace --attach`, one ordinary decode
+request, all temp files cleaned up; runner PIDs unchanged
+before/during/after). No reattribution of the parallel switch_mlp/kernel-
+trace investigation: this result neither confirms nor rules out
+cross-rank timing as a lever, so the standing §2.7 attribution (transport
+fast; 34x gap is an undifferentiated "MLX eval-fence / dispatch /
+Python-scheduling" bucket) is unchanged.
+
 **RULED OUT this session** (`docs/memory-residency-check-ruled-out-2026-08-22.md`):
 memory residency / expert-weight paging from disk. Real pageins delta
 across a full real decode request (495 tokens, 1.97s TTFT + 26.73s
@@ -2647,6 +2792,27 @@ closed:
   actually help (§3.2). This session's `INDEXER_PBLOCK` retest closed
   out ONE specific angle (small p_block causes decode regression at
   depth) but the original prefill cliff mechanism remains open.
+  **UPDATED 2026-09-14 (see §3.2 for full detail): live re-test on the
+  CURRENT Vision-Exp checkpoint through the exact historical 340K depth
+  found NO discontinuity — smooth, monotonically-decaying throughput
+  (472→404 tok/s, worst/median interval ratio 1.0x, not the ~0.15-0.2x
+  a cliff would show) and `active_memory` well under `gc_limit` (94.81 GB
+  vs 106.70 GB at 349,641 tokens). This is NEW evidence the 2026-08-24
+  `gc_limit`-threshold mechanism identification remains the best
+  standing explanation (today's config sits safely under the threshold
+  band, consistent with, not contradicting, that model) — it is NOT a
+  fresh live reproduction of the cliff itself, so the mechanism is still
+  not directly confirmed by a live crossing. Genuinely still open:
+  (a) no live active-memory-vs-depth trajectory has ever been captured
+  mid-request on the TP path (the only per-chunk `[MEM]` instrumentation
+  in `generate.py` lives in `pipeline_parallel_prefill`, which is
+  PP-only and structurally never runs under TP — confirmed by code
+  read); production's real-time memory curve is currently unobserved
+  except at prefill start/end. (b) `k_eff` (the effective in-flight-task
+  stacking factor central to the 2026-08-24 arithmetic) remains
+  unmeasured, still only bounded to a plausible 2-5 range. (c) the
+  era's bimodal 8-32s stall amplitude at Studio scale is still
+  UNREPRODUCED, exactly as of 2026-08-24.
 - ~~`EXO_DSV4_DSPARK_NATIVE`~~ **SUPERSEDED 2026-08-22**: this entry's
   original framing ("out of scope for prefill-focused work, decode-only
   mechanism") is stale. Confirmed this session
@@ -3330,6 +3496,80 @@ the collective; different runner PIDs across the two depths (relaunch sat
 between them).
 
 ---
+
+## 2026-09-14 — P13: moe.switch_mlp/GatherQMM sub-phase attribution — gather/scatter closed as negligible (<5% of GPU time), prefill compute-efficiency gap (33-41% of peak) flagged as new open thread
+
+Full detail: `docs/p13-switch-mlp-subphase-attribution-2026-09-14.md`; artifacts
+`bench/p13_switch_mlp_subphase_capture.py`, `tmp/p13-20260914/results.json`.
+
+**Answers §13's "real Instruments Metal trace of moe.switch_mlp GatherQMM
+kernel internals" line — via source read + `MLX_GPU_TIME` bracketing, NOT
+Instruments/xctrace** (per P11, xctrace's template is structurally incapable
+of per-kernel labels; per §12's hazard table, xctrace attach has killed
+production runners 3 times — neither re-attempted here; Xcode's GUI
+Performance tab was evaluated and ruled unreachable, no VNC/sudo in this
+SSH-only environment). Standalone process on m4-1, zero relaunches, zero
+xctrace, runner PIDs unchanged (43724/10062, ~3h47m uptime) before and after.
+
+- **Structural finding (source read, no ambiguity)**: `gather_sort`/
+  `scatter_unsort` (real `mx.argsort` + fancy-index gather/scatter) are
+  separate Python-level MLX ops that run BEFORE/AFTER `gather_qmm`, not
+  internal sub-phases of the GatherQMM Metal kernel. `switch_layers.py`'s
+  `do_sort = indices.size >= 64` gate means these ops are **structurally
+  inert at decode** (M=1, top_k=6 → size=6) and **only fire at prefill**
+  (M=2048 → size=12288) — P01 (2026-08-29) correctly never saw them because
+  it measured decode shape exclusively; nobody had measured prefill shape.
+- **Measured (3 independent runs, rotated pools, pipelined GPU-time
+  bracketing)**: gather_sort+scatter_unsort combined = **1.8%/4.8%/3.5% of
+  total GPU time** across runs — stable despite 2-5x absolute-time swings
+  from live production contention (cluster was actively serving a 349K-token
+  prefill + concurrent decode throughout). Dominant cost is the two
+  `gather_qmm` matmul calls (~95%+). Closes §13's T3-era open candidate
+  ("gather_sort/scatter_unsort overhead around the core gather_qmm call")
+  as NOT the bottleneck, at both shapes.
+- **Roofline (using the doc's own measured 15.21 TFLOPS/424-488 GB/s
+  ceilings, PH:5819-5822)**: decode is 0.085x the compute/bandwidth ridge
+  point (deep memory-bound, consistent with P01). Prefill's sorted path
+  reuses each expert's weight tile across ~48 co-routed tokens on average
+  (P(any of 256 experts untouched)≈1.3e-21 at this M/top_k) → ~4x the ridge
+  point (should be compute-bound) — cross-confirmed independently: implied
+  bandwidth under the most generous full-reuse assumption is only 5-8% of
+  peak, ruling out memory-bound. **But measured compute efficiency is only
+  33.5-41.3% of peak TFLOPS** — a real, previously-uncharacterized gap not
+  explained by gather/scatter (ruled out above) or bandwidth (ruled out
+  above).
+- **Flagged (not proven) candidate mechanism**: connects to the existing
+  Lever-1 MoE small-M tile-staircase finding (2026-08-31) — simulating
+  production prefill's routing shape (M=2048, top_k=6, 256 experts, uniform
+  routing) gives per-expert row counts mean 48/stdev 6.7/range 31-68, with
+  86.7-99.2% of experts landing on a partial tile at 8/16/32-row
+  granularities. Explicitly hedged: the 15.21 TFLOPS reference peak is a
+  large-dense-GEMM number that may not transfer to a batch of 256 small
+  irregular-M GEMMs regardless of tile-boundary waste specifically — two
+  compounding mechanisms are plausible, not separated in this session, no
+  direct row-count-vs-TFLOPS causal measurement was taken. Lever-1 already
+  ruled out a routing-equalization fix (alters model outputs); no new fix
+  proposed here, per task scope (attribution data, not a fix, is the ask).
+- **Also new**: real dispatch-count data via `MLX_DISPATCH_COUNT=1` — a
+  single `gather_qmm` call issues 4 Metal kernel dispatches, not 1; full
+  fused `BatchedSwitchGLU.__call__` issues 8 dispatches/call at decode shape,
+  18 at prefill shape. Useful ceiling data for any future dispatch-reduction
+  fusion proposal, per §4.6's pipelined-not-isolated rule.
+- **Caveats carried honestly**: production was live/busy throughout (real
+  GPU contention measured directly — an elementwise-add control saw only
+  57.6% of established peak bandwidth during one window; 8 back-to-back
+  trials of the same stage swung 128-659µs, 5.1x) — qualitative
+  findings (percentages, dispatch counts) were stable across this noise,
+  absolute µs/GB/s numbers were not, and are reported as "this session's
+  live-contended measurement" rather than a clean ceiling. Microbench is
+  synthetic (correct shape/dtype/quantization, not the live runner's actual
+  weights or real trained-router routing skew) — per this doc's standing
+  synthetic-vs-live caution, flagged not glossed over.
+- **Still open**: whether tile-staircase or small-M-GEMM-ceiling (or both)
+  actually explains the 33-41% gap — no direct measurement separates them;
+  genuinely idle-cluster remeasurement (none available this session); real
+  (non-uniform) production routing distribution untested; Xcode GUI limiter
+  classification remains unreachable from this environment.
 
 ## 2026-08-24 — P4v2 M1 shadow gate: measured, verdict HOLD; incident recovery; cluster reverted to production
 

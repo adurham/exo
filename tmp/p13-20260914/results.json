@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "host": "Adams-Mac-Studio-M4-1",
+    "mlx": "0.32.3.dev20260912+3288a3309",
+    "gpu": "applegpu_g16s",
+    "ts": "2026-09-14 15:36:25",
+    "peak_bw_spec_gbps": 546.0,
+    "peak_bw_measured_gbps": 424.0,
+    "peak_tflops_measured": 15.21,
+    "prefill_m": 2048
+  },
+  "decode_shape": {
+    "fused_gate_up": {
+      "gpu_us_per_call": 131.178325,
+      "dispatches_per_call": 4.0
+    },
+    "activation": {
+      "gpu_us_per_call": 0.373955,
+      "dispatches_per_call": 1.0
+    },
+    "down_proj": {
+      "gpu_us_per_call": 52.777395,
+      "dispatches_per_call": 3.0
+    },
+    "_do_sort_would_be": false,
+    "_total_gpu_us": 184.329675,
+    "_total_dispatches": 8.0,
+    "_bytes_touched_approx": 47185920.0,
+    "_implied_bw_gbps": 255.9865632053005,
+    "_pct_of_spec_peak": 46.883985935036726,
+    "_pct_of_measured_peak": 60.37418943521239
+  },
+  "prefill_shape": {
+    "gather_sort": {
+      "gpu_us_per_call": 983.42126,
+      "dispatches_per_call": 10.0
+    },
+    "fused_gate_up": {
+      "gpu_us_per_call": 34872.47197,
+      "dispatches_per_call": 3.0
+    },
+    "activation": {
+      "gpu_us_per_call": 306.60172,
+      "dispatches_per_call": 1.0
+    },
+    "down_proj": {
+      "gpu_us_per_call": 14346.80889,
+      "dispatches_per_call": 3.0
+    },
+    "scatter_unsort": {
+      "gpu_us_per_call": 811.72894,
+      "dispatches_per_call": 1.0
+    },
+    "_do_sort": true,
+    "_total_gpu_us": 51321.03278,
+    "_total_dispatches": 18.0,
+    "_gather_scatter_pct_of_total": 3.4978840112110463,
+    "_roofline_flops_total": 309237645312,
+    "_roofline_achieved_tflops": 6.28285582212385,
+    "_roofline_pct_of_measured_peak_compute": 41.30740185485766,
+    "_bandwidth_model_caveat": "at M=2048 grouped/sorted gather_qmm reuses weight tiles across co-routed tokens; a naive bytes/M-token model (correct for decode's M=1 case) does NOT directly apply here without knowing per-expert run-length distribution. Not computed to avoid a misleading number; see FLOPs-based compute roofline above instead, which IS shape-correct."
+  },
+  "roofline": {},
+  "notes": []
+}
