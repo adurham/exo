@@ -624,7 +624,44 @@ fi
 # bullet style and phrasing differ) while the substance stays correct. If a
 # workload needs byte-reproducible prose rather than correct answers, set
 # EXO_DSV4_LMHEAD_MXFP8=0 to restore the BF16 head.
-: "${EXO_DSV4_LMHEAD_MXFP8:=1}"
+#
+# REVERSED TO OFF 2026-09-13: the mxfp8 head causes the glued
+# cross-lingual-fragment defect (e.g. "angleсь", "camerauden") at
+# low-margin decode positions -- confirmed via raw logprobs capture
+# (flat cross-lingual top-10 at the defect token, correct token
+# demoted to rank 2). This CONTRADICTS the "substance stays correct"
+# claim in the comment above -- low-margin flips are not benign
+# rewording, they are genuine wrong-token selection. The 15-task
+# ship-decision eval above was high-margin exact-match/code tasks and
+# never exercised free-form prose (vision descriptions), so it never
+# saw this. The ~11.5% figure above is an ESTIMATE combining a
+# synthetic-input flip rate with a real-generation margin distribution,
+# not a directly observed all-token flip rate -- see mlx-lm's loader
+# comment (mlx_lm/utils.py) for the derivation.
+#
+# Cost of OFF: two independent 100K-context measurements came back at
+# 37.05 and 37.65 tok/s decode vs a 38.62 tok/s mxfp8-on baseline --
+# roughly 2.5-4% decode cost (the spread between the two OFF runs is
+# normal noise, not a discrepancy).
+#
+# A follow-up investigation (2026-09-13) looked for a smarter fix that
+# would keep more of the mxfp8 speedup: affine int8 g32 still flips
+# 1.66% vs BF16 (not zero); a per-token low-margin BF16 fallback needs
+# ~40.6% of tokens to catch every observed flip, collapsing the net
+# speedup to ~1.06x; a top-K logit re-rank looked near-lossless on
+# synthetic data but reproduces the same cross-script defect at a
+# nonzero rate on real residual-decode testing. None beat this blunt
+# disable on both defect-rate and throughput, so none were adopted.
+# DO NOT re-enable this flag, or ship any alternative lm_head
+# quantization scheme, without a LOW-MARGIN FREE-FORM PROSE eval
+# (raw-logprobs argmax-flip rate on open-ended/vision-description
+# generation, not just high-margin task pass/fail) -- the 15-task
+# battery above is not sufficient on its own.
+#
+# Scope: this is a launcher-level default, not model-specific --
+# deepseek-ai/DeepSeek-V4-Flash-0731 inherits this fix automatically
+# on its next relaunch, no separate change needed.
+: "${EXO_DSV4_LMHEAD_MXFP8:=0}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
 # 1M-context budgets; bf16 is fine at typical 50-200K usage.
