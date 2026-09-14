@@ -1,6 +1,26 @@
 # DSpark Native Head for DeepSeek-V4-Flash-0731 (2026-08-03, implemented 2026-08-04)
 
-**STATUS: IMPLEMENTED, validated standalone, NOT YET LIVE-A/B'd.**
+> **STATUS UPDATE 2026-09-12: DEFAULTED ON IN PRODUCTION.** Commit
+> `805afbb018bad838b114d08035907d7df470e2ac` set
+> `EXO_DSV4_DSPARK_NATIVE=1` as the `start_cluster.sh` default — this is
+> the "NOT YET LIVE-A/B'd" step this doc's own §4 called out as the next
+> session's work, now done. It was also promoted from a throughput-neutral
+> nice-to-have to a **root-cause production fix**: the local converted
+> DSpark head (what this flag's OFF setting falls back to) turned out to
+> silently fail strict weight loading against the Vision-Exp checkpoint
+> specifically (missing `bias_vl` keys the Vision-Exp `DSparkStage`
+> requires), collapsing decode to ~11 tok/s via a silent MTP-1 fallback.
+> The native path this doc designed is what recovered it — live A/B:
+> 10.59-10.97 tok/s (broken local head) → 27.25-32.31 tok/s (native head),
+> 36-43 tok/s at 100K context. Full incident/fix detail:
+> `docs/PERFORMANCE_HISTORY.md`'s 2026-09-12→14 session entry (commit 3) and
+> the commit message itself (`git show 805afbb018bad838b114d08035907d7df470e2ac`).
+> Everything below this point is the original 2026-08-03 planning doc plus
+> its 2026-08-04 "what actually happened" update — kept as-is for
+> historical/design-rationale value, but no longer describes current
+> defaults (the flag is now ON by default, not opt-in).
+
+**STATUS (2026-08-04, historical — see 2026-09-12 update above for current production state): IMPLEMENTED, validated standalone, NOT YET LIVE-A/B'D AT THAT TIME.**
 `_overlay_dsv4_dspark_native()` (utils_mlx.py) + `Model.sanitize()`'s new
 `n_mtp_override` param (mlx-lm submodule, adurham/mlx-lm@e101803) are
 committed and pushed to exo's `main` (commit `99f5cda51`). Gated behind

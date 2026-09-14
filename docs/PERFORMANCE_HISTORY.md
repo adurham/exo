@@ -52,6 +52,7 @@ fully closed out.
 12. [Measurement methodology lessons (meta)](#12-measurement-methodology-lessons-meta)
     - [12.5 Cross-domain recurring patterns](#125-cross-domain-recurring-patterns)
 13. [Open / never-finished threads](#13-open--never-finished-threads)
+14. [2026-09-12 to 2026-09-14 — Five launcher-default fixes + mlx/mlx-lm upstream sync + LMHEAD_MXFP8 correctness incident](#2026-09-12-to-2026-09-14--five-launcher-default-fixes--mlxmlx-lm-upstream-sync--the-lmhead_mxfp8-correctness-incident)
 
 ---
 
@@ -1438,6 +1439,30 @@ equivalent end-to-end wall-clock speedup.**
   tok/s. mean_accept 1.04/2 drafts = 68% of gamma=2 ceiling. **gamma has
   a sweet spot determined by acceptance-rate falloff, not a monotonic
   increase** — gamma=1 is -6%, gamma=3 is -18% vs gamma=2's baseline.
+
+### 5.5 Structural fact for ANY future decode-path fix: DSpark's draft head bypasses `Model.__call__` (durable, found 2026-09-14)
+
+Any lm_head / decode-path fix (quantization, fallback, re-rank, logit
+post-processing of any kind) must hook BOTH of DSpark's two `lm_head` call
+sites, or it will silently miss one:
+
+- **Verify path**: `Model.__call__` (`mlx-lm/mlx_lm/models/deepseek_v4.py`)
+  calls `self.lm_head(h)` directly — this is the "obvious main path" and the
+  one most patches target by default.
+- **Draft path**: `DSparkStage.draft()` (same file, ~line 7472) calls
+  `lm_head` **directly**, bypassing `Model.__call__` entirely:
+  `base_logits = lm_head(self.norm(x))`. This is the call that seeds the
+  draft tokens DSpark's whole accept/reject chain is built on.
+
+A fix spliced only into `Model.__call__` will look complete (it corrects
+verify-path logits) while silently leaving the draft path — which runs
+*first* and determines what candidate tokens even exist to verify —
+uncorrected. This exact gap is why the 2026-09-14 conditional lm_head
+mxfp8 fallback patch still showed a 10/10 defect rate live even with its
+`Model.__call__` splice active: see
+`docs/lmhead-mxfp8-defect-and-fallback-investigations-2026-09-14.md`
+Investigation B for the full account. Whenever touching lm_head-adjacent
+decode logic, grep for both call sites before declaring a fix complete.
 
 ---
 
@@ -8912,3 +8937,231 @@ and hardened with a preflight that makes this exact failure impossible to repeat
 **Cluster left HEALTHY:** API 200, runners READY 2/2, real-PID verified `EXO_PHASE_MARKS` ABSENT,
 `EXO_WORKER_PLAN_EVENT_WAKE` ABSENT, RV=0, gamma=3, steel-BI=1. A real completion was confirmed
 against the placed checkpoint. Production config, nothing left behind.
+
+---
+
+## 2026-09-12 to 2026-09-14 — Five launcher-default fixes + mlx/mlx-lm upstream sync + the LMHEAD_MXFP8 correctness incident
+
+Five commits landed on `main` across this window, in order. Full commit
+messages are the authoritative source for each (`git show <sha>`); this
+entry summarizes and cross-references, it does not replace them.
+
+### 1. `eb05307ec4f65c98d9802d117bcf0ddbad8297de` — fix(launcher): DSV4_MODEL_ID default → Vision-Exp
+
+`start_cluster.sh`'s `DSV4_MODEL_ID` default was still
+`deepseek-ai/DeepSeek-V4-Flash-0731` (a retired text-only checkpoint) even
+though the live cluster had been running
+`deepseek-ai/DeepSeek-V4-Flash-Vision-Exp` since the 2026-09-09 Phase 5 port
+— but only via a one-off manual instance placement that bypassed the
+default. A cold-start or crash-recovery relaunch with no explicit override
+would have silently relaunched the old text-only model. Fixed:
+`: "${DSV4_MODEL_ID:=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}"`.
+
+### 2. `a9f176f35e64f9474f6aeaeb3450b19f2e1b6435` — fix(launcher): default EXO_DSV4_MOE_FUSED_GATE_UP=1
+
+Half of the locked 2026-08-22 known-good decode baseline (§1; paired with
+`EXO_DSV4_FENCE_ASYNC=1`) had no `:=` default in `start_cluster.sh`, unlike
+its baseline partner — it only forwarded if already exported by hand in the
+calling shell, so any launch that didn't export it silently ran without it,
+regressing decode to ~11 tok/s. This flag was A/B'd live (on/off, both
+toggled) during the SAME live incident this fixed — it made no measurable
+difference on its own; see commit 3 for the actual root cause of that
+incident. Given a real `:=1` default regardless, since it is genuinely part
+of the documented baseline and should never again depend on manual export.
+
+### 3. `805afbb018bad838b114d08035907d7df470e2ac` — fix(launcher): default EXO_DSV4_DSPARK_NATIVE=1 — ROOT CAUSE of the ~11 tok/s regression
+
+**This is the real root cause of the live decode-throughput regression**
+that commit 2's A/B ruled itself out of. The locally-converted DSpark draft
+head (`EXO_DSV4_DSPARK_DIR`, a PREVIEW/text-only conversion) has
+`decoder.N.ffn.gate` keys with no `bias_vl` variant. The Vision-Exp
+checkpoint's `DSparkStage` allocates `e_score_correction_bias_vl` params
+whenever `vision_n_layers>0`, so strict weight loading against the local
+head silently failed ("Missing 3 parameters:
+`stages.{0,1,2}.ffn.gate.e_score_correction_bias_vl`") and the runtime fell
+back to weak single-token MTP-1 drafting — observed live at ~11 tok/s vs the
+documented 26-31 tok/s DSpark baseline.
+
+Fix: default to `EXO_DSV4_DSPARK_NATIVE=1`, which reads `mtp.*` weights
+directly from the serving checkpoint itself (has both `bias` and `bias_vl`
+keys under `layers.{40,41,42}.ffn.gate.*`) instead of the mismatched local
+conversion. Validated end-to-end: strict load 0 missing params, draft
+forward OK for both Vision-Exp and the older -0731 checkpoint. Live A/B,
+200-token completions, 3 iters: before (local head, silent MTP-1 fallback)
+10.59/10.97/10.97 tok/s; after (native head, DSpark 3-stage) 27.25/31.09/
+32.31 tok/s. At 100K context, decode recovered to 36-43 tok/s — **exceeding**
+the documented §1 baseline.
+
+`docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md` is the original
+design/background doc for the native-head path (implemented 2026-08-04,
+opt-in only at the time); this commit is what finally defaulted it ON, for
+Vision-Exp specifically. That doc has been given a status-update header
+pointing here — see §3 fix list below.
+
+### 4. `93ecf51a6aeed5cca1c8769668712c9be9ebcda7` — merge: mlx/mlx-lm upstream sync 2026-09-12 + exo .state compat fixes
+
+Submodule pins bumped: `mlx` `e40a416b2`→`3288a3309` (318 upstream commits:
+34 distributed/JACCL, 51 Metal/kernel, 14 CUDA, ~117 bugfixes, 24 python
+bindings, 24 CI, 24 docs, plus io/fft/linalg/quant fixes); `mlx-lm`
+`04381d998`→`d0dd9ba45` (87 upstream commits). Both hardware-validated on
+the merged stack (per the merge commit message, the authoritative source):
+exo mlx-engine + test_mlx + test_runner 723 passed / 201 deselected; exo
+disaggregated 29 passed; mlx-lm DSv4 + tokenizers 102 passed / 15 skipped
+(pre-existing, torch ref absent); mlx-lm test_models 90 passed / 3 failed
+(same 3 reproduce on the pinned production stack — pre-existing, not a
+regression). Real checkpoint weights (Vision-Exp): DSpark native-head
+overlay strict-load + draft forward PASS; vision tower + aligner strict-load
++ forward PASS.
+
+Required an exo-side adapter for a breaking upstream mlx-lm change: commit
+`ee19be4` ("Make state of cache return full state") changed `.state` tuple
+shapes (`KVCache`→3-tuple, `RotatingKVCache`→6-tuple, `ArraysCache`→3-tuple,
+`CacheList`→typed pairs; `meta_state` removed from 3 classes), which broke
+exo's disaggregated-inference wire-protocol codec. Fixed with an adapter
+codec v2 across 6 files (`disaggregated/adapter.py`, `cache.py`,
+`pp_speculation.py`, plus speculative-generator API-rename adaptation and
+tests). See the `git-fork-upstream-sync` skill's own note on this exact
+coupling — this is a recurring hazard when bumping the mlx-lm pin.
+
+Post-merge live validation: 100K-context decode 38.62 tok/s (vs 37.61
+pre-merge) — no regression, a small improvement — needle-in-haystack 10/10.
+
+**Separate follow-up: are any of the 318+87 upstream commits an
+exploitable win beyond what's already captured in the throughput number?**
+Investigated and found: mostly automatic/already-captured (D512 attention
+kernel dispatch — `if (bd == 512)` in `scaled_dot_product_attention.cpp`,
+an exact shape match for DSv4's `head_dim=512`; some `BatchKVCache` fixes on
+the DSpark hot path), or genuinely inapplicable on this hardware
+specifically, or dead code for this fork. Two categories worth recording in
+detail since they'll matter again under different conditions:
+
+- **All 4 quantized-MoE NAX kernel fixes require Apple Silicon
+  gen-17+/M5-class GPUs.** This cluster is gen-16/M4 — confirmed via
+  `is_nax_available()` gating on `arch_gen >= 17` in the mlx source, and the
+  live device reporting `applegpu_g16s`. **This is durable and will matter
+  again if/when this cluster's hardware is upgraded to M5-class** — at that
+  point, re-check these 4 fixes for exploitability, since they were
+  invisible to this sync's validation purely due to a hardware gate, not
+  because they're irrelevant to this fork's workload.
+- JACCL distributed stability fixes mostly touch the TCP ring backend or
+  `mlx.launch` CLI, neither of which exo's mesh-topology in-process init
+  path uses — defensive, not a behavior change on the happy path this fork
+  exercises.
+- `mlx_lm.server` fixes are dead code for this fork (exo has its own
+  serving stack, never imports `mlx_lm.server`). MoE stop-gradient fixes are
+  dead code too (exo is inference-only, zero autograd usage).
+
+### 5. `1da54ee192203194a35bddbb53625f7cb11799d9` — fix(launcher): disable EXO_DSV4_LMHEAD_MXFP8 by default — THE BIG BUG
+
+A live, user-reported, deterministic (at temp=0) text-quality defect:
+`EXO_DSV4_LMHEAD_MXFP8=1` (mxfp8-quantized lm_head, 129280×4096, shipped ON
+by default since `80ec8ec03`, 2026-08-30) caused garbled cross-lingual
+subword fragments glued onto correct words with no space (e.g. "angleсь",
+"camerauden", "pavement他身上"). Root-caused via raw logprobs capture
+(`logprobs=True, top_logprobs=10, temp=0`): genuine top-1 argmax flips from
+mxfp8 quantization noise at low-margin decode positions — NOT a detokenizer
+bug (streamed token == argmax token for all 273 sampled tokens in the
+capture). The original 15-task ship-decision eval (`80ec8ec03`) was
+high-margin exact-match/code tasks, scored 15/15 byte-identical, and
+structurally could not see this failure mode, which only shows up in
+low-margin free-form prose (e.g. vision image descriptions).
+
+Fix: `EXO_DSV4_LMHEAD_MXFP8` default flipped `1`→`0` (full BF16 lm_head).
+Confirmed 0/10 defect rate live, multiple independent verifications. Costs
+~2.5-4% decode throughput vs the buggy mxfp8-on baseline: two 100K-context
+measurements came back at 37.05 and 37.65 tok/s post-fix vs 38.62 tok/s
+pre-fix — reported as a range, not a single point figure, because a later
+fresh remeasurement in a different session showed 39.06 tok/s on the SAME
+bf16-only config. **There is real ~2-3 tok/s run-to-run variance in this
+benchmark; note the range, don't over-read a single point figure, wherever
+these numbers get cited.**
+
+**Full incident writeup:**
+`docs/incidents/lmhead-mxfp8-cross-lingual-glue-defect-2026-09-13.md`.
+**Full follow-up "smarter fix" investigation writeup (3 negative results,
+described below and in full detail there):**
+`docs/lmhead-mxfp8-defect-and-fallback-investigations-2026-09-14.md`.
+
+**On the "~11.5% flip rate" figure specifically**: this is a DERIVED
+ESTIMATE (synthetic per-band flip rate × a real-generation margin
+distribution), NOT a directly observed all-token flip rate. It originates
+in `mlx-lm/mlx_lm/utils.py`'s loader comment and is the figure most likely
+to get re-quoted without its caveat in the future — carry the caveat with
+it wherever it's cited. The `utils.py` comment and this doc both already
+state the caveat explicitly as of this session.
+
+### Three follow-up investigations (2026-09-14) — all NEGATIVE RESULTS, no code shipped, production unaffected
+
+Full technical detail (numbers, mechanism, why each fails) is in
+`docs/lmhead-mxfp8-defect-and-fallback-investigations-2026-09-14.md` — this
+is a summary pointer, read that doc before re-attempting any of these.
+
+- **A. Alternative fixed quantization schemes** (affine int8 at g32/64/128,
+  mxfp4, nvfp4): best case (affine int8 g64) still has a nonzero flip rate
+  (1.44-1.76%) — rejected as a BF16 replacement. A top-K logit re-rank
+  scheme looked near-lossless on synthetic per-token data but reproduced the
+  same cross-script glue defect at a nonzero rate on real residual-decode
+  testing — rejected specifically because shipping on a synthetic-only
+  diagnostic is exactly the mistake that caused the original bug.
+- **B. Conditional margin-based fallback** (fast mxfp8 first pass, redo only
+  low-margin rows in BF16): actually IMPLEMENTED as an uncommitted
+  working-tree patch (`deepseek_v4.py` +68, `utils.py` +8,
+  `start_cluster.sh` +10, gated by new env vars
+  `EXO_DSV4_LMHEAD_MXFP8_FALLBACK` + `_MARGIN`, both default OFF/inert) and
+  LIVE-TESTED on production. FAILED both bars: 10/10 defect rate (DSpark's
+  speculative draft head calls `lm_head` DIRECTLY at
+  `deepseek_v4.py` — `DSparkStage.draft()`, `base_logits = lm_head(self.norm(x))`
+  — completely bypassing the `Model.__call__` splice, so draft-path logits
+  that seed the whole speculative accept/reject chain stayed uncorrected);
+  AND slower (37.38 vs a fresh 39.06 tok/s bf16-only baseline) because
+  production's batched DSpark verify shape (M=4) means a per-row conditional
+  fallback pays the full ~1.059GB bf16 weight-read cost whenever ANY row in
+  the batch triggers, and the live-measured margin distribution (65.6% of
+  tokens below the fallback threshold) means that's nearly every batch.
+- **C. Extending the fallback to also cover the DSpark draft-head call
+  site** (sanity-check math + one real isolated microbenchmark, NOT
+  re-implemented live — the math was decisive enough to stop there): the
+  real draft batch is M=3 (not M=5 — 5 is `dspark_block_size`, the class
+  ceiling; the actual runtime value is capped by `EXO_SPECULATIVE_GAMMA=3`),
+  P(≥1 row triggers) is 95.9% at draft / 98.6% at verify — both near-total.
+  Draft and verify cannot share one weight read (causally serialized by a
+  full target-model forward pass between them — architecturally impossible
+  to unify, not just uneconomical). **The decisive finding**: a real
+  microbenchmark of the deployed `mx.where(mask, bf16_logits, mxfp8_logits)`
+  splice pattern showed MLX computes BOTH the bf16 and mxfp8 branches
+  UNCONDITIONALLY before doing a value-level select — no compute-level skip,
+  only value-level — making the mechanism's cost invariant to trigger
+  probability, at every M tested (95.9-97.8% of the sum of both matmuls'
+  separate costs). This rules out per-row conditional lm_head fallback via
+  `mx.where`-style selection structurally, at ANY call site, ANY margin
+  threshold, on this framework/hardware — not a tuning problem. The one
+  theoretically-open escape hatch (true gather/scatter conditional compute,
+  forcing a host sync + branch + smaller matmul on a gathered subset) is
+  named but unmeasured and doubtful (host-sync stall cost + near-100%
+  trigger rate leaves little subset to exploit).
+
+**Disposition of the Investigation-B/C uncommitted patch**: see the
+signing-handoff note attached to this entry / the accompanying commit
+message prepared 2026-09-14 (either committed as marked dead-code reference,
+or discarded — check `git log` for whether a commit landed, since this
+entry may predate that decision being executed).
+
+### Cross-reference for this whole window
+
+- `docs/lmhead-mxfp8-defect-and-fallback-investigations-2026-09-14.md` —
+  full technical detail on investigations A/B/C.
+- `docs/incidents/lmhead-mxfp8-cross-lingual-glue-defect-2026-09-13.md` —
+  the defect itself, repro, root cause, fix.
+- `docs/documentation-inventory-2026-09-14.md` — full categorized inventory
+  of this repo's accumulated documentation (~394 files across exo/mlx/mlx-lm)
+  produced alongside this session's writeup.
+- `docs/dsv4-0731-dspark-native-head-plan-2026-08-03.md` — original
+  native-head design doc, now status-updated to point at commit 3 above as
+  the point it was finally defaulted on for Vision-Exp.
+- `mlx-lm/mlx_lm/utils.py`'s lm_head loader comment (~line 624) — the
+  primary source of the "~11.5%" figure and its now-explicit "ESTIMATE, not
+  a direct measurement" caveat.
+- §5 (speculative decoding) of this document — the DSpark draft-head
+  direct-call-to-`lm_head` structural fact (bypasses `Model.__call__`) is
+  relevant to ANY future decode-path fix attempt, not just this one; noted
+  there as a durable architecture fact.

@@ -661,6 +661,17 @@ fi
 # Scope: this is a launcher-level default, not model-specific --
 # deepseek-ai/DeepSeek-V4-Flash-0731 inherits this fix automatically
 # on its next relaunch, no separate change needed.
+#
+# UPDATE 2026-09-14: the "follow-up investigation" mentioned above was
+# extended to a real implementation (a per-row conditional mxfp8/BF16
+# fallback, live-tested on production) plus one more negative-result
+# round checking whether extending it further could work. Both failed
+# for durable, structural reasons (not tuning) -- full detail, numbers,
+# and a summary table: docs/lmhead-mxfp8-defect-and-fallback-
+# investigations-2026-09-14.md. Also see mlx-lm/mlx_lm/models/
+# deepseek_v4.py's own marker comment near _LMHEAD_LASTROW_MIN_L for the
+# same pointer from the code side. Full incident background/repro:
+# docs/incidents/lmhead-mxfp8-cross-lingual-glue-defect-2026-09-13.md.
 : "${EXO_DSV4_LMHEAD_MXFP8:=0}"
 # KV cache quantization (bits). With 1 KV head + head_dim=512, KV per token
 # per layer is 2 × 1 × 512 × 2 B = 2 KiB at bf16. 4-bit halves that for tight
