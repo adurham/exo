@@ -928,24 +928,96 @@ class VisionProcessor:
 def prepare_vision(
     images: list[Base64Image] | None,
     chat_template_messages: list[dict[str, Any]] | None,
-    vision_processor: VisionProcessor,
+    vision_processor: "VisionProcessor | None",
     tokenizer: TokenizerWrapper,
     model: Model,
     model_id: ModelId,
     task_params: TextGenerationTaskParams,
 ) -> VisionResult | None:
+    """Prepare vision embeddings for a request, or drop images LOUDLY.
+
+    THE INCIDENT THIS CLOSES (2026-09-09, commit f76a4da3): an image request
+    silently degraded to a text-only HTTP 200 completion ("There is no image
+    attached to your prompt") because a malformed image block raised inside
+    vision processing and both call sites' bare
+    ``except Exception: logger.warning("...falling back to text-only")``
+    swallowed it below the noise floor. That commit fixed the ONE trigger
+    (the API adapter now emits a valid image block) but left the swallow
+    mechanism itself completely intact — any OTHER future vision-processing
+    defect reproduces the identical silent degradation. This is the single
+    place both callers (``generate.py`` and ``batch_generate.py``) route
+    through, so there is exactly one call site to keep loud instead of two
+    that can independently drift (the same one-call-site-fixed/one-missed
+    shape as the lm_head mxfp8 fallback investigation elsewhere in this
+    codebase — see docs/PERFORMANCE_HISTORY.md's 2026-09-14 entry).
+
+    Three ways an attached image can be dropped, ALL now loud at ERROR
+    (never silent, never merely a routine warning easy to lose in a log
+    stream): (1) ``vision_processor`` is ``None`` — the model has no vision
+    support declared, OR ``VisionProcessor.load()`` failed at model-load time
+    and left it permanently ``None`` for this runner's lifetime (see
+    ``utils_mlx.load_mlx_items``'s ``except Exception: ... vision_processor =
+    None`` load-time guard — that log line only fires ONCE, at load; this is
+    the per-REQUEST signal that a later request's images are being dropped
+    because of that earlier failure); (2) ``chat_template_messages`` is
+    ``None`` while images are attached; (3) ``vision_processor.process(...)``
+    itself raises for any reason.
+
+    A request with NO images attached takes none of these branches and never
+    logs — this stays silent-by-default for the ordinary text-only case,
+    loud only on an actual drop.
+
+    Deliberately still returns ``None`` (degrade to text-only) rather than
+    raising: failing an entire chat request outright because ONE
+    sub-feature (vision) broke would be worse UX than answering the text
+    portion of the prompt, PROVIDED the drop is now impossible to miss in
+    the logs. If future evidence shows operators are not acting on this
+    signal, revisit toward a hard failure — this is a deliberate, documented
+    choice, not an oversight.
+    """
     if not images:
         return None
-    if chat_template_messages is None:
-        logger.warning(
-            "Vision request missing chat_template_messages — ignoring images"
+
+    n_images = len(images)
+
+    if vision_processor is None:
+        logger.error(
+            f"[VISION-DROPPED] {n_images} image(s) attached to a request for "
+            f"model={model_id!r} but this runner has no vision processor "
+            "(no vision support declared for this model, OR "
+            "VisionProcessor.load() failed at model-load time — check for "
+            "an earlier 'Failed to load vision weights' entry in this "
+            "runner's startup log). The request will be answered as "
+            "TEXT-ONLY; the model will not see the image(s)."
         )
         return None
 
-    return vision_processor.process(
-        images=images,
-        chat_template_messages=chat_template_messages,
-        tokenizer=tokenizer,
-        model=model,
-        task_params=task_params,
-    )
+    if chat_template_messages is None:
+        logger.error(
+            f"[VISION-DROPPED] {n_images} image(s) attached to a request for "
+            f"model={model_id!r} but chat_template_messages is None — "
+            "images require the chat-template path and cannot be attached "
+            "without it. The request will be answered as TEXT-ONLY."
+        )
+        return None
+
+    try:
+        return vision_processor.process(
+            images=images,
+            chat_template_messages=chat_template_messages,
+            tokenizer=tokenizer,
+            model=model,
+            task_params=task_params,
+        )
+    except Exception as exc:
+        logger.opt(exception=True).error(
+            f"[VISION-DROPPED] {n_images} image(s) attached to a request for "
+            f"model={model_id!r} but vision_processor.process(...) raised "
+            f"({exc!r}). The request will be answered as TEXT-ONLY; the "
+            "model will not see the image(s) and may confidently claim none "
+            "were attached. This is the same failure shape as the "
+            "2026-09-09 incident (commit f76a4da3) — if this fires in "
+            "production, treat it as a live user-facing correctness bug, "
+            "not routine noise."
+        )
+        return None

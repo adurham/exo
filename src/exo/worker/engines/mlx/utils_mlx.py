@@ -219,6 +219,14 @@ def load_mlx_items(
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
         start_time = time.perf_counter()
         model, _ = load_model(model_path, lazy=True, strict=False)
+        # 2026-09-15 audit: strict=False here means a checkpoint/model
+        # mismatch would otherwise silently proceed with default-init
+        # params for whatever didn't load -- the same failure shape as the
+        # DSpark checkpoint-key-mismatch incident, just on the main model
+        # load instead of an optional draft head. See
+        # _run_strict_false_load_guard's own docstring for the full
+        # rationale and its sanitize()-aware accuracy gate.
+        _run_strict_false_load_guard(model, model_path)
         # Eval layers one by one for progress reporting
         try:
             inner = get_inner_model(model)
@@ -349,6 +357,12 @@ def shard_and_load(
 
     model, _ = load_model(model_path, lazy=True, strict=False)
     logger.debug(model)
+    # 2026-09-15 audit: same strict=False visibility gap as the
+    # single-device path above (load_mlx_items) -- see
+    # _run_strict_false_load_guard's own docstring for the full rationale.
+    # This IS the production distributed-serving load path (TP/PP), so this
+    # call site matters at least as much as the single-device one.
+    _run_strict_false_load_guard(model, model_path)
 
     # Optionally overlay the DEDICATED mlx-community DSv4 MTP head onto the
     # native (checkpoint-bundled) mtp[0], BEFORE tensor sharding. The dedicated
@@ -1123,6 +1137,194 @@ def _log_dspark_load_guard(
             )
     except Exception as guard_err:  # never break a model load
         logger.warning(f"[DSPARK-GUARD] guard failed: {guard_err}")
+
+
+#: Bound on how many individual key names get spelled out in one
+#: [STRICT-FALSE-LOAD-GUARD] log line. A genuinely wrong-architecture load
+#: could mismatch thousands of keys; the point of this guard is a discoverable
+#: SIGNAL (counts + a representative sample), not an unreadable full dump.
+_STRICT_FALSE_LOAD_GUARD_MAX_KEYS_LOGGED = 12
+
+
+def _diff_strict_false_load_keys(
+    model_keys: set[str], checkpoint_keys: set[str]
+) -> tuple[set[str], set[str]]:
+    """Pure set-diff: (missing, extra) between what the model's param tree
+    expects and what the checkpoint actually provided.
+
+    ``missing`` = keys the model has but the checkpoint never supplied (these
+    silently keep the model's random/default init under ``strict=False`` —
+    the exact DSpark-incident failure shape, just on the main model load
+    instead of an optional draft head). ``extra`` = keys the checkpoint
+    supplied that the model's param tree never asked for (usually benign —
+    e.g. training-only buffers — but worth seeing).
+
+    Split out as its own pure function (no mlx/model dependency) so the diff
+    LOGIC is unit-testable without constructing a real model or touching
+    mx.array at all.
+    """
+    return model_keys - checkpoint_keys, checkpoint_keys - model_keys
+
+
+def _log_strict_false_load_guard(
+    model_keys: set[str], checkpoint_keys: set[str], model_path_label: str
+) -> None:
+    """Loud, unconditional visibility into what a ``strict=False`` main
+    model load actually did — the missing half of the strict=False story
+    that ``_log_dspark_load_guard`` already provides for the optional
+    DSpark head overlays.
+
+    WHY THIS EXISTS (2026-09-15 audit). exo's primary production model load
+    (``load_mlx_items`` / ``shard_and_load`` in this file) calls
+    ``load_model(model_path, lazy=True, strict=False)`` — mlx-lm's own
+    ``load()`` API defaults ``strict=True``; exo overrides to ``False`` at
+    BOTH its call sites with no explanation and (before this fix) no
+    post-load visibility into what was actually missing or extra. That is
+    the exact same "trust a fallback that could be silently degrading
+    without ever checking" shape as the two confirmed incidents this audit
+    responds to (DSpark's checkpoint-key-mismatch silently falling back to
+    weak MTP-1 drafting; the lm_head mxfp8-fallback fix missing a second
+    call site) — except here the blast radius is 100% of production traffic,
+    any model, every load.
+
+    Deliberately NOT converted to ``strict=True``: that risks turning a
+    currently-healthy, high-mileage production path into an outage on the
+    next model load, on the strength of an UNCONFIRMED hypothesis (from
+    git-blame archaeology of a sibling function's comment, not this call
+    site) that some benign all-zero-bias omission is the real reason
+    ``strict=False`` exists here. A hard failure worse than the silent
+    degradation it would prevent is not a fix. This guard instead converts
+    the open question into an ANSWERABLE one: log exactly what mismatched,
+    every load, so the next reader can tell at a glance whether today's
+    ``strict=False`` is masking something real or is genuinely inert.
+
+    Contract, mirroring ``_log_dspark_load_guard`` exactly: NEVER raises (a
+    guard that can crash a model load is worse than the hazard it reports),
+    and stays SILENT on a clean load (no behavior-changing noise added to
+    every production load when there is nothing to report).
+    """
+    try:
+        missing, extra = _diff_strict_false_load_keys(model_keys, checkpoint_keys)
+        if not missing and not extra:
+            return  # clean load — nothing to report, stay silent
+        logger.error(
+            f"[STRICT-FALSE-LOAD-GUARD] {model_path_label}: strict=False "
+            f"model load did NOT exactly match the checkpoint's keys — "
+            f"missing={len(missing)} extra={len(extra)} "
+            f"(model expects {len(model_keys)} keys total, checkpoint "
+            f"provided {len(checkpoint_keys)}). Missing keys silently keep "
+            "the model's random/default init for that parameter — this is "
+            "the SAME failure shape as the DSpark checkpoint-key-mismatch "
+            "incident, just on the main model load. Sample missing="
+            f"{sorted(missing)[:_STRICT_FALSE_LOAD_GUARD_MAX_KEYS_LOGGED]} "
+            f"extra={sorted(extra)[:_STRICT_FALSE_LOAD_GUARD_MAX_KEYS_LOGGED]}"
+        )
+    except Exception as guard_err:  # never break a model load
+        logger.warning(f"[STRICT-FALSE-LOAD-GUARD] guard failed: {guard_err}")
+
+
+def _load_checkpoint_key_set(model_path: Path) -> set[str] | None:
+    """Read every on-disk safetensors key for a checkpoint WITHOUT loading
+    any tensor data — only the safetensors headers (a few KB per shard),
+    same technique this file's own ``_peek_mtp_hidden_size`` /
+    ``_overlay_dsv4_dspark_native`` already use for their own shard scans.
+
+    Returns ``None`` (never raises) if the checkpoint has no
+    ``model.safetensors.index.json`` (e.g. a single-shard checkpoint with no
+    index) — the strict=False guard treats that as "cannot check", same
+    spirit as ``_mtp_compatible_with_model``'s documented "either side
+    undeterminable -> don't false-positive" contract.
+    """
+    import json as _json
+    import struct as _struct
+
+    index_path = model_path / "model.safetensors.index.json"
+    if not index_path.exists():
+        return None
+    try:
+        weight_map = _json.loads(index_path.read_text())["weight_map"]
+        shard_names = sorted(set(weight_map.values()))
+        keys: set[str] = set()
+        for shard_name in shard_names:
+            shard_path = model_path / shard_name
+            with open(shard_path, "rb") as f:
+                header_size_bytes = f.read(8)
+                if len(header_size_bytes) < 8:
+                    continue
+                header_size = _struct.unpack("<Q", header_size_bytes)[0]
+                header = _json.loads(f.read(header_size))
+            keys.update(k for k in header if k != "__metadata__")
+        return keys
+    except Exception:
+        return None
+
+
+def _run_strict_false_load_guard(model: Any, model_path: Path) -> None:
+    """Wire ``_log_strict_false_load_guard`` up to a real loaded model.
+
+    Called right after ``load_model(model_path, lazy=True, strict=False)``
+    at BOTH of this file's call sites. Reads the checkpoint's on-disk keys
+    (header-only, no tensor I/O — cheap enough to run unconditionally on
+    every load) and diffs them against the model's real, post-construction
+    param tree.
+
+    ARCHITECTURE-AWARE GATE (do not remove this check — see the incident it
+    prevents, below). A raw on-disk-vs-model-param diff is only trustworthy
+    when the checkpoint's keys and the model's parameter names are the SAME
+    NAMESPACE. Many mlx-lm architectures (DeepSeek-V4 among them — the
+    ACTUAL model this cluster serves) define their own ``Model.sanitize()``
+    that does real key RENAMING before load (DSv4 example:
+    ``.hc_attn.`` -> ``.attn_hc.``, ``embed.weight`` ->
+    ``model.embed_tokens.weight`` — see ``mlx_lm/models/deepseek_v4.py``).
+    ``hasattr(model, "sanitize")`` is exactly the same gate mlx-lm's own
+    ``load_model()`` uses to decide whether to call it (base ``nn.Module``
+    defines no ``sanitize``), so it is a cheap, accurate proxy for "will the
+    raw checkpoint keys differ from the param names for a structural,
+    EXPECTED reason having nothing to do with strict=False actually masking
+    anything."
+
+    A first version of this guard did NOT check this and would have logged
+    a large ERROR-level "mismatch" on literally every DSv4 load — the ONE
+    model this cluster runs — which is worse than shipping nothing at all:
+    a diagnostic guaranteed to cry wolf on its primary target teaches
+    operators to ignore it, undermining trust in every OTHER genuine
+    ERROR-level guard line in this codebase. Caught via a second consult
+    review before shipping; the earlier over-eager version is not what
+    landed.
+
+    For a ``sanitize``-defining architecture, this instead logs ONE INFO
+    line noting the raw diff was skipped as architecturally unreliable
+    (never silent about the limitation, just not falsely loud about it) —
+    a genuinely accurate rename-aware diff (hooking ``sanitize()`` itself to
+    capture its key-rename map) is flagged as a real follow-up, not solved
+    here.
+    """
+    try:
+        from mlx.utils import tree_flatten
+
+        if hasattr(model, "sanitize"):
+            logger.info(
+                f"[STRICT-FALSE-LOAD-GUARD] {model_path}: skipping raw "
+                "key-diff — this architecture defines Model.sanitize(), "
+                "which renames checkpoint keys before load (e.g. DeepSeek-V4's "
+                ".hc_attn./.attn_hc. + top-level remaps), so a raw on-disk-"
+                "vs-param-tree diff would report a large EXPECTED mismatch "
+                "that is not a real bug. A rename-aware diff (hooking "
+                "sanitize() itself) is a follow-up, not yet implemented."
+            )
+            return
+
+        checkpoint_keys = _load_checkpoint_key_set(model_path)
+        if checkpoint_keys is None:
+            return  # no index to check against — cannot verify, don't guess
+        model_keys = {k for k, _ in tree_flatten(model.parameters())}
+        _log_strict_false_load_guard(
+            model_keys=model_keys,
+            checkpoint_keys=checkpoint_keys,
+            model_path_label=str(model_path),
+        )
+    except Exception as guard_err:  # never break a model load
+        logger.warning(f"[STRICT-FALSE-LOAD-GUARD] wiring failed: {guard_err}")
 
 
 def _prepare_mtp_weights(model_id: str, model_path: Path) -> None:

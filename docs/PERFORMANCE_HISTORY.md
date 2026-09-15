@@ -9609,3 +9609,237 @@ entry may predate that decision being executed).
   direct-call-to-`lm_head` structural fact (bypasses `Model.__call__`) is
   relevant to ANY future decode-path fix attempt, not just this one; noted
   there as a durable architecture fact.
+
+## 2026-09-15 — Silent-fallback / weak-validation audit of the serving stack (3rd Fable-consult recommendation, finally acted on)
+
+**Trigger**: three separate Fable consults across 2026-09-13/14/15 all
+recommended the same follow-up after finding two confirmed real instances of
+one failure shape — a component silently degrading to a wrong/weak mode
+instead of failing loudly when its real dependency isn't met — and it had
+never been acted on (`git log`/`grep` confirmed zero prior audits of this
+kind). The two instances that motivated it: (1) DSpark's local-head
+checkpoint-key-mismatch silently falling back to weak MTP-1 drafting (the
+"2026-09-12 to 2026-09-14" entry above, item 3, commit `805afbb0`, the
+~11 tok/s regression); (2) the lm_head mxfp8
+conditional-fallback investigation finding its splice covered
+`Model.__call__` but not DSpark's own direct `lm_head` call in
+`DSparkStage.draft()` (§5 above / the "2026-09-12 to 2026-09-14" entry's
+follow-up investigations, 2026-09-14, a rejected fix, not a production
+incident, but the same underlying "assumed one call site covered all of
+them" pattern).
+
+### Search methodology (reproducible)
+
+Scope: `src/exo/worker/engines/mlx/` and submodules (`generator/`,
+`speculative/`, `disaggregated/`, `patches/`) plus mlx-lm's model-loading
+code exo actually depends on (`mlx_lm/utils.py`, `mlx_lm/models/deepseek_v4.py`).
+Repo confirmed at `origin/main` `30a4ce074b8`, later re-based onto
+`64efa5d9c` (docs-only fast-forward, zero overlap with touched files) before
+finalizing. Systematic, not spot-read:
+
+1. **Every `except` clause** in the scope (139 sites, tests excluded), classified
+   programmatically by body content: `RERAISE` (17), `LOUD_ERROR` (2),
+   `LOUD_WARN` (41), `QUIET_LOG` (4, info/debug-only), `SILENT_PASS` (17,
+   bare `pass`/empty body), `SILENT_OTHER` (58, does something but never
+   logs). All 75 SILENT_PASS+SILENT_OTHER sites read in context (±8 lines).
+2. **hasattr/getattr(...,None)/is-not-None gates** near
+   weight/checkpoint/head/load/quant/dspark/mtp/lm_head/sanitize/overlay/draft
+   keywords (105 matches) — read in context for silent-branch-without-logging risk.
+3. **Multi-call-site capability audit** (the exact lm_head-splice-miss shape):
+   grepped every real invocation (not just reference) of `lm_head(`,
+   `.draft(`, `load_weights(`, `sanitize(`, `quantize(`, `set_dspark_taps`
+   across both exo and mlx-lm, and manually traced each call site's argument
+   provenance (is it the SAME live object at every site, or could one site
+   see a stale/different one).
+4. Cross-referenced every candidate against git history (`git log -p -S`,
+   `git blame`) to establish whether a given warning/fallback already existed
+   before an incident (i.e. "logs a warning" alone did not prevent the
+   DSpark incident — the warning line predates the fix by two months; the
+   real problem was nobody was watching for it, not that it was silent) vs.
+   genuinely never logged at all.
+
+Full raw search output preserved in `/home/hermes/audit-work/` on
+hermes-gw-01 (except_triage.txt, hasattr_fallback.txt, silent_sites_context.txt)
+for anyone re-verifying this pass.
+
+### Findings
+
+**Confirmed genuine risk #1 (fixed) — vision-processing swallow, and it is
+NOT hypothetical**: while auditing `prepare_vision()`'s
+`except Exception: logger.warning("...falling back to text-only")` pattern
+in `generate.py`/`batch_generate.py`, found it is the EXACT mechanism of a
+**third real prior production incident**, already documented in-repo but
+never connected to this audit's pattern until now: 2026-09-09, commit
+`f76a4da3` ("fix(api): emit a real image source in multimodal
+chat_template_messages", see `docs/DSV4_VISION_PORT_PHASE5_PROCEDURE.md` and
+`src/exo/api/tests/test_chat_completions_image_blocks.py`). EVERY image
+request silently degraded to a text-only HTTP 200 completion ("There is no
+image attached to your prompt") because a bare `{"type": "image"}` block
+made the vendored encoder raise, and both generators' bare
+`except Exception: ...warning(...)` swallowed it below the noise floor.
+That commit fixed the TRIGGER (the adapter now emits a valid image source)
+but left the SWALLOW MECHANISM itself completely intact — any OTHER future
+vision-processing defect reproduces the identical silent degradation, and
+(until this fix) `vision_processor is None` (e.g. `VisionProcessor.load()`
+failing at model-load time, leaving it `None` for the runner's whole
+lifetime) dropped every subsequent image-bearing request with **zero log
+output at all**, forever, for that runner.
+
+Fix: `prepare_vision()` (`src/exo/worker/engines/mlx/vision.py`) now handles
+all three drop paths — `vision_processor is None`,
+`chat_template_messages is None`, and any exception from
+`vision_processor.process(...)` — with an ERROR-level `[VISION-DROPPED]` log
+naming the image count, model id, and (for the exception case) the real
+exception detail, while still returning `None` (text-only degrade) rather
+than hard-failing the whole request. Both call sites (`generate.py`,
+`batch_generate.py`) now call the single hardened function unconditionally
+instead of gating it behind `if vision_processor is not None:` (that outer
+guard was itself part of the silence — it meant `prepare_vision` was never
+even invoked, so it never got a chance to log). A plain text-only request
+(no images) stays completely silent — this is loud-on-drop, not
+loud-on-every-request. 5 new regression tests
+(`test_vision_dropped_images_loud.py`) pin: exception→ERROR, no-processor→ERROR,
+missing-chat-template→ERROR, no-images→silent, success→silent+unchanged
+result. Verified against the full `src/exo/worker/engines/mlx/` +
+`src/exo/api/` suite (both fixes together): clean pre-change baseline 631
+passed → 649 passed after both fixes (net +18 = 5 vision tests + 13
+strict=False-guard tests below), 0 regressions, 0 failures.
+
+**Confirmed genuine risk #2 (fixed, diagnostic-only) — the main model load's
+`strict=False`, zero visibility**: exo's primary production model load
+(`load_mlx_items` and `shard_and_load` in `utils_mlx.py`) calls
+`load_model(model_path, lazy=True, strict=False)` at BOTH call sites — the
+weight load for literally every model exo serves, any architecture, 100% of
+production traffic. mlx-lm's own public `load()` API defaults `strict=True`;
+exo overrides to `False` at both sites (oldest traceable to commit
+`77beecf8`, Feb 2026, "Fix large model support... strict=False", no further
+rationale in the diff) with, until this fix, no post-load visibility into
+what was actually missing or extra. Contrast: the DSpark head overlays in
+the SAME FILE use `strict=True` PLUS an explicit post-load
+missing/extra-param-tree assertion+log (`_log_dspark_load_guard`) —
+precisely because a shape-compatible-but-wrong weight set is the exact
+silent-degradation risk this audit is about. The main load had no
+equivalent.
+
+Deliberately NOT converted to `strict=True` — flipping it blind risks
+turning a currently-healthy, high-mileage production path into a
+cluster-wide outage on the next model load, on the strength of an
+UNCONFIRMED hypothesis (from a sibling function's comment, not this call
+site) that some benign all-zero-bias omission is the real reason
+`strict=False` exists here. A hard failure worse than the silent
+degradation it would prevent is not a fix — this is the same
+loud-not-reflexively-fatal judgment call the task itself calls for.
+
+Fix: `_run_strict_false_load_guard()` reads the checkpoint's on-disk
+safetensors keys (header-only, no tensor I/O, cheap enough to run
+unconditionally on every load) and diffs them against the model's real
+post-construction param tree, logging ERROR on any mismatch (bounded to a
+12-key sample), silent on a clean match — same "never raises, silent when
+clean" contract as `_log_dspark_load_guard`. **Correction made mid-implementation,
+caught by a second consult review before shipping**: a first version did a
+raw diff unconditionally, which would have logged a large ERROR-level "mismatch"
+on literally EVERY load of DeepSeek-V4 — the one model this cluster
+serves — because DSv4's `Model.sanitize()` does real key RENAMING before
+load (`.hc_attn.`→`.attn_hc.`, `embed.weight`→`model.embed_tokens.weight`,
+etc.), which a raw diff cannot distinguish from a genuine gap. A diagnostic
+guaranteed to cry wolf on its primary target is worse than shipping nothing
+— it teaches operators to ignore ERROR lines from this guard, undermining
+every OTHER genuine one. Fixed by gating on `hasattr(model, "sanitize")`
+(the exact same check mlx-lm's own loader uses to decide whether to call
+it): sanitize-defining architectures get an honest INFO line explaining the
+raw diff was skipped as unreliable, not a false ERROR. Verified empirically
+against two real locally-cached checkpoints on macstudio-m4-1
+(`mlx-community/Qwen3.5-0.8B-MLX-8bit`, `mlx-community/Qwen3-1.7B-8bit`) —
+**every mlx-lm architecture checked so far defines `sanitize()` and does
+something a raw diff would misread as a bug** (Qwen3's drops
+`lm_head.weight` entirely when `tie_word_embeddings=True` — a real key
+removal, not just a cosmetic rename), which validates the gate as necessary
+rather than defensive overcaution. **Open follow-up, stated honestly**: a
+genuinely accurate diff for sanitize-defining architectures (DSv4 included)
+would need to hook `sanitize()` itself to capture its real rename map — not
+implemented this pass; today's fix gives real signal on non-renaming
+architectures and an honest "skipped, here's why" on renaming ones, not a
+universal oracle. 13 new regression tests (`test_strict_false_load_guard.py`)
+cover the pure diff logic, the logging contract, the checkpoint-header
+reader, AND the sanitize-gate correction itself (the exact bug the second
+consult caught, pinned so it can't silently regress).
+
+### Findings triaged as NOT genuine risk (explicitly, not by omission)
+
+- **DSpark's 4 `.draft()` call sites** (`dsv4_mtp.py` ×2, `pp_speculation.py`
+  ×2) all pass the SAME live `model.lm_head` / `self.model.lm_head`
+  attribute reference at call time, not a cached/stale copy — no drift risk.
+  This is the exact "multiple call sites of one resource" shape the lm_head
+  investigation flagged, confirmed already consistent (matches the existing
+  2026-09-14 investigation docs' own finding).
+- **Remote-prefill fallback** (`except Exception: ...falling back to local
+  prefill`, 4 sites) is correctness-preserving (same numerical output, not
+  degraded — just possibly using local instead of remote compute) and
+  already logs the real exception at WARNING. Not the same risk class as a
+  silent WRONG output.
+- **`should_use_remote_prefill` + server-side `RemotePrefillVisionUnsupportedError`**:
+  the exact silent-corruption shape (a vision request routed to a
+  remote prefill server that can't reconstruct embeddings) is already
+  identified in the code's OWN docstring and defended in two layers
+  (client-side routing exclusion + server-side hard rejection). Already
+  mature and loud; no fix needed.
+- **DSv4 MoE gate+up fusion** (`EXO_DSV4_MOE_FUSED_GATE_UP`) is correctly
+  applied at all 3 structurally similar call sites (main layers, MTP
+  blocks, AND DSpark stages) in `auto_parallel.py` — confirmed via full
+  read, not just grep-count. A clean negative result for the exact
+  "fix applied at one of several call sites" pattern.
+- **`_mtp_compatible_with_model`** (Qwen3.5-style separate-MTP-weights path)
+  already logs a detailed WARNING on hidden-size mismatch and returns False
+  so the caller skips to the next candidate — an existing, working example
+  of the "loud" pattern this audit is pushing toward elsewhere.
+- Roughly 90 of the 139 classified `except` sites are diagnostic/tracing
+  code explicitly marked never-crash-generation (memory profiling, degen
+  probes, heap census, GPU trace capture) — correctly silent-by-design,
+  their failure mode is losing an optional diagnostic, not corrupting served
+  output.
+
+### What was NOT covered — honest gaps for a follow-up session
+
+- The `speculative/dsv4_mtp.py` file alone is ~5,700 lines with dozens of
+  `except Exception:` sites tied to speculative-decode bookkeeping (degen
+  probes, cache-offset introspection, trace writers) — each was CLASSIFIED
+  (silent vs. logged) but not all were individually judged for genuine risk
+  vs. acceptable; the ones read in depth were prioritized by proximity to
+  weight/checkpoint/capability logic specifically, per the task's own
+  prioritization guidance, not exhaustively.
+- `pp_speculation.py` (~3,500 lines, the PP/pipeline speculative path) got
+  the same classification pass but proportionally less deep-read time than
+  the TP path (`dsv4_mtp.py`) and `vision.py`/`utils_mlx.py` — a follow-up
+  session should specifically re-walk its ~15 SILENT_OTHER sites with the
+  same depth this pass gave the vision and model-load findings.
+- The rename-aware `sanitize()`-hooking diff for the strict=False guard
+  (flagged explicitly above) — today's fix is deliberately partial and says
+  so; DSv4 gets an honest skip, not a real check.
+- `patches/qwen3_5_moe/` and the vendored `deepseek_v4_encoding.py`/`dsml_encoding.py`
+  tool-call parsers were swept (classified) but not deep-read line-by-line —
+  their `except (json.JSONDecodeError, ValueError): args[k] = raw_string`
+  fallbacks look like reasonable graceful-degradation (a malformed tool-call
+  argument value falls back to its raw string form rather than crashing
+  parsing) but were not individually verified against a real malformed-input
+  test.
+- No live production relaunch was performed for this audit. Both fixes are
+  purely additive logging (no change to any happy-path serving decision),
+  verified via (a) the regression test suites above and (b) direct
+  invocation of the real `_run_strict_false_load_guard` code path against
+  two real, differently-shaped checkpoints on macstudio-m4-1
+  (`mlx-community/Qwen3.5-0.8B-MLX-8bit`, `mlx-community/Qwen3-1.7B-8bit`) —
+  judged sufficient given the changes cannot alter served output, and the
+  session's one available relaunch was not spent here since nothing in
+  these fixes requires live validation to trust.
+
+### Cross-reference
+
+- `/home/hermes/audit-work/` on hermes-gw-01 — raw search methodology output
+  (except-classification, hasattr-gate grep, full-context dumps for every
+  candidate site) for reproducing or extending this audit.
+- `src/exo/api/tests/test_chat_completions_image_blocks.py` — the
+  2026-09-09 incident this session's Fix #1 closes the swallow-mechanism
+  half of; that test file covers the TRIGGER, the new
+  `test_vision_dropped_images_loud.py` covers the MECHANISM.
+- §5 (this document) — the DSpark draft-head direct-lm_head-call structural
+  fact, re-confirmed still accurate during this audit's multi-call-site sweep.

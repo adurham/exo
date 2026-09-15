@@ -2248,22 +2248,27 @@ class ExoBatchGenerator:
         vision: VisionResult | None = None
         media_regions: list[MediaRegion] = []
 
-        if self.vision_processor is not None:
-            try:
-                with T("submit.vision"):
-                    vision = prepare_vision(
-                        images=task_params.images,
-                        chat_template_messages=task_params.chat_template_messages,
-                        vision_processor=self.vision_processor,
-                        tokenizer=self.tokenizer,
-                        model=self.model,
-                        model_id=task_params.model,
-                        task_params=task_params,
-                    )
-            except Exception:
-                logger.opt(exception=True).warning(
-                    "Vision processing failed, falling back to text-only"
-                )
+        # prepare_vision() itself now handles vision_processor being None
+        # (e.g. VisionProcessor.load() failed at model-load time) and any
+        # processing exception -- ALWAYS logging loudly at ERROR rather than
+        # silently dropping the image(s), per the 2026-09-09 incident
+        # (commit f76a4da3) this closes. Do NOT gate this call behind
+        # `if self.vision_processor is not None:` -- that guard is exactly
+        # what made the "no processor but images attached" case silent
+        # before this fix (prepare_vision was never even called, so it
+        # never got a chance to log). No try/except needed here either:
+        # prepare_vision() catches, logs, and returns None internally so a
+        # vision defect can never propagate up and abort the whole request.
+        with T("submit.vision"):
+            vision = prepare_vision(
+                images=task_params.images,
+                chat_template_messages=task_params.chat_template_messages,
+                vision_processor=self.vision_processor,
+                tokenizer=self.tokenizer,
+                model=self.model,
+                model_id=task_params.model,
+                task_params=task_params,
+            )
 
         if vision is not None:
             all_prompt_tokens = vision.prompt_tokens
