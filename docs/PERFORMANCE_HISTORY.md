@@ -2155,6 +2155,29 @@ number:
     this (§3.2, `docs/p14-switch-mlp-gap-decomposition-2026-09-15.md`);
     P02D/P03/P08 were unaffected because they already used the
     isolated-per-iteration pattern.
+15. **A signed-off, previously-trusted headline number can still be
+    wrong — periodic independent re-derivation is a standing practice,
+    not a one-off response to catching an error.** Lesson #14 above
+    documents the CORRECT TECHNIQUE for measuring absolute per-call
+    TFLOPS/bandwidth going forward; it says nothing about ever
+    re-checking a number that already shipped and was already trusted.
+    P13's original 33-41%-of-peak figure was reviewed, wrote up, and
+    would have stood indefinitely — it was only caught because a
+    DIFFERENT, closely-targeted follow-up investigation (P14, dispatched
+    specifically to decompose P13's own explicitly-flagged open
+    question) happened to re-measure the same scenario as a side effect
+    of its actual task. A less targeted follow-up, or no follow-up at
+    all, would never have surfaced the ~1.8-1.9x artifact. The general
+    lesson: any number that gates a real decision (a ship/no-ship call,
+    a "this is now a closed physics floor" verdict, a documented
+    baseline other work will be measured against) is worth an
+    independent re-derivation at some point after it ships — not
+    contingent on an unrelated investigation stumbling into the error —
+    especially numbers produced by a benchmarking helper that hasn't
+    itself been independently audited. This doc's own headline
+    baseline table (§1) and every "SHIPS"/"PROMOTED"/"CLOSED" verdict in
+    the chronological log below are exactly the class of number this
+    lesson applies to.
 
 ---
 
