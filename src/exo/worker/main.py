@@ -45,6 +45,7 @@ from exo.shared.types.tasks import (
     CreateRunner,
     DownloadModel,
     ImageEdits,
+    ImageGeneration,
     LoadModel,
     Shutdown,
     Task,
@@ -90,6 +91,30 @@ _PLAN_EVENT_WAKE_ENABLED: Final[bool] = os.environ.get(
     "false",
     "False",
 )
+
+
+def _may_dispatch_non_blocking(task: Task) -> bool:
+    """Whether `plan_step` may hand this task to `start_soon` instead of awaiting it.
+
+    True ONLY for the generation tasks, whose `task_id` is STABLE (they are
+    created by the master and delivered through cluster state, not built fresh
+    by `plan()`). A repeat send of one of those is deduped by the runner's
+    `seen` set and the supervisor's `pending` / `in_progress` guards, so it is
+    safe for the planner to re-evaluate `plan()` while one is in flight -- which
+    is exactly what the c>=2 batched-prefill rendezvous needs (see the caller).
+
+    False for every LIFECYCLE task (`ConnectToGroup`, `StartWarmup`, ...).
+    Those are rebuilt by `plan()` with a NEW `task_id` on each call, so nothing
+    task_id-keyed can suppress a duplicate; only `plan()`'s own state
+    precondition can, and that depends on a status the runner publishes
+    asynchronously. They MUST be awaited so the dispatch and the guard status
+    cannot interleave (I16 regression, 2026-09-15).
+
+    Written as an explicit runtime predicate rather than an OR-pattern match
+    arm because basedpyright's pattern narrowing overflows the stack on an
+    OR-pattern in this match (confirmed against this file, v1.29.0).
+    """
+    return isinstance(task, (TextGeneration, ImageGeneration, ImageEdits))
 
 
 class Worker:
@@ -532,17 +557,64 @@ class Worker:
 
                     await self._start_runner_task(task)
                 case task:
-                    # Dispatch generation tasks non-blocking so concurrent
-                    # requests (c≥2) can reach the runner's work_queue within
-                    # the batched-prefill rendezvous window. The runner's
-                    # handle_generation_tasks drains its queue for
+                    # GENERATION tasks are dispatched NON-BLOCKING so
+                    # concurrent requests (c≥2) can reach the runner's
+                    # work_queue within the batched-prefill rendezvous window.
+                    # The runner's handle_generation_tasks drains its queue for
                     # EXO_BATCHED_PREFILL_RENDEZVOUS_MS (default 200ms) to
                     # batch arriving tasks into one prefill_batched call.
                     # Blocking here (await) serialized c=2+ prefill: the 2nd
                     # task couldn't be sent until the 1st completed, so the
                     # rendezvous never saw it. Non-blocking dispatch + the
                     # in_progress guard in plan() prevents re-dispatch.
-                    self._tg.start_soon(self._start_runner_task, task)
+                    #
+                    # That is safe ONLY for generation tasks, because they
+                    # carry a STABLE task_id (they come from cluster state, not
+                    # from `plan()`), so the runner's own `seen` set and this
+                    # supervisor's `pending`/`in_progress` guards dedupe a
+                    # repeat send.
+                    #
+                    # LIFECYCLE tasks (ConnectToGroup, StartWarmup) MUST be
+                    # dispatched BLOCKING -- never via `start_soon`.
+                    #
+                    # Unlike generation tasks, lifecycle tasks are constructed
+                    # fresh by `plan()` on every call with a NEW `task_id`, so
+                    # no task_id-keyed guard can suppress a re-dispatch of the
+                    # same logical task. What stops a duplicate is `plan()`'s
+                    # own state precondition (e.g. `_init_distributed_backend`
+                    # requires `isinstance(runner.status, RunnerIdle)`,
+                    # `_ready_to_warmup` requires RunnerLoaded), and that
+                    # status is only published asynchronously by the runner.
+                    #
+                    # `supervisor.start_task` returns after the runner
+                    # ACKNOWLEDGES, and every `handle_first_task` arm publishes
+                    # its new `RunnerStatusUpdated` BEFORE calling
+                    # `acknowledge_task` (Connecting before the ConnectToGroup
+                    # ack; WarmingUp before the StartWarmup ack). Blocking here
+                    # therefore orders the two: `plan_step` cannot re-enter
+                    # `plan()` until the guard status is already visible, so a
+                    # second lifecycle task for the same instance is
+                    # structurally impossible.
+                    #
+                    # Regression (2026-09-15, EXO_WORKER_PLAN_EVENT_WAKE=1):
+                    # lifecycle tasks previously took the non-blocking branch
+                    # too, so a state-apply wake could re-enter `plan()` inside
+                    # that window. `plan_step`'s own `TaskCreated` echo came
+                    # back through the master ~5ms later and re-planned while
+                    # the runner was still RunnerIdle, producing two
+                    # `ConnectToGroup` tasks ~5ms apart for the SAME instance
+                    # with DIFFERENT task_ids. The runner processed the first
+                    # (`RunnerIdle` -> connect -> `RunnerConnected`), then hit
+                    # the second with `RunnerConnected` already set, fell
+                    # through to the `case _:` arm and died with
+                    # `ValueError: Received ConnectToGroup outside of state
+                    # machine in self.current_status=RunnerConnected()` --
+                    # SIGKILL-free process death, RunnerFailed, teardown and
+                    # re-placement, i.e. the observed crash-loop.
+                    if _may_dispatch_non_blocking(task):
+                        self._tg.start_soon(self._start_runner_task, task)
+                    else:
+                        await self._start_runner_task(task)
 
     async def shutdown(self):
         self._tg.cancel_tasks()
