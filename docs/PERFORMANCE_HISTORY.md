@@ -2081,6 +2081,26 @@ number:
 13. **Establish a theoretical ceiling (roofline) before an open-ended
     optimization sweep**, so effort has a clear termination condition
     (this session, §4.3).
+14. **`mx.metal.gpu_time_ns()` summed over an UNSYNCHRONIZED CHAINED batch
+    of repeated calls to the SAME kernel is not a valid absolute TFLOPS/
+    bandwidth denominator** — it inflates apparent GPU time by ~1.8-1.9x
+    once the chain length exceeds Metal's command-buffer pipeline depth
+    (confirmed on both a large dense GEMM and the real production
+    `gather_qmm` kernel; not double-dispatch, not graph memoization —
+    dispatch counts and wall-clock-vs-N linearity both check out). This
+    is DIFFERENT from lesson #7 above (which is about DIFFERENT sequential
+    kernels hiding dispatch overhead behind each other in a pipeline —
+    that lesson is correct and this one does not contradict it). The
+    fix: use wall-clock timing (isolated-per-call, or chained-with-a-
+    single-mx.eval-at-the-end — both validated to agree with each other
+    and with isolated `gpu_time_ns()` to <1%) for any absolute per-call
+    throughput number; `gpu_time_ns()` is only trustworthy per-call when
+    read immediately after a per-call `mx.eval()`+`mx.synchronize()`, or
+    when comparing a RATIO between two conditions measured with the
+    identical (even if biased) chained method — P13/Lever-1 originally hit
+    this (§3.2, `docs/p14-switch-mlp-gap-decomposition-2026-09-15.md`);
+    P02D/P03/P08 were unaffected because they already used the
+    isolated-per-iteration pattern.
 
 ---
 
@@ -3570,6 +3590,37 @@ xctrace, runner PIDs unchanged (43724/10062, ~3h47m uptime) before and after.
   genuinely idle-cluster remeasurement (none available this session); real
   (non-uniform) production routing distribution untested; Xcode GUI limiter
   classification remains unreachable from this environment.
+
+> **FOLLOW-UP (2026-09-15, P14) — the 33-41% figure was substantially a
+> measurement artifact, not a real efficiency deficit; corrected figure is
+> ~59-64% of peak.** Full detail:
+> `docs/p14-switch-mlp-gap-decomposition-2026-09-15.md`. This session's own
+> `time_stage_chained()` helper (queue N unsynchronized independent calls,
+> `mx.eval()` once, divide accumulated `mx.metal.gpu_time_ns()` by N) inflates
+> apparent GPU time by **~1.8-1.9x** for repeated calls to the same kernel —
+> confirmed on both a large dense bf16 GEMM (the exact shape that produced
+> the 15.21 TFLOPS reference) and the real production `gather_qmm` kernel at
+> real prefill shape, and confirmed NOT double-dispatch or graph memoization
+> (dispatch_count/call and wall-clock-vs-N linearity both check out). A
+> byte-for-byte re-run of this doc's own scenario reproduces the original
+> 33.2-35.3%-of-peak figure under the original method and **58.6-63.7% under
+> corrected wall-clock timing, 3 independent runs, 1.80-1.92x inflation
+> ratio**. Direct isolated measurement of both named candidates: the
+> tile-boundary-cliff is real (1.43-1.57x at the M=32/33 boundary, confirmed
+> via single-GEMM isolated measurement) but contributes ≤2% in aggregate at
+> production's real per-expert row-count distribution (R=0.98-1.00,
+> corroborating Lever-1's own 2026-08-31 R=1.10-1.11x via an independent
+> method); the small-M-GEMM ceiling is the dominant real mechanism —
+> production's mean M≈48 mxfp4 GEMM sits at ~82-84% of the large-dense-GEMM
+> reference peak even under perfect tile alignment. Verdict: **physics/
+> framework floor for this model+hardware+chunk-size combination, not a
+> tuning gap** — closed-levers table unaffected (both entries strengthened,
+> not reopened). The methodology artifact itself is scoped to this doc's
+> `time_stage_chained`-style chained-`gpu_time_ns()` pattern (confirmed
+> present in `bench/p13_switch_mlp_subphase_capture.py` and
+> `bench/p01_switch_mlp_gputrace.py`'s `time_stage()`; confirmed ABSENT from
+> P02D/P03/P08's per-iteration isolated reset+eval+sync pattern) — a full
+> audit of every historical use was NOT performed, flagged as open in P14.
 
 ## 2026-08-24 — P4v2 M1 shadow gate: measured, verdict HOLD; incident recovery; cluster reverted to production
 

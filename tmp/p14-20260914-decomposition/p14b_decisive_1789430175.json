@@ -1,0 +1,23 @@
+{
+  "prefill_m": 2048,
+  "do_sort": true,
+  "original_p13_method": {
+    "gu_s": 0.04010692278,
+    "down_s": 0.017411777309999998,
+    "achieved_tflops": 5.3762975315529244,
+    "pct_of_peak": 35.34712381034138
+  },
+  "corrected_wall_chained": {
+    "gu_s": 0.021269507920369506,
+    "down_s": 0.010648400000063703,
+    "achieved_tflops": 9.688531155703728,
+    "pct_of_peak": 63.698429689044886
+  },
+  "corrected_wall_isolated": {
+    "gu_s": 0.022690583020448685,
+    "down_s": 0.011985457967966795,
+    "achieved_tflops": 8.917905173064874,
+    "pct_of_peak": 58.63185518122862
+  },
+  "artifact_inflation_ratio": 1.8020823994287443
+}

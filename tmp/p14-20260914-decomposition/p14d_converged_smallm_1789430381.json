@@ -1,0 +1,642 @@
+[
+  {
+    "shape": "fused_gate_up",
+    "M": 32,
+    "mxfp4": {
+      "M": 32,
+      "s_per_call": 4.54420566029512e-05,
+      "n_iters_used": 512,
+      "dtype": "mxfp4",
+      "achieved_tflops": 11.814406128025757,
+      "pct_of_measured_peak": 77.67525396466638
+    },
+    "bf16": {
+      "M": 32,
+      "s_per_call": 5.664168349994725e-05,
+      "n_iters_used": 512,
+      "dtype": "bf16",
+      "achieved_tflops": 9.478371383514757,
+      "pct_of_measured_peak": 62.31670863586296
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 64,
+    "mxfp4": {
+      "M": 64,
+      "s_per_call": 8.584993361182569e-05,
+      "n_iters_used": 256,
+      "dtype": "mxfp4",
+      "achieved_tflops": 12.507194575769523,
+      "pct_of_measured_peak": 82.23007610630849
+    },
+    "bf16": {
+      "M": 64,
+      "s_per_call": 0.00011086881636401813,
+      "n_iters_used": 256,
+      "dtype": "bf16",
+      "achieved_tflops": 9.684795591887251,
+      "pct_of_measured_peak": 63.673869769146954
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 96,
+    "mxfp4": {
+      "M": 96,
+      "s_per_call": 0.00012580436714415555,
+      "n_iters_used": 128,
+      "dtype": "mxfp4",
+      "achieved_tflops": 12.80251848613845,
+      "pct_of_measured_peak": 84.17171917250789
+    },
+    "bf16": {
+      "M": 96,
+      "s_per_call": 0.0001520703121968836,
+      "n_iters_used": 128,
+      "dtype": "bf16",
+      "achieved_tflops": 10.591237124013785,
+      "pct_of_measured_peak": 69.63338017103081
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 128,
+    "mxfp4": {
+      "M": 128,
+      "s_per_call": 0.00016494791407239973,
+      "n_iters_used": 128,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.01916220084733,
+      "pct_of_measured_peak": 85.59606969656363
+    },
+    "bf16": {
+      "M": 128,
+      "s_per_call": 0.00018682552354221116,
+      "n_iters_used": 128,
+      "dtype": "bf16",
+      "achieved_tflops": 11.49459456761431,
+      "pct_of_measured_peak": 75.57261385676732
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 160,
+    "mxfp4": {
+      "M": 160,
+      "s_per_call": 0.0001987678983823571,
+      "n_iters_used": 128,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.504970278632614,
+      "pct_of_measured_peak": 88.79007415274565
+    },
+    "bf16": {
+      "M": 160,
+      "s_per_call": 0.00020673925791925285,
+      "n_iters_used": 128,
+      "dtype": "bf16",
+      "achieved_tflops": 12.984251694704453,
+      "pct_of_measured_peak": 85.36654631626858
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 224,
+    "mxfp4": {
+      "M": 224,
+      "s_per_call": 0.0002843723905243678,
+      "n_iters_used": 64,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.21540525460389,
+      "pct_of_measured_peak": 86.88629358713932
+    },
+    "bf16": {
+      "M": 224,
+      "s_per_call": 0.0002795839845930459,
+      "n_iters_used": 64,
+      "dtype": "bf16",
+      "achieved_tflops": 13.441744130909976,
+      "pct_of_measured_peak": 88.37438613353041
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 256,
+    "mxfp4": {
+      "M": 256,
+      "s_per_call": 0.0003181953125022119,
+      "n_iters_used": 64,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.497896189058864,
+      "pct_of_measured_peak": 88.74356468809246
+    },
+    "bf16": {
+      "M": 256,
+      "s_per_call": 0.0003121100317002856,
+      "n_iters_used": 64,
+      "dtype": "bf16",
+      "achieved_tflops": 13.761067763833973,
+      "pct_of_measured_peak": 90.47381830265596
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 384,
+    "mxfp4": {
+      "M": 384,
+      "s_per_call": 0.00047811068725422956,
+      "n_iters_used": 32,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.474810573674343,
+      "pct_of_measured_peak": 88.59178549424288
+    },
+    "bf16": {
+      "M": 384,
+      "s_per_call": 0.00043030209326389013,
+      "n_iters_used": 64,
+      "dtype": "bf16",
+      "achieved_tflops": 14.971925642130346,
+      "pct_of_measured_peak": 98.43475109881884
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 512,
+    "mxfp4": {
+      "M": 512,
+      "s_per_call": 0.000637511717286543,
+      "n_iters_used": 32,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.474159547312404,
+      "pct_of_measured_peak": 88.58750524202763
+    },
+    "bf16": {
+      "M": 512,
+      "s_per_call": 0.0005743242181779351,
+      "n_iters_used": 32,
+      "dtype": "bf16",
+      "achieved_tflops": 14.956594759754145,
+      "pct_of_measured_peak": 98.33395634289379
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 768,
+    "mxfp4": {
+      "M": 768,
+      "s_per_call": 0.000953986935201101,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.506371431893724,
+      "pct_of_measured_peak": 88.7992862057444
+    },
+    "bf16": {
+      "M": 768,
+      "s_per_call": 0.0008579427176300669,
+      "n_iters_used": 32,
+      "dtype": "bf16",
+      "achieved_tflops": 15.018370834351895,
+      "pct_of_measured_peak": 98.74011067949964
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 1024,
+    "mxfp4": {
+      "M": 1024,
+      "s_per_call": 0.0012705573099083267,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.52152244532721,
+      "pct_of_measured_peak": 88.8988983913689
+    },
+    "bf16": {
+      "M": 1024,
+      "s_per_call": 0.001147075501648942,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 14.977104087136047,
+      "pct_of_measured_peak": 98.46879741706802
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 1536,
+    "mxfp4": {
+      "M": 1536,
+      "s_per_call": 0.001898195314424811,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.575949524355842,
+      "pct_of_measured_peak": 89.25673586032768
+    },
+    "bf16": {
+      "M": 1536,
+      "s_per_call": 0.0017140338131866883,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.034594754049472,
+      "pct_of_measured_peak": 98.84677681820823
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 2048,
+    "mxfp4": {
+      "M": 2048,
+      "s_per_call": 0.002532624999730615,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.566847982490383,
+      "pct_of_measured_peak": 89.19689666331612
+    },
+    "bf16": {
+      "M": 2048,
+      "s_per_call": 0.0022747291877749376,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.104979771947939,
+      "pct_of_measured_peak": 99.3095317024848
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 4096,
+    "mxfp4": {
+      "M": 4096,
+      "s_per_call": 0.005044799498136854,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.621844983409051,
+      "pct_of_measured_peak": 89.5584811532482
+    },
+    "bf16": {
+      "M": 4096,
+      "s_per_call": 0.004562638001516461,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.061347561029399,
+      "pct_of_measured_peak": 99.02266641044969
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 8192,
+    "mxfp4": {
+      "M": 8192,
+      "s_per_call": 0.010085424437420443,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.627483337444236,
+      "pct_of_measured_peak": 89.59555119950188
+    },
+    "bf16": {
+      "M": 8192,
+      "s_per_call": 0.009082794251298765,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.131792009088764,
+      "pct_of_measured_peak": 99.48581202556716
+    }
+  },
+  {
+    "shape": "fused_gate_up",
+    "M": 16384,
+    "mxfp4": {
+      "M": 16384,
+      "s_per_call": 0.02017502606031485,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.62466180327255,
+      "pct_of_measured_peak": 89.57700067897797
+    },
+    "bf16": {
+      "M": 16384,
+      "s_per_call": 0.018206380187621107,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.097888987888714,
+      "pct_of_measured_peak": 99.26291247790081
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 32,
+    "mxfp4": {
+      "M": 32,
+      "s_per_call": 2.6600300770951435e-05,
+      "n_iters_used": 1024,
+      "dtype": "mxfp4",
+      "achieved_tflops": 10.09144439047629,
+      "pct_of_measured_peak": 66.34743189004793
+    },
+    "bf16": {
+      "M": 32,
+      "s_per_call": 3.6230548857929534e-05,
+      "n_iters_used": 512,
+      "dtype": "bf16",
+      "achieved_tflops": 7.409091621896568,
+      "pct_of_measured_peak": 48.7119764753226
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 64,
+    "mxfp4": {
+      "M": 64,
+      "s_per_call": 4.5002767592450255e-05,
+      "n_iters_used": 512,
+      "dtype": "mxfp4",
+      "achieved_tflops": 11.929731008145072,
+      "pct_of_measured_peak": 78.43347145394524
+    },
+    "bf16": {
+      "M": 64,
+      "s_per_call": 3.633194921803806e-05,
+      "n_iters_used": 512,
+      "dtype": "bf16",
+      "achieved_tflops": 14.77682655499955,
+      "pct_of_measured_peak": 97.15204835634155
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 96,
+    "mxfp4": {
+      "M": 96,
+      "s_per_call": 6.062923034733103e-05,
+      "n_iters_used": 256,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.282477171268438,
+      "pct_of_measured_peak": 87.32726608329018
+    },
+    "bf16": {
+      "M": 96,
+      "s_per_call": 7.214127731458575e-05,
+      "n_iters_used": 256,
+      "dtype": "bf16",
+      "achieved_tflops": 11.162906978875748,
+      "pct_of_measured_peak": 73.39189335224029
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 128,
+    "mxfp4": {
+      "M": 128,
+      "s_per_call": 8.072851574070228e-05,
+      "n_iters_used": 256,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.300651128639952,
+      "pct_of_measured_peak": 87.44675298251119
+    },
+    "bf16": {
+      "M": 128,
+      "s_per_call": 7.237321096909e-05,
+      "n_iters_used": 256,
+      "dtype": "bf16",
+      "achieved_tflops": 14.836177773825543,
+      "pct_of_measured_peak": 97.54226018294241
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 160,
+    "mxfp4": {
+      "M": 160,
+      "s_per_call": 0.00010058821476377489,
+      "n_iters_used": 256,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.343285623987057,
+      "pct_of_measured_peak": 87.72705867184126
+    },
+    "bf16": {
+      "M": 160,
+      "s_per_call": 0.00010754638674370653,
+      "n_iters_used": 256,
+      "dtype": "bf16",
+      "achieved_tflops": 12.47998487572194,
+      "pct_of_measured_peak": 82.0511826148714
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 224,
+    "mxfp4": {
+      "M": 224,
+      "s_per_call": 0.00014097558550929534,
+      "n_iters_used": 128,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.328890851643978,
+      "pct_of_measured_peak": 87.63241848549623
+    },
+    "bf16": {
+      "M": 224,
+      "s_per_call": 0.00014411328129426693,
+      "n_iters_used": 128,
+      "dtype": "bf16",
+      "achieved_tflops": 13.038688558920155,
+      "pct_of_measured_peak": 85.72444811913317
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 256,
+    "mxfp4": {
+      "M": 256,
+      "s_per_call": 0.00016020051543819136,
+      "n_iters_used": 128,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.404973399280623,
+      "pct_of_measured_peak": 88.13263247390285
+    },
+    "bf16": {
+      "M": 256,
+      "s_per_call": 0.00014435807815971202,
+      "n_iters_used": 128,
+      "dtype": "bf16",
+      "achieved_tflops": 14.876089203848432,
+      "pct_of_measured_peak": 97.80466274719547
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 384,
+    "mxfp4": {
+      "M": 384,
+      "s_per_call": 0.00024045573445619084,
+      "n_iters_used": 64,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.396334586426269,
+      "pct_of_measured_peak": 88.07583554520886
+    },
+    "bf16": {
+      "M": 384,
+      "s_per_call": 0.00021642089859597036,
+      "n_iters_used": 128,
+      "dtype": "bf16",
+      "achieved_tflops": 14.884077706440028,
+      "pct_of_measured_peak": 97.8571841317556
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 512,
+    "mxfp4": {
+      "M": 512,
+      "s_per_call": 0.00031896354721538955,
+      "n_iters_used": 64,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.465386040178744,
+      "pct_of_measured_peak": 88.52982274936714
+    },
+    "bf16": {
+      "M": 512,
+      "s_per_call": 0.0002884908753912896,
+      "n_iters_used": 64,
+      "dtype": "bf16",
+      "achieved_tflops": 14.887705859586012,
+      "pct_of_measured_peak": 97.88103786710066
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 768,
+    "mxfp4": {
+      "M": 768,
+      "s_per_call": 0.00048011456419772003,
+      "n_iters_used": 32,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.418570117249931,
+      "pct_of_measured_peak": 88.22202575443741
+    },
+    "bf16": {
+      "M": 768,
+      "s_per_call": 0.000430605468864087,
+      "n_iters_used": 64,
+      "dtype": "bf16",
+      "achieved_tflops": 14.961377432095377,
+      "pct_of_measured_peak": 98.36540060549228
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 1024,
+    "mxfp4": {
+      "M": 1024,
+      "s_per_call": 0.0006359648432407994,
+      "n_iters_used": 32,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.506933100620373,
+      "pct_of_measured_peak": 88.80297896528843
+    },
+    "bf16": {
+      "M": 1024,
+      "s_per_call": 0.0005748229050368536,
+      "n_iters_used": 32,
+      "dtype": "bf16",
+      "achieved_tflops": 14.943619185545979,
+      "pct_of_measured_peak": 98.24864684777106
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 1536,
+    "mxfp4": {
+      "M": 1536,
+      "s_per_call": 0.0009901276243908796,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.013374812087191,
+      "pct_of_measured_peak": 85.55801980333459
+    },
+    "bf16": {
+      "M": 1536,
+      "s_per_call": 0.0008602356883784523,
+      "n_iters_used": 32,
+      "dtype": "bf16",
+      "achieved_tflops": 14.978339148295616,
+      "pct_of_measured_peak": 98.47691747728872
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 2048,
+    "mxfp4": {
+      "M": 2048,
+      "s_per_call": 0.0013248333125375211,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 12.96757035124254,
+      "pct_of_measured_peak": 85.25687278923431
+    },
+    "bf16": {
+      "M": 2048,
+      "s_per_call": 0.0011506276241561864,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 14.930868009186613,
+      "pct_of_measured_peak": 98.16481268367266
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 4096,
+    "mxfp4": {
+      "M": 4096,
+      "s_per_call": 0.0025758411866263486,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.339230130488717,
+      "pct_of_measured_peak": 87.70039533523153
+    },
+    "bf16": {
+      "M": 4096,
+      "s_per_call": 0.0022884948120918125,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.014121153542522,
+      "pct_of_measured_peak": 98.71217063473058
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 8192,
+    "mxfp4": {
+      "M": 8192,
+      "s_per_call": 0.0051206614371039905,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.42003910628869,
+      "pct_of_measured_peak": 88.23168380202952
+    },
+    "bf16": {
+      "M": 8192,
+      "s_per_call": 0.004568768250464927,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.041138654604982,
+      "pct_of_measured_peak": 98.88980049049955
+    }
+  },
+  {
+    "shape": "down_proj",
+    "M": 16384,
+    "mxfp4": {
+      "M": 16384,
+      "s_per_call": 0.010157958375202725,
+      "n_iters_used": 16,
+      "dtype": "mxfp4",
+      "achieved_tflops": 13.530174902814277,
+      "pct_of_measured_peak": 88.95578502836474
+    },
+    "bf16": {
+      "M": 16384,
+      "s_per_call": 0.009135588563367492,
+      "n_iters_used": 16,
+      "dtype": "bf16",
+      "achieved_tflops": 15.044345804178631,
+      "pct_of_measured_peak": 98.91088628651302
+    }
+  }
+]

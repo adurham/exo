@@ -1,0 +1,242 @@
+[
+  {
+    "shape": "fused_gate_up",
+    "on_M": 32,
+    "past_M": 33,
+    "on": {
+      "M": 32,
+      "s_per_call": 5.906646008952521e-05,
+      "achieved_tflops": 9.089268447546736,
+      "pct_of_measured_peak": 59.75850392864389,
+      "us_per_row": 1.8458268777976627
+    },
+    "past": {
+      "M": 33,
+      "s_per_call": 8.858385495841503e-05,
+      "achieved_tflops": 6.2499891008345205,
+      "pct_of_measured_peak": 41.0913155873407,
+      "us_per_row": 2.684359241164092
+    },
+    "cliff_us_per_row": 1.4542854876871871
+  },
+  {
+    "shape": "fused_gate_up",
+    "on_M": 64,
+    "past_M": 65,
+    "on": {
+      "M": 64,
+      "s_per_call": 8.598781249020249e-05,
+      "achieved_tflops": 12.48713966438375,
+      "pct_of_measured_peak": 82.09822264552103,
+      "us_per_row": 1.3435595701594139
+    },
+    "past": {
+      "M": 65,
+      "s_per_call": 0.00012498791751568204,
+      "achieved_tflops": 8.72499567698753,
+      "pct_of_measured_peak": 57.363548172173104,
+      "us_per_row": 1.9228910387028006
+    },
+    "cliff_us_per_row": 1.4311915015979895
+  },
+  {
+    "shape": "fused_gate_up",
+    "on_M": 96,
+    "past_M": 97,
+    "on": {
+      "M": 96,
+      "s_per_call": 0.00012588510508066976,
+      "achieved_tflops": 12.794307435878823,
+      "pct_of_measured_peak": 84.11773462116253,
+      "us_per_row": 1.3113031779236433
+    },
+    "past": {
+      "M": 97,
+      "s_per_call": 0.0001651973949628882,
+      "achieved_tflops": 9.851184108354706,
+      "pct_of_measured_peak": 64.76781136327881,
+      "us_per_row": 1.7030659274524558
+    },
+    "cliff_us_per_row": 1.2987583315012943
+  },
+  {
+    "shape": "fused_gate_up",
+    "on_M": 128,
+    "past_M": 129,
+    "on": {
+      "M": 128,
+      "s_per_call": 0.00016479843747220003,
+      "achieved_tflops": 13.030970929941375,
+      "pct_of_measured_peak": 85.67370762617603,
+      "us_per_row": 1.2874877927515627
+    },
+    "past": {
+      "M": 129,
+      "s_per_call": 0.00019816479252767749,
+      "achieved_tflops": 10.921520601081143,
+      "pct_of_measured_peak": 71.80486917213112,
+      "us_per_row": 1.536161182385097
+    },
+    "cliff_us_per_row": 1.193146211586271
+  },
+  {
+    "shape": "fused_gate_up",
+    "on_M": 160,
+    "past_M": 161,
+    "on": {
+      "M": 160,
+      "s_per_call": 0.00019926333261537365,
+      "achieved_tflops": 13.471392477317703,
+      "pct_of_measured_peak": 88.56931280287773,
+      "us_per_row": 1.2453958288460854
+    },
+    "past": {
+      "M": 161,
+      "s_per_call": 0.0002393636474153027,
+      "achieved_tflops": 11.284636598612071,
+      "pct_of_measured_peak": 74.19221958324832,
+      "us_per_row": 1.4867307292875944
+    },
+    "cliff_us_per_row": 1.1937816835833766
+  },
+  {
+    "shape": "fused_gate_up",
+    "on_M": 256,
+    "past_M": 257,
+    "on": {
+      "M": 256,
+      "s_per_call": 0.00031548396000289356,
+      "achieved_tflops": 13.613900674888852,
+      "pct_of_measured_peak": 89.50625032800033,
+      "us_per_row": 1.232359218761303
+    },
+    "past": {
+      "M": 257,
+      "s_per_call": 0.0003549232298973948,
+      "achieved_tflops": 12.148386323562105,
+      "pct_of_measured_peak": 79.87104749219004,
+      "us_per_row": 1.3810242408458941
+    },
+    "cliff_us_per_row": 1.1206344869428742
+  },
+  {
+    "shape": "down_proj",
+    "on_M": 32,
+    "past_M": 33,
+    "on": {
+      "M": 32,
+      "s_per_call": 2.6986042503267526e-05,
+      "achieved_tflops": 9.947196072469584,
+      "pct_of_measured_peak": 65.39905373089798,
+      "us_per_row": 0.8433138282271102
+    },
+    "past": {
+      "M": 33,
+      "s_per_call": 4.364573003840633e-05,
+      "achieved_tflops": 6.342523398197418,
+      "pct_of_measured_peak": 41.6996936107654,
+      "us_per_row": 1.3225978799517069
+    },
+    "cliff_us_per_row": 1.5683341547146101
+  },
+  {
+    "shape": "down_proj",
+    "on_M": 64,
+    "past_M": 65,
+    "on": {
+      "M": 64,
+      "s_per_call": 4.5550209906650705e-05,
+      "achieved_tflops": 11.786354291237028,
+      "pct_of_measured_peak": 77.49082374251827,
+      "us_per_row": 0.7117220297914173
+    },
+    "past": {
+      "M": 65,
+      "s_per_call": 6.020645989337936e-05,
+      "achieved_tflops": 9.056495282493097,
+      "pct_of_measured_peak": 59.54303275800853,
+      "us_per_row": 0.9262532291289133
+    },
+    "cliff_us_per_row": 1.3014255430597927
+  },
+  {
+    "shape": "down_proj",
+    "on_M": 96,
+    "past_M": 97,
+    "on": {
+      "M": 96,
+      "s_per_call": 6.0321979981381445e-05,
+      "achieved_tflops": 13.350131548211118,
+      "pct_of_measured_peak": 87.77206803557605,
+      "us_per_row": 0.6283539581393901
+    },
+    "past": {
+      "M": 97,
+      "s_per_call": 8.011260491912253e-05,
+      "achieved_tflops": 10.156890751729565,
+      "pct_of_measured_peak": 66.77771697389588,
+      "us_per_row": 0.8259031434961086
+    },
+    "cliff_us_per_row": 1.314391566724078
+  },
+  {
+    "shape": "down_proj",
+    "on_M": 128,
+    "past_M": 129,
+    "on": {
+      "M": 128,
+      "s_per_call": 7.993656254257075e-05,
+      "achieved_tflops": 13.432424285547324,
+      "pct_of_measured_peak": 88.31311167355243,
+      "us_per_row": 0.624504394863834
+    },
+    "past": {
+      "M": 129,
+      "s_per_call": 9.97198949335143e-05,
+      "achieved_tflops": 10.851700482852323,
+      "pct_of_measured_peak": 71.34582828962736,
+      "us_per_row": 0.773022441345072
+    },
+    "cliff_us_per_row": 1.2378174560542854
+  },
+  {
+    "shape": "down_proj",
+    "on_M": 160,
+    "past_M": 161,
+    "on": {
+      "M": 160,
+      "s_per_call": 9.962843745597638e-05,
+      "achieved_tflops": 13.47182907082206,
+      "pct_of_measured_peak": 88.57218324011875,
+      "us_per_row": 0.6226777340998524
+    },
+    "past": {
+      "M": 161,
+      "s_per_call": 0.00012058906257152558,
+      "achieved_tflops": 11.199737846862623,
+      "pct_of_measured_peak": 73.63404238568457,
+      "us_per_row": 0.749000388643016
+    },
+    "cliff_us_per_row": 1.2028700363371376
+  },
+  {
+    "shape": "down_proj",
+    "on_M": 256,
+    "past_M": 257,
+    "on": {
+      "M": 256,
+      "s_per_call": 0.00015881447994615884,
+      "achieved_tflops": 13.521963795291452,
+      "pct_of_measured_peak": 88.90180010053551,
+      "us_per_row": 0.6203690622896829
+    },
+    "past": {
+      "M": 257,
+      "s_per_call": 0.00017962479250854813,
+      "achieved_tflops": 12.002086270454033,
+      "pct_of_measured_peak": 78.90917995038811,
+      "us_per_row": 0.6989291537297593
+    },
+    "cliff_us_per_row": 1.126634444261491
+  }
+]

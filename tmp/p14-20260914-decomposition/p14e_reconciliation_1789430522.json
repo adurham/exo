@@ -1,0 +1,593 @@
+{
+  "row_count_stats": {
+    "mean": 48.0,
+    "std": 7.337830060719586,
+    "min": 23,
+    "max": 69,
+    "n_experts_used": 256
+  },
+  "fine_curves": {
+    "fused_gate_up": {
+      "23": {
+        "M": 23,
+        "s_per_call": 4.6707031287951395e-05,
+        "achieved_tflops": 8.261624799509384,
+        "pct_of_measured_peak": 54.317059825834214
+      },
+      "24": {
+        "M": 24,
+        "s_per_call": 4.6228435508055554e-05,
+        "achieved_tflops": 8.710075942973141,
+        "pct_of_measured_peak": 57.265456561296126
+      },
+      "25": {
+        "M": 25,
+        "s_per_call": 4.598054886173486e-05,
+        "achieved_tflops": 9.121909380882819,
+        "pct_of_measured_peak": 59.973105725725304
+      },
+      "26": {
+        "M": 26,
+        "s_per_call": 4.6251300773292314e-05,
+        "achieved_tflops": 9.431250769316456,
+        "pct_of_measured_peak": 62.00690841102207
+      },
+      "27": {
+        "M": 27,
+        "s_per_call": 4.652791403714218e-05,
+        "achieved_tflops": 9.735764892412593,
+        "pct_of_measured_peak": 64.00897365162783
+      },
+      "28": {
+        "M": 28,
+        "s_per_call": 4.756900978009071e-05,
+        "achieved_tflops": 9.875380004160016,
+        "pct_of_measured_peak": 64.92689023116381
+      },
+      "29": {
+        "M": 29,
+        "s_per_call": 4.80508633700083e-05,
+        "achieved_tflops": 10.125505139282911,
+        "pct_of_measured_peak": 66.57136843709999
+      },
+      "30": {
+        "M": 30,
+        "s_per_call": 4.912084955321916e-05,
+        "achieved_tflops": 10.24649379190175,
+        "pct_of_measured_peak": 67.36682308942636
+      },
+      "31": {
+        "M": 31,
+        "s_per_call": 4.651790425214131e-05,
+        "achieved_tflops": 11.18050575066608,
+        "pct_of_measured_peak": 73.50759862370862
+      },
+      "32": {
+        "M": 32,
+        "s_per_call": 4.5394207063509384e-05,
+        "achieved_tflops": 11.82685956489742,
+        "pct_of_measured_peak": 77.75713060419079
+      },
+      "33": {
+        "M": 33,
+        "s_per_call": 8.844010153552517e-05,
+        "achieved_tflops": 6.260148036777267,
+        "pct_of_measured_peak": 41.15810675067236
+      },
+      "34": {
+        "M": 34,
+        "s_per_call": 8.811035172584525e-05,
+        "achieved_tflops": 6.473987821259351,
+        "pct_of_measured_peak": 42.56402249348686
+      },
+      "35": {
+        "M": 35,
+        "s_per_call": 8.828808586258674e-05,
+        "achieved_tflops": 6.650983020675443,
+        "pct_of_measured_peak": 43.727699018247485
+      },
+      "36": {
+        "M": 36,
+        "s_per_call": 8.839843758323696e-05,
+        "achieved_tflops": 6.832471167052991,
+        "pct_of_measured_peak": 44.920914970762595
+      },
+      "37": {
+        "M": 37,
+        "s_per_call": 8.902539047994651e-05,
+        "achieved_tflops": 6.972808416266696,
+        "pct_of_measured_peak": 45.84357933114199
+      },
+      "38": {
+        "M": 38,
+        "s_per_call": 8.898323426365096e-05,
+        "achieved_tflops": 7.1646553789114,
+        "pct_of_measured_peak": 47.10490058455884
+      },
+      "39": {
+        "M": 39,
+        "s_per_call": 8.91531560682779e-05,
+        "achieved_tflops": 7.33918408338675,
+        "pct_of_measured_peak": 48.252360837519724
+      },
+      "40": {
+        "M": 40,
+        "s_per_call": 8.90919570792903e-05,
+        "achieved_tflops": 7.5325389855645755,
+        "pct_of_measured_peak": 49.52359622330424
+      },
+      "41": {
+        "M": 41,
+        "s_per_call": 9.01622734090779e-05,
+        "achieved_tflops": 7.629198222177292,
+        "pct_of_measured_peak": 50.15909416290133
+      },
+      "42": {
+        "M": 42,
+        "s_per_call": 9.00141601505311e-05,
+        "achieved_tflops": 7.8281358268701515,
+        "pct_of_measured_peak": 51.46703370723308
+      },
+      "43": {
+        "M": 43,
+        "s_per_call": 8.975797663879348e-05,
+        "achieved_tflops": 8.037394725408744,
+        "pct_of_measured_peak": 52.84283185673072
+      },
+      "44": {
+        "M": 44,
+        "s_per_call": 9.006608206618694e-05,
+        "achieved_tflops": 8.196176485810943,
+        "pct_of_measured_peak": 53.886761905397385
+      },
+      "45": {
+        "M": 45,
+        "s_per_call": 9.01015623639978e-05,
+        "achieved_tflops": 8.379152371964507,
+        "pct_of_measured_peak": 55.08975918451352
+      },
+      "46": {
+        "M": 46,
+        "s_per_call": 9.082779683922126e-05,
+        "achieved_tflops": 8.496869492123825,
+        "pct_of_measured_peak": 55.86370474769116
+      },
+      "47": {
+        "M": 47,
+        "s_per_call": 9.154492204288545e-05,
+        "achieved_tflops": 8.613576093610119,
+        "pct_of_measured_peak": 56.631006532610904
+      },
+      "48": {
+        "M": 48,
+        "s_per_call": 8.938232417676772e-05,
+        "achieved_tflops": 9.009682567745484,
+        "pct_of_measured_peak": 59.23525685565736
+      },
+      "49": {
+        "M": 49,
+        "s_per_call": 9.055224609255674e-05,
+        "achieved_tflops": 9.078555413851563,
+        "pct_of_measured_peak": 59.68806978206155
+      },
+      "50": {
+        "M": 50,
+        "s_per_call": 8.865739073371515e-05,
+        "achieved_tflops": 9.461825946576084,
+        "pct_of_measured_peak": 62.20792864284079
+      },
+      "51": {
+        "M": 51,
+        "s_per_call": 8.748128516344877e-05,
+        "achieved_tflops": 9.780812140577705,
+        "pct_of_measured_peak": 64.30514227861738
+      },
+      "52": {
+        "M": 52,
+        "s_per_call": 8.705842969902733e-05,
+        "achieved_tflops": 10.021031105385848,
+        "pct_of_measured_peak": 65.88449115967026
+      },
+      "53": {
+        "M": 53,
+        "s_per_call": 8.70838202899904e-05,
+        "achieved_tflops": 10.210765272343084,
+        "pct_of_measured_peak": 67.13192158016491
+      },
+      "54": {
+        "M": 54,
+        "s_per_call": 8.710383985999215e-05,
+        "achieved_tflops": 10.401030143518655,
+        "pct_of_measured_peak": 68.38284118026728
+      },
+      "55": {
+        "M": 55,
+        "s_per_call": 8.687369540893997e-05,
+        "achieved_tflops": 10.621706324985484,
+        "pct_of_measured_peak": 69.83370364881975
+      },
+      "56": {
+        "M": 56,
+        "s_per_call": 8.651953135085932e-05,
+        "achieved_tflops": 10.859098302208597,
+        "pct_of_measured_peak": 71.3944661552176
+      },
+      "57": {
+        "M": 57,
+        "s_per_call": 8.730029298931186e-05,
+        "achieved_tflops": 10.954159250268262,
+        "pct_of_measured_peak": 72.01945595179659
+      },
+      "58": {
+        "M": 58,
+        "s_per_call": 8.674479295223136e-05,
+        "achieved_tflops": 11.217716878243689,
+        "pct_of_measured_peak": 73.75224772020835
+      },
+      "59": {
+        "M": 59,
+        "s_per_call": 8.742317982068926e-05,
+        "achieved_tflops": 11.322577673681739,
+        "pct_of_measured_peak": 74.44166780855844
+      },
+      "60": {
+        "M": 60,
+        "s_per_call": 8.673649222146196e-05,
+        "achieved_tflops": 11.605645262086355,
+        "pct_of_measured_peak": 76.30273019123179
+      },
+      "61": {
+        "M": 61,
+        "s_per_call": 8.739127724766149e-05,
+        "achieved_tflops": 11.710667336966809,
+        "pct_of_measured_peak": 76.99321063094548
+      },
+      "62": {
+        "M": 62,
+        "s_per_call": 8.694059374647622e-05,
+        "achieved_tflops": 11.964346540273768,
+        "pct_of_measured_peak": 78.66105549160926
+      },
+      "63": {
+        "M": 63,
+        "s_per_call": 8.757942964621179e-05,
+        "achieved_tflops": 12.068640002221326,
+        "pct_of_measured_peak": 79.34674557673455
+      },
+      "64": {
+        "M": 64,
+        "s_per_call": 8.61404610077443e-05,
+        "achieved_tflops": 12.46501134819173,
+        "pct_of_measured_peak": 81.95273733196403
+      },
+      "65": {
+        "M": 65,
+        "s_per_call": 0.0001242267226189142,
+        "achieved_tflops": 8.77845778275376,
+        "pct_of_measured_peak": 57.71504130673083
+      },
+      "66": {
+        "M": 66,
+        "s_per_call": 0.00012681428893301927,
+        "achieved_tflops": 8.731636358303845,
+        "pct_of_measured_peak": 57.40720814137965
+      },
+      "67": {
+        "M": 67,
+        "s_per_call": 0.0001244274101281917,
+        "achieved_tflops": 9.033969853120949,
+        "pct_of_measured_peak": 59.39493657541715
+      },
+      "68": {
+        "M": 68,
+        "s_per_call": 0.0001245768241915357,
+        "achieved_tflops": 9.157808407813903,
+        "pct_of_measured_peak": 60.20912825650166
+      },
+      "69": {
+        "M": 69,
+        "s_per_call": 0.00012430712899913487,
+        "achieved_tflops": 9.31264291373069,
+        "pct_of_measured_peak": 61.22710659914983
+      }
+    },
+    "down_proj": {
+      "23": {
+        "M": 23,
+        "s_per_call": 2.6343261708916543e-05,
+        "achieved_tflops": 7.323997541834209,
+        "pct_of_measured_peak": 48.15251506794351
+      },
+      "24": {
+        "M": 24,
+        "s_per_call": 2.663684085746354e-05,
+        "achieved_tflops": 7.558200804566848,
+        "pct_of_measured_peak": 49.69231298203056
+      },
+      "25": {
+        "M": 25,
+        "s_per_call": 2.6660196283501136e-05,
+        "achieved_tflops": 7.866228656755383,
+        "pct_of_measured_peak": 51.71747966308601
+      },
+      "26": {
+        "M": 26,
+        "s_per_call": 2.6754556643027172e-05,
+        "achieved_tflops": 8.15202475264499,
+        "pct_of_measured_peak": 53.59648095098613
+      },
+      "27": {
+        "M": 27,
+        "s_per_call": 2.6850259757793538e-05,
+        "achieved_tflops": 8.435390124457118,
+        "pct_of_measured_peak": 55.459501146989595
+      },
+      "28": {
+        "M": 28,
+        "s_per_call": 2.709086129470961e-05,
+        "achieved_tflops": 8.670120209351493,
+        "pct_of_measured_peak": 57.00276271762981
+      },
+      "29": {
+        "M": 29,
+        "s_per_call": 2.7083292991392227e-05,
+        "achieved_tflops": 8.982276714922273,
+        "pct_of_measured_peak": 59.05507373387424
+      },
+      "30": {
+        "M": 30,
+        "s_per_call": 2.7216755881909194e-05,
+        "achieved_tflops": 9.246445134457618,
+        "pct_of_measured_peak": 60.791881225888346
+      },
+      "31": {
+        "M": 31,
+        "s_per_call": 2.7242268515692558e-05,
+        "achieved_tflops": 9.54571194576558,
+        "pct_of_measured_peak": 62.75944737518462
+      },
+      "32": {
+        "M": 32,
+        "s_per_call": 2.6993082030912774e-05,
+        "achieved_tflops": 9.944601942549012,
+        "pct_of_measured_peak": 65.38199830735708
+      },
+      "33": {
+        "M": 33,
+        "s_per_call": 4.430875583238958e-05,
+        "achieved_tflops": 6.2476153708121585,
+        "pct_of_measured_peak": 41.07570920981038
+      },
+      "34": {
+        "M": 34,
+        "s_per_call": 4.363956645647704e-05,
+        "achieved_tflops": 6.535644030388124,
+        "pct_of_measured_peak": 42.96938875994821
+      },
+      "35": {
+        "M": 35,
+        "s_per_call": 4.421240225838119e-05,
+        "achieved_tflops": 6.640699554938638,
+        "pct_of_measured_peak": 43.66008911859722
+      },
+      "36": {
+        "M": 36,
+        "s_per_call": 4.515104092206457e-05,
+        "achieved_tflops": 6.688436896089865,
+        "pct_of_measured_peak": 43.97394409000569
+      },
+      "37": {
+        "M": 37,
+        "s_per_call": 4.49343261834656e-05,
+        "achieved_tflops": 6.907380667793554,
+        "pct_of_measured_peak": 45.413416619287005
+      },
+      "38": {
+        "M": 38,
+        "s_per_call": 4.402840227157867e-05,
+        "achieved_tflops": 7.240033422829231,
+        "pct_of_measured_peak": 47.600482727345366
+      },
+      "39": {
+        "M": 39,
+        "s_per_call": 4.4567056534106086e-05,
+        "achieved_tflops": 7.340752058634065,
+        "pct_of_measured_peak": 48.26266968201226
+      },
+      "40": {
+        "M": 40,
+        "s_per_call": 4.4857910211248964e-05,
+        "achieved_tflops": 7.480159428288658,
+        "pct_of_measured_peak": 49.17922043582287
+      },
+      "41": {
+        "M": 41,
+        "s_per_call": 4.4106119162279356e-05,
+        "achieved_tflops": 7.797850605140974,
+        "pct_of_measured_peak": 51.26791982341206
+      },
+      "42": {
+        "M": 42,
+        "s_per_call": 4.4674072341877036e-05,
+        "achieved_tflops": 7.886488012639431,
+        "pct_of_measured_peak": 51.85067726916128
+      },
+      "43": {
+        "M": 43,
+        "s_per_call": 4.39316406755097e-05,
+        "achieved_tflops": 8.210714156211399,
+        "pct_of_measured_peak": 53.98234159244838
+      },
+      "44": {
+        "M": 44,
+        "s_per_call": 4.41984042254262e-05,
+        "achieved_tflops": 8.350951996309112,
+        "pct_of_measured_peak": 54.90435237547082
+      },
+      "45": {
+        "M": 45,
+        "s_per_call": 4.45668124484655e-05,
+        "achieved_tflops": 8.470144918632103,
+        "pct_of_measured_peak": 55.68800077996122
+      },
+      "46": {
+        "M": 46,
+        "s_per_call": 4.433398430592206e-05,
+        "achieved_tflops": 8.703841399349603,
+        "pct_of_measured_peak": 57.22446679388299
+      },
+      "47": {
+        "M": 47,
+        "s_per_call": 4.477555273751932e-05,
+        "achieved_tflops": 8.80535363373927,
+        "pct_of_measured_peak": 57.89187135923254
+      },
+      "48": {
+        "M": 48,
+        "s_per_call": 4.4534015614772215e-05,
+        "achieved_tflops": 9.04147489153072,
+        "pct_of_measured_peak": 59.44427936575095
+      },
+      "49": {
+        "M": 49,
+        "s_per_call": 4.581494147259946e-05,
+        "achieved_tflops": 8.971784723239946,
+        "pct_of_measured_peak": 58.98609285496348
+      },
+      "50": {
+        "M": 50,
+        "s_per_call": 4.47251796913406e-05,
+        "achieved_tflops": 9.37794778902157,
+        "pct_of_measured_peak": 61.65646146628251
+      },
+      "51": {
+        "M": 51,
+        "s_per_call": 4.460644538539782e-05,
+        "achieved_tflops": 9.590968397137717,
+        "pct_of_measured_peak": 63.056991434173014
+      },
+      "52": {
+        "M": 52,
+        "s_per_call": 4.493115227433009e-05,
+        "achieved_tflops": 9.70835587159452,
+        "pct_of_measured_peak": 63.828769701476126
+      },
+      "53": {
+        "M": 53,
+        "s_per_call": 4.487703517952468e-05,
+        "achieved_tflops": 9.906987442941611,
+        "pct_of_measured_peak": 65.13469719225253
+      },
+      "54": {
+        "M": 54,
+        "s_per_call": 4.503548245793354e-05,
+        "achieved_tflops": 10.05839856213645,
+        "pct_of_measured_peak": 66.13016806138361
+      },
+      "55": {
+        "M": 55,
+        "s_per_call": 4.4770507770408585e-05,
+        "achieved_tflops": 10.30529835323754,
+        "pct_of_measured_peak": 67.75344084968796
+      },
+      "56": {
+        "M": 56,
+        "s_per_call": 4.5646892544937145e-05,
+        "achieved_tflops": 10.291216374423344,
+        "pct_of_measured_peak": 67.66085716254663
+      },
+      "57": {
+        "M": 57,
+        "s_per_call": 4.576757805807574e-05,
+        "achieved_tflops": 10.44736637348958,
+        "pct_of_measured_peak": 68.6874843753424
+      },
+      "58": {
+        "M": 58,
+        "s_per_call": 4.553320309241826e-05,
+        "achieved_tflops": 10.685373111407875,
+        "pct_of_measured_peak": 70.25228870090648
+      },
+      "59": {
+        "M": 59,
+        "s_per_call": 4.544213868484803e-05,
+        "achieved_tflops": 10.89138597618483,
+        "pct_of_measured_peak": 71.60674540555443
+      },
+      "60": {
+        "M": 60,
+        "s_per_call": 4.5604492243001005e-05,
+        "achieved_tflops": 11.036554848985185,
+        "pct_of_measured_peak": 72.56117586446538
+      },
+      "61": {
+        "M": 61,
+        "s_per_call": 4.552254290501878e-05,
+        "achieved_tflops": 11.240696484545143,
+        "pct_of_measured_peak": 73.9033299444125
+      },
+      "62": {
+        "M": 62,
+        "s_per_call": 4.580419920330314e-05,
+        "achieved_tflops": 11.354716489891036,
+        "pct_of_measured_peak": 74.65296837535197
+      },
+      "63": {
+        "M": 63,
+        "s_per_call": 4.597558597652096e-05,
+        "achieved_tflops": 11.494846509838677,
+        "pct_of_measured_peak": 75.5742702816481
+      },
+      "64": {
+        "M": 64,
+        "s_per_call": 4.6229736312852765e-05,
+        "achieved_tflops": 11.613107813698246,
+        "pct_of_measured_peak": 76.35179364693127
+      },
+      "65": {
+        "M": 65,
+        "s_per_call": 6.0431558608797786e-05,
+        "achieved_tflops": 9.022761162420517,
+        "pct_of_measured_peak": 59.32124367140379
+      },
+      "66": {
+        "M": 66,
+        "s_per_call": 6.048950194781355e-05,
+        "achieved_tflops": 9.152796934543318,
+        "pct_of_measured_peak": 60.176179714288736
+      },
+      "67": {
+        "M": 67,
+        "s_per_call": 6.0085775430707145e-05,
+        "achieved_tflops": 9.353906677099623,
+        "pct_of_measured_peak": 61.498400243915995
+      },
+      "68": {
+        "M": 68,
+        "s_per_call": 6.0130615224807116e-05,
+        "achieved_tflops": 9.486437846467748,
+        "pct_of_measured_peak": 62.36974258032707
+      },
+      "69": {
+        "M": 69,
+        "s_per_call": 6.013468555465806e-05,
+        "achieved_tflops": 9.62529273515366,
+        "pct_of_measured_peak": 63.282660980628926
+      }
+    }
+  },
+  "reconciliation": {
+    "fused_gate_up": {
+      "ragged_weighted_tflops": 9.072187792648744,
+      "ragged_weighted_pct_of_peak": 59.6462050798734,
+      "balanced_at_32_pct_of_peak": 77.75713060419079,
+      "R_ragged_over_balanced32": 0.7670834123688549
+    },
+    "down_proj": {
+      "ragged_weighted_tflops": 8.996460654439721,
+      "ragged_weighted_pct_of_peak": 59.148327774094156,
+      "balanced_at_32_pct_of_peak": 65.38199830735708,
+      "R_ragged_over_balanced32": 0.9046576933308341
+    }
+  }
+}
