@@ -948,6 +948,73 @@ def prefill(
             f"has_ssm={has_ssm}"
         )
 
+    # EXO_PREFILL_MEM_TRACE (2026-09-14, docs/PERFORMANCE_HISTORY.md §3.2):
+    # per-chunk active/cache-memory instrumentation for the TP prefill path.
+    # Production's ONLY existing per-chunk `[MEM]` line lives inside
+    # `pipeline_parallel_prefill()`, gated on `is_pipeline`
+    # (`_has_pipeline_communication_layer(model)`), which is ALWAYS False
+    # under TP sharding -- confirmed by reading the code, not inferred. TP
+    # requests instead route through mlx-lm's `stream_generate` /
+    # `generate_step`, which has no active/cache-memory logging of its own
+    # (only a final `peak_memory` field on the terminal GenerationResponse).
+    #
+    # This hooks `progress_callback` below instead of patching the mlx-lm
+    # submodule: `combined_progress_callback` (which wraps this function) is
+    # passed as `stream_generate(..., prompt_progress_callback=...)` a few
+    # dozen lines down, and mlx-lm's `generate_step` calls it exactly once
+    # per real prefill chunk (after that chunk's `mx.eval([c.state for c in
+    # prompt_cache])`, i.e. after the chunk's KV state is already
+    # materialized -- so sampling memory here adds NO new synchronization
+    # beyond what mlx-lm already does per chunk). The SAME callback is also
+    # passed to `pipeline_parallel_prefill()` below, so enabling this trace
+    # produces comparable per-chunk samples on PP too (useful as a
+    # cross-check against the existing PP-only `[MEM] prefill chunk` line,
+    # though the two are sampled at slightly different points and won't be
+    # byte-identical).
+    #
+    # Inert by default (env-gated, zero overhead when unset -- one `os.environ.get`
+    # at prefill() entry, no per-chunk cost). Uses the modern (non-deprecated)
+    # top-level `mx.get_active_memory()`/`mx.get_cache_memory()`/
+    # `mx.get_peak_memory()` API (confirmed present on the installed mlx
+    # 0.32.3.dev20260912 build on both nodes; `mx.metal.get_*` still works
+    # but is deprecated and warns).
+    _mem_trace = os.environ.get("EXO_PREFILL_MEM_TRACE") == "1"
+    _mem_trace_interval = max(
+        1, int(os.environ.get("EXO_PREFILL_MEM_TRACE_INTERVAL", "1"))
+    )
+    _mem_trace_chunk_idx = 0
+    _mem_trace_prev_active_gb: float | None = None
+    _mem_trace_prev_wall: float | None = None
+
+    def _mem_trace_sample(processed: int, total: int) -> None:
+        # processed==0 is the pre-loop callback fired before any chunk has
+        # run (mlx-lm generate.py's initial `prompt_progress_callback(0,
+        # total)`) -- skip it, it would just duplicate the existing
+        # "[MEM] before prefill" checkpoint logged moments earlier above.
+        nonlocal _mem_trace_chunk_idx, _mem_trace_prev_active_gb, _mem_trace_prev_wall
+        if not _mem_trace or processed <= 0:
+            return
+        idx = _mem_trace_chunk_idx
+        _mem_trace_chunk_idx = idx + 1
+        if idx % _mem_trace_interval != 0 and processed < total:
+            return
+        active_gb = mx.get_active_memory() / 1024**3
+        peak_gb = mx.get_peak_memory() / 1024**3
+        cache_gb = mx.get_cache_memory() / 1024**3
+        now = time.perf_counter()
+        prev_active = _mem_trace_prev_active_gb
+        prev_wall = _mem_trace_prev_wall
+        delta_gb = (active_gb - prev_active) if prev_active is not None else 0.0
+        delta_ms = ((now - prev_wall) * 1000) if prev_wall is not None else 0.0
+        logger.info(
+            f"[MEM_TRACE] prefill chunk {idx} ({processed}/{total} tokens, "
+            f"is_pipeline={is_pipeline}): active={active_gb:.2f} GB "
+            f"(delta={delta_gb:+.2f}), peak={peak_gb:.2f} GB, cache={cache_gb:.2f} GB, "
+            f"dt={delta_ms:.1f}ms"
+        )
+        _mem_trace_prev_active_gb = active_gb
+        _mem_trace_prev_wall = now
+
     # TODO(evan): kill the callbacks/runner refactor
     def progress_callback(processed: int, total: int) -> None:
         elapsed = time.perf_counter() - start_time
@@ -955,6 +1022,7 @@ def prefill(
         logger.debug(
             f"Prefill progress: {processed}/{total} tokens ({tok_per_sec:.1f} tok/s)"
         )
+        _mem_trace_sample(processed, total)
         if has_ssm:
             # Keep up to _SNAPSHOT_RETENTION most-recent chunk-boundary
             # snapshots. Original "last 2 only" was too tight (rollback-
