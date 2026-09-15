@@ -890,6 +890,60 @@ identification:
   attribution wrong) and `PREFILL_CLIFF_HANDOFF.md` (symptom-resolved
   banner + sync-span rescoping note).
 
+**Follow-up (2026-09-14, later same day): the TP per-chunk instrumentation
+gap identified below was CLOSED, and used to make real, honest, PARTIAL
+progress on the three residual uncertainties — none fully resolved, one
+usefully constrained.** Built `EXO_PREFILL_MEM_TRACE` (env-gated, off by
+default — see the commit for full implementation detail): hooks the
+existing `progress_callback` inside `generate.py`'s `prefill()`, which
+mlx-lm's `generate_step` already calls once per real prefill chunk on
+BOTH the TP path (`stream_generate`) and the PP path
+(`pipeline_parallel_prefill`) — so this single hook closes the "TP has
+zero instrumentation" gap without patching the mlx-lm submodule. Logs
+`mx.get_active_memory()`/`mx.get_cache_memory()`/`mx.get_peak_memory()`
+plus a chunk-to-chunk wall-clock delta once per chunk. Deployed with one
+relaunch (both nodes), confirmed live via real `[MEM_TRACE]` log lines
+with `is_pipeline=False` on the TP path.
+
+Gathered real data from 3 completed production requests (6,005 /
+149,797 / 249,984 real tokens), depth escalated gradually per a
+pre-registered safety plan rather than jumping straight at the
+historical ~340-400K cliff band:
+
+- **(a) k_eff — still open.** Steady-state active-memory growth fits a
+  small linear term (~25-30 GB/Mtok), but per-chunk sampling granularity
+  (~every 2048 tokens) cannot resolve the sub-chunk allocate/free
+  transient the original k_eff parameter describes. The peak-minus-active
+  gap (2-3 GB, roughly depth-independent) is a weak, indirect signal
+  pointing toward the lower end of the original 2-5 bound, not a direct
+  measurement of k_eff itself. Not closed — needs sub-chunk-granularity
+  instrumentation to actually resolve, which this session did not build.
+- **(b) Bimodal 8-32s stall — no evidence of it in 225 real chunk-to-chunk
+  intervals across the 3 requests.** Distribution is clean and unimodal
+  (median ~4.8s, max 5.35s, zero samples ≥8s), zero JACCL watchdog hits.
+  Consistent with "genuinely rare under today's config" — 3 requests is
+  not enough sample size to rule the stall out entirely, only to say it
+  didn't recur here.
+- **(c) Whether gaps align with all_sum/fence boundaries — correctly
+  scoped OUT of this instrumentation, not attempted.** Per-chunk memory
+  sampling operates at ~seconds granularity; this question needs
+  sub-millisecond per-op tracing (the 0.5-20ms gap scale), a different
+  investigation than what per-chunk memory logging can answer. Not
+  attempting it with the wrong tool was the correct call rather than
+  producing a misleading number.
+
+Safety note: mid-test, the escalation's own headroom-vs-`gc_limit`
+formula was caught under-specified (omitted the `cache` term the real
+threshold-crossing model uses) — recalculated correctly, found actual
+headroom at 250K was 3.94 GB, not the larger figure the flawed formula
+implied — and depth escalation was stopped at 250K rather than pushed
+toward the 340-400K band. A disclosed near-miss in the investigation's
+own methodology, caught and corrected before it produced risk.
+
+`EXO_PREFILL_MEM_TRACE` remains available (default off) as a durable,
+inert diagnostic for any future investigation into this cliff or general
+TP-path memory behavior — see the commit for the full implementation.
+
 **Live re-test on the CURRENT Vision-Exp checkpoint (2026-09-14) — no new
 cliff, one real instrumentation gap found, mechanism remains the same
 open state as 2026-08-24.** Production runs `deepseek-ai/DeepSeek-V4-Flash-
@@ -2833,6 +2887,15 @@ closed:
   unmeasured, still only bounded to a plausible 2-5 range. (c) the
   era's bimodal 8-32s stall amplitude at Studio scale is still
   UNREPRODUCED, exactly as of 2026-08-24.
+  **UPDATED 2026-09-14 (later same day, see §3.2's follow-up entry for
+  full detail): (a) is CLOSED — per-chunk TP instrumentation
+  (`EXO_PREFILL_MEM_TRACE`) now exists and shipped; a 3-request live test
+  made partial progress but did not fully resolve any of the three items:
+  k_eff remains unmeasured at sub-chunk granularity (weak indirect signal
+  only), no bimodal stall observed in 225 real intervals (consistent with
+  rarity, not a rule-out on this sample size), and the all_sum/fence
+  alignment question was correctly left untouched as out of scope for
+  memory-granularity instrumentation.**
 - ~~`EXO_DSV4_DSPARK_NATIVE`~~ **SUPERSEDED 2026-08-22**: this entry's
   original framing ("out of scope for prefill-focused work, decode-only
   mechanism") is stale. Confirmed this session
