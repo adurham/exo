@@ -2947,19 +2947,36 @@ closed:
   same structural reason, not just out of scope. A live A/B of this
   flag would be testing a no-op under the current config. Not worth
   live-cluster time unless/until production switches to PP sharding.
-- **Decode stall's "third undiagnosed symptom"** (rank0 CPU never
+- ~~**Decode stall's "third undiagnosed symptom"**~~ (rank0 CPU never
   converging to idle after two other bugs were fixed, §8) — investigation
-  chain was abandoned mid-cascade.
-- **Section 110's decode-stall root cause** — 6 hypotheses refuted, root
+  chain was abandoned mid-cascade. **SCOPE CORRECTION (2026-09-14,
+  confirmed by the user and the orchestrator, not retracted by
+  either PM dispatched afterward):** traces back to
+  `EXO_PP_BATCHED_DECODE` debugging (§4, section42/43 handoffs), which
+  defaults to 0 and is gated on `DSV4_SHARDING=Pipeline` in
+  `start_cluster.sh` — PP-only, same structural reason as the
+  `EXO_DSV4_DSPARK_NATIVE` entry above. Not reachable under production's
+  live TP config. Left in the list (not deleted) for the historical
+  record; not counted among the doc's genuinely-open-for-production
+  threads as of 2026-09-14.
+- ~~**Section 110's decode-stall root cause**~~ — 6 hypotheses refuted, root
   cause of the 550-686ms/token PP decode stall still unknown as of that
   doc; two unproven leading candidates flagged (`ForwardStepInfo.queue_sends`
   context-var inconsistency, chunked-prefill KV-cache dependency-graph
   fragmentation) (§4, referenced via `bench/section110_decode_stall_last_candidate.md`).
-- **DeltaNet kernel auto-selection** for Qwen3.5 pipeline-parallel prefill
+  **SCOPE CORRECTION (2026-09-14):** explicitly a PP-topology stall
+  (550-686ms/token "PP decode stall"). Production runs TP. Not
+  reachable under the live config; same basis as the entry above.
+- ~~**DeltaNet kernel auto-selection**~~ for Qwen3.5 pipeline-parallel prefill
   — projected 5-15% of DeltaNet time, never started (§3.5,
-  `docs/prefill-optimization.md`).
-- **Dual-stream overlap** for Qwen3.5 prefill — projected 0.5-1ms/chunk,
+  `docs/prefill-optimization.md`). **SCOPE CORRECTION (2026-09-14):**
+  explicitly scoped to Qwen3.5, a different model family than
+  production's DeepSeek-V4-Flash-Vision-Exp. Never was an open thread
+  for what's actually deployed.
+- ~~**Dual-stream overlap**~~ for Qwen3.5 prefill — projected 0.5-1ms/chunk,
   flagged as high correctness risk, never started (§3.5).
+  **SCOPE CORRECTION (2026-09-14):** same basis as the entry above —
+  Qwen3.5-scoped, not applicable to the live DSv4 production config.
 - **A real Instruments Metal trace of the `moe.switch_mlp` GatherQMM
   kernel internals specifically** (as opposed to the generic matmul probe
   this session ran) — the single largest individual span (~30-45% of
