@@ -168,7 +168,44 @@ def apply_node_download_progress(event: NodeDownloadProgress, state: State) -> S
     return state.model_copy(update={"downloads": new_downloads})
 
 
+_TERMINAL_TASK_STATUSES = (
+    TaskStatus.Complete,
+    TaskStatus.TimedOut,
+    TaskStatus.Failed,
+    TaskStatus.Cancelled,
+)
+
+
 def apply_task_created(event: TaskCreated, state: State) -> State:
+    # Defense in depth (I16 follow-up, 2026-09-15): this used to be an
+    # unconditional `{**state.tasks, id: task}` overwrite. A duplicate/stray
+    # TaskCreated for a task_id that already reached a terminal status would
+    # silently resurrect it -- reverting an already-Complete task back to
+    # Pending, with no error anywhere. Measured as a real consequence (not
+    # hypothetical) while investigating a deterministic-task_id alternative
+    # for I16: a corrected id scheme that collided task_ids across nodes hit
+    # exactly this, one node's completion flipping the other node's task
+    # entry back to an earlier status.
+    #
+    # This does not fix a currently-live bug. I16 itself is already closed by
+    # 3f06afdd's blocking lifecycle dispatch, and ConnectToGroup/StartWarmup
+    # task_ids are still random per BaseTask's `default_factory=TaskId`, so
+    # two constructions cannot collide today. This hardens the state layer
+    # against the *next* thing that collides a task_id, whatever that turns
+    # out to be -- the failure mode (silent state corruption via a blind
+    # dict overwrite) is generic to any duplicate-id source, not specific to
+    # the lifecycle-dispatch bug that motivated it.
+    existing = state.tasks.get(event.task_id)
+    if existing is not None and existing.task_status in _TERMINAL_TASK_STATUSES:
+        logger.warning(
+            f"Ignoring TaskCreated for {event.task_id}: already "
+            f"{existing.task_status.value}. A TaskCreated for an "
+            f"already-terminal task_id should be impossible under today's "
+            f"random task_id generation -- if seen in production, "
+            f"something is colliding task_ids."
+        )
+        return state
+
     new_tasks: Mapping[TaskId, Task] = {**state.tasks, event.task_id: event.task}
     return state.model_copy(update={"tasks": new_tasks})
 
