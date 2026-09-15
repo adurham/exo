@@ -2838,6 +2838,47 @@ cross-rank timing as a lever, so the standing §2.7 attribution (transport
 fast; 34x gap is an undifferentiated "MLX eval-fence / dispatch /
 Python-scheduling" bucket) is unchanged.
 
+**RESOLVED (2026-09-15, follow-up session): the concrete next step above
+was executed — decisive result across three independent tests, the 34x
+gap is shared local overhead, NOT genuine cross-rank arrival skew.**
+Full detail (protocol rebuild, validation numbers, phase segmentation,
+all three tests, sanity checks): `docs/clock-synced-allsum-skew-vs-overhead-2026-09-14.md`'s
+dated follow-up section. Summary: rebuilt and re-validated the UDP
+clock-sync protocol (45.5µs/47.1µs error bounds, matching the prior
+session's ~30-75µs range), then — since jaccl's trace format genuinely
+has no absolute timestamp — built a `kqueue`-based local watcher
+explicitly validated to 98% within 50µs / p99 67.9µs **under real
+concurrent GPU decode load** (not idle-system validation, the same
+failure class that sank xctrace). One relaunch with
+`JACCL_TRACE_CALLS=1 JACCL_TRACE_TIMING=1` captured both ranks' full
+per-call trace (11,696 calls, zero mismatches between ranks) during a
+real decode request; applied the clock offset (3-way sign sanity
+check: unsynced=925.8µs, wrong-sign=1852.5µs, correct=−1.0µs). On
+9,277 phase-clean decode-only calls (segmented out 44 prefill-chunk
+calls that had been muddying the tail stats): entry-skew median
+**−1.0µs** (p1..p99 = [−121,+106]µs, within clock-sync+watcher noise),
+idle-gap correlation **r=0.9975 at lag 0**. A second-opinion review
+correctly flagged that skew+correlation alone don't distinguish shared
+overhead from (a) a lagged/pipelined dependency or (b) a symmetric
+mutual wait baked into `all_sum`'s own barrier/ACK semantics — both
+addressed with two more direct tests using data already in hand:
+(a) correlation collapses from r=0.9975 at lag 0 to r≈0.001 at lag ±1
+(rules out any offset dependency); (b) of calls following a flagged
+1-10ms gap, their OWN jaccl-internal `transport_us` stays at a normal
+~39µs median (only 0.10% exceed 500µs) — if the wait were inside
+jaccl's own transport/ACK protocol, `transport_us` itself would be
+elevated on exactly these calls, and it is not. All three structurally
+distinct alternatives ruled out by direct test, not absence of
+evidence: **the standing §2.7 attribution (transport fast; 34x gap =
+"MLX eval-fence / dispatch / Python-scheduling") is now the CONFIRMED
+explanation.** Does not further decompose which of those three
+sub-causes dominates (the `switch_mlp` kernel-trace item below remains
+open for that), but "is the gap cross-rank skew, in any form" is now
+closed. One relaunch to enable tracing, one to restore baseline (trace
+vars are diagnostic-only, correctly turned back off); both nodes
+confirmed healthy (fresh PIDs, model loaded, real completion) before,
+between, and after.
+
 **RULED OUT this session** (`docs/memory-residency-check-ruled-out-2026-08-22.md`):
 memory residency / expert-weight paging from disk. Real pageins delta
 across a full real decode request (495 tokens, 1.97s TTFT + 26.73s
@@ -2935,6 +2976,15 @@ closed:
   (MLX's `mx.eval` fence, dispatch coordination, or Python-level
   scheduling — not yet further decomposed, now the correct next target).
   See §2.7 and `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md`.
+  **FURTHER RESOLVED 2026-09-15**: the skew-vs-shared-overhead split
+  itself (which of the two the 34x gap's overhead IS) is now also
+  decisively closed — shared local overhead, not cross-rank skew. See
+  §13's clock-synced-skew-test entry and
+  `docs/clock-synced-allsum-skew-vs-overhead-2026-09-14.md`'s follow-up
+  section for the full evidence (clock-synced jaccl trace capture,
+  r=0.998 per-call idle-gap correlation between ranks, 97.5% of
+  rank0's flagged-bucket idle gaps coincide with rank1 also idle, 0%
+  with rank1 genuinely busy).
 
 **NEW (2026-08-23, P3 worker A): attention-path read bandwidth is NOT the
 500K decode decay — code-derived byte inventory, and the TP all_sum
