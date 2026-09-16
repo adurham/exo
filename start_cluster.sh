@@ -2323,6 +2323,15 @@ for NODE in "${NODES[@]}"; do
   # MTP tie-break losslessness fix (1 = recompute near-tie bonus via single-token forward).
   [ -n "${EXO_DSV4_MTP_TIEBREAK_FIX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_FIX=$EXO_DSV4_MTP_TIEBREAK_FIX"
   [ -n "${EXO_DSV4_MTP_TIEBREAK_EPS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_TIEBREAK_EPS=$EXO_DSV4_MTP_TIEBREAK_EPS"
+  # Post-verify bookkeeping trim (dsv4_mtp.py _BOOKKEEP_FAST: lazy+fused
+  # pre_norm eval, fused fence, lm-head row-gamma-only argmax fusion).
+  # Default OFF. NOTE (2026-09-16): all three sub-features gate inside
+  # _speculative_next_batch, which the dispatcher only reaches at c>=2
+  # (len(uids)==1 routes to _speculative_next instead). With production's
+  # EXO_DSV4_MTP_C2_MAX_CTX=1 there is no c>=2 spec cycle at all, so the
+  # flag is currently UNREACHABLE in production. A real A/B must also set
+  # EXO_DSV4_MTP_C2_MAX_CTX=0 in both arms. Inert when unset.
+  [ -n "${EXO_DSV4_BOOKKEEP_FAST:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_BOOKKEEP_FAST=$EXO_DSV4_BOOKKEEP_FAST"
   # Greedy accept-rule alignment (see defaults block above).
   [ -n "${EXO_DSV4_MTP_ACCEPT_LOGPROBS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_ACCEPT_LOGPROBS=$EXO_DSV4_MTP_ACCEPT_LOGPROBS"
   [ -n "${EXO_DSV4_POOL_SNAPSHOT_BATCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_POOL_SNAPSHOT_BATCH=$EXO_DSV4_POOL_SNAPSHOT_BATCH"
