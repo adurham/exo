@@ -2366,14 +2366,35 @@ class DSv4MTPBatchGenerator(MTPBatchGenerator):
         # C≥2 high-context MTP degeneration gate REMOVED (2026-06-24). The
         # degeneration root cause — _bootstrap_per_stream_ring rebasing the
         # absolute position via self._offset (ring cursor) instead of
-        # self.offset (logical position) — is fixed (mlx-lm 48a4a3c). MTP-on
-        # at c≥2 high context now produces clean quality through 500K
-        # (verified: b2 200K/300K/500K all_needles=True). The gate that
-        # disabled spec at c≥2 high context (EXO_DSV4_MTP_C2_MAX_CTX) is no
-        # longer needed; removing it so MTP-on is the default at c≥2. The
-        # env var is still read for backward-compat safety but no longer has
-        # a default-threshold effect (set to 0 to re-disable if a regression
-        # ever surfaces).
+        # self.offset (logical position) — is fixed (mlx-lm 48a4a3c).
+        #
+        # !! CORRECTION 2026-09-16: this comment used to end "...no longer
+        # has a default-threshold effect". That was WRONG and is the exact
+        # misreading that gets production's c>=2 state backwards. What is
+        # true: the gate below NO LONGER DEFAULT-DISABLES spec at c>=2 (that
+        # is what was removed), but it is still a LIVE THRESHOLD gate — the
+        # code default is "0 = no gate", while start_cluster.sh exports
+        # EXO_DSV4_MTP_C2_MAX_CTX=1, and 1 as a threshold disables spec at
+        # c>=2 for every real generation. Reason from the live pid
+        # (`ps eww -p $PID | tr ' ' '\n' | grep MTP_C2_MAX_CTX`), never from
+        # this comment. Setting the var to 0 in the launcher ARMS c>=2
+        # speculation; it is NOT a no-op.
+        #
+        # Why the gate should stay armed: at c>=2 the spec VERIFY forward
+        # cannot run the structurally-sequential path at all. The B==1
+        # "losslessness stack" (which makes an L>1 verify bitwise-equal to L
+        # sequential decode steps by fixing window-overwrite order, pool-flush
+        # visibility timing, and indexer top-k selection — see mlx-lm
+        # deepseek_v4.py ~L2160-2178) is B==1-only at four independent sites
+        # (FULLBLOCK ~5944, model-level hc_head ~7985, VERIFY_BATCH ~7918,
+        # and _rowseq_min_ctx returning max(MIN_CTX, 32768) for B>=2). The
+        # real defect this exposes: with the gate open, a 2026-09-16 c>=2
+        # control boot (LMHEAD_MXFP8=0) emitted cross-script glued
+        # fragments on 2 of 12 streams ("redundancyфа." / "purposeфабрика.").
+        # Kernel-level batch invariance (MLX_STEEL_BATCH_INVARIANT) cannot
+        # repair that divergence class — which is why the 2026-07-11
+        # bitexact-build probe did not clear it. See
+        # docs/incidents/c2-spec-verify-structural-drift-2026-09-16.md.
         if spec_eligible and len(gen_batch) >= 2:
             _c2_max = int(os.environ.get("EXO_DSV4_MTP_C2_MAX_CTX", "0"))
             if _c2_max == 0:

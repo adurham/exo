@@ -2227,17 +2227,53 @@ for NODE in "${NODES[@]}"; do
   # (temp=0 batteries are blind to acceptance-spread bugs). Making c>=2
   # spec actually PROFITABLE needs per-stream pool rollback (pools track
   # per-stream keeps like PerStreamBatchRotatingKVCache.trim_per_stream).
-  # NOTE 2026-09-04 (campaign 2 round 7): this whole "1 = spec-off at c>=2
-  # (default); 0 = spec on" binary framing is STALE. The gate itself was
-  # REMOVED 2026-06-24 -- see src/exo/worker/engines/mlx/speculative/
-  # dsv4_mtp.py ~L2371-2385: the true root cause was a
-  # _bootstrap_per_stream_ring positioning bug (self._offset vs
-  # self.offset), fixed elsewhere (mlx-lm 48a4a3c), and MTP-on at c>=2
-  # high context is now clean through 500K context. The env var is still
-  # read for backward-compat safety but no longer has a default-threshold
-  # effect -- setting it to 0 is a no-op (no gate exists to disable);
-  # setting it to a nonzero threshold re-arms an explicit opt-in ceiling
-  # only, for bandaging a future regression, not the old binary gate.
+  # NOTE 2026-09-04 (campaign 2 round 7): the "1 = spec-off at c>=2;
+  # 0 = spec on" binary framing above is STALE AS PROSE -- the original
+  # high-context degeneration gate really was removed 2026-06-24 (see
+  # src/exo/worker/engines/mlx/speculative/dsv4_mtp.py ~L2366-2400: the
+  # true root cause was a _bootstrap_per_stream_ring positioning bug,
+  # self._offset vs self.offset, fixed in mlx-lm 48a4a3c).
+  #
+  # !! CORRECTION 2026-09-16 — THIS NOTE'S LAST PARAGRAPH WAS WRONG, AND
+  # !! ITS ERROR WAS DANGEROUS. It claimed "setting it to 0 is a no-op
+  # !! (no gate exists to disable)". That is FALSE for the DEPLOYED code.
+  # !! dsv4_mtp.py:2377-2400 still implements a THRESHOLD gate: it reads
+  # !! the var, and if it is NONZERO and the max cache offset exceeds it,
+  # !! it forces spec_eligible=False at c>=2. So:
+  # !!   * the CODE default is 0 ("no gate"), BUT
+  # !!   * THIS LAUNCHER exports 1 (the := below), and with 1 as the
+  # !!     threshold every real generation (offset > 1) has c>=2 spec
+  # !!     DISABLED.
+  # !! Therefore setting it to 0 is NOT a no-op — it ARMES c>=2
+  # !! speculation. Do not flip it believing nothing changes.
+  #
+  # The gate is doing real safety work, not sitting there as a stale
+  # leftover: on the 2026-09-16 EXO_DSV4_BOOKKEEP_FAST BK0 control boot
+  # (c>=2, C2_MAX_CTX=0, LMHEAD_MXFP8=0 so the already-fixed mxfp8 defect
+  # was OUT of the picture) 2 of 12 measured streams emitted genuine
+  # cross-script glued fragments -- "redundancyфа." / "purposeфабрика."
+  # (Cyrillic; real vocab tokens, e.g. id 37244 = "фа"). Needle 12/12, so
+  # only text FORM was damaged. That is the "unresolved serving-logic
+  # component" referred to above (the MLX_STEEL_BATCH_INVARIANT bitexact
+  # build was probed 2026-07-11 and did NOT clear it).
+  #
+  # 2026-09-16 ROOT-CAUSE LOCALIZATION (structural, not kernel rounding):
+  # the c>=2 spec VERIFY forward cannot run the structurally-sequential
+  # path at all. The B==1 "losslessness stack" -- which makes an L>1
+  # verify bitwise-equal to L sequential decode steps by fixing WINDOW
+  # OVERWRITE ORDER, POOL-FLUSH VISIBILITY TIMING and INDEXER top-k
+  # SELECTION (mlx-lm deepseek_v4.py ~L2160-2178) -- is gated to B==1 by
+  # construction at FOUR independent sites: block FULLBLOCK per-row (~5944),
+  # model-level hc_head per-row (~7985), EXO_DSV4_VERIFY_BATCH (~7918), and
+  # _rowseq_min_ctx(), which returns max(MIN_CTX, 32768) for B>=2 so even
+  # per-row ATTENTION is skipped below 32768 ctx. Net: at c>=2 the verify
+  # forward is structurally batched at every context. Kernel-level batch
+  # invariance cannot repair that class of divergence, which is why the
+  # 2026-07-11 bitexact probe did not clear it. Full writeup:
+  # docs/incidents/c2-spec-verify-structural-drift-2026-09-16.md.
+  # Do NOT lift this gate on the strength of the BS_MIN_ACCEPT=1 result
+  # alone; the c>=2 verify path has never had a structural losslessness
+  # gate, and the 2026-09-16 defect above is the live evidence.
   : "${EXO_DSV4_MTP_C2_MAX_CTX:=1}" # 1 = spec-off at c>=2 (default); 0 = spec on (needs BS_MIN_ACCEPT=1)
   [ -n "${EXO_DSV4_MTP_C2_MAX_CTX:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_MAX_CTX=$EXO_DSV4_MTP_C2_MAX_CTX"
   [ -n "${EXO_DSV4_MTP_C2_GATE_DEBUG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_MTP_C2_GATE_DEBUG=$EXO_DSV4_MTP_C2_GATE_DEBUG"
