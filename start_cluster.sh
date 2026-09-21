@@ -3211,7 +3211,28 @@ done
 
 # 4. Health Check / Topology Verification
 # Wait for all 3 nodes AND their identities (friendlyName) to be populated.
-API="http://$M4_1_IP:52415"
+#
+# API_HOST resolution (fixed 2026-09-21): M4_1_IP is a HARDCODED LAN constant
+# (192.168.86.201) that silently drifts from the real DHCP-assigned address --
+# confirmed live this session: m4-1 was actually on .48, m4-2 on .47, both far
+# from their .201/.202 constants, with a stale ARP/route entry for .201 making
+# every `curl "$API/state"` call below hang for a full TCP-connect timeout
+# (tens of seconds each) instead of failing fast, so "Waiting for cluster to
+# stabilize" looked hung for 10+ minutes even though the cluster was actually
+# already healthy. The Thunderbolt discovery path (get_node_tb_ips, NODE_PEERS
+# above) was NOT affected -- it already resolves via the `macstudio-m4-1` SSH
+# alias (~/.ssh/config -> adams-mac-studio-m4-1.local mDNS), which tracks the
+# real current address. Apply that same drift-proof resolution here: prefer
+# the mDNS hostname (works from any machine on the LAN, including this
+# controller), fall back to the hardcoded IP only if mDNS resolution fails
+# (e.g. no local mDNS resolver available), so this loop never silently trusts
+# a stale constant without at least trying the live name first.
+API_HOST="adams-mac-studio-m4-1.local"
+if ! ping -c1 -t2 "$API_HOST" >/dev/null 2>&1; then
+  echo "WARNING: mDNS resolution of $API_HOST failed; falling back to hardcoded $M4_1_IP (may be stale)." >&2
+  API_HOST="$M4_1_IP"
+fi
+API="http://$API_HOST:52415"
 
 echo -n "Waiting for cluster to stabilize..."
 CLUSTER_READY=false
