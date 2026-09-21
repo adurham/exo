@@ -14,6 +14,7 @@ from anyio import (
     BrokenResourceError,
     CancelScope,
     ClosedResourceError,
+    to_thread,
 )
 from loguru import logger
 
@@ -80,6 +81,87 @@ def _env_seconds(name: str, default: float) -> float:
 
 
 HANG_TIMEOUT_SECONDS = _env_seconds("EXO_RUNNER_HANG_TIMEOUT_SECONDS", 45.0)
+
+# LIVENESS PROBE (2026-09-21). Root cause of two independently-reproduced
+# false-positive hang-kills this session (a from-scratch cache-busting
+# prefill's first chunk, and fresh model loading — both 100% reproducible):
+# the event-silence heuristic above cannot distinguish "genuinely wedged"
+# from "real GPU compute that happens to not have emitted its own progress
+# event yet". Both false-positive cases were confirmed via THIS SAME
+# `sample` diagnostic (already fired post-mortem, right before the kill) to
+# be inside live `mlx::core::eval()` / real Metal dispatch calls with an
+# actively large-to-growing physical memory footprint at the moment of the
+# wrongful kill — not a spin-loop, not a deadlock.
+#
+# This turns that same diagnostic into a PRE-kill liveness check: once
+# HANG_TIMEOUT_SECONDS of silence has elapsed, take a cheap 1s `sample`
+# and record the process's physical footprint. If a SECOND probe
+# (HANG_PROBE_INTERVAL_SECONDS later) shows the footprint grew by at least
+# HANG_PROBE_GROWTH_THRESHOLD_GB, that is real forward progress (weight
+# materialization, KV-cache construction, etc.) — extend and re-check later
+# rather than kill. If the footprint has genuinely plateaued, or `sample`
+# itself fails, fall through to the original kill path unchanged. Capped by
+# HANG_PROBE_MAX_EXTENSIONS so a runner that is truly wedged AFTER some
+# initial real growth (e.g. finishes loading, then wedges on a subsequent
+# collective) is still caught, not given infinite reprieve.
+#
+# Deliberately NOT a larger HANG_TIMEOUT_SECONDS default: a blind timeout
+# bump would also delay detection of the genuine wedge this watchdog exists
+# to catch (a runner spinning at 100% CPU inside a hung native collective)
+# for its entire increased duration. This mechanism only extends when there
+# is verified evidence of real work — a wedged process's footprint is
+# static by definition, so it is caught at the FIRST probe interval past
+# the original timeout, same as before this change for the case the
+# watchdog was actually designed for.
+HANG_PROBE_INTERVAL_SECONDS = _env_seconds(
+    "EXO_RUNNER_HANG_PROBE_INTERVAL_SECONDS", 20.0
+)
+HANG_PROBE_GROWTH_THRESHOLD_GB = _env_seconds("EXO_RUNNER_HANG_PROBE_GROWTH_GB", 0.25)
+HANG_PROBE_MAX_EXTENSIONS = int(
+    _env_seconds("EXO_RUNNER_HANG_PROBE_MAX_EXTENSIONS", 20.0)
+)
+
+
+def _sample_physical_footprint_gb(pid: int, duration_s: int = 1) -> float | None:
+    """Read `pid`'s current physical memory footprint (GB) via a short,
+    read-only `sample` invocation — the SAME tool already used (at a longer
+    duration) for the post-mortem hang diagnostic below, just run earlier
+    and non-destructively as live evidence of whether the process is still
+    doing real work. `sample` is a statistical profiler (microstackshots via
+    task_for_pid) — it does not SIGSTOP or otherwise pause the target the
+    way an xctrace/Instruments attach does, so this is safe to call
+    repeatedly on a live, busy process.
+
+    Returns None on any failure (missing binary, timeout, unparseable
+    output) — callers must treat None as "no evidence either way" and fall
+    back to the original kill decision, never as "confirmed hung".
+    """
+    try:
+        result = subprocess.run(
+            ["/usr/bin/sample", str(pid), str(duration_s)],
+            capture_output=True,
+            timeout=duration_s + 10,
+            check=False,
+            text=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("Physical footprint:"):
+            continue
+        value_str = stripped.split(":", 1)[1].strip()
+        try:
+            if value_str.endswith("G"):
+                return float(value_str[:-1])
+            if value_str.endswith("M"):
+                return float(value_str[:-1]) / 1024.0
+            if value_str.endswith("K"):
+                return float(value_str[:-1]) / (1024.0 * 1024.0)
+            return float(value_str) / (1024.0**3)
+        except ValueError:
+            return None
+    return None
 
 
 def _process_is_stopped_or_traced(pid: int) -> bool:
@@ -272,6 +354,15 @@ class RunnerSupervisor:
     # hang watchdog (see HANG_TIMEOUT_SECONDS). Bumped on every event.
     _last_event_monotonic: float = field(default_factory=time.monotonic, init=False)
     _hang_killed: bool = field(default=False, init=False)
+    # Liveness-probe state (see HANG_PROBE_* above): the footprint reading
+    # from the PREVIOUS probe (None until the first probe has run for this
+    # silence episode) and how many extensions have been granted so far.
+    # Reset to None/0 the moment any real event arrives (see _forward_events)
+    # so a fresh silence episode always starts its own probe sequence rather
+    # than inheriting stale readings from an earlier one.
+    _hang_probe_last_footprint_gb: float | None = field(default=None, init=False)
+    _hang_probe_next_check_monotonic: float = field(default=0.0, init=False)
+    _hang_probe_extensions_used: int = field(default=0, init=False)
     # Worker-injected predicate: True while a SIBLING runner on this node is
     # loading a model. A co-host JIT load saturates the GPU/memory bus and can
     # starve a mid-generation runner of progress for minutes (observed
@@ -403,8 +494,15 @@ class RunnerSupervisor:
         try:
             with self._ev_recv as events:
                 async for event in events:
-                    # Any event = the runner made progress; reset the hang clock.
+                    # Any event = the runner made progress; reset the hang clock
+                    # AND the liveness-probe state, so a fresh silence episode
+                    # after real progress always starts its own probe sequence
+                    # from scratch rather than inheriting a stale footprint
+                    # reading or extension count from a previous episode.
                     self._last_event_monotonic = time.monotonic()
+                    self._hang_probe_last_footprint_gb = None
+                    self._hang_probe_next_check_monotonic = 0.0
+                    self._hang_probe_extensions_used = 0
                     if isinstance(event, RunnerTerminationError):
                         # try to get exception if possible
                         await self._check_runner(event)
@@ -446,11 +544,12 @@ class RunnerSupervisor:
                 if not self.runner_process.is_alive():
                     await self._check_runner(RuntimeError("Runner found to be dead"))
                     return
-                self._check_hang()
+                await self._check_hang()
                 self._check_stuck_init()
 
-    def _check_hang(self) -> None:
-        """SIGKILL a runner that has in-progress work but has gone silent.
+    async def _check_hang(self) -> None:
+        """SIGKILL a runner that has in-progress work but has gone silent AND
+        shows no verified real-memory growth (see the liveness probe below).
 
         Detects the c>=2 degen-kill / GPU-timeout wedge: the runner spins at
         100% CPU inside a native jaccl collective, so it is_alive() (this loop's
@@ -471,6 +570,21 @@ class RunnerSupervisor:
         legitimately block in native code past this window should do the same;
         do not widen HANG_TIMEOUT_SECONDS to cover it, since that also delays
         detection of genuinely wedged runners.
+
+        LIVENESS PROBE (2026-09-21): two independently-reproduced false
+        positives this session (a from-scratch cache-busting prefill's first
+        chunk; fresh model loading) proved the runner can be inside real,
+        progressing GPU compute for well over HANG_TIMEOUT_SECONDS with a
+        correctly-wired-but-not-yet-fired progress event. Once the silence
+        threshold is reached, this now probes the process's physical memory
+        footprint before killing: if it has grown by
+        HANG_PROBE_GROWTH_THRESHOLD_GB since the last probe, that is
+        externally-verified real progress -- extend (bounded by
+        HANG_PROBE_MAX_EXTENSIONS) rather than kill. A genuinely wedged
+        process's footprint is static by construction, so it is still caught
+        at the first probe interval past the original timeout -- this does
+        NOT weaken detection of the wedge this watchdog was built for, it
+        only stops it from firing on real, still-progressing work.
         """
         if (
             HANG_TIMEOUT_SECONDS <= 0
@@ -508,6 +622,70 @@ class RunnerSupervisor:
             )
             self._last_event_monotonic = time.monotonic()
             return
+
+        now = time.monotonic()
+        if (
+            HANG_PROBE_MAX_EXTENSIONS > 0
+            and now >= self._hang_probe_next_check_monotonic
+        ):
+            footprint_gb = await to_thread.run_sync(
+                _sample_physical_footprint_gb, self.runner_process.pid, 1
+            )
+            self._hang_probe_next_check_monotonic = now + HANG_PROBE_INTERVAL_SECONDS
+            if footprint_gb is None:
+                logger.warning(
+                    f"Runner {self.bound_instance.bound_runner_id} silent for "
+                    f"{silent_for:.0f}s; liveness probe could not read memory "
+                    "footprint (sample failed/unavailable) — proceeding to kill "
+                    "with no growth evidence either way."
+                )
+            elif self._hang_probe_last_footprint_gb is None:
+                # First probe of this silence episode: nothing to compare
+                # against yet. Record it and extend once so the NEXT probe
+                # has a baseline to diff against -- a real hang is still
+                # caught one probe interval later than before this change,
+                # a real load/prefill gets a chance to show its growth.
+                self._hang_probe_last_footprint_gb = footprint_gb
+                self._hang_probe_extensions_used += 1
+                logger.warning(
+                    f"Runner {self.bound_instance.bound_runner_id} silent for "
+                    f"{silent_for:.0f}s; liveness probe baseline footprint="
+                    f"{footprint_gb:.2f}GB, extending "
+                    f"{HANG_PROBE_INTERVAL_SECONDS:.0f}s for a growth check "
+                    f"({self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS})."
+                )
+                return
+            else:
+                growth_gb = footprint_gb - self._hang_probe_last_footprint_gb
+                self._hang_probe_last_footprint_gb = footprint_gb
+                if (
+                    growth_gb >= HANG_PROBE_GROWTH_THRESHOLD_GB
+                    and self._hang_probe_extensions_used < HANG_PROBE_MAX_EXTENSIONS
+                ):
+                    self._hang_probe_extensions_used += 1
+                    logger.warning(
+                        f"Runner {self.bound_instance.bound_runner_id} silent for "
+                        f"{silent_for:.0f}s but memory footprint grew "
+                        f"{growth_gb:+.2f}GB since the last probe (now "
+                        f"{footprint_gb:.2f}GB) — real progress, not a hang. "
+                        f"Extending {HANG_PROBE_INTERVAL_SECONDS:.0f}s "
+                        f"({self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS})."
+                    )
+                    return
+                plateau_or_budget = (
+                    "plateaued"
+                    if growth_gb < HANG_PROBE_GROWTH_THRESHOLD_GB
+                    else "extension budget exhausted"
+                )
+                logger.warning(
+                    f"Runner {self.bound_instance.bound_runner_id} silent for "
+                    f"{silent_for:.0f}s; liveness probe shows footprint "
+                    f"{plateau_or_budget} "
+                    f"(growth={growth_gb:+.2f}GB, extensions used="
+                    f"{self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS}) "
+                    "— proceeding to kill."
+                )
+
         self._hang_killed = True
         logger.critical(
             f"Runner {self.bound_instance.bound_runner_id} hung: "
