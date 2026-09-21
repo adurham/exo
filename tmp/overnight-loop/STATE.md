@@ -65,14 +65,48 @@ Never build a new harness — R5 lost a round to one.
 
 ---
 
-## NEXT (loop BLOCKED — RELAUNCH BUDGET EXHAUSTED, 2 of 2 USED — see R13-continued below)
+## NEXT (2026-09-21 update — see below; superseded from 09-04's "budget exhausted" framing)
 
 ### >>> RESUME POINTER (read this first on context loss) <<<
+
+**2026-09-21 UPDATE — READ THIS FIRST, IT SUPERSEDES EVERYTHING BELOW IN THIS SECTION.**
+Full writeup: `docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md`.
+
+Cluster access is no longer the blocker (the tool-permission wall from 09-04 is gone; this
+session drove the cluster directly, interactively, no PM subagent needed). I16 Gate A was
+attempted again and blocked a SECOND time — not by permissions, but by a real hang-watchdog bug
+(supervisor.py `_check_hang`, 45s default) that SIGKILLs runners mid-legitimate-compute. Root
+cause is at the design level (event-silence heuristic mistakes real-but-slow work for a hang) —
+NOT fully root-caused at the specific-slow-operation level. **DO NOT re-attempt Gate A's workload
+driver until this is either fixed or well enough understood that a tools-bearing / cache-miss
+request in the workload won't get killed mid-run again** (this is exactly what consumed 09-21's
+whole Gate A attempt).
+
+**CLUSTER STATE as of 2026-09-21 session end:** both nodes on commit `98a432c520e64cdd48e9515eacee8eadff287bd6`,
+2/2 RunnerReady for DeepSeek-V4-Flash-Vision-Exp, real completion verified.
+**RUNNING WITH `EXO_RUNNER_HANG_TIMEOUT_SECONDS=300` AS A LIVE, NON-COMMITTED ENV OVERRIDE.**
+A bare future relaunch (by a human or a PM) that does NOT set this will very likely re-trigger
+the model-loading hang-kill loop (100% reproduced 2/2 times this session on reload-after-kill,
+though the ORIGINAL cold boot loaded fine under the 45s default — that asymmetry is itself
+undiagnosed). If you relaunch, either pass this same override or budget time to hit and recover
+from the hang-loop again.
+
+Also new this session: a vision-decode throughput regression was found+confirmed (user report),
+~30% slower decode on image-bearing vs. text-only requests, mechanism not yet found. See the
+incident doc for the full characterization and next-step source-read pointers. This is a THIRD
+open thread alongside I16 and the c>=2 spec-decode drift (which was not touched this session).
+
+Also fixed+shipped: `start_cluster.sh`'s health-check polling had a stale hardcoded LAN IP
+(drifted from real DHCP addresses) causing 10+ minute hangs on every relaunch this session before
+the fix. Now resolves via mDNS. Commit `98a432c52`, unrelated to the campaign, pure infra fix.
+
+--- (everything below this line is the PRE-09-21 state, kept for history) ---
 
 **CLUSTER IS HEALTHY. Verified 2026-09-04 on REAL PIDs after the restore boot, not inherited.**
 API 200; runners **READY 2/2**; a real completion was confirmed against the placed checkpoint.
 `EXO_PHASE_MARKS` **ABSENT**, `EXO_WORKER_PLAN_EVENT_WAKE` **ABSENT**, RV=0, γ=3, steel-BI=1.
-Production config, nothing left behind.
+Production config, nothing left behind. **STALE AS OF 09-21 — re-verify before trusting any of
+this, the cluster has been relaunched multiple times since.**
 
 **The ONLY sanctioned path to the nodes is `/Users/adam.durham/repos/exo/cluster-diag.sh`**
 (read-only, allowlisted by exact path). Subcommands: `health|env|sha|ps|gpu|marks <m4-1|m4-2>`.
