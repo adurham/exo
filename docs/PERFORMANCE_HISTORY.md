@@ -9843,3 +9843,38 @@ consult caught, pinned so it can't silently regress).
   `test_vision_dropped_images_loud.py` covers the MECHANISM.
 - §5 (this document) — the DSpark draft-head direct-lm_head-call structural
   fact, re-confirmed still accurate during this audit's multi-call-site sweep.
+
+## 2026-09-21 — I16 Gate A BLOCKED by hang-watchdog false positive; vision-decode regression CONFIRMED; launcher mDNS-drift bug fixed
+
+Full writeup: `docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md`.
+
+**Vision regression (NEW, user-reported and confirmed live):** image-bearing
+requests decode ~30% slower than matched text-only requests on the SAME
+production runner instance (controlled A/B: text 20.44 t/s -> image 14.38
+t/s -> text 20.66 t/s, recovers fully). E-CPU roughly doubles on BOTH nodes
+in lockstep during image decode. Mechanism NOT found — media_regions cache
+bookkeeping and spec/MTP vision-branching both ruled out by source read.
+Next: source-read deepseek_v4_vision.py's embedding-merge + SDPA call sites
+for decode-time (not prefill-time) media-region-keyed behavior.
+
+**I16 Gate A: still not measured.** Blocked again, this time by a genuine
+hang-watchdog bug (supervisor.py's HANG_TIMEOUT_SECONDS=45s default),
+independently reproduced via two mechanisms: (1) a tools-bearing request
+that busts a large prefix cache and forces a full cold reprefill can die
+before chunk 1 completes even though the per-chunk progress-event mechanism
+is correctly wired end-to-end (confirmed via source read + sample stack
+dumps showing genuine live GPU compute at kill time, not a deadlock); (2)
+model LOADING itself (100% reproducible on 2 separate reload-after-kill
+attempts, 0% reproducible on the session's original cold boot) dies the same
+way despite per-layer progress events also being correctly wired. Root
+cause is the watchdog's event-silence heuristic, not a missing heartbeat --
+both failure modes have working heartbeats that still didn't fire in time.
+Live mitigation only (EXO_RUNNER_HANG_TIMEOUT_SECONDS=300, NOT committed,
+NOT the fix) is what's keeping the cluster's current boot alive. A bare
+relaunch by anyone will likely re-trigger this.
+
+**Shipped, unrelated to the above:** start_cluster.sh's health-check polling
+used a hardcoded LAN IP that had drifted from the nodes' real DHCP addresses,
+causing every relaunch this session to hang 10+ minutes on a dead
+TCP-connect before failing. Fixed to resolve via the same mDNS hostname the
+Thunderbolt-discovery path already used successfully. Commit `98a432c52`.
