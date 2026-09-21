@@ -361,8 +361,16 @@ class RunnerSupervisor:
     # so a fresh silence episode always starts its own probe sequence rather
     # than inheriting stale readings from an earlier one.
     _hang_probe_last_footprint_gb: float | None = field(default=None, init=False)
-    _hang_probe_next_check_monotonic: float = field(default=0.0, init=False)
     _hang_probe_extensions_used: int = field(default=0, init=False)
+    # The kill is deferred until THIS monotonic timestamp once an extension is
+    # granted -- checked on EVERY tick (not just at probe-interval boundaries),
+    # which is the fix for the 2026-09-21 bug where an extension only
+    # protected the exact tick it was granted on: the interval gate that
+    # decided WHEN to probe next was also (wrongly) gating the kill decision
+    # itself, so a granted extension had no effect on the ticks in between and
+    # the kill fired anyway on the very next tick. 0.0 means "no extension
+    # currently in effect" (initial state and post-reset state).
+    _hang_probe_deadline_monotonic: float = field(default=0.0, init=False)
     # Worker-injected predicate: True while a SIBLING runner on this node is
     # loading a model. A co-host JIT load saturates the GPU/memory bus and can
     # starve a mid-generation runner of progress for minutes (observed
@@ -501,8 +509,8 @@ class RunnerSupervisor:
                     # reading or extension count from a previous episode.
                     self._last_event_monotonic = time.monotonic()
                     self._hang_probe_last_footprint_gb = None
-                    self._hang_probe_next_check_monotonic = 0.0
                     self._hang_probe_extensions_used = 0
+                    self._hang_probe_deadline_monotonic = 0.0
                     if isinstance(event, RunnerTerminationError):
                         # try to get exception if possible
                         await self._check_runner(event)
@@ -624,14 +632,26 @@ class RunnerSupervisor:
             return
 
         now = time.monotonic()
-        if (
-            HANG_PROBE_MAX_EXTENSIONS > 0
-            and now >= self._hang_probe_next_check_monotonic
-        ):
+        if HANG_PROBE_MAX_EXTENSIONS > 0:
+            # BUG FIX (2026-09-21, same-day as the probe's introduction): a
+            # granted extension MUST hold off the kill for every tick until
+            # its deadline, not just the tick it was granted on. The original
+            # shipped version used a single "next probe time" for BOTH "when
+            # should I sample memory again" AND "am I allowed to kill yet",
+            # which are different questions -- an extension set the next
+            # PROBE time correctly but left the KILL falling through
+            # unconditionally on every tick that wasn't itself a probe tick.
+            # Caught live: a real 106K-token cache-busting prefill got a
+            # baseline probe + a logged "extending 20s" at t=46s silent, then
+            # was SIGKILLed anyway at t=54s -- 8s later, nowhere near the
+            # promised 20s. This check is now unconditional on every tick:
+            # if a deadline is active and not yet reached, defer, full stop,
+            # no probe needed this tick.
+            if now < self._hang_probe_deadline_monotonic:
+                return
             footprint_gb = await to_thread.run_sync(
                 _sample_physical_footprint_gb, self.runner_process.pid, 1
             )
-            self._hang_probe_next_check_monotonic = now + HANG_PROBE_INTERVAL_SECONDS
             if footprint_gb is None:
                 logger.warning(
                     f"Runner {self.bound_instance.bound_runner_id} silent for "
@@ -647,6 +667,7 @@ class RunnerSupervisor:
                 # a real load/prefill gets a chance to show its growth.
                 self._hang_probe_last_footprint_gb = footprint_gb
                 self._hang_probe_extensions_used += 1
+                self._hang_probe_deadline_monotonic = now + HANG_PROBE_INTERVAL_SECONDS
                 logger.warning(
                     f"Runner {self.bound_instance.bound_runner_id} silent for "
                     f"{silent_for:.0f}s; liveness probe baseline footprint="
@@ -663,6 +684,9 @@ class RunnerSupervisor:
                     and self._hang_probe_extensions_used < HANG_PROBE_MAX_EXTENSIONS
                 ):
                     self._hang_probe_extensions_used += 1
+                    self._hang_probe_deadline_monotonic = (
+                        now + HANG_PROBE_INTERVAL_SECONDS
+                    )
                     logger.warning(
                         f"Runner {self.bound_instance.bound_runner_id} silent for "
                         f"{silent_for:.0f}s but memory footprint grew "
