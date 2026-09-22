@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -28,8 +29,16 @@ import uuid
 
 import httpx
 
-API = "http://192.168.86.201:52415"
-MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731"
+# Resolve the API host by mDNS rather than a hardcoded LAN IP: the Studios are
+# on DHCP, and the old constant (192.168.86.201) silently drifted (nodes moved
+# to .48/.47), making every run fail with httpx ConnectError [Errno 60] even
+# though the cluster was healthy. Same fix class as start_cluster.sh's
+# M4_1_IP removal (commit 98a432c52). Env override kept for other hosts.
+API = os.environ.get("EXO_API", "http://adams-mac-studio-m4-1.local:52415")
+# Production currently serves the Vision-Exp checkpoint (start_cluster.sh's
+# DSV4_MODEL_ID), not the historical -0731 text-only checkpoint. Override with
+# EXO_MODEL when benchmarking a different placement.
+MODEL = os.environ.get("EXO_MODEL", "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp")
 
 FILLER = (
     "The observer pattern is a software design pattern in which an object, "
