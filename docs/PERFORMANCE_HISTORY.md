@@ -9878,3 +9878,54 @@ used a hardcoded LAN IP that had drifted from the nodes' real DHCP addresses,
 causing every relaunch this session to hang 10+ minutes on a dead
 TCP-connect before failing. Fixed to resolve via the same mDNS hostname the
 Thunderbolt-discovery path already used successfully. Commit `98a432c52`.
+
+## 2026-09-21 (later same day) -- hang-watchdog fix SHIPPED, hotfixed, and LIVE-VERIFIED
+
+Root-caused and fixed the hang-watchdog false-positive from earlier the same
+day. `_check_hang` (supervisor.py) now probes the runner's real physical
+memory footprint via `sample` before killing on event-silence alone: growth
+>= 0.25GB since the last probe extends the kill deadline (up to 20 x 20s =
+400s of verified real progress) instead of killing; a genuinely static
+footprint still kills at the next probe, so real-wedge detection is
+unweakened. Shipped `67fd81a1b`.
+
+**Same-day bug in that first commit, caught on its very first live relaunch:**
+the extension only protected the exact tick it was granted on -- the next
+`_watch_runner` tick (5s later) fell through to an unconditional kill
+anyway. Reproduced live on a genuine 106K-token cache-busting prefill (the
+SAME trigger as the original incident): "silent for 46s ... extending 20s"
+immediately followed 5s later by "no event for 54s ... SIGKILLing". Fixed in
+`3cae939a2` by replacing the "next probe" timestamp with an explicit
+deadline checked unconditionally on every tick before any kill decision.
+
+Both commits covered by tests: 7 pure unit tests on the footprint-parsing
+helper, plus 3 real-`RunnerSupervisor` integration tests (x2 async backends)
+driven by a fake clock reproducing the exact live tick sequence -- verified
+via git-stash A/B that 4/6 fail against the pre-hotfix code with the exact
+live failure signature, 6/6 pass against the fix.
+
+**Live-verified on the real cluster, no env override:** a full 106,244-token
+cold cache-busting prefill (the original crash trigger) completed 100%
+cleanly end-to-end with zero SIGKILL / zero "hung:" log lines across the
+entire boot, runner PIDs stable for 35+ minutes spanning prefill + decode,
+`EXO_RUNNER_HANG_TIMEOUT_SECONDS` NOT set. This is now the default,
+unmasked behavior, not a workaround.
+
+**Unrelated operational rediscovery:** an interactive `pkill -9` between the
+two commits left dead `screen -dmS exorun` sessions on both nodes, which
+made the next relaunch stick for 20+ minutes in RunnerIdle/RunnerShuttingDown
+with zero instance-lifecycle events (no crash-loop, no watchdog kill --
+looked like a new bug, wasn't). `screen -wipe` on both nodes before
+relaunch fixed it instantly; this is documented exo-cluster-operations
+pitfall #2, re-triggered by not re-checking pitfalls before an interactive
+pkill. Full incident + fix + verification writeup:
+`docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md`.
+
+I16 Gate A: blocker now cleared, measurement itself still not taken --
+next session's first priority. Thread 3 (vision decode regression): still
+open; Fable's leading hypothesis after this session's additional source-read
+(bias_vl, image-visibility masking, and query-tiled-SDPA-decline all ruled
+out) is that it may be pure context-length cost (a DSA indexer top-k budget
+cliff) that merely correlates with "image present" rather than anything
+image-specific -- a length-matched text-only control script is written
+(`/tmp/vision_length_matched_probe.py`) but not yet run.

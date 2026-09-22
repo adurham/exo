@@ -69,38 +69,51 @@ Never build a new harness — R5 lost a round to one.
 
 ### >>> RESUME POINTER (read this first on context loss) <<<
 
-**2026-09-21 UPDATE — READ THIS FIRST, IT SUPERSEDES EVERYTHING BELOW IN THIS SECTION.**
+**2026-09-21 UPDATE (SAME DAY, LATER) — READ THIS FIRST, IT SUPERSEDES EVERYTHING BELOW IN THIS SECTION.**
 Full writeup: `docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md`.
 
-Cluster access is no longer the blocker (the tool-permission wall from 09-04 is gone; this
-session drove the cluster directly, interactively, no PM subagent needed). I16 Gate A was
-attempted again and blocked a SECOND time — not by permissions, but by a real hang-watchdog bug
-(supervisor.py `_check_hang`, 45s default) that SIGKILLs runners mid-legitimate-compute. Root
-cause is at the design level (event-silence heuristic mistakes real-but-slow work for a hang) —
-NOT fully root-caused at the specific-slow-operation level. **DO NOT re-attempt Gate A's workload
-driver until this is either fixed or well enough understood that a tools-bearing / cache-miss
-request in the workload won't get killed mid-run again** (this is exactly what consumed 09-21's
-whole Gate A attempt).
+**The hang-watchdog bug that blocked Gate A earlier today is FIXED, SHIPPED, and LIVE-VERIFIED.**
+Two commits: `67fd81a1b` (root fix — memory-footprint liveness probe before
+killing on event-silence) and `3cae939a2` (same-day hotfix — the first
+commit's extension only protected the exact tick it was granted on; caught
+live on its first relaunch, reproducing the EXACT original crash trigger).
+Both covered by tests (7 unit + 6 real-RunnerSupervisor integration tests,
+git-stash A/B verified to fail-then-pass across the hotfix). Live-verified:
+a full 106,244-token cold cache-busting prefill (the original crash trigger)
+completed 100% cleanly with ZERO SIGKILLs, no env override, runner PIDs
+stable 35+ minutes spanning prefill+decode.
 
-**CLUSTER STATE as of 2026-09-21 session end:** both nodes on commit `98a432c520e64cdd48e9515eacee8eadff287bd6`,
-2/2 RunnerReady for DeepSeek-V4-Flash-Vision-Exp, real completion verified.
-**RUNNING WITH `EXO_RUNNER_HANG_TIMEOUT_SECONDS=300` AS A LIVE, NON-COMMITTED ENV OVERRIDE.**
-A bare future relaunch (by a human or a PM) that does NOT set this will very likely re-trigger
-the model-loading hang-kill loop (100% reproduced 2/2 times this session on reload-after-kill,
-though the ORIGINAL cold boot loaded fine under the 45s default — that asymmetry is itself
-undiagnosed). If you relaunch, either pass this same override or budget time to hit and recover
-from the hang-loop again.
+**CLUSTER STATE as of this update:** both nodes on commit `3cae939a2`, 2/2
+`RunnerReady` for DeepSeek-V4-Flash-Vision-Exp, real completion verified
+(capital-of-France probe correct, `finish_reason: stop`). **NO
+`EXO_RUNNER_HANG_TIMEOUT_SECONDS` override running** — this is the fixed
+default code path, not a masked workaround. Safe to relaunch normally.
 
-Also new this session: a vision-decode throughput regression was found+confirmed (user report),
-~30% slower decode on image-bearing vs. text-only requests, mechanism not yet found. See the
-incident doc for the full characterization and next-step source-read pointers. This is a THIRD
-open thread alongside I16 and the c>=2 spec-decode drift (which was not touched this session).
+**Gate A is UNBLOCKED — this is the next session's #1 priority.** Use
+`/tmp/gate_a_workload.py` (bump its client `timeout=` kwarg to >=2400s; the
+cluster's current cold-prefill speed is ~75-80 tok/s, slower than earlier
+today, budget accordingly) with `EXO_WORKER_PLAN_EVENT_WAKE=1
+EXO_PHASE_MARKS=1`. If request 3 (first tools-bearing, cache-busting turn)
+still gets killed, that is a THIRD, NEW manifestation — do not assume it's
+the same bug reopened, characterize it fresh.
 
-Also fixed+shipped: `start_cluster.sh`'s health-check polling had a stale hardcoded LAN IP
-(drifted from real DHCP addresses) causing 10+ minute hangs on every relaunch this session before
-the fix. Now resolves via mDNS. Commit `98a432c52`, unrelated to the campaign, pure infra fix.
+**Operational gotcha for whoever relaunches next:** if you ever `pkill -9`
+exo processes manually (rather than letting `start_cluster.sh`'s own
+shutdown gate handle it), run `screen -wipe` on BOTH nodes before the next
+relaunch. A dead `screen -dmS exorun` session left behind by a manual kill
+caused a 20+ minute stuck-boot (RunnerIdle/RunnerShuttingDown, zero
+instance-lifecycle events, no crash) that looked like a new hang-watchdog
+bug but wasn't — this is `exo-cluster-operations` skill pitfall #2.
 
---- (everything below this line is the PRE-09-21 state, kept for history) ---
+Also still open: vision-decode throughput regression (user-reported, ~30%
+slower decode on image-bearing requests, confirmed+characterized but root
+mechanism not found — Fable's leading hypothesis is pure context-length
+cost via a DSA indexer top-k cliff, not anything image-specific; a
+length-matched control script is written at
+`/tmp/vision_length_matched_probe.py` but not yet run) and the c>=2
+spec-decode drift (untouched today, see the Sept 16 incident doc).
+
+--- (everything below this line is the EARLIER-09-21 state, kept for history; the hang-watchdog situation it describes is RESOLVED per the update above) ---
 
 **CLUSTER IS HEALTHY. Verified 2026-09-04 on REAL PIDs after the restore boot, not inherited.**
 API 200; runners **READY 2/2**; a real completion was confirmed against the placed checkpoint.
