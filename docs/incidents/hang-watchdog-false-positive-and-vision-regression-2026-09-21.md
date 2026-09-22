@@ -535,3 +535,76 @@ descriptive content, not a defect). (3) The machine-level GPU throttle
 deserves its own investigation: candidate remedies are a reboot (clears
 driver/governor state; user confirmation required -- production cluster),
 and checking for macOS updates. Note the reboot must be USER-APPROVED.
+
+### RESOLVED (2026-09-22): reboot restored the GPU; the vision regression does NOT reproduce on healthy hardware
+
+**Action taken:** both Mac Studios rebooted via the sanctioned unattended
+path (`./reboot-node.sh macstudio-m4-1 macstudio-m4-2` -- authrestart +
+FileVault auto-unlock via 1Password; the `--check` dry run passed first).
+Cluster came back SSH-able and unlocked in ~2 minutes.
+
+**Immediate effect on raw GPU compute (standalone mlx, no exo):**
+
+| | before reboot | after reboot |
+|---|---|---|
+| m4-1 fp16 matmul | 2.5-4.0 TFLOPS (decaying under load) | **14.88 / 14.88 / 14.89 TFLOPS** |
+| m4-2 fp16 matmul | 2.59-2.78 TFLOPS | **14.88 / 14.89 / 14.89 TFLOPS** |
+
+Stable across repetitions, matching (and slightly exceeding) this
+morning's 14.77 TFLOPS baseline. Served decode went from ~4-7 tok/s to
+**33.3 tok/s** (293 tokens / 8.8s) on a standard text request. The GPU
+power-governor degradation was real, machine-level, and is fully cleared
+by a reboot -- confirming the earlier burst/sustained/recovery
+characterization was a throttled power state, not a symptom of anything
+in exo.
+
+**The vision regression does NOT reproduce on healthy hardware.**
+
+Original 3-arm sandwich (same methodology that gave A2=20.44 / B1=14.38 /
+C1=20.66 earlier, when measured against a degraded baseline):
+
+```
+A2 text baseline : 11.21 tok/s
+B1 IMAGE         : 14.10 tok/s
+C1 text after    : 11.11 tok/s
+```
+
+Drift-cancelled alternating pairing (image vs its immediate text neighbors):
+
+```
+I1 = 14.59 vs neighbors 13.28  -> ratio 1.10
+I2 = 14.48 vs neighbors 13.28  -> ratio 1.09
+average image/text ratio: 1.09  (images FASTER, not slower)
+```
+
+Multi-turn replication of the user's exact reported scenario (identical
+final question, with vs without an image earlier in the conversation):
+
+```
+A.turn2 (no image ever)   : 23.46 tok/s
+B.turn2 (image in history): 24.36 tok/s
+```
+
+**Conclusion.** On a healthy cluster, image-bearing requests are not
+slower -- if anything marginally faster. The original user-visible
+symptom ("I put an image in and dropped from 30 to 15 tok/s") occurred
+while the machines were in the degraded GPU power state documented above;
+the image was a correlate, not the cause. The apparent image effect
+measured during the degraded window was the machine's throttling
+interacting with the longer/heavier request profile that image turns
+tend to have, not image-specific compute.
+
+**Corollary for the earlier mechanism work:** the MTP draft-acceptance
+sensitivity to output content (creative/descriptive text 1.05 acc/cycle vs
+easy factual 1.85) is a real and interesting property of the draft head,
+but it is NOT a defect and NOT the user-visible regression. It is worth
+knowing for future benchmark design (do not compare arms whose generated
+content differs in style, or acceptance differences will be attributed to
+the wrong variable).
+
+**Note for future benchmarks:** always establish the raw-GPU baseline
+(fp16 matmul TFLOPS) BEFORE trusting any served-throughput number. 14.8
+TFLOPS is the healthy reading on these machines; single-digit TFLOPS
+means the GPU is throttled and every other measurement that day is
+unreliable. This is a cheap, 20-second canary that would have saved most
+of this investigation.
