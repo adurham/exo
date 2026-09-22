@@ -390,3 +390,50 @@ investigated further, unrelated to either fixed bug).
 3. **Thread 2 (c>=2 spec drift)**: still has a named, unexecuted next step
    from Sept 16 (logprobs repro, then gated fix attempt) — lowest priority,
    not the user's workload.
+
+### NEW FINDING (end of session): general decode throughput regression, cause UNKNOWN
+
+While attempting the length-matched vision control (next-steps item 2
+above), plain text-only decode measured **3.5-6.2 tok/s** on this exact
+boot -- roughly 3-6x SLOWER than the ~20 tok/s baseline this same session
+established repeatedly earlier (the A2/C1 arms of the original vision
+regression probe: 20.44 and 20.66 tok/s, on the SAME model, SAME hardware,
+SAME sharding config, same day). This is NOT the vision regression --
+these were plain text-only requests with no image. Measured cleanly three
+times, isolated (verified zero pending tasks before each call, no orphaned
+concurrent requests):
+- "Count from 1 to 5" -- 133 completion tokens / 37.8s = 3.5 tok/s
+- "Write the numbers 1-20" -- 264 completion tokens / 42.7s = 6.2 tok/s
+- (an image-request calibration call during the control script) -- 150
+  completion tokens / 157s = 0.95 tok/s (this one may have residual
+  calibration-loop overhead from the probe script's binary-search prefill
+  calls stacking up; treat as a weaker data point than the two above)
+
+Ruled out as EASY explanations (checked, not assumed): no thermal
+throttling (`pmset -g therm` clean both nodes), no memory pressure (~11GB
+free on top of ~87-97GB DSv4 residency, not critical), no co-hosted
+model contention (only the DSv4 instance is placed -- Qwen3.6 auto-place
+never completed, still just a stray download), GPU idle power normal
+(21mW) between requests, speculative-decode env flags unchanged
+(EXO_SPECULATIVE=1, GAMMA=3, EXO_DSV4_MTP=1 -- same as the healthy-speed
+boot earlier today).
+
+**NOT diagnosed further this session** -- this is a new, real, separate
+finding surfaced at the very end of an already-long session (two hang-
+watchdog commits + extensive live verification + vision investigation
+already consumed the available time). Do not assume this is the same
+vision regression, the same hang-watchdog issue, or a measurement error --
+it was checked against exactly the obvious causes and none of them explain
+it. Leading candidates for next session, in order of cheapness to check:
+(1) MTP acceptance-rate collapse (compare `accepted_prediction_tokens` /
+`completion_tokens` ratio in `usage.completion_tokens_details` across
+these slow requests vs. the earlier fast ones -- a collapsed accept rate
+would mean the SAME total wall-clock is producing verify-only, near-zero
+net throughput, without needing any GPU-level slowdown); (2) something
+specific to THIS boot's env/config that differs from the earlier
+same-session fast boot despite looking identical in the checked flags
+(diff the full env between the two boots, not just the handful checked
+here); (3) a real hardware/thermal issue that `pmset -g therm`'s coarse
+reporting doesn't surface (a live `powermetrics` GPU-frequency sample
+during an active slow decode, not just idle, would be more conclusive
+than the idle-only check done here).
