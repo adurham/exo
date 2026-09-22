@@ -64,22 +64,27 @@ So the "28 vs 36" gap I initially treated as a regression is a
 **cross-checkpoint comparison**, not a loss. The July numbers are simply not
 transferable.
 
-### 3. Where the throughput actually goes: context depth
+### 3. ~~Where the throughput actually goes: context depth~~ — CORRECTED, SEE BELOW
 
-Measured this session, current config, 400-token generations:
+**This section's conclusion was WRONG and is superseded by
+`docs/decode-flat-across-depth-36tps-at-115k-2026-09-22.md`.**
 
-| context depth | tok/s |
-|---|---|
-| ~20 tok | 27.02 |
-| ~605 tok | 23.22 |
-| ~1771 tok | 18.99 |
-| ~3521 tok | 15.78 |
-| ~7021 tok | 12.30 |
+The depth table originally printed here (27 t/s @20 tok falling to 12.3 @7K)
+was produced by a hand-rolled `depth_sweep.py` that computed
+`completion_tokens / wall` — charging PREFILL time to decode. Corrected
+using the probe's own `decode_tps`, decode is flat-to-rising across depth:
 
-**~20% loss per doubling of context.** This is the real decode lever, and it
-also explains the campaign's headline: the July "36.1-36.3 t/s short-ctx"
-figure was explicitly *short-ctx*. Our 4K probe sits several doublings
-deeper. Same config, different operating point.
+| context depth | decode tok/s | needle |
+|---|---|---|
+| 2,216 | 29.17 | ✓ |
+| 21,855 | 33.22 | ✓ |
+| 68,002 | 31.78 | ✓ |
+| 115,614 | **36.74** | ✓ |
+
+**The 35-40 t/s target is already met at real working depths.** No decode
+campaign is required. The "28 t/s" that motivated this campaign came from a
+600-token generation at short context — the least favourable operating
+point.
 
 Generation length matters too (standing ">400 tokens" rule understates it):
 
@@ -110,16 +115,14 @@ promotion, with no inline status marker.
 ## Conclusion and next step
 
 - The divergence is fixed and verified **lossless**. Nothing to chase there.
-- Decode is **depth-limited**: 27 t/s at short ctx falling to 12 t/s at 7K.
-- The 35-40 t/s target is therefore reachable only by attacking the
-  **context-scaling term**, not the vec/loop question.
+- ~~Decode is depth-limited~~ **WRONG — see §3 correction.** Decode is
+  flat-to-rising across depth; 36.74 t/s at 115K.
+- **The 35-40 t/s target is already met at real working depths.** No
+  campaign required.
 - The batched-verify path (+36.7% @100K, already shipped) is the main
   reason depth scaling has improved at all.
 
-Highest-value next work: characterize and reduce the per-cycle cost growth
-with depth. Candidate mechanisms are already mapped in
-`docs/dspark-14k-cliff-investigation-2026-08-27.md` (Indexer top-k over
-compressed KV; branch flip compressed→sparse at the depth threshold;
-per-cycle pmask build). None of those were measured under the current
-batched-verify regime at intermediate depths — a depth ladder of verify-cycle
-timings (not just end-to-end tok/s) would localize it.
+Highest-value next work is NOT a decode campaign. If further decode gains
+are wanted, the honest levers are byte-reduction (fewer bytes per token) or
+the still-unexplained local drain/dispatch penalty — not depth, which is
+already flat.
