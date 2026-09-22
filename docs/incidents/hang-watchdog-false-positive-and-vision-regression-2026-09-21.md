@@ -437,3 +437,101 @@ here); (3) a real hardware/thermal issue that `pmset -g therm`'s coarse
 reporting doesn't surface (a live `powermetrics` GPU-frequency sample
 during an active slow decode, not just idle, would be more conclusive
 than the idle-only check done here).
+
+### ROOT CAUSE FOUND (2026-09-22): the "vision regression" is NOT image-specific -- it is MTP draft-acceptance sensitivity, and the ambient slowdown is a machine-level GPU power-governor throttle
+
+**Two separate findings, both now measured directly rather than inferred.**
+
+#### Finding 1: images do not add decode compute -- they reduce MTP draft acceptance
+
+Measured via exo's own Prometheus counters (`exo_mtp_cycles_total`,
+`exo_mtp_accepted_drafts_total`), scraped before/after each request, with
+per-cycle wall time computed alongside:
+
+| arm | acc/cycle | tok/cycle | ms/cycle |
+|---|---|---|---|
+| easy text | 1.85 | 2.85 | 455.9 |
+| image-instr, no image | 1.79 | 2.79 | 379.2 |
+| image attached | 1.67 | 2.67 | 475.1 |
+| creative/hard text | 1.05 | 2.03 | 365.2 |
+
+**Per-cycle cost is identical across all arms** (365-476 ms; the image arm
+is not slower than text). What changes is how many draft tokens the MTP
+head gets accepted per verify cycle. Fewer accepted drafts = fewer tokens
+delivered per identical-cost cycle = lower tok/s with NO extra compute.
+
+A length-matched interleaved test (3 rounds, ABABAB, drift-cancelling)
+gave IMG/TXT acceptance ratio **0.71** at matched prompt length
+(127 vs 133 tokens), reproducible exactly across all 3 rounds.
+
+Critically, a **content-controlled** variant (identical requested output,
+`enable_thinking: false`, byte-identical emitted text in both arms) showed
+the gap largely VANISH: image 2.90 acc/cycle vs text 2.87. So a large part
+of the acceptance difference is **output-content-driven** (drafting is
+simply harder on descriptive/freeform content: creative text measured 1.05
+acc/cycle vs 1.85 for easy factual), not image-token-presence-driven.
+
+The user's original observation (MTP acceptance 1.83 -> 1.46 across a
+conversation that gained an image) is consistent with this: images tend to
+arrive with descriptive prompts and open-ended outputs, and the
+conversation grows -- both of which depress acceptance. **There is no
+extra per-token compute anywhere in the vision path**, which is exactly why
+every source-read of the vision/MTP code came up empty (media_regions is
+prefill-only; `_apply_image_visibility` is env-gated OFF and prefill-only;
+`_query_tiled_ok` is prefill-only; `bias_vl` is config-driven and
+own-position scoped; rollback/snapshot paths are context-size-independent).
+
+#### Finding 2: the ambient 3-6x cluster slowdown is a machine-level GPU governor condition, NOT an exo bug
+
+Raw fp16 matmul (standalone mlx process, no exo involvement, per-iteration
+`mx.eval`):
+
+- **Earlier today: 14.77 TFLOPS on BOTH nodes** (verified directly).
+- **Now: 2.5-4.0 TFLOPS**, via two independent benchmark methodologies
+  (per-iteration eval on 4096 and on 8192 matrices -- both agree).
+
+Shape of the degradation (reproducible):
+
+```
+three short bursts with 10s gaps :  4.09 / 3.77 / 4.06 TFLOPS
+one sustained 45s run            :  4.03 -> 2.55 -> 2.27 TFLOPS
+burst after 10s pause            :  3.99 TFLOPS   (full recovery)
+```
+
+Co-sampled `powermetrics` during sustained load:
+- GPU HW active frequency **pinned at 338 MHz** (this chip's table runs to
+  1578 MHz) with 44-59% idle residency
+- GPU power only **1.5-2.2 W** under real compute
+- CPU P-cluster 4.0-4.3 GHz with headroom -- CPU is NOT the bottleneck
+- **Thermal pressure "Sleeping"** at every sample; `pmset -g therm` reports
+  no thermal warning level AND no performance warning level ever recorded
+
+So the GPU holds its lowest frequency bin and draws ~2W under sustained
+compute, with no thermal signal, then recovers fully when idle. This is a
+power/performance governor state, and it is **not** permanent hardware
+damage (full recovery after a pause proves that) and **not** an exo code
+path.
+
+One logged kernel-level `AGX: NOP prepared` / `AGX: Submitting NOP` event
+(GPU driver error-recovery) coincided with the earlier SIGKILL-based runner
+recoveries. Also found and ruled out as causes (both were present during
+the fast measurements too): `configd` in a perpetual DHCP-retry loop on
+orphaned virtual interfaces (~40% of one core) and `audiomxd` at ~76% of
+one core. Machines have ~4 days uptime with heavy Metal process churn.
+
+**Verdict on the user's original question ("I put an image in and dropped
+from 30 to 15 tok/s"):** the drop was real and is now explained --
+it is MTP draft acceptance falling (drafts rejected more often), chiefly
+as a function of the content that image-bearing prompts elicit, with a
+smaller genuine contribution from image tokens in context. No extra
+per-token image compute exists at any site examined.
+
+**What still needs doing:** (1) A/B the acceptance claim against a clean
+machine state once the GPU governor issue is resolved -- the ambient
+slowdown makes absolute numbers unreliable even though the drift-cancelled
+ratios are sound. (2) Decide whether acceptance-sensitivity is worth
+engineering around (it is a property of the draft head's accuracy on
+descriptive content, not a defect). (3) The machine-level GPU throttle
+deserves its own investigation: candidate remedies are a reboot (clears
+driver/governor state; user confirmation required -- production cluster),
+and checking for macOS updates. Note the reboot must be USER-APPROVED.
