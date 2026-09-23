@@ -65,6 +65,15 @@ Specifically, counting prefill time as decode time. Guards:
   out startup-dominated DECODE windows but says nothing about whether your
   denominator still includes prefill.
 
+## SUPERSEDED (same day, deeper data)
+
+The "flat-to-rising" conclusion below was drawn from FOUR points. Two deeper
+rungs falsify it: 273K = 26.83 t/s, 565K = 13.36 t/s (at 95.9% of the GPU
+wired-memory limit). Throughput is flat only to ~120K.
+
+See `docs/decode-depth-ladder-to-565k-memory-wall-2026-09-22.md` for the full
+six-point ladder, the memory correlation, and the methodological guards.
+
 ## Status
 
 The vec-vs-loop divergence is fixed and verified lossless (see
