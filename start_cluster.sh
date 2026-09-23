@@ -94,8 +94,23 @@
 # logic in mlx_lm stream_generate starts at EXO_PREFILL_STEP_SIZE (low ctx) and
 # shrinks to EXO_PREFILL_STEP_SIZE_HIGH_CTX past EXO_PREFILL_STEP_SIZE_CROSSOVER.
 # Defaults: high-ctx unset => fixed step (unchanged behavior). Set both to enable.
-: "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:=}"
-: "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=}"
+#
+# ENABLED 2026-09-23 to attack the deep-context memory overshoot. Rationale:
+#   * The deep-context decode collapse (565-638K: 12.04-13.12 t/s, page-ins
+#     39,930-66,003, peak 117.88-123.80 GB against a 115.4 GB wired limit) is
+#     driven by total footprint, and the reconciled budget at 638K is
+#     ~104 GB fixed + 16.63 GiB retained leaves + ~9 GB prefill transient.
+#   * The transient is the only term that is neither fixed nor required, and it
+#     is exactly what this mechanism shrinks: the (B, H=64, L, P) indexer score
+#     transient scales with chunk size L AND pooled P.
+#   * We were running 2048-token chunks at 638K. The comment above already
+#     measures 256-chunk as -30% vs 128 past 380K -- i.e. at 8x smaller than
+#     what we shipped. The transient scales with L, so this regime is the worst
+#     case for both throughput AND peak memory.
+#   * 128 is the documented high-ctx default named by the code itself.
+# No wedge risk (two env vars); revert by unsetting both.
+: "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:=128}"
+: "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=200000}"
 # Clear MLX Metal buffer cache every N prefill chunks (default 1 = every chunk,
 # original behavior). Setting N>1 amortizes the allocator release/re-acquire
 # overhead across chunks — each clear_cache forces the Metal allocator to drop
