@@ -72,6 +72,32 @@ Test: fine-grained rungs at 40K / 55K / 70K / 90K / 110K.
 
 `/tmp/cliff_ladder.py` implements exactly this and writes `/tmp/cliff_ladder.jsonl`.
 
+## SOURCE-VERIFIED: the threshold is real in code
+
+`mlx-lm/mlx_lm/models/deepseek_v4.py`, `Indexer.__call__`, line ~4795:
+
+```python
+k = min(self.index_topk, pooled.shape[1])
+```
+
+That is exactly the predicted arithmetic. `pooled` is the compressed KV
+(`depth / compress_ratio` entries). So:
+
+- `pooled.shape[1] <= 512` -> `k = pooled.shape[1]` -> **top-k selects ALL
+  entries** (no coverage loss, effectively dense)
+- `pooled.shape[1] > 512`  -> `k = 512` -> **entries are dropped**
+
+Crossover at `pooled.shape[1] == 512`, i.e. depth = 512 * 128 = **65,536
+tokens** — matching the arithmetic and sitting between the healthy 28K rung
+and the degraded 128K rung.
+
+Also note from the same source: the indexer comment states
+`EXO_DSV4_INDEX_TOPK` is "validated quality-neutral at 192 on AIME for
+DSv4-Flash-6bit" — i.e. the *set* of selected entries matters less than
+expected quality-wise, BUT that was measured on a different checkpoint and the
+lever's effect on *acceptance* (not quality) at depth is what concerns us here.
+Raising topk above 512 increases coverage and therefore the drafter's view.
+
 ## Why this matters for the user's targets
 
 - **T2 (250K >= 30 t/s):** if the cliff is the indexer threshold, then 250K is
