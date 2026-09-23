@@ -109,8 +109,24 @@
 #     case for both throughput AND peak memory.
 #   * 128 is the documented high-ctx default named by the code itself.
 # No wedge risk (two env vars); revert by unsetting both.
+#
+# CROSSOVER REVISED 200000 -> 500000 (2026-09-23, after review). The 200000
+# value above is the code's documented default, but it was chosen for a
+# throughput/memory-bandwidth concern, NOT for the collapse. Measured transient
+# scaling (transient ~ 8 bytes x L x P, cross-checked against this session):
+#     depth   2048-chunk transient   128-chunk transient
+#    250,000        1.02 GB               0.06 GB
+#    500,000        2.05 GB               0.13 GB
+# At 250K a 2048-chunk transient is ~1 GB against a 87-107 GB baseline and a
+# 115.0 GB limit -- no risk. So shrinking at 200K buys ZERO safety there while
+# paying 16x more chunk boundaries (~1950 chunks vs ~122 at 250K) in the exact
+# regime the user asked to speed up (250K > 30 t/s). Setting the crossover at
+# 500K keeps the shrink where the collapse actually lives (565-640K tonight)
+# and leaves 250K on the cheap large chunks.
+# (Independent review recommended 450-500K; 500K chosen as the conservative
+# end, and it is the round number matching the user's stated target cliff.)
 : "${EXO_PREFILL_STEP_SIZE_HIGH_CTX:=128}"
-: "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=200000}"
+: "${EXO_PREFILL_STEP_SIZE_CROSSOVER:=500000}"
 # Clear MLX Metal buffer cache every N prefill chunks (default 1 = every chunk,
 # original behavior). Setting N>1 amortizes the allocator release/re-acquire
 # overhead across chunks — each clear_cache forces the Metal allocator to drop
