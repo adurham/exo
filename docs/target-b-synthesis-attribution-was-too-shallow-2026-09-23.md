@@ -122,9 +122,50 @@ The honest position is now sharper and less flattering to my own framing:
    be presented as hygiene, with the <0.5% bound stated, **not** as the answer to
    target (b).
 
-## Verification status
+## Verification status — VERIFIED (with 4 imprecisions recorded)
 
-The reader's eight load-bearing source claims are being independently
-re-verified against the source (a separate read-only pass, since a child's
-summary is a self-report and not fact). This document will be amended if any
-claim fails.
+All eight load-bearing source claims were independently re-verified against the
+source in a separate read-only pass. **Verdict: supported, nothing falsified.**
+Two claims HOLDS VERBATIM (the `mx.concatenate` at 5159; the instantiation list
+at `.metal:58-61`), two more HOLDS VERBATIM (the config/TP geometry at
+8434-8448, confirmed against two checkpoint configs on disk AND the source
+defaults; the absence of any (G=32, D=512) instantiation). None WRONG.
+
+Imprecisions found and recorded, because two of them narrow the claims:
+
+1. **C3 overstated — "pooled mask is None at decode BY CONSTRUCTION in both
+   cache classes" is wrong for `BatchPoolingCache`.** It returns None at L==1
+   only when `all(pl == P for pl in self._pool_lengths)` (cache.py:2239); under
+   **ragged per-stream pool lengths it returns the non-None `valid` array**.
+   Consequence: the `mx.ones` all-True branch does not fire under ragged
+   batching. For the 2×Mac-Studio single-stream deployment this document is about,
+   all streams are equal so the claim holds in practice — but it is
+   *deployment-scoped*, not structural.
+2. **C2 understated its own precondition.** `_extend_mask` short-circuits to None
+   at 1845-1846 when the *incoming* mask is None — which is what plain
+   `RotatingKVCache` yields at L==1. So nothing is materialized in
+   single-stream plain-cache decode; the concat + `mx.ones` fire only under the
+   serving **batch** cache classes (and `BatchRotatingKVCache.make_mask` returns
+   an array unconditionally, cache.py:3362). Again true for serving, but the
+   mechanism is "batch classes," not "decode."
+3. **C6 misattributed a line.** The quoted `q_head_idx = gqa_factor * kv_head_idx
+   + tidtg.y` (sdpa_vector.h:223) is inside `sdpa_vector_2pass_1` (declared line
+   180), **not** the GQA variant (declared line 326, different indexing at
+   350-360). **This makes the finding STRONGER, not weaker:** `sdpa_vector_2pass_1`
+   is the kernel DeepSeek-V4 actually runs (the GQA variant being unreachable per
+   C4/C5), and in it 32 simdgroups each own one query head against the single
+   shared KV head — so K/V really is re-read 32×.
+4. C1's "unconditional" is loose (skipped only when the pool is empty, i.e. early
+   decode steps) and C8's identifier is `_sinks`, not `sinks`. Neither changes a
+   verdict. C4 omits two gate conjuncts (`q.shape(1) == gqa_factor * k.shape(1)`,
+   `q.shape(-1) == v.shape(-1)`) that hold trivially here.
+
+Not verifiable locally: whether the checkpoints actually carry `attn_sink` weight
+tensors (no safetensors in `~/.cache/huggingface` for either DeepSeek-V4-Flash
+snapshot). This does not affect the gate, which reads `!sinks` on the tensor's
+presence, and the tensor is always present.
+
+**Net effect on this document's conclusions: none.** The two corrections that
+matter are scoping ones (this waste is a *serving batch-cache* effect, not a
+universal decode effect) and they leave the <0.5% bound and the "kernel is at its
+ceiling" verdict intact.
