@@ -520,7 +520,44 @@ def _array_like_nbytes(value: Any) -> int:
 
 
 def _cache_object_nbytes(cache_entry: Any) -> int:
-    """Sum nbytes across a single per-layer cache object's K/V/state tensors."""
+    """Byte size of a single per-layer cache object.
+
+    Prefer the standard ``.nbytes`` property that every mlx-lm cache class
+    implements (``_BaseCache.nbytes``: KVCache, RotatingKVCache, ArraysCache,
+    QuantizedKVCache, PoolingCache, BatchPoolingCache, BatchRotatingKVCache,
+    CacheList, ...). ``CacheList.nbytes`` recurses over its sub-caches.
+
+    WHY THIS MATTERS (root-caused 2026-09-23). The previous implementation
+    hand-rolled the attribute walk (``keys``/``values``/``state``) and returned
+    ZERO for every ``CacheList`` layer, because:
+
+      * CacheList exposes no ``.keys``/``.values``, and
+      * ``CacheList.state`` returns a LIST OF TUPLES ``[(sub.state, type_name),
+        ...]``; ``_array_like_nbytes`` iterates a list and reads ``.nbytes`` off
+        each ITEM, but the items are tuples, which have no ``.nbytes``.
+
+    DeepSeek-V4's ``make_cache()`` wraps EVERY sparse layer in
+    ``CacheList(RotatingKVCache, PoolingCache, ...)``. Measured on the real
+    structure at 273K depth: the old code reported 0.75 MiB for what is
+    actually 2.68 GiB of KV — a ~3570x undercount.
+
+    CONSEQUENCE: ``_total_bytes()`` under-reported by orders of magnitude, so
+    the ``max_bytes`` ("byte cap") eviction branch in ``_evict_if_needed`` could
+    never fire for DSv4 no matter how much KV was retained — the cap was
+    configured and "wired end-to-end" but structurally unreachable. That is also
+    why the eviction log only ever showed "session cap N" evictions.
+
+    Falls back to the legacy attribute walk for any object lacking ``.nbytes``
+    (keeps test doubles / future cache types working).
+    """
+    nb = getattr(cache_entry, "nbytes", None)
+    # `nbytes` on the base class raises NotImplementedError for unknown types;
+    # treat any failure as "not available" and fall back.
+    if nb is not None:
+        try:
+            return int(nb)
+        except (NotImplementedError, TypeError, ValueError):
+            pass
     total = 0
     for attr in ("keys", "values", "state"):
         total += _array_like_nbytes(getattr(cache_entry, attr, None))
