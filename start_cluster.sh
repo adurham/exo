@@ -179,6 +179,32 @@
 #   layer_memory  — per-layer Metal memory snapshots (was EXO_PROFILE_LAYERS;
 #                   EXO_PROFILER_LEVEL=2 also snapshots before each layer)
 # Unset ⇒ all hook calls in mlx-lm short-circuit to no-ops.
+#
+# SPANS ENABLED 2026-09-23 to profile the 250K decode gap. Rationale: the 250K
+# shortfall (28.99/27.70 t/s vs 34.1 at 30K) was isolated to CYCLE COST
+# (+22.9% ms/cycle, 56.5 -> 69.5) with acceptance flat (-3.5%). Every candidate
+# lever is now closed by measurement: FENCE_ASYNC already live; stale top-k reuse
+# falsified (0.42 overlap at depth, docs/target-b-topk-overlap-*); INDEX_TOPK<512
+# forbidden (skill #49); FENCE_EVERY_N_LAYERS 4->8 worth only ~+0.7 t/s and costs
+# c=2 bistability. So the remaining question is WHICH per-cycle term carries the
+# +22.9%, and guessing further is not acceptable -- it needs a span profile.
+#
+# 'spans' is a per-span wall-time accumulator and emits the breakdown for the
+# named sites, which is exactly the granularity required:
+#   indexer.score, indexer.topk, attn.indexer, attn.compressor, attn.sdpa,
+#   attn.mask, attn.kv_cache, moe.switch_mlp, moe.gate, moe.all_sum, ...
+# It answers directly whether the depth-scaling cost sits in indexer scoring
+# (the O(context) term) or elsewhere.
+#
+# CAUTION (documented): span profiling MUST mx.eval at bracket closes or lazy
+# eval bills deferred compute to the wrong phase -- that is handled at the
+# instrumented sites. Profiling adds wall-time overhead, so DO NOT compare
+# throughput numbers measured with this on against the 27-29 t/s baseline;
+# use it for ATTRIBUTION only, then unset it for benchmarks.
+# Set EXO_PROFILER=spans to enable for an attribution run. LEFT UNSET BY DEFAULT
+# on purpose: profiling adds wall-time overhead, so leaving it on would silently
+# contaminate every future throughput measurement. Enable it for one run, read
+# the attribution, then restore the empty default.
 : "${EXO_PROFILER:=}"
 : "${EXO_PROFILER_LEVEL:=1}"
 : "${EXO_MEMORY_PROFILE_PATH:=}"
