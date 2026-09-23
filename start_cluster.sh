@@ -1906,29 +1906,6 @@ for NODE in "${NODES[@]}"; do
   if [ "${DSV4_SHARDING:-Tensor}" = "Pipeline" ] && [ -z "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]; then
     EXO_RUNNER_HANG_TIMEOUT_SECONDS=1800
   fi
-  # TENSOR MODE FIX (2026-09-23): the PP-only guard above left the default 45s
-  # in force for the production TENSOR config, so the supervisor SIGKILLed a
-  # runner during a legitimate deep-context operation. Measured failure: a
-  # 565K request had its runner killed at 16:04:24 after "silent for 69s; liveness
-  # probe shows footprint plateaued (growth=+0.00GB)". The thread dump
-  # (/tmp/exo_hang_32526.txt) shows the process at 387 MB footprint stuck inside
-  #   mlx::core::distributed::init -> jaccl::init -> jaccl::Config::get_side_channel()
-  # i.e. RDMA side-channel setup, not compute and not a deadlock.
-  #
-  # WHY THE EXISTING LIVENESS PROBE CANNOT COVER THIS: _check_hang infers
-  # liveness from FOOTPRINT GROWTH. An RDMA-init stall legitimately produces
-  # exactly 0.00 GB of growth, so the probe's own discriminator reads it as dead
-  # and kills a healthy runner. The same class as skill pitfall #74b (watchdog
-  # false positives), and the same incoherence already documented for PP: the
-  # supervisor's 45s is shorter than the 1800s MLX event wait it is racing.
-  #
-  # 1800s for Tensor too: it is the value already chosen for the identical
-  # incoherence in PP, and it matches the MLX_EVENT_WAIT_TIMEOUT_MS it must not
-  # undershoot. This does NOT hide real hangs -- a genuine stall still trips the
-  # (now consistent) 1800s bound, and the hang dump is still written.
-  if [ -z "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ]; then
-    EXO_RUNNER_HANG_TIMEOUT_SECONDS=1800
-  fi
   [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
   # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. Depth 8 is
   # validated for sz<=2 chunks (<=16KB concurrent UC sends are clean; the old
