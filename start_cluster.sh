@@ -595,30 +595,34 @@ fi
 # FIX: _cache_object_nbytes now prefers the standard .nbytes property that every
 # mlx-lm cache class implements (CacheList.nbytes recurses over sub-caches).
 #
-# SIZING (now that accounting is correct). Measured leaf KV: 30K=0.29 GiB,
-# 100K=0.96, 250K=2.39, 273K=2.62, 500K=4.79, 565K=5.41 GiB. With the count cap
-# at 4, worst-case retention is 4 x 5.41 = 21.6 GiB at 565K. 12 GiB is chosen so
-# the cap is SILENT up to ~300K (4 leaves x 2.62 = 10.5 GiB fits) and binds only
-# in the deep regime:
-#     depth   4 leaves   cap fires   keeps
-#     30,000     1.16G       no        4      <- normal traffic: unchanged
-#    250,000     9.56G       no        4      <- the 250K target: untouched
-#    400,000    15.32G      YES        3
-#    565,000    21.64G      YES        2      <- frees ~10.8 GiB
+# SIZING (now that accounting is correct). Measured leaf KV (real DSv4 shapes,
+# post-fix, agreeing exactly with .nbytes): 30K=0.29 GiB, 100K=0.96, 250K=2.39,
+# 273K=2.62, 361K=3.45, 565K=5.41 GiB. 12 GiB is chosen so the cap is SILENT
+# below ~420K and binds only in the deep regime:
+#     depth   3 leaves   byte cap
+#    250,000    7.17G      silent     <- the 250K target: untouched
+#    361,000   10.37G      silent     <- VERIFIED SILENT ON LIVE HW 2026-09-23
+#    420,000   12.06G      FIRES
+#    565,000   16.23G      FIRES -> keeps 2, frees ~5.4 GiB
+# NOTE the eviction ORDER matters: _evict_if_needed runs (1) memory pressure,
+# (2) session cap, (3) byte cap -- and it runs BEFORE the new leaf is inserted.
+# The session cap already reduces to 3 leaves (reserve_slot), so the byte cap
+# only ever removes the 3rd leaf, freeing ONE deep leaf (~5.4 GiB at 565K), not
+# the whole excess. That is a real but bounded headroom win in the 500K regime.
 # This preserves the anti-thrash property from b56cd9351 (which raised the COUNT
 # cap 2->4 because live multi-conversation traffic at 2 caused "5 full
 # re-prefills in one evening, 24,759 tok / 72.9 s stall") for every depth the
-# user normally works at, and trades older deep leaves for headroom only above
-# ~300K -- the regime where the 565K decode collapse lives (peak 117.24 GB
+# user normally works at, and trades the oldest deep leaf for headroom only
+# above ~420K -- the regime where the 565K decode collapse lives (peak 117.24 GB
 # against the 115.4 GB wired limit; 6,599 page-ins in one deep request vs 400 at
 # 128K; pageouts=0 so not swap).
 #
 # SCOPE / HONEST LIMITS: this addresses the 500K-collapse target. It does NOT
 # address the 250K>30 t/s target -- that gap is CYCLE COST (+22.9% ms/cycle from
-# 30K to 273K), not memory, and retention at 250K is 9.6 GiB of a ~104 GB
-# footprint. Also note the collapse is STOCHASTIC (13.36 vs 24.15 tok/s at
-# identical 565K; one of six 250K runs at 19.46), so this cap is expected to
-# reduce its frequency, not eliminate it outright.
+# 30K to 273K), not memory, and retention at 250K is 7.2 GiB of a ~104 GB
+# footprint. The collapse is also STOCHASTIC and NOT eliminated: with the fix
+# live, a 5x361K sweep still produced two slow runs (16.43 and 16.83 t/s against
+# ~25.5 for the others) at 370-384K. Expect reduced frequency, not a cure.
 : "${DSV4_MAX_PREFIX_BYTES:=12884901888}"
 # Per-leaf KV snapshot retention for DSv4's non-sliceable (PoolingCache /
 # RotatingKVCache) layers. Snapshots are now retained EVENLY SPACED across the
