@@ -2129,6 +2129,26 @@ for NODE in "${NODES[@]}"; do
   [ -n "$EXO_DSV4_INDEX_TOPK" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEX_TOPK=$EXO_DSV4_INDEX_TOPK"
   # One-shot decode-step top-k overlap diagnostic (Indexer, deepseek_v4.py)
   # -- opt-in, off by default, no effect on production decode.
+  # TOP-K OVERLAP DIAGNOSTIC (enabled 2026-09-23). Read-only; serves the user's
+  # OPEN target "get 250K above 30 t/s".
+  #
+  # WHY: decode at 250K is 27-29 t/s vs 34.1 at 30K, and the gap was decomposed
+  # to CYCLE COST, not acceptance (acc/cycle only -3.5% from 30K to 273K, while
+  # ms/cycle rose +22.9%: 56.5 -> 69.5). The one per-cycle term that grows with
+  # depth is the indexer scoring over pooled entries (~234 pooled entries at 30K
+  # vs ~2135 at 273K, 9x). If consecutive decode steps select nearly the same
+  # top-k set (high Jaccard), then the full O(context) rescoring every step is
+  # largely redundant and "stale top-k reuse" (rescore every N steps + cheap
+  # incremental scoring between) becomes viable -- the highest-value remaining
+  # lever for this target.
+  #
+  # This env var only MEASURES the overlap (it prints
+  # "[TOPK OVERLAP] step=.. ratio=.. jaccard=.. inter=../.. pool_size=.." on
+  # true single-token decode steps, L==1/B==1). It changes no computation, so it
+  # is safe to leave on. EXO_DSV4_INDEX_TOPK<512 is FORBIDDEN (skill #49).
+  #
+  # Disable by setting EXO_DSV4_TOPK_OVERLAP_LOG=0.
+  : "${EXO_DSV4_TOPK_OVERLAP_LOG:=1}"
   [ -n "${EXO_DSV4_TOPK_OVERLAP_LOG:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_TOPK_OVERLAP_LOG=$EXO_DSV4_TOPK_OVERLAP_LOG"
   # P08 Item 2 live A/B gate (mlx-lm a248d0a7): take the exact top-k Metal
   # kernel for PREFILL chunks (L>16) too. Default OFF -> absent unless set,
