@@ -341,3 +341,93 @@ async def test_extension_budget_exhaustion_still_kills(
         "still growing, so a slow-leak process cannot stall the watchdog "
         "forever"
     )
+
+# ── Native-setup discriminator (2026-09-23) ──────────────────────────────
+# Third false-positive class: a runner blocked in JACCL side-channel /
+# TCP all-gather setup has a FLAT footprint (it consumes no memory while
+# blocked) but is genuinely waiting on its peer, not wedged. The footprint
+# probe alone therefore misreads it as a hang. These tests pin both
+# directions: the new check must EXTEND when the stack shows native setup,
+# and must NOT weaken the existing real-wedge kill.
+
+
+def _fake_sample_bytes_native_setup(*_a, **_k):
+    """subprocess.run stand-in whose stdout is BYTES containing the real
+    2026-09-23 call chain (the shape that was wrongly killed)."""
+    dump = (
+        b"Analysis of sampling python (pid 32526) every 1 millisecond\n"
+        b"Physical footprint:         387.3M\n"
+        b"Call graph:\n"
+        b"    2186 Thread_1   DispatchQueue_1: com.apple.main-thread  (serial)\n"
+        b"    + 2186 mlx::core::distributed::init(bool, std::string const&)\n"
+        b"    +   2186 mlx::core::distributed::jaccl::init(bool)\n"
+        b"    +     2186 jaccl::init(jaccl::Config const&, bool)\n"
+        b"    +       2186 jaccl::Config::get_side_channel() const\n"
+        b"    +         2186 jaccl::TCPAllGather::TCPAllGather(int, int, char const*)\n"
+    )
+    return subprocess.CompletedProcess(args=(), returncode=0, stdout=dump, stderr=b"")
+
+
+def test_native_setup_symbols_are_detected():
+    """The detector recognises the exact 2026-09-23 stack."""
+    assert supervisor_module._NATIVE_BLOCKED_SYMBOLS  # pyright: ignore[reportPrivateUsage]
+    dump_hits = [
+        s
+        for s in supervisor_module._NATIVE_BLOCKED_SYMBOLS  # pyright: ignore[reportPrivateUsage]
+        if s in (
+            "mlx::core::distributed::init\n"
+            "jaccl::init(jaccl::Config const&, bool)\n"
+            "jaccl::Config::get_side_channel() const\n"
+            "jaccl::TCPAllGather::TCPAllGather(int, int, char const*)\n"
+        )
+    ]
+    assert len(dump_hits) >= 2, "the real dump must arm the detector"
+
+
+def test_bytes_stdout_is_failsafe_not_crash(monkeypatch: pytest.MonkeyPatch):
+    """Bytes stdout must be decoded, never raise, and a dump WITHOUT the
+    native-setup symbols must return False (fail-safe)."""
+    neutral = subprocess.CompletedProcess(
+        args=(),
+        returncode=0,
+        stdout=b"Physical footprint: 87.0G\ncom.apple.main-thread\n"
+        b"mlx::core::eval()\nEvent::wait()\n",
+        stderr=b"",
+    )
+    monkeypatch.setattr(
+        supervisor_module.subprocess, "run", lambda *a, **k: neutral
+    )
+    assert (
+        supervisor_module._sample_is_blocked_in_native_setup(  # pyright: ignore[reportPrivateUsage]
+            12345, 1
+        )
+        is False
+    ), "a normal compute stack must NOT be reported as native-blocked"
+
+
+def test_bytes_stdout_with_native_setup_returns_true(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The positive direction: bytes output containing the side-channel
+    chain must be detected as native-blocked."""
+    monkeypatch.setattr(
+        supervisor_module.subprocess, "run", _fake_sample_bytes_native_setup
+    )
+    assert (  # pyright: ignore[reportPrivateUsage]
+        supervisor_module._sample_is_blocked_in_native_setup(12345, 1) is True
+    )
+
+
+def test_unparseable_output_is_failsafe(monkeypatch: pytest.MonkeyPatch):
+    """Garbage/empty output must return False, so a genuine wedge is still
+    killed -- this function must never be able to suppress a real kill."""
+    for junk in (b"", b"\xff\xfe", "", None):
+        empty = subprocess.CompletedProcess(
+            args=(), returncode=0, stdout=junk, stderr=b""
+        )
+        monkeypatch.setattr(
+            supervisor_module.subprocess, "run", lambda *a, **k: empty
+        )
+        assert (  # pyright: ignore[reportPrivateUsage]
+            supervisor_module._sample_is_blocked_in_native_setup(1, 1) is False
+        ), f"junk={junk!r} must fail safe"

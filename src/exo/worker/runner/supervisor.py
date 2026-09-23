@@ -164,6 +164,91 @@ def _sample_physical_footprint_gb(pid: int, duration_s: int = 1) -> float | None
     return None
 
 
+# Symbols that identify a task BLOCKED IN NATIVE NETWORK/COLLECTIVE SETUP.
+# A process parked in one of these is waiting on the peer, not spinning and
+# not deadlocked in our code -- and crucially it consumes ~zero memory while
+# blocked, so the footprint-growth probe alone misreads it as a hang.
+#
+# CONFIRMED CASE (2026-09-23): a 565K deep-context request had its runner
+# SIGKILLed at 69s of silence. /tmp/exo_hang_32526.txt shows the main thread
+# at 387 MB footprint (vs ~87 GB steady state, i.e. NOT yet loaded) in:
+#   mlx::core::distributed::init
+#     -> mlx::core::distributed::jaccl::init
+#       -> jaccl::init(jaccl::Config const&, bool)
+#         -> jaccl::Config::get_side_channel() const
+#           -> jaccl::TCPAllGather::TCPAllGather(int, int, char const*)
+# That is RDMA/JACCL side-channel bring-up blocking on a TCP all-gather with
+# the peer. Genuine progress: it completes once the peer arrives. The kill
+# destroyed a healthy request and returned an empty response.
+#
+# This is a THIRD manifestation of the watchdog false-positive class (the
+# skill reference documents cold cache-busting prefill and model loading).
+# The distinguishing evidence is the STACK, which the footprint probe never
+# looked at.
+_NATIVE_BLOCKED_SYMBOLS = (
+    "get_side_channel",
+    "TCPAllGather",
+    "jaccl::init",
+    "distributed::init",
+)
+
+
+def _sample_is_blocked_in_native_setup(pid: int, duration_s: int = 2) -> bool:
+    """True if `pid`'s main thread is parked in native network/collective
+    SETUP (JACCL side-channel / TCP all-gather), i.e. waiting on a peer.
+
+    This is the discriminator the footprint probe lacks. Such a task is NOT
+    doing compute, so its footprint is flat by definition, and it is NOT
+    wedged either -- it proceeds as soon as the peer responds.
+
+    Returns False on any failure, matching the footprint probe's contract:
+    absence of evidence is never treated as evidence of a hang.
+    """
+    try:
+        result = subprocess.run(
+            ["/usr/bin/sample", str(pid), str(duration_s)],
+            capture_output=True,
+            timeout=duration_s + 10,
+            check=False,
+            text=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    # FAIL-SAFE: this function must never suppress a legitimate kill. Any
+    # unparseable output returns False ("no evidence"), matching the
+    # footprint probe's contract. `sample`'s stdout is bytes in some
+    # invocations (and mocked as bytes in tests), so decode defensively.
+    raw = result.stdout
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode("utf-8", errors="replace")
+        except Exception:
+            return False
+    if not isinstance(raw, str) or not raw:
+        return False
+    # Only inspect the main thread, so a parked background thread cannot
+    # mask or replace the signal.
+    main = []
+    in_main = False
+    for line in raw.splitlines():
+        if "main-thread" in line or "Thread_" in line:
+            in_main = "main-thread" in line
+        if in_main:
+            main.append(line)
+    blob = "\n".join(main) if main else raw
+    hits = [s for s in _NATIVE_BLOCKED_SYMBOLS if s in blob]
+    if len(hits) >= 2:
+        # Require >=2 distinct setup symbols so an incidental single mention
+        # elsewhere in the dump cannot arm this.
+        logger.warning(
+            f"Runner pid {pid} main thread appears BLOCKED IN NATIVE SETUP "
+            f"(symbols={hits}) -- awaiting peer, not hung; extending instead "
+            f"of killing."
+        )
+        return True
+    return False
+
+
 def _process_is_stopped_or_traced(pid: int) -> bool:
     """Return True if `pid` reports a macOS process state containing 'T'.
 
@@ -679,6 +764,36 @@ class RunnerSupervisor:
             else:
                 growth_gb = footprint_gb - self._hang_probe_last_footprint_gb
                 self._hang_probe_last_footprint_gb = footprint_gb
+                # NATIVE-SETUP CHECK (2026-09-23, third false-positive class).
+                # Flat footprint is NOT sufficient evidence of a hang: a
+                # runner blocked in JACCL side-channel / TCP all-gather setup
+                # is genuinely waiting on its PEER and consumes no memory
+                # while blocked, so this probe's growth test misreads it as
+                # dead. Inspect the stack before killing. Evaluated here --
+                # unconditionally on every plateau tick, before the kill
+                # decision -- rather than behind a separate gate, per the
+                # documented v1 bug where an extension armed on one tick was
+                # ignored on the next.
+                if (
+                    growth_gb < HANG_PROBE_GROWTH_THRESHOLD_GB
+                    and self._hang_probe_extensions_used < HANG_PROBE_MAX_EXTENSIONS
+                    and _sample_is_blocked_in_native_setup(
+                        self.runner_process.pid, 2
+                    )
+                ):
+                    self._hang_probe_extensions_used += 1
+                    self._hang_probe_deadline_monotonic = (
+                        now + HANG_PROBE_INTERVAL_SECONDS
+                    )
+                    logger.warning(
+                        f"Runner {self.bound_instance.bound_runner_id} silent for "
+                        f"{silent_for:.0f}s, footprint flat ({growth_gb:+.2f}GB) "
+                        f"BUT stack shows native network/collective setup -- "
+                        f"waiting on peer, not hung. Extending "
+                        f"{HANG_PROBE_INTERVAL_SECONDS:.0f}s "
+                        f"({self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS})."
+                    )
+                    return
                 if (
                     growth_gb >= HANG_PROBE_GROWTH_THRESHOLD_GB
                     and self._hang_probe_extensions_used < HANG_PROBE_MAX_EXTENSIONS
