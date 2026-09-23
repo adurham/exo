@@ -571,33 +571,41 @@ fi
 : "${DSV4_MAX_KV_TOKENS:=}"
 # DSV4_MAX_PREFIX_BYTES (set 2026-09-23): TOTAL retained prefix-cache bytes.
 #
-# WHY THIS EXISTS. DSV4_MAX_PREFIX_SESSIONS above is a COUNT cap. It was sized
-# for 24-44K sessions at ~0.6 GB each ("4 sessions retain ~2.5 GB typical"),
-# which is correct for that workload. But cost per leaf scales with context:
-# the same cap now retains FOUR ~275K-token leaves. Measured 2026-09-23 from
-# the eviction log (trie_leaves=4 throughout the deep phase; resident leaves
-# 276424/273623/276427/270821 tokens = 1,097,295 tokens total) that is ~15-33
-# GB resident instead of ~2.5 GB. The comment above already flagged this as
-# "the 100K-ctx worst case (~12 GB) remains the documented risk if long-context
-# sessions return" -- long-context sessions HAVE returned (275-565K), so that
-# documented risk had materialised.
+# STATUS: CORRECT BUT INERT for the deep-context problem it was added for.
+# Kept as a guard rail, NOT as a fix. See the correction below.
 #
-# CONSEQUENCE OBSERVED: headroom against the 115000 MB wired limit fell to
-# 4.9 GB at 565K, macOS began evicting the model's mmap-backed CLEAN weight
-# pages and re-faulting them from SSD (measured: 6,599 page-ins in one deep
-# request vs 400 at 128K; pageouts=0 so not swap), and decode collapsed
-# stochastically -- 13.36 vs 24.15 tok/s at the SAME 565K depth.
+# WHAT IT DOES. Wires the already-existing "byte cap" eviction loop in
+# KVPrefixCache._evict_if_needed (instance field -> builder.py:157 ->
+# KVPrefixCache(max_bytes=...) -> the loop using _total_bytes(), which sums
+# real per-leaf KV tensor nbytes). It was previously unset, so that loop could
+# never fire.
 #
-# The byte cap is ALREADY WIRED end-to-end (instance field -> builder.py:157
-# -> KVPrefixCache(max_bytes=...) -> the "byte cap" eviction loop in
-# _evict_if_needed). It was simply never given a value, so it never fired.
+# WHY IT WAS ADDED. Deep-context decode collapses stochastically (13.36 vs
+# 24.15 tok/s at identical 565K depth; one of six 250K runs dropped to 19.5),
+# correlated with headroom against the 115000 MB wired limit falling to 4.9 GB
+# at 565K, and with macOS evicting the model's mmap-backed CLEAN weight pages
+# (6,599 page-ins in one deep request vs 400 at 128K; pageouts=0, so not swap).
+# The count cap DSV4_MAX_PREFIX_SESSIONS=4 was sized for 24-44K sessions at
+# ~0.6 GB and appeared to retain four ~275K leaves.
 #
-# Why 12 GiB: a byte cap can only ever make eviction MORE aggressive when
-# leaves are LARGE. For the small-session (24-44K) workload the COUNT cap still
-# binds first (4 x 0.6 GB = 2.4 GB << 12 GiB), so normal traffic keeps exactly
-# its current retention behaviour and the anti-thrash property from b56cd9351
-# is preserved. Only when leaves are deep does the byte budget bite, evicting
-# down to 1-3 leaves and freeing the 8-25 GB the deep runs need.
+# CORRECTION (same session, measured): that per-leaf figure was WRONG by ~2
+# orders of magnitude. A 275K-token DSv4 leaf holds only ~0.07 GB of KV
+# (RotatingKVCache rings are capped at sliding_window=128 for all 43 layers;
+# the 20 sparse layers hold a pool of depth/128 entries of (512+128) dims,
+# i.e. 0.055 GB at 275K). Four deep leaves ~= 0.3 GB total, against a ~104 GB
+# footprint -- 0.3%. So:
+#   * the prefix cache is NOT the memory problem at depth;
+#   * this 12 GiB cap can never bind in practice (correctly configured, inert);
+#   * the collapse mode is UNCHANGED by it (measured: pre-fix n=6 mean 26.18
+#     with a 19.46 collapse; post-fix n=4 mean 25.87 with a 20.12 collapse).
+#
+# The real depth-scaling term is activation/working-set memory that grows with
+# context and does not fully release -- the "prefill working-set accumulates"
+# defect documented as real-and-unfixed (warm fact 778), NOT retained KV.
+#
+# Kept at 12 GiB because it is harmless and guards against a future workload
+# that genuinely retains many large leaves; it does not change retention for
+# the current workload (count cap still binds first).
 : "${DSV4_MAX_PREFIX_BYTES:=12884901888}"
 # Per-leaf KV snapshot retention for DSv4's non-sliceable (PoolingCache /
 # RotatingKVCache) layers. Snapshots are now retained EVENLY SPACED across the
