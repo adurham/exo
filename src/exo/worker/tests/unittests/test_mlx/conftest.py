@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import mlx.core as mx
 import mlx.nn as nn
+import pytest
 
 from exo.shared.constants import EXO_DEFAULT_MODELS_DIR
 from exo.shared.models.model_cards import ModelCard, ModelTask
@@ -223,3 +224,31 @@ def run_gpt_oss_tensor_parallel_device(
 
     except Exception as e:
         result_queue.put((rank, False, f"{e}\n{traceback.format_exc()}"))  # pyright: ignore[reportAny]
+
+
+@pytest.fixture(autouse=True)
+def host_pressure_is_inert(monkeypatch: pytest.MonkeyPatch):
+    """Pin the KV prefix cache's eviction threshold so it can NEVER fire during
+    test SETUP, regardless of the host's real memory pressure.
+
+    WHY THIS EXISTS (root-caused 2026-09-23): `add_kv_cache()` calls
+    `_evict_if_needed()`, whose pressure loop evicts while
+    `get_memory_used_percentage() > _MEMORY_THRESHOLD`. That threshold defaults
+    to a value derived from the HOST's total RAM, and the eviction tests patch
+    only the percentage function -- not the threshold. On any host whose real
+    pressure exceeds its threshold, leaves are therefore evicted DURING setup,
+    before the test's own assertions run. On a 36 GiB laptop at 82.5% pressure
+    (threshold 0.75) this broke 7 tests in test_kv_prefix_cache.py, two of them
+    with different symptoms from the same cause.
+
+    Setting the threshold impossibly high makes the pressure loop inert for the
+    whole test, so each test's own explicit control (its own monkeypatch of the
+    threshold, or a direct `_evict_lru_once` call) is the only thing that can
+    evict. Tests that want the loop to FIRE re-pin the threshold lower inside
+    their body; monkeypatch teardown restores both afterwards.
+    """
+    from exo.worker.engines.mlx import cache as _cache_mod
+
+    monkeypatch.setattr(_cache_mod, "_MEMORY_THRESHOLD", 2.0)
+    yield
+

@@ -462,6 +462,14 @@ class TestRadixTrieStorage:
 
         # Pressure stays high so the loop evicts until only the protected
         # active leaf remains, then stops (can't evict the active one).
+        #
+        # Pin the threshold BELOW the patched pressure as well as patching the
+        # percentage: the conftest's host_pressure_is_inert fixture pins the
+        # threshold to 2.0 so that setup can never evict (which is what made
+        # this test host-dependent), so this test must re-pin it to arm the
+        # loop for its own explicit call. Without both, the comparison
+        # `0.99 > threshold` is False and nothing evicts.
+        monkeypatch.setattr(cache_mod, "_MEMORY_THRESHOLD", 0.5)
         monkeypatch.setattr(cache_mod, "get_memory_used_percentage", lambda: 0.99)
         monkeypatch.setattr(cache_mod.mx, "clear_cache", lambda: None)
 
