@@ -425,8 +425,13 @@ def test_unparseable_output_is_failsafe(monkeypatch: pytest.MonkeyPatch):
         empty = subprocess.CompletedProcess(
             args=(), returncode=0, stdout=junk, stderr=b""
         )
+        # Bind `empty` as a default arg: a bare closure over the loop variable
+        # would late-bind and every iteration would re-use the FINAL value,
+        # silently testing only the last case (ruff B023).
         monkeypatch.setattr(
-            supervisor_module.subprocess, "run", lambda *a, **k: empty
+            supervisor_module.subprocess,
+            "run",
+            lambda *a, _e=empty, **k: _e,
         )
         assert (  # pyright: ignore[reportPrivateUsage]
             supervisor_module._sample_is_blocked_in_native_setup(1, 1) is False
