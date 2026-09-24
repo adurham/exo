@@ -216,19 +216,30 @@ def _sample_is_blocked_in_native_setup(pid: int, duration_s: int = 2) -> bool:
         return False
     # FAIL-SAFE: this function must never suppress a legitimate kill. Any
     # unparseable output returns False ("no evidence"), matching the
-    # footprint probe's contract. `sample`'s stdout is bytes in some
-    # invocations (and mocked as bytes in tests), so decode defensively.
-    raw = result.stdout
-    if isinstance(raw, bytes):
+    # footprint probe's contract.
+    #
+    # The bytes guard below is NOT dead code, though basedpyright says so:
+    # the call site passes text=True, so the checker infers result.stdout as
+    # str, but this repo's own test helpers construct
+    # subprocess.CompletedProcess(..., stdout=b"...") -- bytes -- and the first
+    # draft of this function crashed on exactly that (TypeError: a bytes-like
+    # object is required, not 'str'), caught by the suite. So the runtime type
+    # genuinely varies and the guard is what keeps the function fail-safe.
+    # Suppressed rather than deleted; deleting it re-introduces the crash.
+    raw_stdout = result.stdout
+    if not isinstance(raw_stdout, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if not isinstance(raw_stdout, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]
+            return False
         try:
-            raw = raw.decode("utf-8", errors="replace")
+            raw_stdout = raw_stdout.decode("utf-8", errors="replace")
         except Exception:
             return False
-    if not isinstance(raw, str) or not raw:
+    if not raw_stdout:
         return False
+    raw: str = raw_stdout
     # Only inspect the main thread, so a parked background thread cannot
     # mask or replace the signal.
-    main = []
+    main: list[str] = []
     in_main = False
     for line in raw.splitlines():
         if "main-thread" in line or "Thread_" in line:
