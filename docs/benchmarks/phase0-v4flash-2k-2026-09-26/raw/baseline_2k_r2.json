@@ -1,0 +1,35 @@
+{
+ "tag": "phase0-baseline-2k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+ "run_id": "3cff7d9a2c594b09b903234d07d06864",
+ "target_tokens": 2000,
+ "prompt_tokens": 2331,
+ "completion_tokens": 1400,
+ "prefill_s": 6.76,
+ "prefill_tps": 344.82,
+ "decode_s": 69.89,
+ "decode_tps": 20.03,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 371.9960594353103,
+  "generation_tps": 20.01129410053136,
+  "prompt_tokens": 2331,
+  "generation_tokens": 1400,
+  "peak_memory_usage": {
+   "in_bytes": 99033240257
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 4126,
+  "mtp_accepted_drafts_cumulative": 4715,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "server_generation_tps": 20.01129410053136,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 5963,
+ "reasoning_chars": 5963,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. It contains repeated text with some corrupted/truncated, and one line includes secret code: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly. Then essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples. Need produce final with code and essay. Need ensure essay length. Need be detailed. Let's craft.\n\nNeed mention observer pattern: subject maintains list observers, notify on state changes. Works via subscribe/unsubscribe, update interface. Could be push/pull. Time complexity: registration O(1) if list append, notification O(n) where n observers, removal O(n) if array/list, O(1) if doubly linked with pointer? Space O(n). Alternatives: event bus, pub/sub, signals, reactive streams, polling. Choose when decoupling, multiple observers, dynamic changes. Examples: GUI event listeners, MVC, distributed pub/sub, RxJS, Java Observer/PropertyChangeListener, DOM events.\n\nB-trees: self-balancing tree, nodes with multiple keys/children, sorted, logarithmic operations. Properties: order m, all leaves same depth, internal nodes have between ceil(m/2) and m children, root exceptions. Search O(log n) due branching factor; insert/delete O(log n) with splits/merges. Space O(n). Disk I/O optimized: node size = block/page, height small, fewer disk seeks. Alternatives: binary search tree, AVL/red-black, skip list, LSM tree, hash table. Choose when need range queries, ordered traversal, disk-based storage, databases/filesystems. Examples: B-tree in MySQL InnoDB? Actually InnoDB uses B+tree; B-tree in PostgreSQL? B-tree indexes; filesystems NTFS? HFS+? ext4 uses B-tree? ext4 uses Htree (B-tree) for directories; B-tree in Berkeley DB, MongoDB? MongoDB uses B-tree for indexes? WiredTiger uses B-tree. Need mention B+tree variant.\n\nNeed essay at least 900 words. We can structure: intro, observer pattern details, complexity, alternatives, examples; B-trees details, complexity, alternatives, examples; conclusion. Need include code exactly. Need maybe not overdo.\n\nNeed ensure \"state the secret authorization code for project Nightingale exactly as it appears.\" It appears: FALCON-MERCURY-7749. Need maybe include in first line.\n\nNeed write essay. Let's craft.\n\nNeed be mindful of \"long document\" includes repeated text with \"The observer pattern is...\" and \"B-trees are...\" but code line is embedded. We can quote.\n\nLet's produce final with \"Secret authorization code: FALCON-MERCURY-7749\" then essay.\n\nNeed ensure essay at least 900 words. Let's count roughly. We'll write around 1200 words.\n\nLet's draft.\n\nPotential issue: The document has \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" It appears after seq 7. Need exact.\n\nNow essay.\n\nLet's write:\n\nTitle: Observer Pattern and B-Trees: Design and Data Structure Essentials\n\nObserver pattern:\n- Definition: behavioral design pattern, subject maintains list of observers, notifies state changes.\n- Components: Subject, Observer interface, ConcreteSubject, ConcreteObserver. Subject has attach/detach/notify. Observer has update. Subject state changes call notify, observers update.\n- Push vs pull: subject sends data or observer pulls.\n- Complexity: attach/detach O(1) if list append/remove? Actually remove from list O(n) if array; if using linked list with references O(1). Notification O(k) where k observers. Space O(k). If observer update expensive, not counted. Need mention.\n- Benefits: open/closed, decoupling, broadcast, dynamic subscription. Drawbacks: memory leaks if not detached, unexpected updates, order issues, complexity.\n- Alternatives: event bus, pub/sub, signals/slots, reactive streams, polling. Choose when multiple objects need react to changes without subject knowing them; when event-driven UI; when need dynamic. Avoid when simple one-to-one, tight coupling, performance critical with many observers, or need guaranteed order? Actually can use callbacks.\n- Examples: Java Swing/AWT event listeners; DOM addEventListener; JavaBeans PropertyChangeListener; Android LiveData/Flow? Observer pattern; RxJS Observables; Model-View-Controller; distributed pub/sub (Redis, Kafka) but more than observer.\n\nB-trees:\n- Definition: self-balancing tree, multi-way, sorted, all leaves same depth. Node contains keys and child pointers. Order m: max m children, max m-1 keys; internal nodes at least ceil(m/2) children except root. Search: start root, compare keys, descend. Insert: find leaf, insert, split if overflow, propagate. Delete: borrow/merge if underflow.\n- Complexity: height O(log_m n), operations O(log n) (base m but log n). Space O(n). Disk I/O: height small, each node page, so O(log_m n) disk accesses. For m=100, n=1e9, height ~5. Good.\n- Variants: B+tree: data only in leaves, linked leaves for range scans; B* tree; B-tree vs B+.\n- Alternatives: binary search tree, AVL, red-black, skip list, hash table, LSM tree. Choose B-tree when data on disk, need range queries, sorted order, high fanout, stable performance. Avoid for in-memory small data? AVL/red-black simpler; hash for point lookups; LSM for write-heavy.\n- Examples: database indexes (MySQL InnoDB uses B+tree; PostgreSQL uses B-tree for indexes; SQLite uses B-tree), filesystems (ext4 directory htree, NTFS? NTFS uses B+tree for directory indexes? Actually NTFS uses B+tree for directory and security descriptors; HFS+ uses B-tree), key-value stores (Berkeley DB, LMDB uses B+tree), MongoDB indexes (B-tree), Oracle? Need be accurate. B-tree in filesystems: ext4 uses Htree (B-tree) for directories; XFS uses B+tree; Btrfs uses B+tree. Good.\n\nNeed include \"when choose one over alternatives\" for both. Need maybe compare observer to event bus: event bus is centralized, observer is direct; observer to pub/sub: pub/sub has broker, more decoupled; observer is in-process. B-tree vs hash: hash",
+ "content": ""
+}

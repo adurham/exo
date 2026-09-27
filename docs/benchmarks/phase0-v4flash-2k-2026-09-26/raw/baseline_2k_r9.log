@@ -1,0 +1,34 @@
+{
+  "tag": "phase0-baseline-2k",
+  "model": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+  "run_id": "c8e67727ed5f4712ade6a88142503a8d",
+  "target_tokens": 2000,
+  "prompt_tokens": 2285,
+  "completion_tokens": 1400,
+  "prefill_s": 7.47,
+  "prefill_tps": 305.89,
+  "decode_s": 67.19,
+  "decode_tps": 20.84,
+  "decode_sample_trustworthy": true,
+  "server_stats": {
+    "prompt_tps": 323.6610925739308,
+    "generation_tps": 20.815982615530082,
+    "prompt_tokens": 2285,
+    "generation_tokens": 1400,
+    "peak_memory_usage": {
+      "in_bytes": 99033240257
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 9101,
+    "mtp_accepted_drafts_cumulative": 9538,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+  },
+  "server_generation_tps": 20.815982615530082,
+  "finish_reason": "length",
+  "needle_hit": true,
+  "gen_chars": 6261,
+  "reasoning_chars": 6261,
+  "content_chars": 0
+}
+wrote /tmp/baseline_2k_r9.json

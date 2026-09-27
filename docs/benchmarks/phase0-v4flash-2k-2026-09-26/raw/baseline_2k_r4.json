@@ -1,0 +1,35 @@
+{
+ "tag": "phase0-baseline-2k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+ "run_id": "8e6272640d804acc9982469eb2225c51",
+ "target_tokens": 2000,
+ "prompt_tokens": 2239,
+ "completion_tokens": 1400,
+ "prefill_s": 7.63,
+ "prefill_tps": 293.45,
+ "decode_s": 69.23,
+ "decode_tps": 20.22,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 313.15498247609304,
+  "generation_tps": 20.201369196137193,
+  "prompt_tokens": 2239,
+  "generation_tokens": 1400,
+  "peak_memory_usage": {
+   "in_bytes": 99033240257
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 5546,
+  "mtp_accepted_drafts_cumulative": 6095,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "server_generation_tps": 20.201369196137193,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 6007,
+ "reasoning_chars": 6007,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need parse document. Need state secret authorization code exactly as appears. Then essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose over alternatives, concrete examples. Need be careful: The document contains repeated text and one line: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly. Then essay. Need ensure no hidden issues? The document includes repeated \"observer pattern...\" and B-trees. Need maybe mention code. Need write detailed essay. Need include observer pattern and B-trees. Need at least 900 words. We can produce.\n\nNeed structure: First: secret code. Then essay. Need maybe include headings. Need discuss observer pattern: subject, observers, notify, decoupling, push/pull, implementation, time complexity O(1) notify? Actually observer pattern: registration/deregistration O(1) if list; notification O(n) where n observers; memory O(n). Alternatives: event bus, pub/sub, callbacks, polling, signals/slots. When choose: when multiple objects need react to state changes without tight coupling, UI event handling, MVC, distributed event systems. Examples: GUI button listeners, model-view-controller, Java Observer/Observable deprecated, RxJS, Kafka? B-trees: self-balancing search tree, nodes with multiple keys, sorted, all leaves same depth, operations O(log n) average/worst, space O(n), node size, disk I/O, branching factor, insertion/deletion splitting/merging, B+ trees. Alternatives: binary search tree, AVL, red-black, hash table, skip list, LSM tree. When choose: database indexes, filesystems, large datasets on disk, range queries, sorted access. Examples: MySQL InnoDB B+ tree, PostgreSQL, ext4 Htree, NTFS, MongoDB? Need mention time complexity: B-tree search O(log n) with base branching factor; height O(log_B n); disk accesses O(log_B n). Space O(n). Need maybe compare to red-black: B-tree optimized for disk, high branching factor, fewer disk I/O. Observer pattern complexity: notify O(number observers), add/remove O(1) if doubly linked list; memory O(observers). Need maybe discuss \"when choose one over alternatives\" for observer: if need one-to-many state change, decoupling; if need many-to-many, event bus; if need synchronous? Observer can be synchronous; if need async, message queue. For B-trees: if need sorted data and range queries, B-tree; if only point lookups, hash table O(1) but no range; if in-memory small, red-black/AVL; if disk, B-tree. Need include concrete examples.\n\nNeed ensure essay at least 900 words. We can write around 1000-1200. Need not overdo. Need include code exactly. Let's craft.\n\nNeed be mindful: The document includes repeated \"The observer pattern is a software design pattern...\" and \"B-trees are self-balancing tree data structures...\" with some malformed repetitions. The secret code appears in seq 7: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" Need state exactly: FALCON-MERCURY-7749. Maybe include \"FALCON-MERCURY-7749\" exactly. Need not include period? It says \"is: FALCON-MERCURY-7749.\" So exact code is FALCON-MERCURY-7749. We'll state.\n\nNow essay. Need maybe include \"Observer Pattern\" and \"B-Trees\" sections. Let's draft.\n\nNeed maybe mention \"observer pattern\" definition: subject maintains list of observers, notifies on state changes. It is behavioral design pattern. Subject and observers are loosely coupled. Observers register/unregister. Notification can be push (subject sends data) or pull (observer queries subject). Implementation: subject interface with attach, detach, notify; observer interface with update. In languages with function pointers, callbacks. Complexity: attach/detach O(1) if using linked list; notify O(n) where n observers; memory O(n). If using event bus, maybe O(1) dispatch? But observer pattern itself.\n\nNeed discuss \"when choose over alternatives\": Use when multiple objects need to react to changes in another object, but you don't want to hard-code dependencies. Example: UI button click: button subject, listeners observers; adding new listener doesn't modify button. Alternative: polling (subject state checked periodically) wastes resources and introduces latency; callbacks can be used but observer pattern provides standard registration and multiple observers. If many-to-many, event bus or pub/sub. If asynchronous, message queue. If need guaranteed delivery, maybe not.\n\nNeed B-trees: self-balancing tree, nodes can have many children, keys sorted, all leaves at same depth. B-tree of order m: each node has at most m children, at least ceil(m/2) children except root, keys. Search: start root, compare keys, descend. Insert: find leaf, insert, split if overflow, propagate. Delete: borrow/merge. B+ tree: internal nodes only keys, data in leaves, linked leaves for range scans. Complexity: height O(log_m n), search O(log n) comparisons? Actually O(log n) with base m, but each node has m keys; comparisons O(log n) if binary search within node? More precisely O(log_m n) disk accesses and O(log n) key comparisons? Need be accurate: B-tree search: O(log n) time in terms of comparisons? Since each node has up to m keys, height h = O(log_m n), and at each node binary search O(log m), total O(log_m n * log m) = O(log n). But disk I/O O(log_m n). Insert/delete O(log n) time, O(log_m n) disk accesses. Space O(n). Need mention.\n\nNeed \"when choose over alternatives\": B-tree for disk-based storage because high branching factor reduces height and disk I/O. For in-memory, red-black/AVL simpler and lower memory overhead? B-tree nodes have many keys, but can be more cache-friendly? Actually B-tree can be used in memory too. Hash table for point lookups O(1) but no range. Skip list for concurrent? B-tree for range queries. Examples: database indexes (InnoDB uses B+ tree), filesystems (ext4 uses B-tree? ext4 uses extent tree, HFS+ B-tree, NTFS MFT? Need be accurate: ext4 uses Htree for directory",
+ "content": ""
+}

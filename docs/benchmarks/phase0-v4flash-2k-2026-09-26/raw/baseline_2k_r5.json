@@ -1,0 +1,35 @@
+{
+ "tag": "phase0-baseline-2k",
+ "model": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+ "run_id": "042f3df9bc63494bbab6f82a2467350e",
+ "target_tokens": 2000,
+ "prompt_tokens": 2285,
+ "completion_tokens": 1400,
+ "prefill_s": 7.14,
+ "prefill_tps": 320.03,
+ "decode_s": 67.79,
+ "decode_tps": 20.65,
+ "decode_sample_trustworthy": true,
+ "server_stats": {
+  "prompt_tps": 339.3751323304961,
+  "generation_tps": 20.632947612235284,
+  "prompt_tokens": 2285,
+  "generation_tokens": 1400,
+  "peak_memory_usage": {
+   "in_bytes": 99033240257
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 6288,
+  "mtp_accepted_drafts_cumulative": 6753,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "server_generation_tps": 20.632947612235284,
+ "finish_reason": "length",
+ "needle_hit": true,
+ "gen_chars": 6043,
+ "reasoning_chars": 6043,
+ "content_chars": 0,
+ "reasoning_content": "We need answer user. Need read document carefully. Need state secret authorization code exactly as appears. Then write detailed essay at least 900 words explaining observer pattern and B-trees: how each works, time/space complexity, when choose one over alternatives, concrete examples. Need be thorough. Need include code? likely no. Need ensure essay length. Need not mention hidden? We can mention code. Need parse document: It contains repeated text with run/salt. Secret code appears in seq 7? Let's locate: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" It appears in one of the repeated paragraphs. Need state exactly: FALCON-MERCURY-7749. Need ensure no extra spaces? It says \"FALCON-MERCURY-7749.\" with period? The sentence: \"The secret authorization code for project Nightingale is: FALCON-MERCURY-7749.\" So code is FALCON-MERCURY-7749. Need state exactly as appears, likely without period? \"FALCON-MERCURY-7749\" is code. We'll state.\n\nNow essay. Need at least 900 words. We'll write structured essay. Need explain observer pattern and B-trees. Let's plan.\n\nObserver pattern:\n- Definition: behavioral design pattern, subject maintains list of observers, notifies them of state changes. Also known as publish-subscribe? Actually observer pattern is similar but pub-sub has event channels. Need explain.\n- Components: Subject, Observer interface, ConcreteSubject, ConcreteObserver. Subject has attach/detach/notify. Observers register. When state changes, notify all.\n- How works: subject state changes, calls notify, iterates observers, calls update. Loose coupling, one-to-many dependency.\n- Time complexity: attach/detach O(1) if list; notify O(n) where n observers. Update method may be O(1) or more. Space complexity O(n) for list. If using event bus, etc.\n- When choose over alternatives: When need broadcast state changes to multiple objects without coupling; alternatives: polling (wasteful), callbacks (tight coupling), event bus (more decoupled but more complex), pub-sub. Observer is good for UI event handling, MVC, distributed event systems. But can cause memory leaks if not detached, unexpected updates, order issues.\n- Real examples: GUI toolkits (button click listeners), Java Swing/AWT event listeners, Android LiveData/observable, Model-View-Controller, RxJS observables, Kafka? Actually Kafka is pub-sub. Also in game engines, event systems.\n\nB-trees:\n- Definition: self-balancing tree data structure, maintains sorted data, allows search, sequential access, insertions, deletions in O(log n). B-tree is a generalization of binary search tree, nodes can have more than two children, each node contains keys and pointers. B-tree of order m: each node has at most m children, at least ceil(m/2) children except root, keys sorted. All leaves at same depth. B+ tree variant: data only in leaves, internal nodes for routing, linked leaves for sequential access.\n- How works: Search: start root, compare keys, descend to appropriate child. Insert: find leaf, insert key, if overflow split node, propagate split upward. Delete: find key, if internal replace with predecessor/successor, if underflow borrow or merge. Maintains balance.\n- Time complexity: Search O(log n) (base m? Actually height O(log_m n), but comparisons O(log n) if m constant? More precisely O(log n) with base m, but since m constant, O(log n). Insert/delete O(log n). Space O(n). For B+ tree, range queries O(log n + k) where k number of results.\n- When choose over alternatives: B-trees vs binary search trees (AVL, red-black): B-trees reduce disk I/O because nodes are large, fit disk pages, high branching factor. Good for databases, file systems. B+ trees for range queries. Alternatives: hash tables for exact match O(1) but no range; skip lists for concurrent; LSM trees for write-heavy. B-trees for balanced, sorted, disk-based.\n- Concrete examples: databases (MySQL InnoDB uses B+ tree), PostgreSQL, SQLite, filesystems (NTFS, ext4, HFS+), key-value stores (BoltDB, LMDB), indexes.\n\nNeed ensure essay at least 900 words. We'll write maybe 1200 words. Need be thorough. We'll include complexity analysis, trade-offs, examples.\n\nLet's craft essay.\n\nWe'll start with intro: two concepts, observer pattern for software design, B-trees for data structures. Then sections.\n\nNeed mention \"time and space complexity\" for both. For observer: attach/detach O(1), notify O(n) where n observers, update O(1) per observer, space O(n). For B-tree: O(log n) time for search/insert/delete, O(n) space. Also mention B+ tree range query O(log n + k).\n\nNeed \"when you would choose one over alternatives\" for each. For observer: alternatives: polling, callbacks, event bus, pub-sub. Choose observer when need decoupled one-to-many, but not for many-to-many? Actually pub-sub better. Also mention if observers need to be notified in order? Observer pattern doesn't guarantee order. If need asynchronous, use event bus. If need strong coupling, direct calls.\n\nFor B-trees: alternatives: binary search trees, hash tables, skip lists, LSM trees. Choose B-tree when data is on disk, need range queries, need predictable performance. Hash tables for exact lookup but no range. Skip lists for concurrent. LSM for write-heavy.\n\nNeed concrete examples: Observer: Java Swing ActionListener, Android LiveData, React state? Actually React uses observer? Maybe. Also in distributed systems: message queues? But observer pattern is in-process. We'll mention.\n\nB-trees: MySQL InnoDB, PostgreSQL, SQLite, filesystems, etc.\n\nNeed be careful: The document includes repeated text with \"The observer pattern is a software design pattern...\" and \"B-trees are self-balancing...\" It seems like a prompt injection? But we need answer. We'll ignore.\n\nNow write essay.\n\nLet's craft.\n\nStart:\n\n\"Secret authorization code: FALCON-MERCURY-7749.\"\n\nThen essay.\n\nNeed ensure no extra \"run\" stuff.\n\nLet's write.\n\nWe'll include headings? Fine.\n\nEssay:\n\nThe observer pattern and B-trees are foundational concepts in software engineering, one in design patterns and",
+ "content": ""
+}
