@@ -1,0 +1,48 @@
+==============================================================================
+P2 EXL3 MoE microbench  layer=1  experts_stacked=128  top_k=6
+model: /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+==============================================================================
+[mem] start: active=0.00 GiB peak=0.00 GiB
+[load] 1152 tensors from 1 shards in 1.2s
+[shape] w1.trellis=(320, 144, 48) -> k=3 (packed_size 48)
+[shape] w1: in=5120 out=2304 | w2: in=2304 out=5120
+[cb] codebook_mode=2 (mul1 per config.json)
+[exl3] built in 0.1s  gu_trellis=(320, 36864, 48) dn_trellis=(144, 40960, 48)
+[exl3] in=5120 hidden=2304 E=128 gu_tiles=144 dn_tiles=320
+[exl3] _v2_ok()=False  (v2 needs hidden<=512; V4.1 is 2304)
+[exl3] env: UNFUSED=False V2=True MM=True SEG_BM=64 MM_MAX_ROWS=9216
+[mem] after exl3 build: active=3.18 GiB peak=3.18 GiB
+
+==============================================================================
+CORRECTNESS (proves orientation; plain silu on all three sides)
+==============================================================================
+[affine4] gate: fp16 stack (128, 2304, 5120) 2.81 GiB in 1.4s
+[mem] after affine4 gate: active=3.97 GiB peak=6.78 GiB
+[affine4] up: fp16 stack (128, 2304, 5120) 2.81 GiB in 1.3s
+[mem] after affine4 up: active=4.76 GiB peak=7.57 GiB
+[affine4] down: fp16 stack (128, 5120, 2304) 2.81 GiB in 1.3s
+[mem] after affine4 down: active=5.55 GiB peak=8.36 GiB
+[mem] after affine4 complete: active=5.55 GiB peak=8.36 GiB
+  R=1: EXL3-vs-dense=0.00112  aff4-vs-dense=0.14746  EXL3-vs-aff4=0.14765
+        shapes exl3=(1, 1, 6, 5120) aff=(1, 1, 6, 5120) ref=(1, 1, 6, 5120)
+        max|gate|=0.64 max|up|=0.67 -> SWIGLU_LIMIT=10.0 binds on 0.0000% of elements
+  R=4: EXL3-vs-dense=0.00121  aff4-vs-dense=0.14708  EXL3-vs-aff4=0.14755
+        shapes exl3=(1, 4, 6, 5120) aff=(1, 4, 6, 5120) ref=(1, 4, 6, 5120)
+        max|gate|=0.75 max|up|=0.70 -> SWIGLU_LIMIT=10.0 binds on 0.0000% of elements
+
+==============================================================================
+TIMING per MoE block (gate+up+silu+down, top-6 of 128 stacked experts)
+==============================================================================
+[affine3] gate: fp16 stack (128, 2304, 5120) 2.81 GiB in 1.2s
+[mem] after affine3 gate: active=6.16 GiB peak=8.98 GiB
+[affine3] up: fp16 stack (128, 2304, 5120) 2.81 GiB in 1.3s
+[mem] after affine3 up: active=6.78 GiB peak=9.59 GiB
+[affine3] down: fp16 stack (128, 5120, 2304) 2.81 GiB in 1.3s
+[mem] after affine3 down: active=7.40 GiB peak=10.21 GiB
+[mem] after affine3 complete: active=7.40 GiB peak=10.21 GiB
+
+  rows       EXL3 k3 med     aff4 med     aff3 med   ex/aff4   ex/aff3
+     1           1.300ms      0.396ms      0.349ms     3.284     3.731
+     4          12.535ms      1.097ms      0.906ms    11.423    13.830
+   512          54.121ms     29.521ms     29.549ms     1.833     1.832
+libc++abi: terminating due to uncaught exception of type nanobind::python_error: OverflowError: Integer value 3019898880 is outside the supported range [-2147483648, 2147483647].

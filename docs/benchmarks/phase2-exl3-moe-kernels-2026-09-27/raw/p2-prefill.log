@@ -1,0 +1,18 @@
+[env] _MOE_MM=True _MM_MAX_ROWS=100000 _SEG_BM=64
+[build] production baseline mxfp8 8/32 ...
+[build] affine 4/64 ...
+
+============================================================================================
+PREFILL rows: EXL3 vs PRODUCTION mxfp8 8-bit (the honest baseline)
+============================================================================================
+  rows  N=rows*k     EXL3 ms    mxfp8 ms     aff4 ms    ex/p8    ex/a4   gate1.7
+   256      1536      52.533      26.110      20.839    2.012    2.521      MISS
+   512      3072      54.152      35.576      29.329    1.522    1.846      PASS
+  1024      6144      58.606      52.461      46.382    1.117    1.264      PASS
+  2048     12288     112.322      86.073      81.232    1.305    1.383      PASS
+
+If the segmented-GEMM path is disabled (EXL3_MOE_MM=0) the fallback tries
+to materialize E*out*in*2 bytes and crashes on int32 overflow at E=128:
+  128 * 5120 * 2304 * 2 = 3019898880 > INT32_MAX
+  (E=384 -- the real V4.1 count -- would be 9.06 GB, so the fallback is
+   never usable at full scale; the segmented path is mandatory.)

@@ -16,9 +16,14 @@ isolated from the production exo venv. The live cluster was up throughout;
 It answers the plan's phase-1 question — "can PonyExl3 read this file at
 all" — and produces the real memory budget. It is **not** a quality
 measurement and **not** a performance measurement: nothing here says
-anything about tok/s on M4 Ultra, and nothing here was run through exo.
+anything about tok/s on M4 Max, and nothing here was run through exo.
 Every number below is from real tensors in the real 210.6 GB repo, not
 synthetic data.
+
+Chip note: the cluster nodes are **Apple M4 Max** Mac Studios (16 cores,
+128 GB unified each — verified on both machines 2026-09-27 via
+`sysctl machdep.cpu.brand_string`). Older docs in this repo say "M4 Ultra";
+that part does not exist in the M4 generation, and those docs are wrong.
 
 ## 1. Format acceptance
 

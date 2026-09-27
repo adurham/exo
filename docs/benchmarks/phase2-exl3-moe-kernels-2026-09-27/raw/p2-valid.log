@@ -1,0 +1,17 @@
+[exl3] built; _v2_ok()=False (False => R=2..8 uses _prefill)
+[build] production baseline mxfp8 gs=32 bits=8 ...
+[build] affine 4/64 ...
+[build] affine 8/64 ...
+
+================================================================================================
+VALID per-call timing (mx.eval per rep). Ratios vs the PRODUCTION mxfp8 baseline.
+================================================================================================
+  rows    EXL3 ms   mxfp8 ms    aff4 ms    aff8 ms    ex/p8    ex/a4    ex/a8   rowloop
+     1      1.302      0.607      0.397      0.608    2.147    3.283    2.141       nan
+     4     12.564      1.922      1.100      1.962    6.537   11.422    6.405     4.286
+     8     19.095      3.652      2.050      3.750    5.229    9.315    5.092     7.561
+
+Context: one V4.1 token = 40 MoE layers. If EVERY layer were EXL3:
+  decode: 1.295 ms/layer x 40 layers = 51.8 ms/token -> 19.3 tok/s ceiling (single rank, MoE only)
+  (the plan streams only a FRACTION of layers as EXL3; the rest stay
+   resident affine, so the blend is what matters -- see the report.)

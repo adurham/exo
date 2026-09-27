@@ -1,0 +1,33 @@
+==============================================================================
+P2 EXL3 MoE microbench  layer=1  experts_stacked=64  top_k=6
+model: /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+==============================================================================
+[mem] start: active=0.00 GiB peak=0.00 GiB
+[load] 576 tensors from 1 shards in 0.1s
+[shape] w1.trellis=(320, 144, 48) -> k=3 (packed_size 48)
+[shape] w1: in=5120 out=2304 | w2: in=2304 out=5120
+[cb] codebook_mode=2 (mul1 per config.json)
+[exl3] built in 0.0s  gu_trellis=(320, 18432, 48) dn_trellis=(144, 20480, 48)
+[exl3] in=5120 hidden=2304 E=64 gu_tiles=144 dn_tiles=320
+[exl3] _v2_ok()=False  (v2 needs hidden<=512; V4.1 is 2304)
+[exl3] env: UNFUSED=False V2=True MM=True SEG_BM=64 MM_MAX_ROWS=9216
+[mem] after exl3 build: active=1.59 GiB peak=1.59 GiB
+
+==============================================================================
+CORRECTNESS (proves orientation; plain silu on all three sides)
+==============================================================================
+[affine4] gate: fp16 stack (64, 2304, 5120) 1.41 GiB in 0.7s
+[mem] after affine4 gate: active=1.98 GiB peak=3.39 GiB
+[affine4] up: fp16 stack (64, 2304, 5120) 1.41 GiB in 0.6s
+[mem] after affine4 up: active=2.38 GiB peak=3.79 GiB
+[affine4] down: fp16 stack (64, 5120, 2304) 1.41 GiB in 0.7s
+[mem] after affine4 down: active=2.77 GiB peak=4.18 GiB
+[mem] after affine4 complete: active=2.77 GiB peak=4.18 GiB
+  R=1: EXL3-vs-dense=0.00109  aff4-vs-dense=0.14288  EXL3-vs-aff4=0.14352
+        shapes exl3=(1, 1, 6, 5120) aff=(1, 1, 6, 5120) ref=(1, 1, 6, 5120)
+        max|gate|=0.72 max|up|=0.63 -> SWIGLU_LIMIT=10.0 binds on 0.0000% of elements
+  R=4: EXL3-vs-dense=0.00122  aff4-vs-dense=0.14890  EXL3-vs-aff4=0.14963
+        shapes exl3=(1, 4, 6, 5120) aff=(1, 4, 6, 5120) ref=(1, 4, 6, 5120)
+        max|gate|=0.78 max|up|=0.72 -> SWIGLU_LIMIT=10.0 binds on 0.0000% of elements
+
+BENCH_CORRECTNESS_ONLY=1 -> stopping before timing.
