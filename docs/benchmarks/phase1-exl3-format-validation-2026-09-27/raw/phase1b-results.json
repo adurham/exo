@@ -1,0 +1,51 @@
+{
+ "checks": [
+  {
+   "check": "budget/per-rank byte table",
+   "ok": true,
+   "detail": "R0=112.6GB R2=104.3GB R3=103.4GB R4=93.6GB (trigger 98.0GB)"
+  },
+  {
+   "check": "budget/trigger check (R0 > 98GB means mitigations mandatory)",
+   "ok": true,
+   "detail": "R0=112.56 GB vs trigger 98.0 GB; R4 (all listed mitigations)=93.64 GB"
+  },
+  {
+   "check": "mtp.0.ffn.experts.10.w1/inner_decode ref-vs-mlx",
+   "ok": true,
+   "detail": "shapes ref(5120, 2304) mlx(5120, 2304) equal=True max_abs_diff=0.0"
+  },
+  {
+   "check": "mtp.0.ffn.experts.10.w1/full_layer ref-vs-mlx",
+   "ok": false,
+   "detail": "shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=0.000244140625"
+  },
+  {
+   "check": "mtp.0.attn.wo_a.slice.0/inner_decode ref-vs-mlx",
+   "ok": true,
+   "detail": "shapes ref(4096, 1024) mlx(4096, 1024) equal=True max_abs_diff=0.0"
+  },
+  {
+   "check": "mtp.0.attn.wo_a.slice.0/full_layer ref-vs-mlx",
+   "ok": false,
+   "detail": "shapes ref(4096, 1024) mlx(4096, 1024) equal=False max_abs_diff=0.000244140625"
+  },
+  {
+   "check": "mtp.0.main_proj/inner_decode ref-vs-mlx",
+   "ok": true,
+   "detail": "shapes ref(15360, 5120) mlx(15360, 5120) equal=True max_abs_diff=0.0"
+  },
+  {
+   "check": "mtp.0.main_proj/full_layer ref-vs-mlx",
+   "ok": false,
+   "detail": "shapes ref(15360, 5120) mlx(15360, 5120) equal=False max_abs_diff=0.0001220703125"
+  },
+  {
+   "check": "mtp/4-bit group tested",
+   "ok": true,
+   "detail": "3 raw-path MTP group(s) compared"
+  }
+ ],
+ "passed": 6,
+ "total": 9
+}

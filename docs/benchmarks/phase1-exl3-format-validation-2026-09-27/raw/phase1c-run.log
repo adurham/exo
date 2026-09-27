@@ -1,0 +1,80 @@
+model: /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+
+--- load_safetensors on model-00004-of-00039.safetensors (module layers.3.ffn.experts.0.w1)
+    tensors loaded: 4681
+    header_names_match=True trellis_bytes_equal=True inner_decode_bit_exact=True
+
+--- localizing layers.0.attn.wq_a
+{
+ "signs_unpack_bit_exact": true,
+ "signs_size": 5120,
+ "hadamard_left": {
+  "max_abs_diff": 2.384185791015625e-06,
+  "n_differing": 5592592,
+  "size": 6553600,
+  "max_rel_to_input_mean": 3.5864991332346108e-06
+ },
+ "hadamard_right": {
+  "max_abs_diff": 2.1457672119140625e-06,
+  "n_differing": 5583154,
+  "size": 6553600,
+  "max_rel_to_input_mean": 3.2278492199111497e-06
+ },
+ "public_path": {
+  "size": 6553600,
+  "n_differing_fp16": 9985,
+  "frac_differing": 0.001523590087890625,
+  "max_abs_diff_fp16": 6.103515625e-05,
+  "max_diff_in_fp16_ulp": 1.0,
+  "all_diffs_within_1_ulp": true
+ },
+ "pre_cast_fp32": {
+  "max_abs_diff": 5.21540641784668e-08,
+  "n_differing": 5973838,
+  "size": 6553600,
+  "max_rel_to_output_mean": 3.2046491469372995e-06
+ },
+ "fp32_to_fp16_crossing": {
+  "fp32_differ_but_fp16_equal": 5963853,
+  "fp32_differ_and_fp16_differ": 9985
+ }
+}
+
+--- localizing layers.11.ffn.shared_experts.w1
+{
+ "signs_unpack_bit_exact": true,
+ "signs_size": 5120,
+ "hadamard_left": {
+  "max_abs_diff": 2.384185791015625e-06,
+  "n_differing": 10067889,
+  "size": 11796480,
+  "max_rel_to_input_mean": 3.3141002404590836e-06
+ },
+ "hadamard_right": {
+  "max_abs_diff": 3.814697265625e-06,
+  "n_differing": 10073297,
+  "size": 11796480,
+  "max_rel_to_input_mean": 5.302560566633474e-06
+ },
+ "public_path": {
+  "size": 11796480,
+  "n_differing_fp16": 17373,
+  "frac_differing": 0.0014727274576822917,
+  "max_abs_diff_fp16": 6.103515625e-05,
+  "max_diff_in_fp16_ulp": 1.0,
+  "all_diffs_within_1_ulp": true
+ },
+ "pre_cast_fp32": {
+  "max_abs_diff": 4.76837158203125e-07,
+  "n_differing": 10650089,
+  "size": 11796480,
+  "max_rel_to_output_mean": 3.6698824260383844e-05
+ },
+ "fp32_to_fp16_crossing": {
+  "fp32_differ_but_fp16_equal": 10632716,
+  "fp32_differ_and_fp16_differ": 17373
+ }
+}
+
+wrote /Users/adam.durham/phase1c-results.json
+EXIT=0

@@ -1,0 +1,61 @@
+model: /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+========================================================================
+PART B: per-rank byte table (from shard headers)
+========================================================================
+shards walked: 39   tensors: 192452
+
+component         tensors           bytes        GB   share
+routed_experts     184320    196034088960    196.03   93.1%
+shared_experts        480       803942880      0.80    0.4%
+attention            2132      3215461324      3.22    1.5%
+router+glue           400       315431360      0.32    0.1%
+embed                   1      1323827200      1.32    0.6%
+head                    4       496704004      0.50    0.2%
+norm                    1           10240      0.00    0.0%
+mtp                  4836      7243204928      7.24    3.4%
+vision                266       970536960      0.97    0.5%
+other                  12       177401864      0.18    0.1%
+TOTAL              192452    210580609720    210.58
+
+expert sanity: 40 MoE layers, experts/layer min=384 max=384, w1/w2/w3 matrix counts={'w1': 61440, 'w2': 61440, 'w3': 61440}
+
+per-rank resident weight bytes (V4 rule: experts split, everything else replicated):
+scenario                                                          GB   >98GB?
+R0 raw (experts/2 + all replicated)                           112.56     OVER
+R1 R0 - vision tower                                          111.59     OVER
+R2 R1 - MTP tensors                                           104.35     OVER
+R3 R2 - head/2 - embed/2 (shard head+embed)                   103.44     OVER
+R4 R3 - coldest 10% of rank experts (SSD stream)               93.64       ok
+
+reference: wired limit 115 GB; V4-Flash precedent 72 GB weights/rank + ~16 GB overhead = 88 GB peak
+R0 + 16 GB overhead = 128.6 GB vs 115 GB wired; R4 + 16 GB overhead = 109.6 GB
+[PASS] budget/per-rank byte table: R0=112.6GB R2=104.3GB R3=103.4GB R4=93.6GB (trigger 98.0GB)
+[PASS] budget/trigger check (R0 > 98GB means mitigations mandatory): R0=112.56 GB vs trigger 98.0 GB; R4 (all listed mitigations)=93.64 GB
+
+========================================================================
+PART A: 4-bit MTP tensor group (raw-shard path)
+========================================================================
+
+--- mtp.0.ffn.experts.10.w1
+    in=5120 out=2304 k=4 bits=4 mul1=True trellis=(320, 144, 64)
+[PASS] mtp.0.ffn.experts.10.w1/inner_decode ref-vs-mlx: shapes ref(5120, 2304) mlx(5120, 2304) equal=True max_abs_diff=0.0
+[FAIL] mtp.0.ffn.experts.10.w1/full_layer ref-vs-mlx: shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=0.000244140625
+
+--- mtp.0.attn.wo_a.slice.0
+    in=4096 out=1024 k=4 bits=4 mul1=True trellis=(256, 64, 64)
+[PASS] mtp.0.attn.wo_a.slice.0/inner_decode ref-vs-mlx: shapes ref(4096, 1024) mlx(4096, 1024) equal=True max_abs_diff=0.0
+[FAIL] mtp.0.attn.wo_a.slice.0/full_layer ref-vs-mlx: shapes ref(4096, 1024) mlx(4096, 1024) equal=False max_abs_diff=0.000244140625
+
+--- mtp.0.main_proj
+    in=15360 out=5120 k=4 bits=4 mul1=True trellis=(960, 320, 64)
+[PASS] mtp.0.main_proj/inner_decode ref-vs-mlx: shapes ref(15360, 5120) mlx(15360, 5120) equal=True max_abs_diff=0.0
+[FAIL] mtp.0.main_proj/full_layer ref-vs-mlx: shapes ref(15360, 5120) mlx(15360, 5120) equal=False max_abs_diff=0.0001220703125
+[PASS] mtp/4-bit group tested: 3 raw-path MTP group(s) compared
+
+========================================================================
+PHASE 1B VERDICT: 6/9 checks passed, 3 failed
+  FAILED: mtp.0.ffn.experts.10.w1/full_layer ref-vs-mlx -- shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=0.000244140625
+  FAILED: mtp.0.attn.wo_a.slice.0/full_layer ref-vs-mlx -- shapes ref(4096, 1024) mlx(4096, 1024) equal=False max_abs_diff=0.000244140625
+  FAILED: mtp.0.main_proj/full_layer ref-vs-mlx -- shapes ref(15360, 5120) mlx(15360, 5120) equal=False max_abs_diff=0.0001220703125
+========================================================================
+EXIT=1

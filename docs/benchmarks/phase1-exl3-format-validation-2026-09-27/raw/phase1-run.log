@@ -1,0 +1,54 @@
+model: /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+quantization_config: {"quant_method": "exl3", "version": "1.4.2", "bits": 2.9, "head_bits": 6, "mtp_bits": 4, "codebook": "mul1"}
+[PASS] format/quantization_config v1.4.2 accepted: quant_method=exl3 version=1.4.2 codebook=mul1 bits=2.9 head_bits=6 mtp_bits=4
+
+groups under test:
+  routed-expert-3bit     layers.3.ffn.experts.0.w1
+  attention-5bit         layers.0.attn.wq_b
+  attention-6bit         layers.0.attn.wq_a
+  head-6bit              head
+  shared-expert-4bit     layers.11.ffn.shared_experts.w1
+
+--- routed-expert-3bit: layers.3.ffn.experts.0.w1
+    in=5120 out=2304 k=3 bits=3 mul1=True mcg=False trellis=(320, 144, 48)
+[PASS] routed-expert-3bit/inner_decode ref-vs-mlx: shapes ref(5120, 2304) mlx(5120, 2304) equal=True max_abs_diff=0.0
+[FAIL] routed-expert-3bit/full_layer ref-vs-mlx: shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=6.103515625e-05
+
+--- attention-5bit: layers.0.attn.wq_b
+    in=1280 out=32768 k=5 bits=5 mul1=True mcg=False trellis=(80, 2048, 80)
+[PASS] attention-5bit/inner_decode ref-vs-mlx: shapes ref(1280, 32768) mlx(1280, 32768) equal=True max_abs_diff=0.0
+[FAIL] attention-5bit/full_layer ref-vs-mlx: shapes ref(1280, 32768) mlx(1280, 32768) equal=False max_abs_diff=0.0001220703125
+
+--- attention-6bit: layers.0.attn.wq_a
+    in=5120 out=1280 k=6 bits=6 mul1=True mcg=False trellis=(320, 80, 96)
+[PASS] attention-6bit/inner_decode ref-vs-mlx: shapes ref(5120, 1280) mlx(5120, 1280) equal=True max_abs_diff=0.0
+[FAIL] attention-6bit/full_layer ref-vs-mlx: shapes ref(5120, 1280) mlx(5120, 1280) equal=False max_abs_diff=6.103515625e-05
+
+--- head-6bit: head
+    in=5120 out=129280 k=6 bits=6 mul1=True mcg=False trellis=(320, 8080, 96)
+[PASS] head-6bit/inner_decode ref-vs-mlx: shapes ref(5120, 129280) mlx(5120, 129280) equal=True max_abs_diff=0.0
+[FAIL] head-6bit/full_layer ref-vs-mlx: shapes ref(5120, 129280) mlx(5120, 129280) equal=False max_abs_diff=0.00048828125
+
+--- shared-expert-4bit: layers.11.ffn.shared_experts.w1
+    in=5120 out=2304 k=4 bits=4 mul1=True mcg=False trellis=(320, 144, 64)
+[PASS] shared-expert-4bit/inner_decode ref-vs-mlx: shapes ref(5120, 2304) mlx(5120, 2304) equal=True max_abs_diff=0.0
+[FAIL] shared-expert-4bit/full_layer ref-vs-mlx: shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=6.103515625e-05
+
+========================================================================
+PHASE 1 VERDICT: 6/11 checks passed, 5 failed
+  FAILED: routed-expert-3bit/full_layer ref-vs-mlx -- shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=6.103515625e-05
+  FAILED: attention-5bit/full_layer ref-vs-mlx -- shapes ref(1280, 32768) mlx(1280, 32768) equal=False max_abs_diff=0.0001220703125
+  FAILED: attention-6bit/full_layer ref-vs-mlx -- shapes ref(5120, 1280) mlx(5120, 1280) equal=False max_abs_diff=6.103515625e-05
+  FAILED: head-6bit/full_layer ref-vs-mlx -- shapes ref(5120, 129280) mlx(5120, 129280) equal=False max_abs_diff=0.00048828125
+  FAILED: shared-expert-4bit/full_layer ref-vs-mlx -- shapes ref(5120, 2304) mlx(5120, 2304) equal=False max_abs_diff=6.103515625e-05
+========================================================================
+{
+ "checks": [
+  {
+   "check": "format/quantization_config v1.4.2 accepted",
+   "ok": true,
+   "detail": "quant_method=exl3 version=1.4.2 codebook=mul1 bits=2.9 head_bits=6 mtp_bits=4"
+  },
+  {
+   "ch
+EXIT=1
