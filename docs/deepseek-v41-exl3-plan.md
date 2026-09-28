@@ -26,7 +26,10 @@ numbered separately from the plan phases below).
 - Plan phase 3 first cut DONE: `mlx_lm.models.deepseek_v41` package + EXL3
   builder (`bd1bfd1`); per-layer cos >= 0.99983, NLL 1.003 / top-1 78.3%
   matching the reference (phase13).
-- NEXT: `mlx_lm.load` entry + full-model decode loop, then exo integration
+- First end-to-end run on both nodes (phase14): coherent text, plain decode
+  9.3 tok/s, 105.9 GB/rank. Gap to 25 tok/s is port overhead (hc path, shared
+  expert, in-situ experts, attention), not bandwidth. Fix the body before MTP.
+- NEXT (was): `mlx_lm.load` entry + full-model decode loop, then exo integration
   (auto_parallel world=2, model card, generator, MTP head), first real tok/s.
 
 ## 0. Goal

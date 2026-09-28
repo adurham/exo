@@ -1,0 +1,64 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[p47 r0] jaccl up world=2
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=16 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p47 r0] all_sum ok
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=0
+[p47 r0] built in 58.8s active=105.9GB peak=105.9GB
+[p47 r0] eval every 0 layers
+[p47 r0] prompt 23 tokens
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=21 target=22 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=22 target=23 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=23 target=24 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=24 target=25 (polling; self-abort at 20000ms)
+[jaccl-v2] ENTER rank=0 call_id=43 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=43 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=84 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=84 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=125 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=125 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=166 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=166 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=207 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=207 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=248 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=248 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=289 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=289 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=330 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=330 rounds=0
+[p47 r0] prefill 23 tok in 0.91s = 25.3 tok/s
+[p47 r0] decode 40 tok: median 9.30 tok/s (mean step 107.4 ms, p10 106.7 p90 107.9)
+----- TEXT -----
+The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with tiny gas molecules
+----- END -----
+[p47 r0] PROFILE over 21 fenced decode steps, 250.0 ms/step (fenced):
+[p47 r0]    attention                          93.26 ms/step
+[p47 r0]    head_or_dense_proj_toplevel        77.63 ms/step
+[p47 r0]    hc_mixes                           50.93 ms/step
+[p47 r0]    experts                            44.86 ms/step
+[p47 r0]    shared_expert                      31.11 ms/step
+[p47 r0]    hc_post                            15.87 ms/step
+[p47 r0]    gate                                8.09 ms/step
+[p47 r0]    all_sum                             7.84 ms/step
+[p47 r0]    engram                              2.69 ms/step
+[p47 r0] P47_DONE
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2

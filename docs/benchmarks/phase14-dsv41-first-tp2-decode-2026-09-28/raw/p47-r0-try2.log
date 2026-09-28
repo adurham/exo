@@ -1,0 +1,58 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[p47 r0] jaccl up world=2
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=16 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p47 r0] all_sum ok
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=0
+[p47 r0] built in 58.8s active=105.9GB peak=105.9GB
+[p47 r0] eval every 4 layers
+[p47 r0] prompt 23 tokens
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=2 target=3 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=3 target=4 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[jaccl-v2] ENTER rank=0 call_id=43 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=43 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=84 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=84 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=125 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=125 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=166 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=166 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=207 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=207 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=248 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=248 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=289 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=289 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=330 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=330 rounds=0
+[p47 r0] prefill 23 tok in 1.10s = 20.8 tok/s
+[p47 r0] decode 200 tok: median 9.02 tok/s (mean step 110.9 ms, p10 109.3 p90 111.8)
+----- TEXT -----
+The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with tiny gas molecules—mostly nitrogen and oxygen—that are much smaller than the wavelength of visible light. Rayleigh scattering affects short wavelengths far more strongly than long ones, and it scales roughly with the inverse fourth power of wavelength. This means blue and violet light scatter about ten times more efficiently than red light. As a result, scattered blue light bounces in every direction across the sky, so when you look up, you're seeing blue light that has been redirected toward your eyes from all parts of the atmosphere.
+
+You might wonder why the sky isn't violet, since violet has an even shorter wavelength than blue. Two factors resolve this. First, the Sun emits more blue light than violet light. Second, our eyes are more sensitive to blue than to violet. The combination means the scattered light we perceive is dominated by blue
+----- END -----
+[p47 r0] P47_DONE
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
