@@ -1,0 +1,22 @@
+$ ssh macstudio-m4-1 '~/phase1-exl3/.venv/bin/python ~/exl3_vendor_equiv.py'
+== loading E=16 experts of layer 1 ==
+  loaded 144 tensors
+  K_BITS = 3
+
+== EXL3SwitchGLU: vendored vs upstream ==
+  [PASS] switch act=silu R=1: equal=True md5 f84eec8f10cdb24bb36bbdbdf3e7054b vs f84eec8f10cdb24bb36bbdbdf3e7054b dtype=float16 shape=(1, 1, 6, 5120) nan=0/0
+  [PASS] switch act=silu R=4: equal=True md5 1e1152a7198b2d550e2a54877f9692dd vs 1e1152a7198b2d550e2a54877f9692dd dtype=float16 shape=(1, 4, 6, 5120) nan=0/0
+  [PASS] switch act=silu R=8: equal=True md5 6d6afcc72da0a5f780e4e2ddffc669ca vs 6d6afcc72da0a5f780e4e2ddffc669ca dtype=float16 shape=(1, 8, 6, 5120) nan=0/0
+  [PASS] switch act=silu_clamp R=1: equal=True md5 f84eec8f10cdb24bb36bbdbdf3e7054b vs f84eec8f10cdb24bb36bbdbdf3e7054b dtype=float16 shape=(1, 1, 6, 5120) nan=0/0
+  [PASS] switch act=silu_clamp R=4: equal=True md5 1e1152a7198b2d550e2a54877f9692dd vs 1e1152a7198b2d550e2a54877f9692dd dtype=float16 shape=(1, 4, 6, 5120) nan=0/0
+  [PASS] switch act=silu_clamp R=8: equal=True md5 6d6afcc72da0a5f780e4e2ddffc669ca vs 6d6afcc72da0a5f780e4e2ddffc669ca dtype=float16 shape=(1, 8, 6, 5120) nan=0/0
+
+== EXL3Linear (head group, k=6): vendored vs upstream ==
+  group = head. shapes: trellis(320, 8080, 96), suh(5120,), svh(129280,)
+  [PASS] linear head R=1: equal=True md5 986efc9385007dc848bcfb0637241149 vs 986efc9385007dc848bcfb0637241149 dtype=float16 shape=(1, 1, 129280) nan=0/0
+  [PASS] linear head R=4: equal=True md5 a109c96323455a6380aff3a5a325f72c vs a109c96323455a6380aff3a5a325f72c dtype=float16 shape=(1, 4, 129280) nan=0/0
+
+== reconstruct_public_mlx (expert w1 of expert 0): vendored vs upstream ==
+  [PASS] reconstruct w1 expert0: equal=True md5 8dc2627a696b75fca0b3a0ba057e1d70 vs 8dc2627a696b75fca0b3a0ba057e1d70 dtype=float16 shape=(5120, 2304) nan=0/0
+
+VERDICT: PASS -- vendored tree is bit-identical to upstream on all tested paths

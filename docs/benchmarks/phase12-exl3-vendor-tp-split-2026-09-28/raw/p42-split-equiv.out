@@ -1,0 +1,12 @@
+$ ssh macstudio-m4-1 '~/phase1-exl3/.venv/bin/python ~/p42_tp_split_equiv.py'
+== loading E=16 experts of layer 1 ==
+  K=3 in_tiles=320 gu_tiles=144 (H=2304) hid_tiles=144 dn_tiles=320 (D=5120) P=48
+== building full module ==
+  built in 0.0s; local H=2304 D=5120
+== building rank modules (sliced) ==
+  rank0 H=1152 rank1 H=1152 (full H=2304)
+  [PASS] R=1: max|diff|=0.0002441 (max|full|=0.5645) cos=0.9999999
+  [PASS] R=4: max|diff|=0.0004883 (max|full|=1.264) cos=0.9999999
+  control: rank0-alone deviates from full by 0.7292 of max (expect >0.1) OK
+
+VERDICT: PASS -- sum of 2-way split partials reproduces the full EXL3SwitchGLU

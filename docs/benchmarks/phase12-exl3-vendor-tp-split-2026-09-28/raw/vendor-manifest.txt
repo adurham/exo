@@ -1,0 +1,22 @@
+EXL3 vendor manifest — source: ~/repos/ref/PonyExl3 @ 8e7fa6b (patched working tree, md5-verified)
+Vendored by hermes agent 2026-09-28 for mlx-lm fork phase-2 integration.
+Changes applied: absolute->relative imports (incl. __package__ dynamic import),
+8-line provenance header per file, LICENSE + NOTICE copied, package __init__ reduced
+to EXL3Linear + EXL3SwitchGLU. NUMERICAL CODE UNCHANGED.
+
+decode.py	src_bytes=2627	vend_bytes=2852	src_md5=efa51bca69b3f93484572e97d4a7bdba	vend_md5=b196ca08ef469a979ebb8ecd72aff0aa
+exl3_linear.py	src_bytes=7502	vend_bytes=7699	src_md5=200e00d06f8861fd204cdeb0efb73957	vend_md5=60989f3a91530b1dd221c5dd47ef8eb6
+exl3_moe.py	src_bytes=44717	vend_bytes=45223	src_md5=9f9bca311f6751b5d3917e1413eb1acc	vend_md5=606a830a50d2dc6ebff92c1ebe9ec46f
+gemv_metal.py	src_bytes=67213	vend_bytes=67590	src_md5=3d5f69a0b4b23310444015e83d1f75fa	vend_md5=4df8be03d9a409cad2acad1162a44657
+hadamard.py	src_bytes=2510	vend_bytes=2775	src_md5=405714d67b5c4da37e5565f965b8f707	vend_md5=7dc036f6e81b6bb54c21f8a5963c0f5c
+layer_state.py	src_bytes=7933	vend_bytes=8114	src_md5=103e3d5d1f90a88cea5606aa5a206495	vend_md5=a8399fac058b02b5c1564f87ea2daf28
+metal_kernels.py	src_bytes=5387	vend_bytes=5644	src_md5=0be96c4570e1fa4070117cc0d30a6ffc	vend_md5=e73edfcdf51eb805946158ca6c615300
+ops.py	src_bytes=2471	vend_bytes=2724	src_md5=cb46a9c93952438cd3206fe5292a4299	vend_md5=1e52a51e58eb15720f515648f1eaeffa
+perm.py	src_bytes=677	vend_bytes=934	src_md5=44419b8db9fe3e54796eeb805968c985	vend_md5=2f968690a5855844c475cd3f24823177
+reconstruct.py	src_bytes=1602	vend_bytes=1815	src_md5=6fccc458127697dc5b0bed5be46316a5	vend_md5=a29b862ea40723e2222f1b933e5cb317
+signs.py	src_bytes=895	vend_bytes=1160	src_md5=2bf3415d86012aecc6ca721bb09e491d	vend_md5=e02326c142d891ada0255dc9625d2ba4
+stripe.py	src_bytes=1591	vend_bytes=1836	src_md5=91ad80d655e4d51c37617ea0fccd2f8d	vend_md5=ac9e05b8182f7620f31772bc2f741a62
+ref/codebook.py	src_bytes=3463	vend_bytes=3728	src_md5=a089fcd39423b566a892ffcbb5b8e7a4	vend_md5=09b7373acd9f33d3bec8faed58b56b47
+ref/layer.py	src_bytes=1324	vend_bytes=1589	src_md5=1075bc35f07181db4d5651ef06ccb82e	vend_md5=4ae6c1321882532d6febc0dd2aed00a0
+ref/perm.py	src_bytes=1155	vend_bytes=1420	src_md5=0cad6f5a80ae1442bc92907a00c9daa3	vend_md5=3d5695c1b40b2cf8061900d1c3838b68
+ref/signs.py	src_bytes=878	vend_bytes=1143	src_md5=b8ecfa800bd6d8e41a3bb14edc7fb0df	vend_md5=67279a070f1ccfe631ec231711cc01c1
