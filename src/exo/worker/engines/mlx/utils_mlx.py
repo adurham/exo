@@ -1099,10 +1099,45 @@ def _log_dspark_load_guard(
         from mlx.utils import tree_flatten
         from mlx_lm.models.deepseek_v4 import DeepseekV4DSparkModule
 
-        loaded = {k for k, _ in tree_flatten(mod.parameters())}
-        expected = {
-            k for k, _ in tree_flatten(DeepseekV4DSparkModule(inner.args).parameters())
+        # Compare LIKE WITH LIKE. ``mod`` has already been through
+        # nn.quantize, which ADDS a ``.scales`` key per quantized projection
+        # (and, under some modes, ``.biases``); a freshly-constructed module
+        # has none. Diffing them directly reported the quantization keys as
+        # ``extra`` and flipped the assert to FAIL on EVERY load of a
+        # quantized head -- while ``missing=0`` (the fact that actually
+        # matters: did every needed parameter arrive?) was passing. Observed
+        # 2026-09-27 on Vision-Exp: param_tree=118/84, missing=0, extra=34,
+        # and 118-84 == 34 == the overlay's own "25 mxfp8 + 9 mxfp4" tally,
+        # with every reported extra ending in ``.scales``.
+        #
+        # So: normalize the quantization artifacts away on BOTH sides before
+        # the diff. The quantized form of ``X.weight`` is ``X.scales`` +
+        # ``X.weight`` (the packed value), so a dropped quantization suffix
+        # maps to ``X.weight`` -- NOT to a bare ``X``. A genuine key mismatch
+        # (a wrong-architecture head) still shows up as missing/extra.
+        _quant_suffixes = (".scales", ".biases")
+
+        def _norm_quant(keys: set[str]) -> tuple[set[str], int]:
+            """Map quantization keys onto the weight they quantize."""
+            out: set[str] = set()
+            n = 0
+            for k in keys:
+                for sfx in _quant_suffixes:
+                    if k.endswith(sfx):
+                        out.add(k[: -len(sfx)] + ".weight")
+                        n += 1
+                        break
+                else:
+                    out.add(k)
+            return out, n
+
+        loaded_all: set[str] = {str(k) for k, _ in tree_flatten(mod.parameters())}
+        loaded, n_quant_keys = _norm_quant(loaded_all)
+        expected_raw: set[str] = {
+            str(k)
+            for k, _ in tree_flatten(DeepseekV4DSparkModule(inner.args).parameters())
         }
+        expected, _ = _norm_quant(expected_raw)
         missing = expected - loaded
         extra = loaded - expected
         tree_ok = not missing and not extra
@@ -1123,8 +1158,9 @@ def _log_dspark_load_guard(
 
         logger.warning(
             f"[DSPARK-GUARD] provenance={provenance} source={source} "
-            f"param_tree={len(loaded)}/{len(expected)} "
+            f"param_tree={len(loaded_all)}/{len(expected_raw)} "
             f"missing={len(missing)} extra={len(extra)} "
+            f"quant_keys={n_quant_keys} "
             f"param_tree_assert={'PASS' if tree_ok else 'FAIL'} "
             f"block_size={mod.block_size} markov_rank={mod.markov_rank} "
             f"n_stages={len(mod.stages)} taps={mod.target_layer_ids} "
