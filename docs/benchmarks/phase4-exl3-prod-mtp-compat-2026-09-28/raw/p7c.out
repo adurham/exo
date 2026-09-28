@@ -1,0 +1,52 @@
+==========================================================================
+(A) EXL3 MTP: which tensor forms does it use, and how many?
+==========================================================================
+  total mtp tensors        : 4836
+  distinct base names      : 1224
+  quantized (trellis set)  : 1198
+  plain (no trellis)       : 26
+
+  format leaf histogram:
+    suh                   1198
+    svh                   1198
+    mul1                  1198
+    trellis               1198
+    weight                  20
+    bias                     3
+    attn_sink                3
+    hc_attn_base             3
+    hc_attn_fn               3
+    hc_attn_scale            3
+    hc_ffn_base              3
+    hc_ffn_fn                3
+    hc_ffn_scale             3
+
+  example quantized tensor's full leaf set:
+    mtp.0.attn.wkv  ->  ['mul1', 'suh', 'svh', 'trellis']
+  example plain tensor's leaves:
+    mtp.0  ->  ['hc_attn_base', 'hc_attn_fn', 'hc_attn_scale', 'hc_ffn_base', 'hc_ffn_fn', 'hc_ffn_scale']
+
+  Can production consume these? Production's sanitizer/loader expects
+  `.weight` + `.scale` (affine). EXL3 quantized tensors have NO `.scale`:
+    quantized bases lacking a `.scale` leaf: 1198 / 1198
+    quantized bases that DO carry `.weight`: 0
+
+==========================================================================
+(A2) Does production have ANY exl3-aware loading path?
+==========================================================================
+  files mentioning exl3/trellis in mlx-lm + mlx engine: 0
+
+==========================================================================
+(B) Which body layers do the locally-present shards cover?
+==========================================================================
+  shards present            : 12 / 48
+  layers FULLY present      : 4
+    [0, 1, 2, 3]
+  layers PARTIALLY present  : 1
+    L14: shards ['model-00017-of-00048.safetensors', 'model-00048-of-00048.safetensors'] present=['model-00048-of-00048.safetensors']
+  layers absent             : 35 (lowest: [4, 5, 6, 7, 8, 9, 10, 11])
+
+  config: 40 layers, kv_src=[2, 8, 14, 20], compress_ratios=[0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0]
+  engram_layer_ids=[1, 14]
+
+DONE

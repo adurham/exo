@@ -1,0 +1,20 @@
+-rw-r--r--  1 adam.durham  staff  530757930 Sep 27 20:10 /Users/adam.durham/exo.log
+
+=== accept_rate / tokens-per-cycle telemetry (production's own) ===
+  (count: 0)
+
+=== the telemetry line's full shape (one sample) ===
+
+=== DSpark overlay status lines ===
+[ 2026-09-23 19:07:46.560 | [1mINFO    [0m | exo.worker.engines.mlx.utils_mlx:_overlay_dsv4_dspark_native:1047 ] [1mDSpark draft head attached from /Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp (NATIVE checkpoint-bundled head, 118 tensors, 3 stages, block_size=5, taps=[40, 41, 42]).[0m
+[ 2026-09-23 19:07:46.561 | [33m[1mWARNING [0m | exo.worker.engines.mlx.utils_mlx:_log_dspark_load_guard:1124 ] [33m[1m[DSPARK-GUARD] provenance=native source=/Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp param_tree=118/84 missing=0 extra=34 param_tree_assert=FAIL block_size=5 markov_rank=256 n_stages=3 taps=[40, 41, 42] noise_token_id=128799 CHECKPOINT_PROVENANCE=MATCHED[0m
+[ 2026-09-23 19:07:46.561 | [33m[1mWARNING [0m | exo.worker.engines.mlx.utils_mlx:_log_dspark_load_guard:1134 ] [33m[1m[DSPARK-GUARD] param-tree mismatch — missing=[] extra=['main_proj.scales', 'stages.0.attn.wkv.scales', 'stages.0.attn.wo_a.scales', 'stages.0.attn.wo_b.scales', 'stages.0.attn.wq_a.scales', 'stages.0.attn.wq_b.scales', 'stages.0.ffn.shared_experts.down_proj.scales', 'stages.0.ffn.shared_experts.gate_proj.scales'][0m
+[ 2026-09-27 19:57:41.199 | [1mINFO    [0m | exo.worker.engines.mlx.utils_mlx:_overlay_dsv4_dspark_native:1047 ] [1mDSpark draft head attached from /Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp (NATIVE checkpoint-bundled head, 118 tensors, 3 stages, block_size=5, taps=[40, 41, 42]).[0m
+[ 2026-09-27 19:57:41.200 | [33m[1mWARNING [0m | exo.worker.engines.mlx.utils_mlx:_log_dspark_load_guard:1124 ] [33m[1m[DSPARK-GUARD] provenance=native source=/Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4-Flash-Vision-Exp param_tree=118/84 missing=0 extra=34 param_tree_assert=FAIL block_size=5 markov_rank=256 n_stages=3 taps=[40, 41, 42] noise_token_id=128799 CHECKPOINT_PROVENANCE=MATCHED[0m
+[ 2026-09-27 19:57:41.200 | [33m[1mWARNING [0m | exo.worker.engines.mlx.utils_mlx:_log_dspark_load_guard:1134 ] [33m[1m[DSPARK-GUARD] param-tree mismatch — missing=[] extra=['main_proj.scales', 'stages.0.attn.wkv.scales', 'stages.0.attn.wo_a.scales', 'stages.0.attn.wo_b.scales', 'stages.0.attn.wq_a.scales', 'stages.0.attn.wq_b.scales', 'stages.0.ffn.shared_experts.down_proj.scales', 'stages.0.ffn.shared_experts.gate_proj.scales'][0m
+
+=== MTP / speculative mode lines ===
+[ 2026-09-23 19:08:22.094 | [1mINFO    [0m | exo.worker.engines.mlx.generator.batch_generate:__post_init__:859 ] [1mDSv4 MTP speculative decoding enabled (γ=3, T=0.0)[0m
+[ 2026-09-27 19:58:17.656 | [1mINFO    [0m | exo.worker.engines.mlx.generator.batch_generate:__post_init__:859 ] [1mDSv4 MTP speculative decoding enabled (γ=3, T=0.0)[0m
+
+DONE
