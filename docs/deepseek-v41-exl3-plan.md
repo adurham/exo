@@ -23,8 +23,11 @@ numbered separately from the plan phases below).
   gated green (phase12). exo's recorded mlx-lm pin intentionally still
   `5c5328b` until the model file needs the branch.
 - MTP/DSpark draft head ported and token-identical (phase3/4/7).
-- NEXT: plan phase 3 -- `mlx_lm/models/deepseek_v41.py`, then exo integration
-  (auto_parallel branch, model card, generator), Engram row store, cache wrapper.
+- Plan phase 3 first cut DONE: `mlx_lm.models.deepseek_v41` package + EXL3
+  builder (`bd1bfd1`); per-layer cos >= 0.99983, NLL 1.003 / top-1 78.3%
+  matching the reference (phase13).
+- NEXT: `mlx_lm.load` entry + full-model decode loop, then exo integration
+  (auto_parallel world=2, model card, generator, MTP head), first real tok/s.
 
 ## 0. Goal
 

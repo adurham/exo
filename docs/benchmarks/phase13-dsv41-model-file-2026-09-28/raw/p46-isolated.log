@@ -1,0 +1,44 @@
+[p46] isolate=True layers=0-39 world=1 rank=0 n=531
+[p46] L00 build  1.6s fwd  0.25s cos_h=0.999981 cos_pm=1.000000 maxrel=1.161e-02 rms=0.076 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L01 build  1.5s fwd  0.27s cos_h=0.999985 cos_pm=1.000000 maxrel=1.566e-02 rms=0.101 plain=15 dense=16 opt_absent=1 peak=8.9GB
+[p46] L02 build  1.5s fwd  0.25s cos_h=0.999904 cos_pm=1.000000 maxrel=3.951e-02 rms=0.104 plain=16 dense=19 opt_absent=1 peak=8.9GB
+[p46] L03 build  1.5s fwd  0.24s cos_h=0.999927 cos_pm=1.000000 maxrel=5.704e-02 rms=0.120 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L04 build  1.5s fwd  0.24s cos_h=0.999929 cos_pm=1.000000 maxrel=7.761e-02 rms=0.134 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L05 build  1.5s fwd  0.23s cos_h=0.999926 cos_pm=1.000000 maxrel=7.833e-02 rms=0.153 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L06 build  1.5s fwd  0.22s cos_h=0.999947 cos_pm=1.000000 maxrel=5.181e-02 rms=0.191 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L07 build  1.5s fwd  0.21s cos_h=0.999964 cos_pm=0.999999 maxrel=1.392e-02 rms=0.240 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L08 build  1.5s fwd  0.22s cos_h=0.999987 cos_pm=1.000000 maxrel=9.697e-03 rms=0.244 plain=16 dense=19 opt_absent=1 peak=8.9GB
+[p46] L09 build  1.5s fwd  0.22s cos_h=0.999986 cos_pm=1.000000 maxrel=1.819e-02 rms=0.254 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L10 build  1.5s fwd  0.23s cos_h=0.999940 cos_pm=1.000000 maxrel=2.830e-02 rms=0.262 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L11 build  1.5s fwd  0.23s cos_h=0.999954 cos_pm=1.000000 maxrel=3.985e-02 rms=0.275 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L12 build  1.5s fwd  0.23s cos_h=0.999885 cos_pm=1.000000 maxrel=6.103e-02 rms=0.293 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L13 build  1.5s fwd  0.24s cos_h=0.999947 cos_pm=0.999999 maxrel=3.318e-02 rms=0.319 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L14 build  1.5s fwd  2.65s cos_h=0.999894 cos_pm=1.000000 maxrel=1.721e-02 rms=0.395 plain=18 dense=20 opt_absent=1 peak=8.9GB
+[p46] L15 build  1.5s fwd  0.24s cos_h=0.999987 cos_pm=0.999998 maxrel=2.038e-02 rms=0.421 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L16 build  1.5s fwd  0.21s cos_h=0.999904 cos_pm=1.000000 maxrel=9.183e-02 rms=0.508 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L17 build  1.5s fwd  0.22s cos_h=0.999886 cos_pm=0.999999 maxrel=8.781e-02 rms=0.620 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L18 build  1.1s fwd  0.18s cos_h=0.999831 cos_pm=0.999997 maxrel=8.987e-02 rms=0.838 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L19 build  1.1s fwd  0.21s cos_h=0.999980 cos_pm=1.000000 maxrel=2.701e-02 rms=1.016 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L20 build  1.1s fwd  0.20s cos_h=0.999946 cos_pm=1.000000 maxrel=3.837e-02 rms=0.991 plain=16 dense=18 opt_absent=1 peak=8.9GB
+[p46] L21 build  1.1s fwd  0.20s cos_h=0.999972 cos_pm=0.999999 maxrel=3.027e-02 rms=1.147 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L22 build  1.1s fwd  0.20s cos_h=0.999982 cos_pm=0.999999 maxrel=2.561e-02 rms=1.180 plain=13 dense=15 opt_absent=1 peak=8.9GB
+[p46] L23 build  1.5s fwd  0.23s cos_h=0.999994 cos_pm=0.999999 maxrel=8.206e-03 rms=1.275 plain=13 dense=15 opt_absent=1 peak=9.6GB
+[p46] L24 build  1.5s fwd  0.23s cos_h=0.999978 cos_pm=1.000000 maxrel=3.732e-02 rms=1.321 plain=14 dense=16 opt_absent=1 peak=9.7GB
+[p46] L25 build  1.5s fwd  0.22s cos_h=0.999975 cos_pm=1.000000 maxrel=7.391e-02 rms=1.429 plain=13 dense=15 opt_absent=1 peak=9.8GB
+[p46] L26 build  1.5s fwd  0.22s cos_h=0.999987 cos_pm=0.999999 maxrel=2.489e-02 rms=1.745 plain=13 dense=15 opt_absent=1 peak=9.9GB
+[p46] L27 build  1.5s fwd  0.24s cos_h=0.999989 cos_pm=0.999999 maxrel=4.134e-02 rms=1.767 plain=13 dense=15 opt_absent=1 peak=10.0GB
+[p46] L28 build  1.5s fwd  0.23s cos_h=0.999977 cos_pm=1.000000 maxrel=4.927e-02 rms=1.870 plain=14 dense=16 opt_absent=1 peak=10.1GB
+[p46] L29 build  1.5s fwd  0.23s cos_h=0.999989 cos_pm=1.000000 maxrel=3.783e-02 rms=1.995 plain=13 dense=15 opt_absent=1 peak=10.2GB
+[p46] L30 build  1.5s fwd  0.23s cos_h=0.999993 cos_pm=1.000000 maxrel=3.164e-02 rms=2.065 plain=13 dense=15 opt_absent=1 peak=10.3GB
+[p46] L31 build  1.5s fwd  0.23s cos_h=0.999991 cos_pm=1.000000 maxrel=7.693e-03 rms=2.222 plain=13 dense=15 opt_absent=1 peak=10.4GB
+[p46] L32 build  1.5s fwd  0.24s cos_h=0.999971 cos_pm=0.999999 maxrel=3.927e-02 rms=2.350 plain=14 dense=16 opt_absent=1 peak=10.5GB
+[p46] L33 build  1.5s fwd  0.24s cos_h=0.999980 cos_pm=0.999999 maxrel=2.137e-02 rms=2.572 plain=13 dense=15 opt_absent=1 peak=10.6GB
+[p46] L34 build  1.5s fwd  0.24s cos_h=0.999983 cos_pm=0.999999 maxrel=1.736e-02 rms=2.834 plain=13 dense=15 opt_absent=1 peak=10.7GB
+[p46] L35 build  1.5s fwd  0.23s cos_h=0.999988 cos_pm=1.000000 maxrel=2.006e-02 rms=3.193 plain=13 dense=15 opt_absent=1 peak=10.8GB
+[p46] L36 build  1.5s fwd  0.24s cos_h=0.999984 cos_pm=0.999999 maxrel=2.067e-02 rms=3.457 plain=14 dense=16 opt_absent=1 peak=10.9GB
+[p46] L37 build  1.5s fwd  0.24s cos_h=0.999987 cos_pm=1.000000 maxrel=1.596e-02 rms=3.623 plain=13 dense=15 opt_absent=1 peak=11.0GB
+[p46] L38 build  1.5s fwd  0.24s cos_h=0.999995 cos_pm=1.000000 maxrel=3.038e-03 rms=4.151 plain=13 dense=15 opt_absent=1 peak=11.1GB
+[p46] L39 build  1.5s fwd  0.23s cos_h=0.999961 cos_pm=1.000000 maxrel=5.519e-03 rms=34.588 plain=13 dense=15 opt_absent=1 peak=11.2GB
+[p46] stack done 69.3s worst_cos=0.999831 GATE_0999=PASS
+[p46] NLL mean=1.0030 median=0.0288 top1=78.3% (p35 ref: mean 1.003, median 0.029, top1 78.3%)
+P46_DONE
