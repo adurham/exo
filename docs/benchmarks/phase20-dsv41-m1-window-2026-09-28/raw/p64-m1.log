@@ -1,0 +1,4 @@
+[p64] built active=104.9GB driver=True
+[p64] warmup 44.4s
+[p64] prefill   8192 tok:    62.8 s =  130.4 tok/s  peak=105.3GB  then decode 1.6 tok/s  first toks [5978, 14, 33147, 270, 28949, 10549, 377, 270]
+[p64] prefill  16384 tok:   225.4 s =   72.7 tok/s  peak=105.3GB  then decode 5.0 tok/s  first toks [223, 19, 201, 361, 1354, 565, 19, 271]
