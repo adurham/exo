@@ -1,0 +1,24 @@
+=== SCRAPE #0 (before batch) 02:55:27 ===
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 11777.0
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 12455.0
+
+--- request 1 02:55:27 ---
+http=200 time=28.675809s
+--- request 2 02:55:55 ---
+http=200 time=27.828764s
+--- request 3 02:56:23 ---
+http=200 time=28.768984s
+
+=== SCRAPE #1 (after batch) 02:56:52 ===
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 12669.0
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 13363.0
+
+=== ANALYSIS ===
+cumulative at start : cycles=11777.0 accepted=12455.0  (all-time mean 1.0576/cycle)
+cumulative at end   : cycles=12669.0 accepted=13363.0
+BATCH sample        : cycles=892.0 accepted=908.0
+mean accepted/cycle : 1.0179 of gamma=3  (33.9% of drafts)
+tokens/cycle        : 2.0179  (1 anchor + accepted)
+completion tokens total: 1800
+observed tokens/cycle from actual: 2.0179
+P10-BATCH-DONE

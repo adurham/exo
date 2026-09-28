@@ -1,0 +1,49 @@
+=== SCRAPE #0 (before traffic) 02:45:45 ===
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 11374.0
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 11940.0
+
+=== DRIVING ONE DECODE 02:45:45 ===
+http=200 time=14.913628s
+
+=== SCRAPE #1 (after traffic) 02:46:00 ===
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 11517.0
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 12117.0
+
+=== DELTA ===
+cycles      : 11374.0 -> 11517.0  (delta 143.0)
+accepted    : 11940.0 -> 12117.0  (delta 177.0)
+MEAN ACCEPTANCE per cycle this sample: 1.2378
+tokens/cycle (1 anchor + accepted)  : 2.2378
+
+=== completion sanity ===
+usage: {'prompt_tokens': 33, 'completion_tokens': 320, 'total_tokens': 353, 'prompt_tokens_details': {'cached_tokens': 0, 'audio_tokens': 0}, 'completion_tokens_details': {'reasoning_tokens': 320, 'audio_tokens': 0, 'accepted_prediction_tokens': 0, 'rejected_prediction_tokens': 0}}
+content chars: 0
+head: 
+P10-LIVE-ACCEPT-DONE
+
+=== HIST ===
+=== FULL MTP FAMILY + BUCKETS (before) 02:46:00 ===
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 11517.0
+exo_mtp_cycles_created{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 1.79020869114291e+09
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 12117.0
+exo_mtp_accepted_drafts_created{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 1.790208691142915e+09
+
+--- greedy req 1 02:46:00 ---
+http=200 time=13.443100s
+--- greedy req 2 02:46:13 ---
+http=200 time=13.346959s
+
+=== FULL MTP FAMILY + BUCKETS (after) 02:46:27 ===
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 11777.0
+exo_mtp_cycles_created{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 1.79020869114291e+09
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 12455.0
+exo_mtp_accepted_drafts_created{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 1.790208691142915e+09
+
+=== ANALYSIS ===
+GREEDY SAMPLE: cycles=260.0 accepted=338.0 -> 1.3000/cycle (43.3% of gamma=3), tokens/cycle=2.3000
+completion tokens=600; cycles+accepted=598.0 (identity check)
+ALL-TIME since worker start: cycles=11777.0 accepted=12455.0 -> 1.0576/cycle
+
+BUCKET DISTRIBUTION (after, master):
+P10C-DONE
+=== ALLDONE ===

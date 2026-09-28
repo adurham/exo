@@ -1,0 +1,4 @@
+exo_mtp_cycles_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 12669.0
+exo_mtp_cycles_created{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 1.79020869114291e+09
+exo_mtp_accepted_drafts_total{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 13363.0
+exo_mtp_accepted_drafts_created{model_id="deepseek-ai/DeepSeek-V4-Flash-Vision-Exp"} 1.790208691142915e+09
