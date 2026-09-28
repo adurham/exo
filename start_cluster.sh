@@ -3358,10 +3358,26 @@ done
 # controller), fall back to the hardcoded IP only if mDNS resolution fails
 # (e.g. no local mDNS resolver available), so this loop never silently trusts
 # a stale constant without at least trying the live name first.
+# 2026-09-28: chain extended to mDNS -> Tailscale ($M4_1_TS_IP) -> hardcoded,
+# because mDNS resolution is now dead (LocalHostName drift) and the hardcoded
+# constant is dead (DHCP drift). See the fallback comment in the block below
+# and docs/launcher-address-drift-repair-2026-09-28.md.
 API_HOST="adams-mac-studio-m4-1.local"
 if ! ping -c1 -t2 "$API_HOST" >/dev/null 2>&1; then
-  echo "WARNING: mDNS resolution of $API_HOST failed; falling back to hardcoded $M4_1_IP (may be stale)." >&2
-  API_HOST="$M4_1_IP"
+  # 2026-09-28: this fallback now fires on every launch. mDNS no longer
+  # resolves -- both Studios' LocalHostName drifted (m4-1 reports
+  # Adams-Mac-Studio-M4-4) -- and the hardcoded $M4_1_IP is currently dead
+  # (.201; the DHCP LAN address has moved to .48). Try the Tailscale IP that
+  # the top of this script just resolved ($M4_1_TS_IP -- stable across LAN
+  # DHCP churn; the macstudio-m4-1 SSH alias points at it as of 2026-09-28)
+  # before ever trusting the hardcoded constant. Verified live 2026-09-28:
+  # http://100.91.246.26:52415/state answers with real cluster JSON.
+  echo "WARNING: mDNS resolution of $API_HOST failed; trying Tailscale IP $M4_1_TS_IP." >&2
+  API_HOST="$M4_1_TS_IP"
+  if ! ping -c1 -t2 "$API_HOST" >/dev/null 2>&1; then
+    echo "WARNING: Tailscale IP $M4_1_TS_IP unreachable too; falling back to hardcoded $M4_1_IP (may be stale)." >&2
+    API_HOST="$M4_1_IP"
+  fi
 fi
 API="http://$API_HOST:52415"
 
