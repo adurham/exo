@@ -1,0 +1,69 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p56] built 61s active=108.9GB peak=108.9GB
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=9 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=9 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=10 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=10 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=11 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=11 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=12 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=12 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=13 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=13 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=14 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=14 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=15 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=15 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=16 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=16 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[jaccl-v2] ENTER rank=0 call_id=83 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=83 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=88 total_bytes=12 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=88 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=93 total_bytes=20 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=93 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=175 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=175 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=180 total_bytes=12 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=180 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=185 total_bytes=20 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=185 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=267 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=267 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=272 total_bytes=12 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=272 rounds=0
+[p56] prompt 0: 23 tok | plain step 61.6 ms (16.23 tok/s) | draft round 13.1 ms
+[p56]   accepted/round (teacher-forced): w3g1=0.07  w3g2=0.08  w3g3=0.06  w5g1=0.09  w5g2=0.12  w5g3=0.11  w5g4=0.11  w5g5=0.10
+[p56]   greedy text: The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with molecules of nitrogen and oxygen that are much smaller than the wavelength of visible light. Rayleigh scattering affects short wavelengths far more strongly than long ones—roughly inversely proportional to the fourth power of wavelength. Blue light, with its short wavelength, is scattered about ten times more
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[p56]   spec gamma=2: 0.48 tok/s  mean_acc=0.08 (tokens/round 1.08) rounds=119 identical_prefix=77/129
