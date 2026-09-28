@@ -1,0 +1,80 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p56] built 61s active=108.9GB peak=108.9GB
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=9 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=9 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=10 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=10 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=11 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=11 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=12 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=12 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=13 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=13 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=14 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=14 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=15 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=15 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=16 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=16 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[p56 r0] draft raw=[[12709, 344, 8295]] bcast=[[12709, 344, 8295]]
+[p56 r0] draft raw=[[12709, 344, 8295, 1754, 270]] bcast=[[12709, 344, 8295, 1754, 270]]
+[p56 r0] draft raw=[[344, 8295, 1754]] bcast=[[344, 8295, 1754]]
+[p56] dumped taps (1, 119, 15360)
+[p56] prompt 0: 23 tok | plain step 59.2 ms (16.88 tok/s) | draft round 11.1 ms
+[p56]   accepted/round (teacher-forced): w3g1=0.74  w3g2=1.25  w3g3=1.54  w5g1=0.75  w5g2=1.28  w5g3=1.60  w5g4=1.74  w5g5=1.77
+[p56]   greedy text: The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with molecules of nitrogen and oxygen that are much smaller than the wavelength of visible light. Rayleigh scattering affects short wavelengths far more strongly than long ones—roughly inversely proportional to the fourth power of wavelength. Blue light, with its short wavelength, is scattered about ten times more efficiently than red light. This
+[p56]   verify forward ms by rows: R1=58.5  R2=74.9  R3=87.9  R4=97.7  R5=111.7  R6=120.1
+[p56]   spec gamma=2: 23.59 tok/s  mean_acc=1.34 (tokens/round 2.34) rounds=41 identical_prefix=42/97
+[p56]   spec gamma=3: 22.40 tok/s  mean_acc=1.48 (tokens/round 2.48) rounds=40 identical_prefix=77/97
+[p56]   spec text:   The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with molecules of nitrogen and oxygen that are much smaller than the wavelength of visible light. Rayleigh scattering affects short wavelengths far more strongly than long ones—roughly inversely proportional to the fourth power of wavelength. Blue and violet light have the shortest wavelengths, so they scatter the most, bouncing in every direction across
+[p56]   spec gamma=4: 21.47 tok/s  mean_acc=1.69 (tokens/round 2.69) rounds=36 identical_prefix=37/97
+[p56] prompt 1: 25 tok | plain step 59.1 ms (16.91 tok/s) | draft round 11.1 ms
+[p56]   accepted/round (teacher-forced): w3g1=0.91  w3g2=1.68  w3g3=2.30  w5g1=0.92  w5g2=1.74  w5g3=2.36  w5g4=2.86  w5g5=3.24
+[p56]   greedy text: # ISO-8601 Date Parser (No `datetime`) /  / Here's a pure-Python implementation that parses ISO-8601 date strings without using the `datetime` module. /  / ```python / def parse_iso8601_date(s: str) -> dict: /     """ /     Parse an ISO-8601 date string into a dict with year, month, day. /  /     Supports: /       - Calendar dates: YYYY-MM-DD, YYYYMMDD
+[p56]   spec gamma=2: 25.37 tok/s  mean_acc=1.49 (tokens/round 2.49) rounds=39 identical_prefix=41/97
+[p56]   spec gamma=3: 26.49 tok/s  mean_acc=1.91 (tokens/round 2.91) rounds=34 identical_prefix=41/97
+[p56]   spec text:   # ISO-8601 Date Parser (No `datetime`) /  / Here's a pure-Python implementation that parses ISO-8601 date strings without using the `datetime` module. /  / ```python / import re /  / # Regex for ISO-8601 date formats: / #   YYYY-MM-DD / #   YYYYMMDD / #   YYYY-MM  (defaults day to 1) / #   YYYY     (defaults month
+[p56]   spec gamma=4: 25.23 tok/s  mean_acc=2.16 (tokens/round 3.16) rounds=31 identical_prefix=41/97
+[p56] prompt 2: 21 tok | plain step 59.2 ms (16.90 tok/s) | draft round 11.1 ms
+[p56]   accepted/round (teacher-forced): w3g1=0.76  w3g2=1.27  w3g3=1.56  w5g1=0.76  w5g2=1.24  w5g3=1.51  w5g4=1.62  w5g5=1.67
+[p56]   greedy text: 1. Feed your starter on a consistent schedule, ideally every 12–24 hours at room temperature. / 2. Use a 1:1:1 ratio of starter, flour, and water by weight to keep it vigorous. / 3. Store it in a clean glass jar with a loose lid so gases can escape. / 4. Use filtered or dechlorinated water, since chlorine can inhibit yeast activity. / 5. Keep it at a steady 70–78°F (21
+[p56]   spec gamma=2: 21.02 tok/s  mean_acc=1.06 (tokens/round 2.06) rounds=47 identical_prefix=44/97
+[p56]   spec gamma=3: 21.60 tok/s  mean_acc=1.40 (tokens/round 2.40) rounds=40 identical_prefix=14/97
+[p56]   spec text:   1. Feed your starter on a consistent schedule, ideally every 12 to 24 hours at room temperature. / 2. Use a 1:1:1 ratio of starter, flour, and water by weight to keep it strong and predictable. / 3. Stick to unbleached flour or whole grains to give the yeast and bacteria proper nutrients. / 4. Use filtered or dechlorinated water, since chlorine can inhibit microbial activity. / 5. Keep the jar loosely covered so gases can
+[p56]   spec gamma=4: 16.96 tok/s  mean_acc=1.13 (tokens/round 2.13) rounds=45 identical_prefix=5/97
+[p56] peak=110.2GB
+[p56] SUMMARY gamma=2: mean 23.33 tok/s, mean_acc 1.30
+[p56] SUMMARY gamma=3: mean 23.50 tok/s, mean_acc 1.60
+[p56] SUMMARY gamma=4: mean 21.22 tok/s, mean_acc 1.66
+[p56] P56_DONE
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
