@@ -1,0 +1,17 @@
+=== achievable streaming bandwidth at the sizes the kernel touches ===
+      MB   ideal GB/s       ms
+      10      80046.1    0.122
+      40     211054.0    0.185
+      80     243886.0    0.320
+     160     378024.5    0.413
+     320     408274.2    0.765
+
+=== the ACTUAL trellis buffers (real layout, same reader) ===
+ experts       MB   ideal GB/s       ms
+       6     75.9        212.7    0.374
+      24    303.8        451.3    0.706
+      48    607.5        469.0    1.358
+
+Interpretation: if 'ideal' and 'trellis' rows are close, the kernel's
+access pattern is NOT the limiter -- the decode ALU is. If 'trellis' is
+much slower, the layout itself throttles what any kernel can read.

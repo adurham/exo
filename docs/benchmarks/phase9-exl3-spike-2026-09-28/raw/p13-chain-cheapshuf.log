@@ -1,0 +1,14 @@
+[chain] ARM=cheapshuf
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+
+============================================================================================
+EXL3 CHAIN PROBE (ARM=cheapshuf) -- E=384, layer=1, top-6
+============================================================================================
+  rows    EXL3 ms   mxfp4 ms   ex/PROD  EXL3 tok/s                             md5(y)
+     1      0.653      0.389     1.677        38.3   a8dc662a9732f1d8f067d3064a3950f9
+     4      1.636      1.039     1.575        15.3   a03ebec906c944478f6d6783c58fcb20
+     6      2.383      1.490     1.600        10.5   055c2fe9c3a62ceae7f5756b3127919e
+     8      3.060      1.979     1.546         8.2   bae171736b23e4e050665d50a2c4867b
+
+CHAIN-PROBE-DONE arm=cheapshuf

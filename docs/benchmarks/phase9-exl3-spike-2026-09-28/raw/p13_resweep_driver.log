@@ -1,0 +1,8 @@
+DONE T1-C0 rc=0 23:02:43 ::   R=1:    0.758 ms
+DONE T1-C384 rc=0 23:03:07 ::   R=1:    0.770 ms
+DONE T1-C1152 rc=0 23:03:31 ::   R=1:    0.887 ms
+DONE T2-C0 rc=0 23:03:55 ::   R=1:    0.773 ms
+DONE T2-C1152 rc=0 23:04:19 ::   R=1:    0.905 ms
+=== FUSED=0 on patched lib ===
+DONE fused0 rc=0 23:05:40 ::   decode R=1             exl3/prod =  2.317  gate 1.25  MISS
+RESWEEP_COMPLETE 2026-09-27 23:05:40

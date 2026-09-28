@@ -1,0 +1,14 @@
+[stub] EXL3_STUB=none EXL3_SWAR=0
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+
+============================================================================================
+EXL3 STUB PROBE (STUB=none SWAR=0) -- E=384, layer=1, top-6
+============================================================================================
+  rows    EXL3 ms   mxfp4 ms   ex/PROD  EXL3 tok/s                             md5(y)
+     1      1.031      0.387     2.667        24.3   f859beeeb0408d6e8d5bb248c9c75c4b
+     4      3.169      1.038     3.052         7.9   08a16bf60b2c8225f8b2585d93e99662
+     6      4.609      1.484     3.106         5.4   27cd2b1f4f3ef900f4637b8501c97f33
+     8      6.043      1.961     3.082         4.1   cff548f7d15a522b0fc32388508f9fe0
+
+STUB-PROBE-DONE arm=none swar=0

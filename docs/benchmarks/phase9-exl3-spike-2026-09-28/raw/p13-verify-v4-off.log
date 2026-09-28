@@ -1,0 +1,30 @@
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+[build] affine 4/64 ...
+[build] affine 4/32 ...
+[bytes] EXL3 E=384: 4876.3 MiB (3.01 bpw effective)
+
+====================================================================================================
+EXL3 vs PRODUCTION mxfp4 4-bit/gs32  (mx.eval per rep; MLX is lazy)
+====================================================================================================
+  rows    EXL3 ms   mxfp4 ms   a4/64 ms   a4/32 ms   ex/PROD  ex/a4/64  EXL3 tok/s
+     1      1.035      0.390      0.397      0.424     2.655     2.605        24.1
+     4      3.170      1.049      1.095      1.206     3.022     2.895         7.9
+     8      6.047      1.957      2.043      2.264     3.090     2.959         4.1
+   256    149.532     39.732     42.724     43.272     3.764     3.500         0.2
+   512    153.068     48.054     51.957     52.693     3.185     2.946         0.2
+  1024    156.885     65.528     70.453     71.584     2.394     2.227         0.2
+  2048    163.539     98.815    105.584    106.959     1.655     1.549         0.2
+
+VERDICT vs plan gates, against the PRODUCTION baseline:
+  decode R=1             exl3/prod =  2.655  gate 1.25  MISS
+  verify R=4 (DSpark)    exl3/prod =  3.022  gate 1.25  MISS
+  verify R=8             exl3/prod =  3.090  gate 1.25  MISS
+  prefill R=512          exl3/prod =  3.185  gate 1.7  MISS
+  prefill R=2048         exl3/prod =  1.655  gate 1.7  PASS
+
+If EXL3 replaced ALL 40 MoE layers (upper bound on the speed cost):
+  decode: 1.035 ms/layer x 40 = 41.4 ms/token -> 24.1 tok/s (EXL3-only, MoE only)
+  prod  : 0.390 ms/layer x 40 = 15.6 ms/token -> 64.1 tok/s (mxfp4, MoE only)
+
+wrote ~/p2_final_results.json

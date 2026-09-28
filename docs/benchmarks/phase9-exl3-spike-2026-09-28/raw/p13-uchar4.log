@@ -1,0 +1,15 @@
+[probe] UCHAR4=1 (XDIRECT at library default)
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+
+============================================================================================
+EXL3 UCHAR4 PROBE (UCHAR4=1) -- E=384, layer=1, top-6
+============================================================================================
+  rows    EXL3 ms   mxfp4 ms   ex/PROD  EXL3 tok/s      md5  match
+     1      0.804      0.389     2.066        31.1 f859beee    YES
+     4      2.280      1.054     2.162        11.0 08a16bf6    YES
+     6      3.325      1.489     2.234         7.5 27cd2b1f    YES
+     8      4.314      1.941     2.223         5.8 cff548f7    YES
+
+ALL-MD5-MATCH=True
+UCHAR4-PROBE-DONE uchar4=1

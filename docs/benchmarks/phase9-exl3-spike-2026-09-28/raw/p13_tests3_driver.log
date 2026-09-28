@@ -1,0 +1,14 @@
+uv=/Users/adam.durham/.local/bin/uv
+=== moe_activation ===
+..s                                                                      [100%]
+2 passed, 1 skipped in 0.33s
+=== mlx_gemv ===
+.................ssssss                                                  [100%]
+17 passed, 6 skipped in 1.02s
+=== codebook ===
+.................                                                        [100%]
+17 passed in 0.01s
+=== gemma4_model ===
+..sss                                                                    [100%]
+2 passed, 3 skipped in 0.01s
+PONYEXL3_TESTS3_DONE 23:09:15

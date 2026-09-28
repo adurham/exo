@@ -1,0 +1,14 @@
+[probe] CHAIN2=cheap (library SWAR+XDIRECT defaults apply)
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+
+============================================================================================
+PATCHED-KERNEL CHAIN RE-PROBE (ARM=cheap) -- E=384, layer=1
+============================================================================================
+  rows    EXL3 ms   mxfp4 ms   ex/PROD  EXL3 tok/s      md5  ref?
+     1      0.688      0.388     1.774        36.3 4a50c65d    no
+     4      1.852      1.053     1.759        13.5 75b1b289    no
+     6      2.692      1.485     1.813         9.3 f0a64f7a    no
+     8      3.472      1.957     1.774         7.2 6b18dab9    no
+
+CHAIN2-PROBE-DONE arm=cheap

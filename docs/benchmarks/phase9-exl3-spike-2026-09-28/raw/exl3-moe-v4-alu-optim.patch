@@ -1,0 +1,86 @@
+--- gemv_metal.py.bak-v4	2026-09-27 22:57:56
++++ gemv_metal.py	2026-09-27 22:57:56
+@@ -61,11 +61,35 @@
+                 uint ai = (dq_cw >> (8u * dq_lane)) & 0xFFu;
+                 dq_sum += ai;
+             }}
++            half dq_h = as_type<half>(ushort(dq_sum & 0xFFFFu));
++            half dq_k_inv = as_type<half>(ushort(0x1EEEu));
++            half dq_k_bias = as_type<half>(ushort(0xC931u));
++            float dq_val = float(dq_h * dq_k_inv + dq_k_bias);
++"""
++
++
++# --- phase 9 spike: env-gated, bit-identical mul1 decode (EXL3_DECODE_SWAR,
++# default on). The 4-iteration byte-sum loop becomes two packed half-sums;
++# integer addition is associative and nothing overflows (max 0x6400 + 4*0xFF).
++# Verified md5-identical to the loop form on node 1, E=384, R=1/4/6/8;
++# measured R=1 1.031 -> 1.000 ms alone (see phase9 doc).
++_EXL3_DECODE_SWAR = __import__("os").environ.get("EXL3_DECODE_SWAR", "1") == "1"
++_decode_expr_stock = _decode_expr
++
++
++def _decode_expr(cb: CodebookMode, *, cw_in: str = "cw") -> str:  # noqa: F811
++    """Env-gated mul1 fast path; otherwise the stock implementation."""
++    if _EXL3_DECODE_SWAR and cb == CodebookMode.MUL1:
++        return f"""
++            uint dq_cw = {cw_in} * 0x83DCD12Du;
++            uint dq_t = (dq_cw & 0x00FF00FFu) + ((dq_cw >> 8u) & 0x00FF00FFu);
++            uint dq_sum = 0x6400u + (dq_t & 0xFFFFu) + (dq_t >> 16u);
+             half dq_h = as_type<half>(ushort(dq_sum & 0xFFFFu));
+             half dq_k_inv = as_type<half>(ushort(0x1EEEu));
+             half dq_k_bias = as_type<half>(ushort(0xC931u));
+             float dq_val = float(dq_h * dq_k_inv + dq_k_bias);
+ """
++    return _decode_expr_stock(cb, cw_in=cw_in)
+ 
+ 
+ _HAD_SCALE_LIT = "0.08838834764831845f"  # 1/sqrt(128)
+--- exl3_moe.py.bak-v4	2026-09-27 22:57:56
++++ exl3_moe.py	2026-09-27 22:57:56
+@@ -474,6 +474,45 @@
+ """
+ 
+ 
++# --- phase 9 spike: env-gated, bit-identical cross-lane removal
++# (EXL3_XDIRECT, default on). ``simd_shuffle(x_lane, ushort(row_[jw]))``
++# broadcasts lane row_[jw]'s x_lane, which holds x[..., (row_[jw] & 15)] --
++# so a direct indexed read computes the same fp16 value with no cross-lane
++# op. md5-identical over R=1/4/6/8; measured R=1 1.031 -> 0.823 ms (2.65x ->
++# 2.11x vs production), R=4-8 -> ~2.25-2.33x (see phase9 doc).
++_XDIRECT = __import__("os").environ.get("EXL3_XDIRECT", "1") == "1"
++
++
++def _xdirect_src(src: str) -> str:
++    """Rewrite shuffle-broadcast sites to direct indexed reads."""
++    import re as _re
++    if not _XDIRECT:
++        return src
++    exprs = _re.findall(r"float x_lane = (.+);", src)
++    if not exprs:
++        return src
++    it = iter(exprs)
++
++    def _sub(_m):
++        return next(it).replace("(lane & 15u)", "(row_[jw] & 15u)")
++    out, n = _re.subn(
++        _re.escape("simd_shuffle(x_lane, ushort(row_[jw]))"), _sub, src)
++    if n != len(exprs):
++        raise ValueError(
++            f"xdirect: {n} shuffle sites vs {len(exprs)} x_lane defs")
++    return out
++
++
++if _XDIRECT:
++    def _mk_xdirect(_fn):
++        def _wrapped(*a, **kw):
++            return _xdirect_src(_fn(*a, **kw))
++        return _wrapped
++    for _n in ("_moe_gateup_source", "_moe_down_source",
++               "_moe_gateup2_source", "_moe_down2_source"):
++        globals()[_n] = _mk_xdirect(globals()[_n])
++
++
+ class EXL3SwitchGLU(nn.Module):
+     """Stacked-expert EXL3 SwitchGLU (gate+up fused per expert, then down)."""
+ 

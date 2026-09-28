@@ -1,0 +1,15 @@
+[probe] LUT=1 (XDIRECT+SWAR at library defaults)
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+
+============================================================================================
+EXL3 LUT PROBE (LUT=1) -- E=384, layer=1, top-6
+============================================================================================
+  rows    EXL3 ms   mxfp4 ms   ex/PROD  EXL3 tok/s      md5  match
+     1      0.829      0.389     2.132        30.2 8f8acea3     NO
+     4      2.572      1.052     2.445         9.7 934d3707     NO
+     6      3.682      1.487     2.476         6.8 d801713a     NO
+     8      4.757      1.975     2.409         5.3 fe12dcfe     NO
+
+ALL-MD5-MATCH=False
+LUT-PROBE-DONE lut=1
