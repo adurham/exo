@@ -1,0 +1,47 @@
+=== p23b soak2 begin 2026-09-28 01:16:55 node=Adams-Mac-Studio-M4-1 seconds=2340 depth=8
+[build] 15360 expert fetches, 13.32 MB/fetch, working set 196.0 GB
+[fds] 38
+[SOAKBEGIN 1790576217.157]
+[soak] t=   60s rate=10782892.03 GB/s cum= 630097.4 GB
+[soak] t=  120s rate=10631729.66 GB/s cum=1266067.8 GB
+[soak] t=  180s rate=10241064.96 GB/s cum=1896663.1 GB
+[soak] t=  240s rate=11089195.01 GB/s cum=2531984.0 GB
+[soak] t=  300s rate=10281145.34 GB/s cum=3167622.1 GB
+[soak] t=  360s rate=10862696.45 GB/s cum=3802278.1 GB
+[soak] t=  420s rate=10107864.58 GB/s cum=4431234.7 GB
+[soak] t=  480s rate=10050356.74 GB/s cum=5047481.2 GB
+[soak] t=  540s rate=10383290.88 GB/s cum=5656933.2 GB
+[soak] t=  600s rate=10525249.54 GB/s cum=6284166.6 GB
+[soak] t=  660s rate=10294505.47 GB/s cum=6906329.7 GB
+[soak] t=  720s rate=10436464.13 GB/s cum=7481385.7 GB
+[soak] t=  780s rate=10591693.82 GB/s cum=8101264.5 GB
+[soak] t=  840s rate=10116934.66 GB/s cum=8709951.2 GB
+[soak] t=  900s rate=9584266.75 GB/s cum=9245572.4 GB
+[soak] t=  960s rate=10076943.36 GB/s cum=9802347.3 GB
+[soak] t= 1020s rate=10769576.45 GB/s cum=10373145.6 GB
+[soak] t= 1080s rate=11098042.37 GB/s cum=10970053.6 GB
+[soak] t= 1140s rate=10094548.99 GB/s cum=11501049.8 GB
+[soak] t= 1200s rate=9815010.82 GB/s cum=12089208.1 GB
+[soak] t= 1260s rate=10321092.10 GB/s cum=12689118.2 GB
+[soak] t= 1320s rate=10680746.50 GB/s cum=13228849.7 GB
+[soak] t= 1380s rate=4550263.30 GB/s cum=13663379.8 GB
+[soak] t= 1440s rate=10933564.42 GB/s cum=14110830.6 GB
+[soak] t= 1500s rate=10214611.97 GB/s cum=14710352.5 GB
+[soak] t= 1560s rate=4519163.90 GB/s cum=15072621.4 GB
+[soak] t= 1620s rate=9983645.18 GB/s cum=15630093.1 GB
+[soak] t= 1680s rate=9792892.42 GB/s cum=16226705.6 GB
+[soak] t= 1740s rate=10449868.80 GB/s cum=16792053.3 GB
+[soak] t= 1800s rate=10520825.86 GB/s cum=17409658.2 GB
+[soak] t= 1860s rate=10720515.07 GB/s cum=17915324.6 GB
+[soak] t= 1920s rate=10343255.04 GB/s cum=18438504.1 GB
+[soak] t= 1980s rate=10747101.70 GB/s cum=19058631.2 GB
+[soak] t= 2040s rate=5948577.79 GB/s cum=19683946.8 GB
+[soak] t= 2100s rate=10138874.88 GB/s cum=20289490.5 GB
+[soak] t= 2160s rate=9997049.86 GB/s cum=20860029.9 GB
+[soak] t= 2220s rate=10698129.41 GB/s cum=21387201.1 GB
+[soak] t= 2280s rate=10676055.55 GB/s cum=22010282.4 GB
+[soak] t= 2340s rate=10738477.06 GB/s cum=22631460.3 GB
+[SOAKEND 1790578557.219]
+[total] 2340.1 s, 22631.6 GB, process-level 9.67 GB/s (UPPER BOUND - iostat is truth)
+[series] p10=4856477.18 p50=10294505.47 p90=10813813.25 GB/s (n=2311)
+=== p23b soak2 done 2026-09-28 01:55:57 ===

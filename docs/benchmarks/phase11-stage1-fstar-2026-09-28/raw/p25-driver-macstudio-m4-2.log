@@ -1,0 +1,37 @@
+p25 driver start 2026-09-28 01:17:09 node=Adams-Mac-Studio-M4-2 dur=2400s
+iostat pid 7375
+env pid 7376
+python rc=0
+p25 driver done 2026-09-28 01:56:12
+/Users/adam.durham/p25_driver.sh: line 22:  7375 Terminated: 15          nohup iostat -d -c "$DUR" -w 1 disk0 > "$HOME/p25-iostat-$NODE.txt" 2>&1
+/Users/adam.durham/p25_driver.sh: line 22:  7376 Terminated: 15          nohup sh "$HOME/p25_env.sh" "$DUR" > "$HOME/p25-env-$NODE.log" 2>&1
+[soak] t=  840s rate=9277919.23 GB/s cum=7350327.3 GB
+[soak] t=  900s rate=9006916.61 GB/s cum=7883115.0 GB
+[soak] t=  960s rate=9109151.23 GB/s cum=8418075.1 GB
+[soak] t= 1020s rate=9131314.18 GB/s cum=8952164.9 GB
+[soak] t= 1080s rate=8625010.18 GB/s cum=9481542.3 GB
+[soak] t= 1140s rate=9029302.27 GB/s cum=9984877.2 GB
+[soak] t= 1200s rate=8949453.31 GB/s cum=10492293.0 GB
+[soak] t= 1260s rate=8469914.11 GB/s cum=11018502.9 GB
+[soak] t= 1320s rate=8505348.10 GB/s cum=11440468.7 GB
+[soak] t= 1380s rate=4083995.14 GB/s cum=11863206.0 GB
+[soak] t= 1440s rate=4172780.54 GB/s cum=12219750.7 GB
+[soak] t= 1500s rate=7094074.37 GB/s cum=12614930.9 GB
+[soak] t= 1560s rate=3906468.86 GB/s cum=12933928.3 GB
+[soak] t= 1620s rate=3924297.22 GB/s cum=13315799.9 GB
+[soak] t= 1680s rate=4283817.98 GB/s cum=13688345.5 GB
+[soak] t= 1740s rate=8447751.17 GB/s cum=14098174.6 GB
+[soak] t= 1800s rate=8727378.43 GB/s cum=14545668.4 GB
+[soak] t= 1860s rate=8789443.58 GB/s cum=15046567.6 GB
+[soak] t= 1920s rate=8878362.62 GB/s cum=15525177.2 GB
+[soak] t= 1980s rate=9637440.00 GB/s cum=16060117.4 GB
+[soak] t= 2040s rate=9233415.17 GB/s cum=16593582.5 GB
+[soak] t= 2100s rate=8647618.56 GB/s cum=17126377.0 GB
+[soak] t= 2160s rate=9255756.29 GB/s cum=17658505.1 GB
+[soak] t= 2220s rate=9451110.91 GB/s cum=18191436.3 GB
+[soak] t= 2280s rate=9313620.48 GB/s cum=18724942.3 GB
+[soak] t= 2340s rate=8527867.39 GB/s cum=19257431.0 GB
+[SOAKEND 1790578570.576]
+[total] 2340.0 s, 19257.5 GB, process-level 8.23 GB/s (UPPER BOUND - iostat is truth)
+[series] p10=4283728.90 p50=8745162.24 p90=9158123.52 GB/s (n=2311)
+=== p23b soak2 done 2026-09-28 01:56:10 ===

@@ -1,0 +1,273 @@
+## t=0s 2026-09-28 01:17:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                    19913.
+Pages active:                                1607933.
+Pages inactive:                              1654667.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=60s 2026-09-28 01:18:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     6092.
+Pages active:                                1633681.
+Pages inactive:                              1563393.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=120s 2026-09-28 01:19:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     6315.
+Pages active:                                1632252.
+Pages inactive:                              1548187.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=180s 2026-09-28 01:20:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5224.
+Pages active:                                1633234.
+Pages inactive:                              1530206.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=240s 2026-09-28 01:21:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5760.
+Pages active:                                1632861.
+Pages inactive:                              1507627.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=300s 2026-09-28 01:22:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5735.
+Pages active:                                1632128.
+Pages inactive:                              1484673.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=360s 2026-09-28 01:23:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5239.
+Pages active:                                1632703.
+Pages inactive:                              1588401.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=420s 2026-09-28 01:24:09
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5996.
+Pages active:                                1632457.
+Pages inactive:                              1565996.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=480s 2026-09-28 01:25:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     6622.
+Pages active:                                1632527.
+Pages inactive:                              1547950.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=540s 2026-09-28 01:26:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5740.
+Pages active:                                1632800.
+Pages inactive:                              1520580.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=600s 2026-09-28 01:27:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     6013.
+Pages active:                                1632690.
+Pages inactive:                              1497986.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=660s 2026-09-28 01:28:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5429.
+Pages active:                                1633171.
+Pages inactive:                              1475907.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=720s 2026-09-28 01:29:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     6188.
+Pages active:                                1632419.
+Pages inactive:                              1585920.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=780s 2026-09-28 01:30:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     5344.
+Pages active:                                1632277.
+Pages inactive:                              1565051.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=840s 2026-09-28 01:31:10
+vm.swapusage: total = 14336.00M  used = 13437.56M  free = 898.44M  (encrypted)
+Pages free:                                     6521.
+Pages active:                                1632838.
+Pages inactive:                              1539283.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=900s 2026-09-28 01:32:10
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     5963.
+Pages active:                                1632410.
+Pages inactive:                              1520272.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=960s 2026-09-28 01:33:10
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     5509.
+Pages active:                                1632281.
+Pages inactive:                              1496379.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1020s 2026-09-28 01:34:10
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     4945.
+Pages active:                                1633227.
+Pages inactive:                              1498542.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1080s 2026-09-28 01:35:10
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     6077.
+Pages active:                                1632740.
+Pages inactive:                              1587156.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1140s 2026-09-28 01:36:11
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     6097.
+Pages active:                                1632903.
+Pages inactive:                              1588424.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1200s 2026-09-28 01:37:11
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     5783.
+Pages active:                                1632575.
+Pages inactive:                              1511556.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1260s 2026-09-28 01:38:11
+vm.swapusage: total = 14336.00M  used = 13444.88M  free = 891.12M  (encrypted)
+Pages free:                                     5753.
+Pages active:                                1633974.
+Pages inactive:                              1494899.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1320s 2026-09-28 01:39:11
+vm.swapusage: total = 14336.00M  used = 13436.88M  free = 899.12M  (encrypted)
+Pages free:                                     5446.
+Pages active:                                1633921.
+Pages inactive:                              1483101.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1380s 2026-09-28 01:40:11
+vm.swapusage: total = 14336.00M  used = 13436.88M  free = 899.12M  (encrypted)
+Pages free:                                     5819.
+Pages active:                                1632936.
+Pages inactive:                              1490136.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1440s 2026-09-28 01:41:11
+vm.swapusage: total = 14336.00M  used = 13442.12M  free = 893.88M  (encrypted)
+Pages free:                                     5897.
+Pages active:                                1632778.
+Pages inactive:                              1476866.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1500s 2026-09-28 01:42:11
+vm.swapusage: total = 14336.00M  used = 13442.12M  free = 893.88M  (encrypted)
+Pages free:                                     5302.
+Pages active:                                1633098.
+Pages inactive:                              1517573.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1560s 2026-09-28 01:43:12
+vm.swapusage: total = 14336.00M  used = 13442.12M  free = 893.88M  (encrypted)
+Pages free:                                     5876.
+Pages active:                                1632336.
+Pages inactive:                              1497717.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1620s 2026-09-28 01:44:12
+vm.swapusage: total = 14336.00M  used = 13442.12M  free = 893.88M  (encrypted)
+Pages free:                                     5734.
+Pages active:                                1632396.
+Pages inactive:                              1483374.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1680s 2026-09-28 01:45:12
+vm.swapusage: total = 14336.00M  used = 13442.12M  free = 893.88M  (encrypted)
+Pages free:                                     6347.
+Pages active:                                1632523.
+Pages inactive:                              1475550.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1740s 2026-09-28 01:46:12
+vm.swapusage: total = 14336.00M  used = 13442.12M  free = 893.88M  (encrypted)
+Pages free:                                     5305.
+Pages active:                                1632267.
+Pages inactive:                              1520940.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1800s 2026-09-28 01:47:12
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5750.
+Pages active:                                1633045.
+Pages inactive:                              1509772.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1860s 2026-09-28 01:48:12
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5776.
+Pages active:                                1632814.
+Pages inactive:                              1488035.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1920s 2026-09-28 01:49:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5916.
+Pages active:                                1632486.
+Pages inactive:                              1592309.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=1980s 2026-09-28 01:50:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5496.
+Pages active:                                1632973.
+Pages inactive:                              1574093.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=2040s 2026-09-28 01:51:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     6242.
+Pages active:                                1633503.
+Pages inactive:                              1550325.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=2100s 2026-09-28 01:52:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5761.
+Pages active:                                1632536.
+Pages inactive:                              1525435.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=2160s 2026-09-28 01:53:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5978.
+Pages active:                                1633208.
+Pages inactive:                              1503439.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=2220s 2026-09-28 01:54:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5724.
+Pages active:                                1632652.
+Pages inactive:                              1481285.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+## t=2280s 2026-09-28 01:55:13
+vm.swapusage: total = 14336.00M  used = 13464.06M  free = 871.94M  (encrypted)
+Pages free:                                     5660.
+Pages active:                                1632809.
+Pages inactive:                              1592162.
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
