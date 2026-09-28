@@ -1,0 +1,59 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p56] built 62s active=108.9GB peak=108.9GB
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=9 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=9 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=10 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=10 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=11 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=11 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=12 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=12 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=13 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=13 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=14 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=14 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=15 total_bytes=471040 sz=2 num_chunks=29 small=0
+[jaccl-v2] EXIT rank=0 call_id=15 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=16 total_bytes=235520 sz=2 num_chunks=15 small=0
+[jaccl-v2] EXIT rank=0 call_id=16 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[p56] prompt 0: plain 9.25 | old-loop g3 19.77 | 1-sync g3 20.27 (110.1 ms/round, acc 1.23) | adaptive 21.35 (97.7 ms/round, acc 1.09, gammas {3: 4, 2: 85, 1: 4})
+[p56]   adaptive text: The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with molecules of nitrogen and oxygen that are much smaller than the wavelength of visible light. Rayleigh scattering affects short wavelengths far more strongly than long ones—roughly inversely proportional to the fourth power of wavelength. Blue and violet light
+[p56] prompt 1: plain 16.98 | old-loop g3 27.37 | 1-sync g3 27.96 (109.6 ms/round, acc 2.06) | adaptive 29.30 (111.1 ms/round, acc 2.25, gammas {3: 57, 2: 1, 4: 1})
+[p56]   adaptive text: # ISO-8601 Date Parser (No `datetime`) /  / Here's a pure-Python implementation that parses ISO-8601 date strings without using the `datetime` module. /  / ```python / def parse_iso8601_date(s: str) -> dict: /     """ /     Parse an ISO-8601 date string into a dict with keys: /     year, month, day, hour
+[p56] prompt 2: plain 16.90 | old-loop g3 20.55 | 1-sync g3 20.75 (110.1 ms/round, acc 1.29) | adaptive 20.65 (98.9 ms/round, acc 1.04, gammas {3: 4, 2: 90})
+[p56]   adaptive text: 1. Feed your starter on a consistent schedule, ideally every 12–24 hours at room temperature. / 2. Use a 1:1:1 ratio of starter, flour, and water by weight to keep it vigorous. / 3. Store it in a clean glass jar with a loose lid so gases can escape. / 4. Use filtered or dechlorinated water, since chlorine can inhibit yeast activity
+[p56] prompt 3: plain 16.93 | old-loop g3 17.58 | 1-sync g3 17.80 (110.2 ms/round, acc 0.97) | adaptive 19.09 (99.4 ms/round, acc 0.90, gammas {3: 4, 2: 75})
+[p56]   adaptive text: The French Revolution stemmed from a confluence of deep-seated crises. Financially, France was bankrupt from costly wars (including aiding the American Revolution) and an unfair tax system that exempted the nobility and clergy while burdening commoners. Socially, rigid class divisions fueled resentment, as the growing bourgeoisie and impoverished peasants demanded rights and representation. Politically, an absolute monarchy under Louis XVI proved
+[p56] prompt 4: plain 16.92 | old-loop g3 22.50 | 1-sync g3 22.53 (111.0 ms/round, acc 1.50) | adaptive 24.27 (98.7 ms/round, acc 1.40, gammas {3: 4, 2: 76, 1: 1})
+[p56]   adaptive text: # How Hash Maps Work (Explained Simply) /  / A hash map (also called dictionary, hash table, or associative array) stores **key-value pairs** and lets you look up a value almost instantly using its key. Think of it like a coat check at a restaurant: you hand over your coat, get a numbered ticket, and later use that ticket to get your coat back — without searching through
+[p56] MEAN plain 15.40 | old-loop g3 21.55 | 1-sync g3 21.86 | adaptive 22.93
+[p56] peak=110.4GB
+[p56] P63_DONE
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
