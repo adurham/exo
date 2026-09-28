@@ -1,0 +1,311 @@
+diff --git a/deepseek_v41_mlx/compressor.py b/deepseek_v41_mlx/compressor.py
+index 80a4db9..7b0ff75 100644
+--- a/deepseek_v41_mlx/compressor.py
++++ b/deepseek_v41_mlx/compressor.py
+@@ -60,6 +60,14 @@ class Compressor(nn.Module):
+         kv = xf @ self.wkv.weight.astype(mx.float32).T
+         score = xf @ self.wgate.weight.astype(mx.float32).T
+ 
++        # Speculative-rollback support: stash this chunk's OWN raw rows (before
++        # the carry is prepended) so the driver can rebuild the open-group
++        # buffer when a draft round rejects part of this chunk. Pure storage --
++        # the compute path and return values are unchanged.
++        comp_state.chunk_kv = kv
++        comp_state.chunk_score = score
++        comp_state.chunk_start = start_pos
++
+         m = start_pos % ratio                    # carried tokens of the open group
+         if m:
+             kv = mx.concatenate([comp_state.kv_state[:bsz, :m], kv], axis=1)
+@@ -86,3 +94,8 @@ class CompressorState:
+     def __init__(self, bsz: int, ratio: int, head_dim: int):
+         self.kv_state = mx.zeros((bsz, ratio, head_dim), dtype=mx.float32)
+         self.score_state = mx.full((bsz, ratio, head_dim), NEG_INF, dtype=mx.float32)
++        # This chunk's OWN raw rows (pre-carry) + where they start, stashed by
++        # Compressor.__call__ so a speculative rollback can rebuild the carry.
++        self.chunk_kv = None
++        self.chunk_score = None
++        self.chunk_start = 0
+diff --git a/deepseek_v41_mlx/config.py b/deepseek_v41_mlx/config.py
+index 6dbec50..c4fd995 100644
+--- a/deepseek_v41_mlx/config.py
++++ b/deepseek_v41_mlx/config.py
+@@ -101,6 +101,15 @@ class ModelArgs:
+     dspark_target_layer_ids: tuple = ()
+     vision_n_layers: int = 0
+ 
++    # DSpark draft head (the mtp.{0..n-1} stack). The draft MoE is SMALLER than
++    # the body: 128 routed experts, top-3, vs the body's 384/top-6. These come
++    # from the checkpoint's own dspark_* keys.
++    dspark_n_experts: int = 0
++    dspark_topk: int = 0
++    dspark_block_size: int = 5
++    dspark_markov_rank: int = 256
++    dspark_noise_token_id: int = 128799
++
+     @property
+     def nope_head_dim(self) -> int:
+         return self.head_dim - self.rope_head_dim
+@@ -190,6 +199,11 @@ class ModelArgs:
+             engram_compressed_vocab_size=_get(c, "engram_compressed_vocab_size", default=0),
+             n_mtp_layers=_get(c, "num_nextn_predict_layers", "n_mtp_layers", default=0),
+             dspark_target_layer_ids=tuple(_get(c, "dspark_target_layer_ids", default=()) or ()),
++            dspark_n_experts=_get(c, "dspark_n_routed_experts", default=0),
++            dspark_topk=_get(c, "dspark_num_experts_per_tok", default=0),
++            dspark_block_size=_get(c, "dspark_block_size", default=5),
++            dspark_markov_rank=_get(c, "dspark_markov_rank", default=256),
++            dspark_noise_token_id=_get(c, "dspark_noise_token_id", default=128799),
+             vision_n_layers=0,  # text-only runtime
+         )
+ 
+diff --git a/deepseek_v41_mlx/convert.py b/deepseek_v41_mlx/convert.py
+index 7e24e38..4379809 100644
+--- a/deepseek_v41_mlx/convert.py
++++ b/deepseek_v41_mlx/convert.py
+@@ -128,7 +128,8 @@ def sanitize_group(names: list[str], tensors: dict[str, mx.array],
+         else:
+             w = t
+ 
+-        m = re.match(r"(layers\.\d+\.ffn\.experts)\.(\d+)\.(w[123])\.weight$", name)
++        m = re.match(r"((?:layers|mtp)\.\d+\.ffn\.experts)\.(\d+)\.(w[123])\.weight$",
++                     name)
+         if m:
+             prefix, idx, wn = m.group(1), int(m.group(2)), m.group(3)
+             proj = {"w1": "gate_proj", "w3": "up_proj", "w2": "down_proj"}[wn]
+@@ -229,6 +230,8 @@ def quantize_engram_table_from_file(src_dir: str, wmap: dict, wname: str,
+ def _group_tag(g: str) -> str:
+     if g.startswith("layers."):
+         return f"layers-{int(g.split('.')[1]):02d}"
++    if g.startswith("mtp."):
++        return f"mtp-{int(g.split('.')[1])}"
+     return g
+ 
+ 
+@@ -303,7 +306,9 @@ def convert(src: str, dst: str, bits: int | None = None,
+         if m:
+             return m.group(1)
+         if name.startswith("mtp."):
+-            return "mtp"
++            # one group per stage so each draft block is its own shard
++            m = re.match(r"mtp\.(\d+)\.", name)
++            return f"mtp.{m.group(1)}" if m else "mtp"
+         if name.startswith(VISION_PREFIXES):
+             return "vision"
+         return "top"
+@@ -311,7 +316,8 @@ def convert(src: str, dst: str, bits: int | None = None,
+     groups: dict[str, list[str]] = {}
+     for name in wmap:
+         groups.setdefault(owner(name), []).append(name)
+-    accounting = {"kept": 0, "dropped_mtp": len(groups.pop("mtp", [])),
++    mtp_groups = [g for g in groups if g.startswith("mtp")]
++    accounting = {"kept": 0, "mtp_kept": sum(len(groups[g]) for g in mtp_groups),
+                   "vision_passthrough": 0}
+ 
+     shard_cache: dict[str, dict] = {}
+@@ -328,6 +334,8 @@ def convert(src: str, dst: str, bits: int | None = None,
+ 
+     order = ["top"] + sorted((g for g in groups if g.startswith("layers.")),
+                              key=lambda s: int(s.split(".")[1]))
++    order += sorted((g for g in groups if g.startswith("mtp")),
++                    key=lambda s: int(s.split(".")[1]) if "." in s else 0)
+     if "vision" in groups:
+         order.append("vision")
+ 
+diff --git a/deepseek_v41_mlx/load.py b/deepseek_v41_mlx/load.py
+index d5c5d31..9397cb0 100644
+--- a/deepseek_v41_mlx/load.py
++++ b/deepseek_v41_mlx/load.py
+@@ -33,6 +33,66 @@ from .config import ModelArgs
+ from .convert import VISION_PREFIXES, bits_for, is_quant_target
+ from .model import Model
+ 
++# Module-level (not stage-scoped) draft sub-modules, as PREFIX -> runtime
++# prefix. Matched by prefix so .weight/.scales/.biases all route the same way
++# (the draft's embeddings and heads are quantized, so scales/biases exist).
++#
++# NOTE: shared_experts keep their w1/w2/w3 names -- this port's SharedExpert
++# owns w1/w2/w3 and its converter does not rename them. (Production's own
++# sanitizer does rename them; that is a different codebase.)
++_MTP_TOP_PREFIX = {
++    "main_proj.": "mtp.main_proj.",
++    "main_norm.": "mtp.main_norm.",
++    "norm.": "mtp.norm.",
++    "markov_head.embed.": "mtp.markov_embed.",
++    "markov_head.head.": "mtp.markov_head.",
++    "confidence_head.proj.": "mtp.confidence_proj.",
++}
++# bare module-path forms (no trailing component) for the quant module map
++_MTP_TOP_M = {
++    "main_proj": "mtp.main_proj",
++    "main_norm": "mtp.main_norm",
++    "norm": "mtp.norm",
++    "markov_head.embed": "mtp.markov_embed",
++    "markov_head.head": "mtp.markov_head",
++    "confidence_head.proj": "mtp.confidence_proj",
++}
++
++
++# module-level draft modules, keyed AND valued WITHOUT ".weight", so the
++# same table serves both checkpoint tensor names and module-map paths.
++_MTP_TOP_M = {
++    "main_proj": "mtp.main_proj",
++    "main_norm": "mtp.main_norm",
++    "norm": "mtp.norm",
++    "markov_head.embed": "mtp.markov_embed",
++    "markov_head.head": "mtp.markov_head",
++    "confidence_head.proj": "mtp.confidence_proj",
++}
++
++
++def map_mtp_name(k: str):
++    """Checkpoint ``mtp.*`` name -> bare runtime module path (or None).
++
++    Idempotent: a name already in runtime form is returned unchanged, so this
++    can be applied to checkpoint keys and to module-map keys alike.
++    """
++    if not k.startswith("mtp."):
++        return None
++    if k.startswith("mtp.stages.") or k in _MTP_TOP_M:
++        return k                          # already runtime form
++    parts = k.split(".")
++    if len(parts) < 3:
++        return None
++    stage, tail = parts[1], ".".join(parts[2:])
++    # module-level tensors, by prefix (covers .weight/.scales/.biases)
++    for pre, repl in _MTP_TOP_PREFIX.items():
++        if tail.startswith(pre):
++            return repl + tail[len(pre):]
++    if tail in _MTP_TOP_M:
++        return _MTP_TOP_M[tail]
++    return f"mtp.stages.{stage}.{tail}"
++
+ 
+ def quant_predicate(group_size: int, bits: int, expert_bits: int | None,
+                     module_map: dict | None = None):
+@@ -125,6 +185,12 @@ def load(path: str, lazy: bool | None = None, strict: bool = True):
+     if q:
+         if q.get("bits"):
+             module_map = q.get("modules")
++            if module_map:
++                # convert.py keys this map by sanitized (release-style) module
++                # paths; quant_predicate looks up runtime paths. Translate the
++                # mtp entries so quantized draft weights land correctly.
++                module_map = {(map_mtp_name(k) or k): v
++                              for k, v in module_map.items()}
+             nn.quantize(model, group_size=q["group_size"], bits=q["bits"],
+                         class_predicate=quant_predicate(q["group_size"], q["bits"],
+                                                         q.get("expert_bits"),
+@@ -146,7 +212,8 @@ def load(path: str, lazy: bool | None = None, strict: bool = True):
+             if k.startswith(VISION_PREFIXES):
+                 vision_skipped.add(k)      # declared passthrough, text-only runtime
+                 continue
+-            items.append((k, v))
++            mapped = map_mtp_name(k)
++            items.append((mapped if mapped else k, v))
+         model.load_weights(items, strict=False)
+         if not lazy:
+             mx.eval([v for _, v in items])
+diff --git a/deepseek_v41_mlx/model.py b/deepseek_v41_mlx/model.py
+index b696909..d402410 100644
+--- a/deepseek_v41_mlx/model.py
++++ b/deepseek_v41_mlx/model.py
+@@ -105,6 +105,10 @@ class Model(nn.Module):
+         self.layers = [Block(i, args) for i in range(args.n_layers)]
+         self.norm = RMSNorm(args.dim, args.norm_eps)
+         self.head = nn.Linear(args.dim, args.vocab_size, bias=False)
++        self.mtp = None
++        if args.n_mtp_layers:
++            from .mtp import DSparkHead
++            self.mtp = DSparkHead(args)
+         self.engram_hasher = None
+         if args.engram_layer_ids and token_map is not None:
+             self.set_token_map(token_map)
+@@ -119,8 +123,15 @@ class Model(nn.Module):
+         return ModelCache(self.args, bsz, max_seq_len, dtype)
+ 
+     def __call__(self, input_ids: mx.array, cache: ModelCache,
+-                 last_logit_only: bool = False) -> mx.array:
+-        """input_ids [b, n] continue the sequence at cache.offset. Advances the cache."""
++                 last_logit_only: bool = False, return_taps: bool = False):
++        """input_ids [b, n] continue the sequence at cache.offset. Advances the cache.
++
++        ``return_taps`` additionally returns ``{layer_id: hc_mean_hidden}`` for
++        every layer in ``args.dspark_target_layer_ids`` -- the DSpark context
++        feed. Production captures the same quantity (``h.mean(axis=2)`` after
++        each tapped layer) into a module-level side channel; returning it is the
++        same information without the global.
++        """
+         start_pos = cache.offset
+         b, n = input_ids.shape
+ 
+@@ -139,6 +150,8 @@ class Model(nn.Module):
+ 
+         pre_mix = make_identity_pre_mix(b, n, self.hc_mult)
+         shared = SharedState()
++        tap_ids = set(self.args.dspark_target_layer_ids) if return_taps else set()
++        taps = {}
+         for layer in self.layers:
+             if layer.engram is not None:
+                 h = layer.engram(h, hashes[:, :, layer.engram.layer_hash_index])
+@@ -152,6 +165,8 @@ class Model(nn.Module):
+                 h, pre_mix = layer(h, pre_mix, start_pos, cache, shared_use)
+             else:
+                 h, pre_mix = layer(h, pre_mix, start_pos, cache, shared)
++            if layer.layer_id in tap_ids:
++                taps[layer.layer_id] = h.mean(axis=2)
+ 
+         h = hc_pre(h, pre_mix)                       # collapse with the last ffn_pre
+         h = self.norm(h)
+@@ -159,4 +174,6 @@ class Model(nn.Module):
+             h = h[:, -1:]
+         logits = self.head(h.astype(mx.float32))   # fp32 logits, as the reference
+         cache.offset = start_pos + n
++        if return_taps:
++            return logits, taps
+         return logits
+diff --git a/deepseek_v41_mlx/moe.py b/deepseek_v41_mlx/moe.py
+index cff1a3e..055540a 100644
+--- a/deepseek_v41_mlx/moe.py
++++ b/deepseek_v41_mlx/moe.py
+@@ -35,25 +35,35 @@ class ClampedSwiGLU(nn.Module):
+         self.limit = limit
+ 
+     def __call__(self, x, gate):
++        # MLX's gather_qmm drops to a ~10x slower path when the activation dtype
++        # does not match the quantized weight's scales dtype. `x` here is the
++        # output of up_proj, so its dtype is the dtype the MoE linears expect --
++        # do the activation math in fp32 (unchanged accuracy) but hand the
++        # result back in that dtype so down_proj stays on the fast path.
++        out_dtype = x.dtype
+         x = x.astype(mx.float32)
+         gate = gate.astype(mx.float32)
+         if self.limit > 0:
+             x = mx.clip(x, -self.limit, self.limit)
+             gate = mx.minimum(gate, self.limit)
+-        return nn.silu(gate) * x
++        return (nn.silu(gate) * x).astype(out_dtype)
+ 
+ 
+ class Gate(nn.Module):
+-    def __init__(self, args: ModelArgs):
++    def __init__(self, args: ModelArgs, n_experts: int | None = None,
++                 topk: int | None = None):
++        # The DSpark draft MoE is 128 experts / top-3 while the body is
++        # 384 / top-6, so the sizes must be overridable.
+         super().__init__()
+-        self.topk = args.n_activated_experts
++        n_experts = n_experts or args.n_routed_experts
++        self.topk = topk or args.n_activated_experts
+         self.score_func = args.score_func
+         self.gate_temp = args.gate_temp
+         self.norm_topk_prob = args.norm_topk_prob
+         self.route_scale = args.route_scale
+-        self.weight = mx.zeros((args.n_routed_experts, args.dim))
+-        self.bias = mx.zeros((args.n_routed_experts,), dtype=mx.float32)
+-        self.bias_vl = mx.zeros((args.n_routed_experts,), dtype=mx.float32)
++        self.weight = mx.zeros((n_experts, args.dim))
++        self.bias = mx.zeros((n_experts,), dtype=mx.float32)
++        self.bias_vl = mx.zeros((n_experts,), dtype=mx.float32)
+ 
+     def __call__(self, x: mx.array):
+         scores = (x.astype(mx.float32) @ self.weight.astype(mx.float32).T) / self.gate_temp

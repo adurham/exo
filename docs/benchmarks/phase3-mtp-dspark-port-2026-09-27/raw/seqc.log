@@ -1,0 +1,23 @@
+=== 4 layers, 3 draft stages, block=5, width=5, verify=chunk, taps=[1, 2, 3] ===
+  prompt: 6 tokens
+
+=== baseline: plain greedy ===
+  48 tokens in 0.475s -> 101.09 tok/s
+  first 12: [43281, 108435, 109597, 105148, 56193, 56712, 100489, 87240, 25057, 74673, 55421, 55421]
+
+=== speculative (DSpark, verify=chunk) ===
+  48 tokens in 1.480s -> 32.42 tok/s
+  first 12: [43281, 108435, 12193, 89744, 89744, 89744, 98106, 127802, 93773, 28422, 124831, 13484]
+
+=== VERDICT ===
+  tokens DIVERGE
+    first divergence at index 2: spec=12193 base=109597
+
+=== acceptance (4-layer body: NOT representative) ===
+  rounds: 47  mean accepted: 0.00 / 5
+    n_acc=0:  47  (100.0%)
+
+  speedup here: 0.32x
+
+SPEC-DONE
+EXIT=0

@@ -1,0 +1,58 @@
+=== 4 body layers + 3 draft stages (block=5) ===
+
+=== body forward vs R ===
+   R   total ms   ms/token
+   1     10.160     10.160
+   4     14.280      3.570
+   5     15.408      3.082
+   8     18.541      2.318
+
+=== draft round ===
+  one round: 10.335 ms   (block=5 -> 4 speculative tokens)
+
+=== one MTP round = draft + verify(R=5) ===
+  draft  :  10.335 ms
+  verify :  15.408 ms
+  total  :  25.743 ms
+
+  acceptance scenarios (fraction of the 4 drafts accepted):
+     accept  tokens   ms/token    tok/s
+         0%     1.0     25.743    38.85
+        40%     2.6      9.901   101.00
+        60%     3.4      7.571   132.07
+        80%     4.2      6.129   163.15
+       100%     5.0      5.149   194.23
+
+=== comparison at the SAME model depth ===
+  plain decode R=1          :  10.160 ms/token    98.43 tok/s
+  MTP @ 60% accept          :   7.571 ms/token   132.07 tok/s   (1.34x)
+  MTP @ 100% accept         :   5.149 ms/token   194.23 tok/s   (1.97x)
+  (no-MTP R=4 batch, for ref):   3.570 ms/token   280.11 tok/s
+
+=== 40-layer projection (x10.0) ===
+  the DRAFT cost does NOT scale: it is an independent 3-stage stack.
+  the VERIFY forward does scale.
+
+  draft  :  10.335 ms  (unchanged)
+  verify : 154.079 ms  (15.408 x 10.0)
+  total  : 164.414 ms
+
+     accept  tokens   ms/token    tok/s
+        40%     2.6     63.236    15.81
+        60%     3.4     48.357    20.68
+        80%     4.2     39.146    25.55
+       100%     5.0     32.883    30.41
+
+  plain decode R=1 @ 40L    : 101.599 ms/token     9.84 tok/s
+  MTP @  40% @ 40L          :  63.236 ms/token    15.81 tok/s   (1.61x)
+  MTP @  60% @ 40L          :  48.357 ms/token    20.68 tok/s   (2.10x)
+  MTP @  80% @ 40L          :  39.146 ms/token    25.55 tok/s   (2.60x)
+  MTP @ 100% @ 40L          :  32.883 ms/token    30.41 tok/s   (3.09x)
+
+=== caveat ===
+  The body here is 4 of 40 layers, so the drafted TOKENS are meaningless
+  and a real acceptance rate cannot be measured. The TIMING is valid
+  (per-layer cost was flat across the reduced stack, and the draft head
+  is depth-independent). Acceptance is what decides whether this is a
+  2x or a 3x -- it needs the full 40-layer model to measure.
+EXIT=0

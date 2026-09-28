@@ -1,0 +1,16 @@
+=== 4 layers, 3 draft stages, block=5, taps=[1, 2, 3] ===
+
+=== baseline: plain greedy (module path) ===
+  48 tokens
+  first 12: [25057, 74673, 24002, 129273, 93752, 93752, 64390, 44115, 44115, 25057, 74673, 69386]
+
+=== speculative via mtp_decode.speculative_generate (rowseq) ===
+  48 tokens in 3.346s -> 14.34 tok/s
+  first 12: [25057, 74673, 24002, 129273, 93752, 93752, 64390, 44115, 44115, 25057, 74673, 69386]
+  rounds=47  mean_accepted=0.00 / 5
+
+=== VERDICT (this validates the PACKAGED module) ===
+  baseline[:48] == module[:48] : True
+
+MODULE-VERIFY-DONE
+EXIT=0

@@ -1,0 +1,3 @@
+=== 1. import + load (strict) ===
+  LOAD FAILED: ValueError: 31 params missing from checkpoint, e.g. ['mtp.markov_embed.biases', 'mtp.markov_embed.scales', 'mtp.markov_head.biases', 'mtp.markov_head.scales']
+EXIT=1

@@ -1,0 +1,23 @@
+=== 4 layers, window=128 ===
+
+context pool: 200 ids
+
+  ctx     margin    perturb    ratio  argmax flips
+----------------------------------------------------
+    8     1.3808     0.0000    0.00x            no
+   16     0.4806     2.2759    4.74x           YES
+   32     0.3906     0.5243    1.34x            no
+   64     2.9504     0.5233    0.18x            no
+  128     0.7380     2.3484    3.18x            no
+
+=== READ-OUT ===
+  margin   = top1 - top2 logit at the final position (bigger = peakier)
+  perturb  = max|one-shot - chunked| over the logit vector
+  ratio    = perturb / margin; >1 means the argmax can flip
+
+  If margin grows and ratio falls as context grows, the divergence is a
+  property of the near-flat short-context regime (amplified by the
+  reduced depth) and would be far rarer on the full 40-layer model.
+
+MARGIN-DONE
+EXIT=0

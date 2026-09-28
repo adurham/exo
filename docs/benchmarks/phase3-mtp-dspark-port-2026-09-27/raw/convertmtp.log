@@ -1,0 +1,39 @@
+=== convert ===
+  src /Users/adam.durham/v41-build-mtp
+  dst /Users/adam.durham/v41-mtp-converted
+  bits=4 expert_bits=4 (affine; matches the other reduced builds)
+
+
+=== accounting ===
+  kept: 344
+  mtp_kept: 2401
+  vision_passthrough: 3
+
+  mtp kept: 2401
+
+=== output: 9 shards ===
+  model-layers-00.safetensors                  7.79 GB
+  model-layers-01.safetensors                  7.79 GB
+  model-layers-02.safetensors                  7.81 GB
+  model-layers-03.safetensors                  7.79 GB
+  model-mtp-0.safetensors                      2.85 GB
+  model-mtp-1.safetensors                      2.69 GB
+  model-mtp-2.safetensors                      2.73 GB
+  model-top.safetensors                        0.74 GB
+  model-vision.safetensors                     0.00 GB
+  total: 40.20 GB
+
+  index tensors: 344  mtp: 145
+    mtp.0.attn.attn_sink -> model-mtp-0.safetensors
+    mtp.0.attn.kv_norm.weight -> model-mtp-0.safetensors
+    mtp.0.attn.q_norm.weight -> model-mtp-0.safetensors
+    mtp.0.attn.wkv.biases -> model-mtp-0.safetensors
+    mtp.0.attn.wkv.scales -> model-mtp-0.safetensors
+    mtp.0.attn.wkv.weight -> model-mtp-0.safetensors
+    mtp.0.attn.wo_a.weight -> model-mtp-0.safetensors
+    mtp.0.attn.wo_b.biases -> model-mtp-0.safetensors
+  unstacked expert names remaining: 42
+    e.g. ['layers.0.ffn.experts.down_proj.biases', 'layers.0.ffn.experts.down_proj.scales', 'layers.0.ffn.experts.gate_proj.biases']
+
+CONVERT-MTP-DONE
+EXIT=0

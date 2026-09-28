@@ -1,0 +1,28 @@
+=== 4 layers, vocab=129280, block=5 ===
+
+=== 1. determinism ===
+  one-shot     repeat-identical: True   argmax=73364
+  of-2         repeat-identical: True   argmax=93293
+  1-then-3s    repeat-identical: True   argmax=73364
+
+=== 2. flatness (top1-top2 margin at the final position) ===
+  one-shot     margin =   0.4806
+  of-2         margin =   0.0552
+  1-then-3s    margin =   0.0387
+  logit max|d| (one-shot vs of-2) = 2.2759
+  logit mean|d|                   = 0.348111
+
+  --> perturbation is 4.7x the top1-top2 margin
+
+=== 3. draft head agreement (200 positions) ===
+  positions tested          : 200
+  draft top-1 == body greedy: 2 (1.0%)
+  chance level (1/vocab)    : 7.74e-06
+  confidence head: min=0.9999 max=1.0000 mean=1.0000
+
+=== READ-OUT ===
+  agreement >> chance and a confidence spread that is not all-0.5
+  together mean the draft weights landed where they belong.
+
+CLOSEOUT-DONE
+EXIT=0

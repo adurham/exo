@@ -1,0 +1,24 @@
+=== reduced+MTP build ===
+  src /Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4.1-Flash-engram
+  dst /Users/adam.durham/v41-build-mtp
+  body layers 0..3, all mtp stages, engram OFF
+
+  index: 96085 tensors
+  keeping 11751 tensors  (mtp.*: 2401, engram dropped: 12)
+
+    model-00-top-00002.safetensors               4 tensors    1.32 GB
+    model-01-layers-00003.safetensors         2334 tensors    7.39 GB
+    model-02-layers-00004.safetensors         2334 tensors    7.39 GB
+    model-03-layers-00005.safetensors         2342 tensors    7.41 GB
+    model-04-layers-00006.safetensors         2334 tensors    7.39 GB
+    model-05-top-00043.safetensors               2 tensors    1.32 GB
+    model-06-mtp-00044.safetensors             801 tensors    2.65 GB
+    model-07-mtp-00045.safetensors             798 tensors    2.57 GB
+    model-08-mtp-00046.safetensors             802 tensors    2.71 GB
+
+  wrote 11751 tensors across 9 files
+  mtp tensors missing from output: 0
+  config: 4 layers, mtp=3, dspark 128/3
+  dir total: 40.16 GB
+BUILD-MTP-DONE
+EXIT=0
