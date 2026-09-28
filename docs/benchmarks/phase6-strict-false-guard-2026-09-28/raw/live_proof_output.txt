@@ -1,0 +1,23 @@
+=== (0) build tiny DSv4 + export its weights ===
+    30 tensors, e.g. ['lm_head.weight', 'model.embed_tokens.weight', 'model.hc_head.base']
+
+=== (A) HEALTHY load: expect ZERO guard lines ===
+    captured=30 keys; guard lines=0 -> PASS
+
+=== (B) DROPPED key: expect ERROR naming it ===
+    dropping 'model.layers.0.attn.kv_norm.weight'
+   [ERROR] [STRICT-FALSE-LOAD-GUARD] /var/folders/w6/9crwsl1n217bq0y62qk2d2h00000gn/T/tmpjvv03l4d: strict=False model load did NOT exactly match the post-sanitize weight set's keys — missing=1 extra=0 (model expects 30 keys total, the sanitized set carried 29; source=post-sanitize). Missing keys silently keep the model's random/default init for that parameter — this is the SAME failure shape as the DSpark checkpoint-key-mismatch incident, just on the main model load. Sample missing=['model.layers.0.attn.kv_norm.weight'] extra=[]
+    ERROR lines=1; names victim=True -> PASS
+
+=== (C) PRE-sanitize names on disk: raw diff lies, captured diff is right ===
+    rewrote 1 key(s) to pre-sanitize names
+    raw on-disk  diff: missing=1 extra=1
+    captured set diff: missing=0 extra=0
+    guard lines=0 -> PASS (silent)
+
+=== SUMMARY ===
+  A_healthy_silent         PASS
+  B_dropped_caught         PASS
+  C_capture_clean          PASS
+  C_raw_would_lie          PASS
+OVERALL: PASS

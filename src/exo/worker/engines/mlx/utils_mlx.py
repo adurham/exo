@@ -4,7 +4,7 @@ import re
 import sys
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -218,15 +218,21 @@ def load_mlx_items(
         logger.info(f"Single device used for {bound_instance.instance}")
         model_path = build_model_path(bound_instance.bound_shard.model_card.model_id)
         start_time = time.perf_counter()
-        model, _ = load_model(model_path, lazy=True, strict=False)
+        # Capture the post-sanitize weight key set while the real load runs
+        # (no second load — see _RecordLoadedWeightKeys), then hand it to the
+        # strict=False guard below. Without this the guard must skip
+        # sanitize()-defining architectures, DSv4 included.
+        with _RecordLoadedWeightKeys() as _loaded_keys:
+            model, _ = load_model(model_path, lazy=True, strict=False)
         # 2026-09-15 audit: strict=False here means a checkpoint/model
         # mismatch would otherwise silently proceed with default-init
         # params for whatever didn't load -- the same failure shape as the
         # DSpark checkpoint-key-mismatch incident, just on the main model
         # load instead of an optional draft head. See
         # _run_strict_false_load_guard's own docstring for the full
-        # rationale and its sanitize()-aware accuracy gate.
-        _run_strict_false_load_guard(model, model_path)
+        # rationale, and _RecordLoadedWeightKeys for why the sanitize-aware
+        # skip is now a fallback rather than the only behaviour.
+        _run_strict_false_load_guard(model, model_path, _loaded_keys)
         # Eval layers one by one for progress reporting
         try:
             inner = get_inner_model(model)
@@ -355,14 +361,15 @@ def shard_and_load(
         except Exception as e:
             logger.warning(f"MTP weight preparation failed: {e}")
 
-    model, _ = load_model(model_path, lazy=True, strict=False)
+    with _RecordLoadedWeightKeys() as _loaded_keys:
+        model, _ = load_model(model_path, lazy=True, strict=False)
     logger.debug(model)
     # 2026-09-15 audit: same strict=False visibility gap as the
     # single-device path above (load_mlx_items) -- see
     # _run_strict_false_load_guard's own docstring for the full rationale.
     # This IS the production distributed-serving load path (TP/PP), so this
     # call site matters at least as much as the single-device one.
-    _run_strict_false_load_guard(model, model_path)
+    _run_strict_false_load_guard(model, model_path, _loaded_keys)
 
     # Optionally overlay the DEDICATED mlx-community DSv4 MTP head onto the
     # native (checkpoint-bundled) mtp[0], BEFORE tensor sharding. The dedicated
@@ -1203,7 +1210,8 @@ def _diff_strict_false_load_keys(
 
 
 def _log_strict_false_load_guard(
-    model_keys: set[str], checkpoint_keys: set[str], model_path_label: str
+    model_keys: set[str], checkpoint_keys: set[str], model_path_label: str,
+    source: str = "raw-on-disk",
 ) -> None:
     """Loud, unconditional visibility into what a ``strict=False`` main
     model load actually did — the missing half of the strict=False story
@@ -1245,10 +1253,11 @@ def _log_strict_false_load_guard(
             return  # clean load — nothing to report, stay silent
         logger.error(
             f"[STRICT-FALSE-LOAD-GUARD] {model_path_label}: strict=False "
-            f"model load did NOT exactly match the checkpoint's keys — "
-            f"missing={len(missing)} extra={len(extra)} "
-            f"(model expects {len(model_keys)} keys total, checkpoint "
-            f"provided {len(checkpoint_keys)}). Missing keys silently keep "
+            f"model load did NOT exactly match the {'checkpoint' if source == 'raw-on-disk' else 'post-sanitize weight set'}"
+            f"'s keys — missing={len(missing)} extra={len(extra)} "
+            f"(model expects {len(model_keys)} keys total, "
+            f"{'checkpoint provided' if source == 'raw-on-disk' else 'the sanitized set carried'} "
+            f"{len(checkpoint_keys)}; source={source}). Missing keys silently keep "
             "the model's random/default init for that parameter — this is "
             "the SAME failure shape as the DSpark checkpoint-key-mismatch "
             "incident, just on the main model load. Sample missing="
@@ -1295,7 +1304,120 @@ def _load_checkpoint_key_set(model_path: Path) -> set[str] | None:
         return None
 
 
-def _run_strict_false_load_guard(model: Any, model_path: Path) -> None:
+class _RecordLoadedWeightKeys:
+    """Context manager that records the EXACT key set ``load_weights``
+    receives during a model load — i.e. AFTER ``sanitize()`` has renamed,
+    dequantized, stacked and dropped keys.
+
+    WHY THIS SHAPE. The guard previously skipped every ``sanitize``-defining
+    architecture, which included DeepSeek-V4 — the production model this
+    cluster serves, and the very model whose incident the guard exists to
+    catch. The documented follow-up was "hook sanitize() itself to capture
+    its key-rename map". Hooking ``load_weights`` is strictly better: it
+    needs no knowledge of WHAT sanitize does, and it is the same namespace
+    mlx-lm itself compares against in ``strict=True``.
+
+    THE REAL LOAD IS THE ONLY LOAD. This wraps the existing
+    ``load_model(...)`` call, so the capture costs one dict comprehension
+    while the weights are already in hand — no second construction, no
+    additional tensor I/O. (An earlier draft of this function called
+    ``load_model`` a second time to observe it; on this cluster that would
+    have re-read ~156 GB per load. Do not restore that shape.)
+
+    Usage::
+
+        with _RecordLoadedWeightKeys() as captured:
+            model, _ = load_model(model_path, lazy=True, strict=False)
+        _run_strict_false_load_guard(model, model_path, captured)
+
+    ``captured.get("keys")`` is absent/empty if no usable ``load_weights``
+    call was observed (never raises — the guard treats that as "cannot
+    check", i.e. it falls back to the raw on-disk set or stays quiet).
+    """
+
+    def __init__(self) -> None:
+        self.captured: dict[str, set[str]] = {}
+        # Concrete Callable type (not Any): the patch below reads a method off
+        # an untyped library class, and a real signature here keeps the
+        # ``reportAny`` ledger at its pre-existing baseline instead of leaking
+        # ``Any`` through three call sites.
+        self._original: Callable[..., object] | None = None
+
+    def __enter__(self) -> dict[str, set[str]]:
+        from mlx.utils import tree_flatten
+
+        # NOTE ON TYPES: this deliberately patches an untyped library boundary
+        # (mlx's ``nn.Module.load_weights``). ``cast`` narrows the read; the
+        # one attribute-assignment suppression is scoped to the patch line.
+        self._original = cast("Callable[..., object]", nn.Module.load_weights)
+        original = self._original
+        captured = self.captured
+
+        def _recording_load_weights(
+            mod: nn.Module, file_or_weights: object, strict: bool = True
+        ) -> object:
+            try:
+                weights: object = file_or_weights
+                if isinstance(weights, str):
+                    weights = list(cast("dict[str, object]", mx.load(weights)).items())
+                if isinstance(weights, (list, tuple)):
+                    # UNION, not replace: if a load path ever calls
+                    # ``load_weights`` more than once (main + auxiliary), the
+                    # question this guard answers is "did every parameter get
+                    # filled", so the union of everything delivered is the
+                    # right set. Replace-semantics would keep only the last
+                    # call and false-alarm on the rest.
+                    captured.setdefault("keys", set()).update(
+                        k for k, _ in cast("list[tuple[str, object]]", weights)
+                    )
+            except Exception:  # noqa: BLE001 — recording must never break the load
+                captured.setdefault("keys", set())
+
+            # Params read BEFORE the real call — the same instant mlx's
+            # own strict=True branch snapshots ``curr_weights`` (it reads
+            # the tree, compares, and only THEN updates). Reading them
+            # afterwards opens two false paths: post-load tree mutation
+            # (e.g. EXO_DSV4_LMHEAD_MXFP8=1 quantizes lm_head in place
+            # AFTER load_weights, adding lm_head.scales/.biases) and an
+            # update that adds keys the tree never asked for.
+            #
+            # ``destination={}`` makes tree_flatten return a DICT (this is
+            # exactly how mlx's own strict branch calls it); WITHOUT it the
+            # function returns a list of (key, value) tuples instead. Do not
+            # "simplify" this by iterating the result as pairs — that raises
+            # inside the try below.
+            try:
+                # cast: tree_flatten's declared return is a union (list | dict)
+                # selected by whether `destination` was passed. We always pass
+                # it, so the dict form is guaranteed at runtime.
+                captured.setdefault("params", set()).update(
+                    cast(
+                        "dict[str, object]",
+                        tree_flatten(mod.parameters(), destination={}),
+                    ).keys()
+                )
+            except Exception as cap_err:  # noqa: BLE001 — never break the load
+                # NOT a silent suppress: the params side is the PRIMARY path
+                # when both captures are present, so losing it must be visible
+                # rather than quietly downgrading the guard to its fallback.
+                logger.warning(
+                    f"[STRICT-FALSE-LOAD-GUARD] param-key capture failed "
+                    f"({cap_err}); falling back to the on-disk key set"
+                )
+
+            return original(mod, file_or_weights, strict=strict)
+
+        nn.Module.load_weights = _recording_load_weights  # type: ignore[method-assign]
+        return self.captured
+
+    def __exit__(self, *exc: object) -> None:
+        with contextlib.suppress(Exception):  # never mask a load failure
+            nn.Module.load_weights = self._original  # type: ignore[method-assign]
+
+
+def _run_strict_false_load_guard(
+    model: Any, model_path: Path, captured: dict[str, set[str]] | None = None
+) -> None:
     """Wire ``_log_strict_false_load_guard`` up to a real loaded model.
 
     Called right after ``load_model(model_path, lazy=True, strict=False)``
@@ -1304,60 +1426,70 @@ def _run_strict_false_load_guard(model: Any, model_path: Path) -> None:
     every load) and diffs them against the model's real, post-construction
     param tree.
 
-    ARCHITECTURE-AWARE GATE (do not remove this check — see the incident it
-    prevents, below). A raw on-disk-vs-model-param diff is only trustworthy
-    when the checkpoint's keys and the model's parameter names are the SAME
-    NAMESPACE. Many mlx-lm architectures (DeepSeek-V4 among them — the
-    ACTUAL model this cluster serves) define their own ``Model.sanitize()``
-    that does real key RENAMING before load (DSv4 example:
-    ``.hc_attn.`` -> ``.attn_hc.``, ``embed.weight`` ->
-    ``model.embed_tokens.weight`` — see ``mlx_lm/models/deepseek_v4.py``).
-    ``hasattr(model, "sanitize")`` is exactly the same gate mlx-lm's own
-    ``load_model()`` uses to decide whether to call it (base ``nn.Module``
-    defines no ``sanitize``), so it is a cheap, accurate proxy for "will the
-    raw checkpoint keys differ from the param names for a structural,
-    EXPECTED reason having nothing to do with strict=False actually masking
-    anything."
+    This function is the "second half": it diffs the model's real param tree
+    against the weight key set the load path ACTUALLY delivered (captured by
+    ``_RecordLoadedWeightKeys`` around the ``load_model`` call), falling back
+    to the raw on-disk key set when no capture is available.
 
-    A first version of this guard did NOT check this and would have logged
-    a large ERROR-level "mismatch" on literally every DSv4 load — the ONE
-    model this cluster runs — which is worse than shipping nothing at all:
+    ARCHITECTURE GATE — now a FALLBACK, not a skip. A raw on-disk-vs-param
+    diff is only trustworthy when the checkpoint's keys and the model's
+    parameter names share a namespace; DSv4's ``sanitize()`` renames
+    (``.hc_attn.`` -> ``.attn_hc.``, ``embed.weight`` ->
+    ``model.embed_tokens.weight``) so a raw diff would report a large
+    EXPECTED mismatch. An earlier version therefore SKIPPED every
+    ``sanitize``-defining architecture — which included DeepSeek-V4, the
+    production model, i.e. the guard was disabled on precisely the model it
+    exists to protect. With the load-time capture the skip is unnecessary:
+    the captured key set is post-sanitize by construction, so the diff is
+    meaningful for any architecture. The gate now only decides whether we
+    can trust the RAW set, and is consulted solely when no capture exists.
+
+    A first version of this guard would have logged a large ERROR-level
+    "mismatch" on literally every DSv4 load — worse than shipping nothing:
     a diagnostic guaranteed to cry wolf on its primary target teaches
-    operators to ignore it, undermining trust in every OTHER genuine
-    ERROR-level guard line in this codebase. Caught via a second consult
-    review before shipping; the earlier over-eager version is not what
-    landed.
-
-    For a ``sanitize``-defining architecture, this instead logs ONE INFO
-    line noting the raw diff was skipped as architecturally unreliable
-    (never silent about the limitation, just not falsely loud about it) —
-    a genuinely accurate rename-aware diff (hooking ``sanitize()`` itself to
-    capture its key-rename map) is flagged as a real follow-up, not solved
-    here.
+    operators to ignore every OTHER genuine ERROR-level guard line.
     """
     try:
-        from mlx.utils import tree_flatten
+        captured_keys = (captured or {}).get("keys") or None
+        captured_params = (captured or {}).get("params") or None
 
-        if hasattr(model, "sanitize"):
+        if captured_keys is not None and captured_params is not None:
+            # BEST PATH: both sides from the same instant, i.e. exactly the
+            # comparison mlx's own strict=True branch performs. No namespace
+            # assumptions, no post-load-mutation skew. This is what makes the
+            # check meaningful for sanitize()-defining architectures such as
+            # DeepSeek-V4 -- the model this cluster serves.
+            model_keys, weight_keys = captured_params, captured_keys
+            source = "post-sanitize"
+        elif hasattr(model, "sanitize"):
             logger.info(
-                f"[STRICT-FALSE-LOAD-GUARD] {model_path}: skipping raw "
-                "key-diff — this architecture defines Model.sanitize(), "
-                "which renames checkpoint keys before load (e.g. DeepSeek-V4's "
-                ".hc_attn./.attn_hc. + top-level remaps), so a raw on-disk-"
-                "vs-param-tree diff would report a large EXPECTED mismatch "
-                "that is not a real bug. A rename-aware diff (hooking "
-                "sanitize() itself) is a follow-up, not yet implemented."
+                f"[STRICT-FALSE-LOAD-GUARD] {model_path}: no load-time key "
+                "capture available and this architecture defines "
+                "Model.sanitize(), which renames checkpoint keys before load "
+                "(e.g. DeepSeek-V4's .hc_attn./.attn_hc. + top-level remaps), "
+                "so a raw on-disk-vs-param-tree diff would report a large "
+                "EXPECTED mismatch that is not a real bug. Skipping the raw "
+                "diff — the post-sanitize capture (see "
+                "_RecordLoadedWeightKeys) is what makes this check work for "
+                "such architectures."
             )
             return
+        else:
+            weight_keys = _load_checkpoint_key_set(model_path)
+            if weight_keys is None:
+                return  # no index to check against — cannot verify, don't guess
+            source = "raw-on-disk"
+            # Only on this fallback path do we read the LIVE tree; when both
+            # captures are present we use the load-instant pair above instead.
+            from mlx.utils import tree_flatten
 
-        checkpoint_keys = _load_checkpoint_key_set(model_path)
-        if checkpoint_keys is None:
-            return  # no index to check against — cannot verify, don't guess
-        model_keys = {k for k, _ in tree_flatten(model.parameters())}
+            model_keys = {k for k, _ in tree_flatten(model.parameters())}
+
         _log_strict_false_load_guard(
             model_keys=model_keys,
-            checkpoint_keys=checkpoint_keys,
+            checkpoint_keys=weight_keys,
             model_path_label=str(model_path),
+            source=source,
         )
     except Exception as guard_err:  # never break a model load
         logger.warning(f"[STRICT-FALSE-LOAD-GUARD] wiring failed: {guard_err}")

@@ -163,19 +163,29 @@ def test_diff_helper_used_by_guard_matches_manual_computation() -> None:
     assert extra == {"w"}
 
 
-# --- _run_strict_false_load_guard: the sanitize-aware gate --------------
+# --- _run_strict_false_load_guard: the load-instant capture --------------
 #
-# A first version of this guard did not check `hasattr(model, "sanitize")`
-# and would have logged a large ERROR-level "mismatch" on EVERY load of
-# DeepSeek-V4 (the actual production model this cluster serves), because
-# DSv4's `Model.sanitize()` renames checkpoint keys before load (e.g.
-# `.hc_attn.` -> `.attn_hc.`). That is a guaranteed false positive on the
-# one architecture the fix most needs to be trustworthy for -- caught via
-# a second consult review before landing. These tests pin the corrected,
-# sanitize-aware behavior directly.
+# HISTORY — both halves matter.
+#
+# 1. A first version of this guard did not check `hasattr(model, "sanitize")`
+#    and would have logged a large ERROR-level "mismatch" on EVERY load of
+#    DeepSeek-V4 (the actual production model this cluster serves), because
+#    DSv4's `Model.sanitize()` renames checkpoint keys before load (e.g.
+#    `.hc_attn.` -> `.attn_hc.`). Caught via a second consult review before
+#    landing.
+#
+# 2. The fix for (1) was to SKIP the diff entirely for sanitize() models —
+#    which disabled the guard on exactly the model it exists to protect
+#    (DSv4 is the production model; the strict=False random-init incident
+#    happened there). The current shape removes the skip: the caller
+#    captures BOTH sides of the comparison at load time via
+#    `_RecordLoadedWeightKeys`, so the diff is namespace-correct for ANY
+#    architecture. The skip survives only as a documented FALLBACK for
+#    callers that pass no capture.
 
 from exo.worker.engines.mlx.utils_mlx import (  # noqa: E402
     _load_checkpoint_key_set,
+    _RecordLoadedWeightKeys,
     _run_strict_false_load_guard,
 )
 
@@ -239,28 +249,184 @@ def test_checkpoint_key_set_returns_none_without_an_index(tmp_path) -> None:
     assert _load_checkpoint_key_set(tmp_path) is None
 
 
-def test_guard_skips_raw_diff_for_sanitize_defining_architecture(
+def test_guard_catches_missing_key_on_sanitize_architecture_with_capture(
     tmp_path, caplog_loguru
 ) -> None:
-    """THE bug this section exists to prevent: a sanitize-renaming
-    architecture (DSv4-shaped) must NOT get a false-positive ERROR."""
+    """THE point of the capture: a sanitize()-defining architecture (DSv4-shaped
+    — the production model) with a genuinely dropped key must now be CAUGHT.
+
+    Before this fix the guard skipped every such architecture, so this exact
+    failure — a parameter silently left at random init by a strict=False load —
+    was invisible on the one model that matters most.
+    """
+    # The raw on-disk keys use PRE-sanitize names; the capture carries the
+    # post-sanitize set the load actually delivered, with one key missing.
+    _write_fake_checkpoint(tmp_path, {"hc_attn.fn": ("F32", [4])})
+    model = _FakeModelWithSanitize({"attn_hc.fn", "attn_hc.base"})
+    captured = {
+        "keys": {"attn_hc.fn"},  # delivered — "attn_hc.base" never arrived
+        "params": {"attn_hc.fn", "attn_hc.base"},
+    }
+
+    _run_strict_false_load_guard(model, tmp_path, captured)
+
+    error_records = [r for r in caplog_loguru.records if r.levelname == "ERROR"]
+    assert error_records, (
+        "a dropped key on a sanitize-defined architecture must be caught "
+        f"once a load capture exists — got: "
+        f"{[(r.levelname, r.message) for r in caplog_loguru.records]}"
+    )
+    assert "attn_hc.base" in "\n".join(r.message for r in error_records)
+    assert "post-sanitize" in "\n".join(r.message for r in error_records), (
+        "the log line must say which namespace it compared"
+    )
+
+
+def test_guard_stays_silent_on_clean_sanitize_load_with_capture(
+    tmp_path, caplog_loguru
+) -> None:
+    """A healthy DSv4-shaped load must not cry wolf — the reason the skip
+    existed in the first place, now satisfied by the capture instead."""
+    _write_fake_checkpoint(tmp_path, {"hc_attn.fn": ("F32", [4])})
+    model = _FakeModelWithSanitize({"attn_hc.fn"})
+    captured = {"keys": {"attn_hc.fn"}, "params": {"attn_hc.fn"}}
+
+    _run_strict_false_load_guard(model, tmp_path, captured)
+
+    assert not caplog_loguru.records, (
+        "a clean captured load must stay silent — got: "
+        f"{[(r.levelname, r.message) for r in caplog_loguru.records]}"
+    )
+
+
+def test_capture_beats_raw_diff_which_would_false_alarm(
+    tmp_path, caplog_loguru
+) -> None:
+    """The exact case that made the raw diff unusable on DSv4: on-disk keys are
+    pre-sanitize, so a raw diff reports an EXPECTED mismatch. With a capture
+    present the raw path must not be consulted at all."""
+    # Raw on-disk names deliberately differ from the model's param names.
+    _write_fake_checkpoint(tmp_path, {"hc_attn_fn": ("F32", [4])})
+    model = _FakeModelWithSanitize({"attn_hc.fn"})
+    captured = {"keys": {"attn_hc.fn"}, "params": {"attn_hc.fn"}}
+
+    _run_strict_false_load_guard(model, tmp_path, captured)
+
+    error_records = [r for r in caplog_loguru.records if r.levelname == "ERROR"]
+    assert not error_records, (
+        "with a capture available the raw on-disk set (pre-sanitize names) "
+        "must never drive an ERROR — that is the guaranteed false positive. "
+        f"got: {[(r.levelname, r.message) for r in caplog_loguru.records]}"
+    )
+
+
+def test_guard_skips_raw_diff_for_sanitize_architecture_without_capture(
+    tmp_path, caplog_loguru
+) -> None:
+    """FALLBACK path (no capture available at all — e.g. a caller that never
+    wrapped its load): the original conservative behavior still applies, because
+    a raw diff on a renaming architecture is a guaranteed false positive."""
     caplog_loguru.set_level(logging.INFO)
     _write_fake_checkpoint(tmp_path, {"hc_attn.fn": ("F32", [4])})
     model = _FakeModelWithSanitize({"attn_hc.fn"})  # renamed by sanitize()
 
-    _run_strict_false_load_guard(model, tmp_path)
+    _run_strict_false_load_guard(model, tmp_path)  # no capture
 
     error_records = [r for r in caplog_loguru.records if r.levelname == "ERROR"]
     assert not error_records, (
-        "a sanitize-defining architecture must never get a raw-diff ERROR "
-        f"(guaranteed false positive) — got: "
+        "a sanitize-defining architecture without a capture must never get a "
+        f"raw-diff ERROR (guaranteed false positive) — got: "
         f"{[(r.levelname, r.message) for r in caplog_loguru.records]}"
     )
     info_records = [r for r in caplog_loguru.records if r.levelname == "INFO"]
-    assert any("skipping raw key-diff" in r.message for r in info_records), (
+    assert any("no load-time key" in r.message for r in info_records), (
         "must still say SOMETHING (not silently do nothing) — "
         f"got: {[(r.levelname, r.message) for r in caplog_loguru.records]}"
     )
+
+
+def test_capture_partial_falls_back_instead_of_mis_diffing(
+    tmp_path, caplog_loguru
+) -> None:
+    """A capture carrying only ONE side cannot support the load-instant
+    comparison; falling through to the sanitize fallback is correct — using the
+    half-capture would diff a post-sanitize set against a raw one."""
+    caplog_loguru.set_level(logging.INFO)
+    _write_fake_checkpoint(tmp_path, {"hc_attn.fn": ("F32", [4])})
+    model = _FakeModelWithSanitize({"attn_hc.fn"})
+
+    _run_strict_false_load_guard(model, tmp_path, {"keys": {"attn_hc.fn"}})
+
+    error_records = [r for r in caplog_loguru.records if r.levelname == "ERROR"]
+    assert not error_records, (
+        "a half-capture must not produce a mixed-namespace ERROR — "
+        f"got: {[(r.levelname, r.message) for r in caplog_loguru.records]}"
+    )
+
+
+def test_record_loaded_weight_keys_captures_both_sides_at_load_time() -> None:
+    """The capture must record, from ONE instant: the exact key set delivered
+    to ``load_weights`` AND the module's own param keys — i.e. the same two
+    sides mlx's own ``strict=True`` branch compares. Requires real mlx; this
+    is the mechanism the production call sites depend on.
+    """
+    import mlx.core as mx
+    import mlx.nn as nn
+
+    class _M(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = nn.Linear(4, 4, bias=True)
+
+    m = _M()
+    with _RecordLoadedWeightKeys() as captured:
+        m.load_weights(
+            [("lin.weight", mx.zeros((4, 4))), ("lin.bias", mx.zeros((4,)))],
+            strict=False,
+        )
+
+    assert captured.get("keys") == {"lin.weight", "lin.bias"}, (
+        f"delivered keys not captured: {captured.get('keys')}"
+    )
+    assert {"lin.weight", "lin.bias"} <= (captured.get("params") or set()), (
+        f"param side not captured: {captured.get('params')}"
+    )
+
+
+def test_record_loaded_weight_keys_restores_the_original_method() -> None:
+    """The patch must be undone on exit — a leaked monkeypatch on nn.Module
+    would affect every later load in the process."""
+    import mlx.nn as nn
+
+    before = nn.Module.load_weights
+    with _RecordLoadedWeightKeys():
+        pass
+    assert nn.Module.load_weights is before
+
+
+def test_record_loaded_weight_keys_shares_delivered_and_param_namespace() -> None:
+    """The whole reason this guard works on sanitize() architectures: the
+    captured keys arrive in the SAME namespace as the param tree, so a diff of
+    the two is namespace-correct without knowing anything about sanitize().
+    """
+    import mlx.core as mx
+    import mlx.nn as nn
+
+    class _M(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lin = nn.Linear(4, 4, bias=False)
+
+    m = _M()
+    with _RecordLoadedWeightKeys() as captured:
+        m.load_weights([("lin.weight", mx.zeros((4, 4)))], strict=True)
+
+    params = captured.get("params") or set()
+    keys = captured.get("keys") or set()
+    assert keys == params == {"lin.weight"}, (
+        f"keys={keys} params={params} — must be identical on an exact load"
+    )
+    assert not (params - keys), "missing set must be empty on an exact load"
 
 
 def test_guard_runs_raw_diff_for_non_sanitize_architecture_with_real_gap(
