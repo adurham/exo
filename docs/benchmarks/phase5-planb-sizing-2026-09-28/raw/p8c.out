@@ -1,0 +1,14 @@
+loading /Users/adam.durham/v41-mtp-converted ...
+  loaded in 6.5s  dim=5120 n_routed=384 topk=6
+  tagged 5 gates: [-1, 0, 1, 2, 3]
+  prompt tokens: 490; decoding 256 steps ...
+  generated 256 tokens in 4.7s (54.24 tok/s)
+  recorded 2984 gate decisions
+  wrote /Users/adam.durham/p8c_trace.json (0.11 MB)
+
+per-layer distinct experts touched:
+  layer   0:  361 distinct of 384   top-10=12.6%  n=4476
+  layer   1:  273 distinct of 384   top-10=34.5%  n=4476
+  layer   2:  279 distinct of 384   top-10=28.8%  n=4476
+  layer   3:  307 distinct of 384   top-10=23.5%  n=4476
+DONE

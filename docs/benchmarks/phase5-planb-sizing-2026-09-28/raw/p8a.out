@@ -1,0 +1,77 @@
+=== NATIVE (engram) — MXFP4 experts ===
+  dir          : /Users/adam.durham/.exo/models/deepseek-ai--DeepSeek-V4.1-Flash-engram
+  shards       : 12   tensors: 12026
+  total        :   244.20 GB
+
+  category                  GB    share   example key
+  engram               203.073    83.2%   layers.1.engram.embed.weight
+  routed_experts        28.878    11.8%   layers.0.ffn.experts.0.w1.scale
+  mtp                    7.933     3.2%   mtp.0.attn.attn_sink
+  other_dense            2.848     1.2%   aligner.w1.bias
+  embed_head             1.325     0.5%   vision.patch_embed.proj.bias
+  shared_experts         0.142     0.1%   layers.0.ffn.shared_experts.w1.scale
+
+  routed-expert bytes: 4 layers present
+    layers 0..3
+      layer   0:   7.219 GB
+      layer   1:   7.219 GB
+      layer   2:   7.219 GB
+      layer   3:   7.219 GB
+    per-expert (assuming 384 experts): 18.80 MB
+
+=== EXL3 2.9bpw ===
+  dir          : /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+  shards       : 39   tensors: 192452
+  total        :   210.58 GB
+
+  category                  GB    share   example key
+  routed_experts       196.034    93.1%   layers.0.ffn.experts.10.w1.suh
+  mtp                    7.243     3.4%   mtp.0.ffn.experts.10.w1.suh
+  other_dense            4.997     2.4%   layers.0.ffn.gate.bias
+  embed_head             1.325     0.6%   embed.weight
+  shared_experts         0.804     0.4%   layers.0.ffn.shared_experts.w1.suh
+  engram                 0.177     0.1%   layers.1.engram.wkv.suh
+
+  routed-expert bytes: 40 layers present
+    layers 0..39
+      layer   0:   5.113 GB
+      layer   1:   5.113 GB
+      layer   2:   5.113 GB
+      layer   3:   5.113 GB
+      ...
+    per-expert (assuming 384 experts): 13.32 MB
+
+=== Plan B sizing (NATIVE format) ===
+  median routed-expert bytes per full layer: 7.219 GB
+  per-expert (w1+w3+w2)                   : 18.80 MB
+  x 40 layers                            : 288.78 GB  <- all routed experts, one rank
+
+  Per TOKEN the model makes 40 layers x 6 picks = 240 expert-selections.
+  Cold bytes/token = selections x miss_rate x per_expert_bytes.
+  Worst case (every pick cold): 4.51 GB/token.
+
+  resident fraction at 95 GB of experts: 32.9%
+  i.e. ~126 of 384 experts per layer
+
+  COLD-MISS BYTES/TOKEN vs LRU HIT RATE at that resident set
+  (a MISS is a pick landing on a non-resident expert):
+
+    hit_rate   miss%   MB/token  ceiling tok/s
+        0.80   20.0%     902.43            7.2
+        0.90   10.0%     451.22           14.4
+        0.94    6.0%     270.73           24.0
+        0.95    5.0%     225.61           28.8
+        0.97    3.0%     135.36           48.0
+        0.98    2.0%      90.24           72.0
+        0.99    1.0%      45.12          144.1
+        1.00    0.0%       0.00            inf
+
+  PLAN B's BAR: to beat 25 tok/s the SSD ceiling needs
+  < 260.0 MB/token  =>  hit rate > 94.2% at the resident set above.
+
+  So Plan B lives or dies on ROUTING CONCENTRATION: what share of
+  picks land on the resident experts. Uniform routing would give
+  hit_rate=0.329 (32.9%) -> 3.03 GB/token -> 2.1 tok/s = DEAD.
+  Real MoE routing is Zipf-like; the actual concentration must be
+  MEASURED from a routing trace (see p8b).
+DONE

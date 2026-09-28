@@ -93,8 +93,8 @@ Corroborating: PonyExl3's own README claims 2.28x prefill scaling from
 "Advanced" tuning on M5 Max, and the plan's risk register already lists "M4 Max
 slower than PonyExl3's M5 Max numbers → accept or retune tiles."
 
-**This retuning has not been attempted.** That is the honest status: the gate is
-missed as the kernels currently stand, not proven unreachable.
+**This retuning HAS since been attempted — see the correction at the end of
+this file.** The gate result below is the pre-retune number.
 
 ## What this does and does not mean
 
@@ -153,3 +153,38 @@ The cluster nodes are **Apple M4 Max** Mac Studios (16 cores, 128 GB unified
 each — verified on both machines 2026-09-27 via
 `sysctl machdep.cpu.brand_string`). Older docs in this repo say "M4 Ultra";
 that part does not exist in the M4 generation, and those docs are wrong.
+
+---
+
+## CORRECTION (2026-09-28) — the retune was done, and it worked
+
+The section "Cross-check: is the 3.3x a hardware floor or a tuning problem?"
+closed with *"This retuning has not been attempted."* That was accurate when
+written; it is no longer. Later the same day the **v3 chunked-prologue** kernel
+was written and measured at the real shape (E=384, D=5120, H=2304,
+`_v2_ok()=True` — the pathological `_prefill` fallthrough is gone).
+
+Patch: `~/exl3-moe-v3-chunked-prologue.patch` on node 1, applied to
+`~/repos/ref/PonyExl3/ponyexl3/mlx/exl3_moe.py`.
+
+| shape | v2 ms | v2 ratio | v3 ms | v3 ratio | speedup |
+|---|---|---|---|---|---|
+| decode R=1 | 1.305 | 3.38 | 1.029 | **2.65** | 1.27x |
+| verify R=4 (DSpark) | 12.251 | 11.95 | 3.171 | **3.04** | **3.86x** |
+| verify R=8 | 19.079 | 9.78 | 6.050 | **3.11** | 3.15x |
+
+Evidence: `~/p2b-v3.log` (E=128) and `~/p2c-v3-e384.log` (E=384) on node 1;
+also `~/p2-layer20.log` for the tile/threads sweep (R=1 1.019 ms best).
+
+**The 9.5-12x verify hole that dominated this document is CLOSED to ~3.0x.**
+What remains is a ~2.65-3.1x gap against production MXFP4 at decode/verify,
+plus prefill R=512 now at 3.10x at E=384 (worse than the 1.98x measured at
+E=128, but E=384 is the real expert count and costs more at prefill in *both*
+formats — not a like-for-like comparison).
+
+Consequence for the choice this document frames: with verify at ~3.0x and the
+experts being the only format that fits resident (see
+`../phase5-planb-sizing-2026-09-28/`), EXL3 is no longer a memory-only bet with
+a broken speed story. The remaining decision is between two *unbuilt* paths —
+streaming Plan B vs porting EXL3 kernels into exo — not one working path against
+one broken one.

@@ -1,0 +1,41 @@
+loading /Users/adam.durham/v41-mtp-converted ...
+  loaded in 15.1s  dim=5120 n_routed=384 topk=6
+  tagged 7 gates; layers: [-1, 0, 1, 2, 3]
+  prompt tokens: 196; decoding 96 steps ...
+  generated 96 tokens in 4.8s (19.84 tok/s)
+  recorded 1168 gate decisions
+
+==========================================================================
+ROUTING CONCENTRATION — real gate weights + e_score_correction_bias
+==========================================================================
+  decisions: 1168   layers seen: 4
+
+  budget 95 GB / 40 layers / 18.80 MB per expert = 126 experts/layer
+
+   layer  decisions  distinct   top-10   top-32   top-126
+       0       1752       282   34.1%   51.4%    83.1%
+       1       1752       201   46.0%   68.6%    94.6%
+       2       1752       197   45.3%   70.3%    95.0%
+       3       1752       214   39.5%   66.0%    93.4%
+
+==========================================================================
+PLAN B VERDICT
+==========================================================================
+  mean per-layer hit rate at 126 experts/layer : 91.5%
+  cold experts per token  : 20.3 of 240 picks
+  cold bytes per token    : 382.4 MB
+  decode ceiling @6.5 GB/s: 17.0 tok/s
+
+  VERDICT: Plan B is DEAD at this budget — the SSD ceiling is
+  below the 25 tok/s bar. EXL3 retuning is the only path.
+
+  CAVEATS (do not over-read this number):
+   * measured on the 4-LAYER reduced build; per-layer routing
+     concentration is what transfers, but a full-model prompt mix
+     over many more tokens can only RAISE distinct-expert counts,
+     which lowers hit rate -> this is an OPTIMISTIC ceiling.
+   * 96 decode steps is a short trace; Zipf concentration needs
+     longer runs to stabilise.
+   * assumes an oracle/perfect LRU (top-K chosen with hindsight).
+
+DONE

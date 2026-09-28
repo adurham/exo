@@ -1,0 +1,4 @@
+=== A2_TILES=1 CHUNK=(auto)  E=384 D=5120 H=2304 v2_ok=True ===
+  R=1:    1.019 ms
+  R=4:    3.118 ms
+  R=8:    5.929 ms

@@ -1,0 +1,26 @@
+reading /Users/adam.durham/p8c_trace.json ...
+  steps=256 prompt_tokens=490 records=2984
+  layers in trace: [0, 1, 2, 3]
+  picks per layer: 4476
+
+==============================================================================
+PLAN B RESIDENCY — per-rank, PER-LAYER caches (the real structure)
+==============================================================================
+  budget is per rank; expert bytes/layer = 384 x 18.80 MB = 7.219 GB
+  TP=2 splits experts between ranks, so a rank's cap/layer =
+  budget / 40 layers / 18.80 MB per expert
+
+    budget  cap/layer   oracle      LRU  cold/tok   MB/tok   ceiling  verdict
+     60.0G         79   71.4%   79.7%      48.7    915.6      7.1  DEAD
+     95.0G        126   83.1%   85.3%      35.2    662.5      9.8  DEAD
+    110.0G        146   86.8%   86.9%      31.4    589.7     11.0  DEAD
+    130.0G        172   90.6%   88.6%      27.3    513.1     12.7  DEAD
+    160.0G        212   94.7%   90.7%      22.4    421.1     15.4  DEAD
+    200.0G        265   98.1%   92.3%      18.4    345.5     18.8  DEAD
+    288.8G        384  100.0%   93.2%      16.4    307.5     21.1  DEAD
+
+  NOTE: LRU is the REALISTIC column (oracle residency needs hindsight).
+  The trace's own limits: 4 body layers, a few hundred tokens of
+  decode. Both bound the distinct-expert count DOWN, so the hit
+  rates here are an OPTIMISTIC ceiling on a full-model production run.
+DONE
