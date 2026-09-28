@@ -1,0 +1,73 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[p47 r0] jaccl up world=2
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=16 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p47 r0] all_sum ok
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=0
+[p47 r0] built in 58.5s active=104.9GB peak=104.9GB
+[p47 r0] eval every 0 layers
+[p47 r0] prompt 23 tokens
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=9 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=9 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=10 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=10 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=11 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=11 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=12 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=12 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=13 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=13 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=14 total_bytes=327680 sz=2 num_chunks=21 small=0
+[jaccl-v2] EXIT rank=0 call_id=14 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=15 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=15 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=17 total_bytes=163840 sz=2 num_chunks=11 small=0
+[jaccl-v2] EXIT rank=0 call_id=17 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.0s n_active=11 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=1 target=2 (polling; self-abort at 20000ms)
+[jaccl-v2] ENTER rank=0 call_id=84 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=84 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=166 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=166 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=248 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=248 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=330 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=330 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=412 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=412 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=494 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=494 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=576 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=576 rounds=0
+[jaccl-v2] ENTER rank=0 call_id=658 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=658 rounds=0
+[p47 r0] prefill 23 tok in 1.48s = 15.5 tok/s
+[p47 r0] decode 200 tok: median 16.32 tok/s (mean step 61.2 ms, p10 60.2 p90 62.1)
+----- TEXT -----
+The sky appears blue because of a phenomenon called Rayleigh scattering. Sunlight is made up of all colors of the visible spectrum, and when it enters Earth's atmosphere, it collides with molecules of nitrogen and oxygen that are much smaller than the wavelength of visible light. Rayleigh scattering affects short wavelengths far more strongly than long ones—roughly inversely proportional to the fourth power of wavelength. Blue light, with its short wavelength, is scattered about ten times more efficiently than red light. This scattered blue light bounces in every direction across the sky, so no matter where you look overhead, some of it reaches your eyes. Violet light is scattered even more, but our eyes are more sensitive to blue, and some violet is absorbed in the upper atmosphere, so the sky reads as blue rather than purple.
+
+This also explains why sunsets are red. When the Sun is low, its light travels through a much thicker slice of atmosphere. The blue light gets scattered away before it reaches you, leaving the longer red
+----- END -----
+[p47 r0] P47_DONE
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
