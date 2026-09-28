@@ -4,6 +4,7 @@ Date: 2026-09-28
 Host: gateway (vendor build) + macstudio-m4-1 (gates; M4 Max, mlx 0.32.2, py3.14)
 Status: **both targets PASS** -- kernels vendored + bit-identical; the plan's
 "main integration edit" (tensor-group slicing for TP) is now a proven recipe.
+Loader follow-up has since landed (`6391efc`, signed+pushed) -- see §4.
 
 ## Bottom line
 
@@ -84,20 +85,34 @@ phrasing is superseded).
 
 ## 4. What is NOT done yet (next bricks, in order)
 
-1. EXL3 **loader module** for mlx-lm: checkpoint + layer idx -> stacked
-   `EXL3SwitchGLU` (+ `EXL3Linear` for dense/MTP/head), with the rank slice
-   above. Prototype logic exists (p30's `build_exl3_experts` + p2 harness);
-   needs to become a first-class module with tests.
+1. ~~EXL3 loader module~~ **DONE** -- `mlx_lm/models/exl3/loader.py` is in the
+   fork (local addition, not vendored): `Exl3Checkpoint`, `load_experts`,
+   `load_dense_layer`, `load_dense_linear`, rank slice included; committed
+   `6391efc` on `feat/dsv41-exl3`, signed + pushed. Loader gate all green --
+   C1 loader output bit-identical to the hand-built reference (R=1/4/8);
+   C2 rank-slice partials sum to the full module (cos 1.0000000 / 0.9999999);
+   C3 dense head path cos 0.9999996. Transcript `raw/p43-loader-gate.out`,
+   script `scripts/p43_loader_gate.py`. (p44/p45 then used this same rank
+   slice to measure the serving-geometry MoE cost -- see the phase-11
+   Addendum.)
 2. `deepseek_v41.py` model file (plan phase 3, the 10-step port; the
    `deepseek-v41-mlx` port is the validated reference for every step).
 3. exo integration: `auto_parallel` branch, model card, generator wiring.
 4. Remaining plan phases (Engram row store, cache wrapper, JIT lifecycle).
 
+Deliberate pending state for a restart: the `mlx-lm` submodule PIN recorded in
+this repo still sits at pre-vendor `5c5328b`; the working tree carries the bump
+to `6391efc` uncommitted, on purpose -- it is inert (nothing on the production
+path imports `mlx_lm.models.exl3`) and production's recorded pin stays stable
+until the model file actually needs it.
+
 ## Artifacts
 
 - `raw/vendor-equiv.out` -- gate A transcript (9/9 PASS)
 - `raw/p42-split-equiv.out` -- gate B transcript (PASS + control)
-- `scripts/`: `p42_tp_split_equiv.py`, `exl3_vendor_equiv.py` (also in the
-  session scratch `exl3patch/`)
-- Fork: `adurham/mlx-lm` branch `feat/dsv41-exl3` @ `9ea86f9` (signed)
-  (vendor manifest: `exl3patch/vendor-fork/vendor-manifest.txt`)
+- `raw/p43-loader-gate.out` -- loader gate transcript (C1/C2/C3 PASS)
+- `scripts/`: `p42_tp_split_equiv.py`, `exl3_vendor_equiv.py`,
+  `p43_loader_gate.py` (also in the session scratch `exl3patch/`)
+- Fork: `adurham/mlx-lm` branch `feat/dsv41-exl3` @ `6391efc` (signed) for the
+  loader; vendor commit `9ea86f9` (signed) (vendor manifest:
+  `exl3patch/vendor-fork/vendor-manifest.txt`)

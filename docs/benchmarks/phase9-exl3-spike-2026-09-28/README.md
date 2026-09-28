@@ -1,8 +1,9 @@
-# Phase 9 — EXL3 MoE kernel spike, day 1
+# Phase 9 — EXL3 MoE kernel spike (day 1 + day-2 closure)
 
 Date: 2026-09-28 (day 1 of the 2-3 day window)
 Machine: macstudio-m4-1, isolated `~/phase1-exl3` venv, live cluster untouched
-Status: **day 1 complete (+ addendum)** — the 2.65-3.1x gap was diagnosed to
+Status: **CLOSED (day 2, p19 + p20)** — kernel thread ended at ~1.9-2.0x
+full-width vs mxfp4; see "Day-2 closure" at the end. Day-1 summary: the 2.65-3.1x gap was diagnosed to
 its source, two bit-identical fixes were found, applied and verified; the
 remaining headroom was then measured to be small. Path A's prospects
 materially improved; the 1.25x plan gate is provably out of reach for this
@@ -216,3 +217,31 @@ Ranked day-2 options, updated:
    A stays available as the slow-but-resident fallback at ~1.9x MoE cost
    (which still nets a viable end-to-end V4.1 — see the re-cost in phase 8
    terms).
+
+## Day-2 closure — x-access probe (p20) — KERNEL THREAD CLOSED
+
+p19 bounded the decode-ALU residue (above). p20 sized the last named lever:
+the per-jw x ACCESS (device indexed read, adopted `EXL3_XDIRECT`) vs a
+register value. Arms: `xdir` = library defaults (md5 must match REF);
+`imm` = register value substituted — a diagnostic FLOOR with deliberately
+wrong values (md5 mismatch expected).
+
+| rows | xdir ms (ratio) | imm floor ms (ratio) | prize |
+|---:|---:|---:|---:|
+| 1 | 0.744 (1.920x) md5 REF | 0.700 (1.803x) | ~6% |
+| 4 | 2.087 (1.986x) md5 REF | 1.787 (1.699x) | ~14% |
+| 6 | 3.034 (2.046x) md5 REF | 2.590 (1.743x) | ~15% |
+| 8 | 3.942 (2.021x) md5 REF | 3.319 (1.699x) | ~16% |
+
+Reading: at decode (R=1) the device read is effectively free (L1). At verify
+shapes a ~14-16% prize exists on paper, but reaching it needs a
+register/shared-memory select that the tile loop's lane layout does not allow
+(the value needed lives in another lane — that is exactly why the original
+kernel used `simd_shuffle`). No realizable form was found. xdir numbers
+reproduce the day-1 adoption (0.733-0.744 / 2.086-2.087) — stable.
+
+**Verdict: kernel work stops at ~1.9-2.0x full-width.** The plan-B day-2 gate
+(phase 10) then chose path A (EXL3-resident), and phase 11's serving-geometry
+addendum re-priced the MoE at the real TP=2 half-width shape (1.61-1.74x,
+g5 ~25-31 tok/s). Raw: `raw/p20-xacc-{xdir,imm,driver}.log`; scripts:
+`scripts/p20_xaccess_probe.py`, `scripts/p20_xacc_arms.sh`.

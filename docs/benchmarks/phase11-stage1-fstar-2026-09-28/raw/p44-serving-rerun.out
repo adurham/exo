@@ -1,0 +1,29 @@
+[p44] node vm before: free+inactive=89.0 GiB
+[p44] A E=128 single   loaded in 0.3s  bytes=1625 MiB  H=2304 D=5120 E=128  vm=free+inactive=86.0 GiB
+[p44] A E=128 single   R=1: median=0.755 ms  min=0.738 ms
+[p44] A E=128 single   R=4: median=2.048 ms  min=2.010 ms
+[p44] A E=128 single   R=6: median=2.970 ms  min=2.935 ms
+[p44] B E=384 single   loaded in 0.9s  bytes=4876 MiB  H=2304 D=5120 E=384  vm=free+inactive=77.4 GiB
+[p44] B E=384 single   R=1: median=0.754 ms  min=0.737 ms
+[p44] B E=384 single   R=4: median=2.043 ms  min=2.005 ms
+[p44] B E=384 single   R=6: median=2.978 ms  min=2.938 ms
+[p44] C E=384 r0/w2   loaded in 1.0s  bytes=2444 MiB  H=1152 D=5120 E=384  vm=free+inactive=73.7 GiB
+[p44] C E=384 r0/w2   R=1: median=0.435 ms  min=0.419 ms
+[p44] C E=384 r0/w2   R=4: median=1.041 ms  min=1.024 ms
+[p44] C E=384 r0/w2   R=6: median=1.460 ms  min=1.453 ms
+
+[p44] === implied 40-layer MoE time (ms/token or ms/cycle) ===
+  A E=128 single    load=0.3s bytes=1625MiB  R1=30.2 R4=81.9 R6=118.8
+  B E=384 single    load=0.9s bytes=4876MiB  R1=30.1 R4=81.7 R6=119.1
+  C E=384 r0/w2    load=1.0s bytes=2444MiB  R1=17.4 R4=41.6 R6=58.4
+
+[p44] ratios vs A(E=128):
+  R=1: B/A=0.998  C/A=0.576
+  R=4: B/A=0.998  C/A=0.508
+  R=6: B/A=1.003  C/A=0.492
+
+[p44] production mxfp4 reference (p20, E=384): R=1 0.388 / R=4 1.051 / R=6 1.483 ms
+  R=1: B ratio vs prod = 1.943  (stage-1 doc assumed 1.909/1.979/2.048)
+  R=4: B ratio vs prod = 1.944  (stage-1 doc assumed 1.909/1.979/2.048)
+  R=6: B ratio vs prod = 2.008  (stage-1 doc assumed 1.909/1.979/2.048)
+[p44] DONE

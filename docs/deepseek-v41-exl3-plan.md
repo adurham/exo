@@ -4,6 +4,28 @@ Implementation plan. Drafted 2026-09-24 from a survey of the cluster, the forks,
 public reference implementations. Every number marked *est.* is an extrapolation; every number
 without that mark was measured or read from a config.
 
+## Status (updated 2026-09-28)
+
+Evidence lives in `docs/benchmarks/phase*-2026-09-2{6,7,8}/` (benchmark phases,
+numbered separately from the plan phases below).
+
+- Kernel spike CLOSED: EXL3 MoE lands at ~1.9-2.0x mxfp4 full-width after two
+  bit-identical ALU fixes; the 1.25x gate is out of reach for this kernel design
+  (phase9 README incl. day-2 closure).
+- Plan B (SSD-streamed mxfp4 experts) measured and NOT chosen; build path is A,
+  EXL3-resident (phase10, phase11).
+- At the real TP=2 serving geometry the EXL3 MoE costs 1.61-1.74x mxfp4, and the
+  MTP gamma=5 projection is ~25-31 tok/s -- borderline for the 25 tok/s bar;
+  only the real build settles it (phase11 Addendum).
+- Plan phase 2 integration pieces DONE on `adurham/mlx-lm` branch
+  `feat/dsv41-exl3`: kernels vendored bit-identically as `mlx_lm.models.exl3`
+  (`9ea86f9`), TP rank-slice recipe proven exact, loader module (`6391efc`)
+  gated green (phase12). exo's recorded mlx-lm pin intentionally still
+  `5c5328b` until the model file needs the branch.
+- MTP/DSpark draft head ported and token-identical (phase3/4/7).
+- NEXT: plan phase 3 -- `mlx_lm/models/deepseek_v41.py`, then exo integration
+  (auto_parallel branch, model card, generator), Engram row store, cache wrapper.
+
 ## 0. Goal
 
 Serve `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (already abliterated) on

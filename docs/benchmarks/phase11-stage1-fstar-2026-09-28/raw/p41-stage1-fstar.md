@@ -1,6 +1,11 @@
 # Stage-1: the expert-speed factor A would need (the post-gate pivot's f* question)
 2026-09-28, gateway. Measured inputs; the non-expert anchor is DERIVED (flagged).
 
+NOTE (same day, evening): ALL MoE costs in this file are FULL-WIDTH single-node
+figures. At the real 2-rank serving geometry (half intermediate width per rank)
+the EXL3 MoE cost is 17.2/41.6/58.3 ms per 40L vs mxfp4 10.7/25.1/33.5 (p44/p45).
+The "not reachable" conclusion below is SUPERSEDED -- see ../README.md Addendum.
+
 Question: how much slower than production MXFP4 can the EXL3 experts be while the
 resident (A) design still hits the 25 tok/s bar?
 

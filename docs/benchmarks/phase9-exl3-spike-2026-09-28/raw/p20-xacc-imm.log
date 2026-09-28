@@ -1,0 +1,14 @@
+[probe] XACC=imm (SWAR decode at library default)
+[exl3] built k=3 E=384 _v2_ok()=True
+[build] mxfp4 4/32 (PRODUCTION) ...
+
+============================================================================================
+X-ACCESS PROBE (ARM=imm) -- E=384, layer=1
+============================================================================================
+  rows    EXL3 ms   mxfp4 ms   ex/PROD  EXL3 tok/s      md5  ref?
+     1      0.700      0.388     1.803        35.7 ccc93c10  diff
+     4      1.787      1.052     1.699        14.0 cdcf6cd6  diff
+     6      2.590      1.486     1.743         9.7 9b6c2807  diff
+     8      3.319      1.953     1.699         7.5 f4e1e9ea  diff
+
+XACC-PROBE-DONE arm=imm

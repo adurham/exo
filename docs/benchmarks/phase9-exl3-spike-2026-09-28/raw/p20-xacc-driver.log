@@ -1,0 +1,5 @@
+=== xacc arm xdir ===
+rc=0 xdir
+=== xacc arm imm ===
+rc=0 imm
+P20_XACC_DONE 23:28:11

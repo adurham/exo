@@ -1,0 +1,27 @@
+[p45] checkpoint: /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+[p45] vm before: free+inactive=89.1 GiB
+[p45] gate built (full + 2 halves)  vm=free+inactive=80.1 GiB
+[p45] up built (full + 2 halves)  vm=free+inactive=75.6 GiB
+[p45] down built (full + 2 halves)  vm=free+inactive=72.5 GiB
+[p45] all modules built in 28.2s  vm=free+inactive=72.5 GiB
+[p45] rank-sum R=1: [OK] max|diff|=6.104e-05 cos=0.9999999
+[p45] R=1: FULL median=0.391 (min 0.380)  H0 median=0.267  H0/F=0.684
+[p45] rank-sum R=4: [OK] max|diff|=6.104e-05 cos=1.0000000
+[p45] R=4: FULL median=1.043 (min 1.028)  H0 median=0.628  H0/F=0.602
+[p45] R=6: FULL median=1.483 (min 1.473)  H0 median=0.838  H0/F=0.565
+
+[p45] control F vs p20 (full width): expected 0.388 / 1.051 / 1.483
+  R=1: got 0.391 vs p20 0.388  ratio=1.007
+  R=4: got 1.043 vs p20 1.051  ratio=0.993
+  R=6: got 1.483 vs p20 1.483  ratio=1.000
+
+[p45] x40L projections (per-rank wall time at serving geometry):
+  R=1: FULL x40 = 15.6 ms   H0 x40 = 10.7 ms
+  R=4: FULL x40 = 41.7 ms   H0 x40 = 25.1 ms
+  R=6: FULL x40 = 59.3 ms   H0 x40 = 33.5 ms
+
+[p45] serving geometry: EXL3 (p44 C: 0.430/1.040/1.459) vs mxfp4 H0:
+  R=1: EXL3 0.430 / mxfp4H 0.267 = 1.608x   (full-width adopted: 1.909/1.979/2.048)
+  R=4: EXL3 1.040 / mxfp4H 0.628 = 1.656x   (full-width adopted: 1.909/1.979/2.048)
+  R=6: EXL3 1.459 / mxfp4H 0.838 = 1.741x   (full-width adopted: 1.909/1.979/2.048)
+[p45] DONE

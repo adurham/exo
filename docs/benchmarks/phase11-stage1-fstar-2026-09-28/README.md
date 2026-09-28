@@ -2,18 +2,25 @@
 
 Date: 2026-09-28
 Host: hermes-gw-01 (analysis) + macstudio-m4-1 / -2 (measurement)
-Status: **Stage-1 answered**; soak question **resolved** -- transient mid-run
-device dip on BOTH nodes with full recovery; node2 parity confirmed.
+Status: **Stage-1 answered** -- but its verdict is SUPERSEDED by the
+serving-geometry correction in the Addendum (§4, p44/p45); soak question
+**resolved** -- transient mid-run device dip on BOTH nodes with full recovery;
+node2 parity confirmed.
 
 ## Bottom line
 
-1. **Stage-1: the 25 tok/s bar is not reachable with EXL3 experts on this GPU.**
-   Meeting it would need the expert kernels 2-4x faster than anything measured
-   *or bounded* (best-known EXL3/production ratios 1.91-2.05), and the non-expert
-   path at 0.07-0.46 ms/layer against 1.3-2.1 ms/layer derived from production.
-   Expected landing: **mid-teens, central ~15-19 tok/s** (MTP gamma=5), matching
-   the independent port-kernel projection (16-19 tok/s). Both build paths (A
-   resident, B streamed) land in the same band; A gets there with no I/O cliff.
+1. **Stage-1: at the FULL-WIDTH single-node costs it priced, the 25 tok/s bar is
+   not reachable with EXL3 experts on this GPU. Measured at the real 2-rank
+   serving geometry, the picture changes -- see §4 (Addendum).** Full-width
+   basis: meeting the bar would need the expert kernels 2-4x faster than
+   anything measured *or bounded* (best-known EXL3/production ratios 1.91-2.05
+   at full width), and the non-expert path at 0.07-0.46 ms/layer against
+   1.3-2.1 ms/layer derived from production. Full-width expected landing:
+   **mid-teens, central ~15-19 tok/s** (MTP gamma=5). **Re-priced at serving
+   geometry: EXL3 MoE ~0.55x of that, g5 lands ~25-31 tok/s --
+   borderline-reachable.** The "unreachable" reading below stands only as the
+   full-width measurement; a full re-derivation (incl. engine/comm overhead)
+   is required before any build decision.
 2. **The soak does not degrade permanently, and node2 is not slow.** Both nodes
    hold ~6.2-6.3 GB/s; in long runs BOTH show a transient dip (~15-25 min in;
    60 s-mean floors ~3.5-4.8 GB/s; full recovery by ~30-32 min). p24 had been
@@ -95,7 +102,50 @@ Left open -- it matters only to a streamed design.
   bar (worse with MTP); dip windows (~3.5-4.8 GB/s for ~5-15 min, seen in both
   runs on both nodes) would additionally starve a decoder needing ~5.8 GB/s.
 - **A (EXL3-resident)**: decode touches no experts on the SSD; the dips are
-  irrelevant beyond one-time load. No decision change: A remains the build.
+  irrelevant beyond one-time load. No decision change: A remains the build
+  (strengthened by §4's serving-geometry correction).
+
+## 4. Addendum (same day) -- serving-geometry correction (p44/p45)
+
+**Material correction to §1's pricing.** §1 multiplied FULL-WIDTH, single-node
+per-layer costs by 40 layers. The build serves TP=2 (phase-12 convention: both
+ranks hold all 40 layers, experts at half intermediate width). Measured on the
+real checkpoint using the loader's own rank slice (layer 1, E=384, rank 0,
+world=2):
+
+| shape | EXL3 MoE /rank, 40L | mxfp4 same geometry, 40L | ratio |
+|---|---:|---:|---:|
+| R=1 | 17.2 ms | 10.7 ms | 1.61x |
+| R=4 | 41.6 ms | 25.1 ms | 1.66x |
+| R=6 | 58.3 ms | 33.5 ms | 1.74x |
+
+Full-width comparison (the shape §1 assumed): EXL3 29.2 / 81.3 / 119.1 ms,
+mxfp4 15.6 / 41.7 / 59.3 ms. So the full-width EXL3/prod ratio (1.87-2.01) is
+NOT the ratio at serving geometry (1.61-1.74): EXL3 scales down better with
+width, and the per-rank MoE cost is **~0.55x** of the full-width figure §1 used.
+
+Reproducibility: C-arm re-run 0.435 / 1.041 / 1.460 ms per layer (vs first run
+0.430 / 1.040 / 1.459); mxfp4 full-width control matches p20 within ~1%
+(0.391 / 1.043 / 1.483 vs 0.388 / 1.051 / 1.483); rank-sum check
+y0 + y1 == y_full (cos 1.0000000).
+
+Re-priced §1 allowance table:
+
+| shape | EXL3 MoE, 40L | budget @25 | T_N allowed | vs derived T_N (53-83 ms) |
+|---|---:|---:|---:|---|
+| plain R=1 | 17.2 ms | 40.0 | <= 22.8 ms | 2.3-3.6x over -- infeasible |
+| MTP g3 (R=4) | 41.6 ms | 86.0 | <= 44.4 ms | 1.2-1.9x over -- infeasible |
+| MTP g5 (R=6) | 58.3 ms | 140.0 | <= 81.7 ms | **near-fit** |
+
+Re-priced expected landings (g5 = 3.5 tok/cycle / (T_N40 + 58.3)):
+T_N40 53 -> 31.4; 66 -> 28.2; 83 -> 24.8 tok/s => **~25-31 tok/s**.
+Production-cycle cross-check (93.1 ms/cycle at g3): swap mxfp4-R4 (25.1) for
+EXL3-R4 (41.6) -> 109.6 ms/cycle -> 18.8 tok/s at g3; g5-shaped cycle -> ~27.7.
+
+**Consequence:** §1's verdict ("not reachable ... mid-teens") is SUPERSEDED at
+serving geometry -- g5 is borderline-reachable. Full re-derivation (including
+engine/comm overheads, which §1 excluded) before any build decision; the build
+remains the only true measurement.
 
 ## Artifacts
 
@@ -107,3 +157,7 @@ Left open -- it matters only to a streamed design.
 - `raw/p25-driver-macstudio-m4-1.log`, `raw/p25-driver-macstudio-m4-2.log`
 - `scripts/p25_driver.sh`, `scripts/p25_env.sh`, `scripts/p25_launch.sh`,
   `scripts/p23_ssd_soak2.py`
+- `raw/p44-serving-geometry.out`, `raw/p44-serving-rerun.out`,
+  `raw/p45-serving-geometry.out` -- serving-geometry MoE costs (Addendum §4)
+- `scripts/p44_full_layer.py`, `scripts/p45_mxfp4_geometry.py`,
+  `scripts/p45_chain.sh`

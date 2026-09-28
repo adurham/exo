@@ -1,0 +1,14 @@
+== checkpoint open: 384 experts in layer 1 ==
+== C1: hand-built reference vs loader (E=16) ==
+  [PASS] C1 R=1: bit-equal=True
+  [PASS] C1 R=4: bit-equal=True
+  [PASS] C1 R=8: bit-equal=True
+== C2: rank slices (world=2) vs full (loader) ==
+  [PASS] C2 R=1: max|diff|=0.0002441 cos=1.0000000
+  [PASS] C2 R=4: max|diff|=0.0004883 cos=0.9999999
+== C3: dense path (head group) ==
+  head layer: in=5120 out=129280 k=6
+  [PASS] C3 R=1: max|diff|=0.01562 cos=0.9999996
+  [PASS] C3 R=4: max|diff|=0.01562 cos=0.9999995
+
+VERDICT: PASS -- loader gates C1/C2/C3 all green
