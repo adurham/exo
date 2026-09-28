@@ -1,0 +1,167 @@
+=== p30v2 --full 2026-09-28 00:19:14 ===
+[full] prompt=531 layers=[0, 1, 2, '...']
+[full] embed 0.5s
+[full] engram hashes (1, 531, 2, 24)
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L0 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L0 total build 1.0s (experts 0.9s)
+[full] L0  build   1.0s fwd   0.17s rms=0.076 rec=531 active=5.5GB peak=10.2GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L1 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L1 total build 1.8s (experts 1.5s)
+[full] L1  build   4.4s fwd   0.24s rms=0.101 rec=531 active=5.8GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L2 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L2 total build 1.7s (experts 1.6s)
+[full] L2  build   1.7s fwd   0.17s rms=0.104 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L3 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L3 total build 1.7s (experts 1.6s)
+[full] L3  build   1.7s fwd   0.16s rms=0.120 rec=531 active=5.5GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L4 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L4 total build 1.7s (experts 1.5s)
+[full] L4  build   1.7s fwd   0.16s rms=0.134 rec=531 active=5.5GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L5 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L5 total build 1.7s (experts 1.5s)
+[full] L5  build   1.7s fwd   0.16s rms=0.153 rec=531 active=5.5GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L6 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L6 total build 1.7s (experts 1.5s)
+[full] L6  build   1.7s fwd   0.15s rms=0.191 rec=531 active=5.5GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L7 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L7 total build 1.7s (experts 1.5s)
+[full] L7  build   1.7s fwd   0.15s rms=0.240 rec=531 active=5.5GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L8 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L8 total build 1.7s (experts 1.5s)
+[full] L8  build   1.7s fwd   0.16s rms=0.244 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L9 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L9 total build 1.6s (experts 1.5s)
+[full] L9  build   1.6s fwd   0.15s rms=0.254 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L10 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L10 total build 1.7s (experts 1.6s)
+[full] L10 build   1.7s fwd   0.15s rms=0.262 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L11 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L11 total build 1.7s (experts 1.6s)
+[full] L11 build   1.7s fwd   0.16s rms=0.275 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L12 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L12 total build 1.7s (experts 1.6s)
+[full] L12 build   1.7s fwd   0.15s rms=0.292 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L13 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L13 total build 1.7s (experts 1.6s)
+[full] L13 build   1.7s fwd   0.17s rms=0.319 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L14 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L14 total build 1.8s (experts 1.6s)
+[full] L14 build   4.2s fwd   0.24s rms=0.395 rec=531 active=5.9GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L15 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L15 total build 1.7s (experts 1.6s)
+[full] L15 build   1.7s fwd   0.17s rms=0.421 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L16 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L16 total build 1.7s (experts 1.6s)
+[full] L16 build   1.7s fwd   0.15s rms=0.508 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L17 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L17 total build 1.7s (experts 1.6s)
+[full] L17 build   1.7s fwd   0.15s rms=0.620 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=2 build 0.3s v2ok=True
+  [w] L18 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L18 total build 1.3s (experts 1.2s)
+[full] L18 build   1.3s fwd   0.14s rms=0.837 rec=531 active=3.9GB peak=10.3GB
+    [ex] E=384 k=2 build 0.3s v2ok=True
+  [w] L19 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L19 total build 1.3s (experts 1.2s)
+[full] L19 build   1.3s fwd   0.17s rms=1.016 rec=531 active=3.9GB peak=10.3GB
+    [ex] E=384 k=2 build 0.3s v2ok=True
+  [w] L20 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L20 total build 1.3s (experts 1.2s)
+[full] L20 build   1.3s fwd   0.16s rms=0.991 rec=531 active=3.9GB peak=10.3GB
+    [ex] E=384 k=2 build 0.3s v2ok=True
+  [w] L21 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L21 total build 1.3s (experts 1.1s)
+[full] L21 build   1.3s fwd   0.17s rms=1.147 rec=531 active=3.9GB peak=10.3GB
+    [ex] E=384 k=2 build 0.3s v2ok=True
+  [w] L22 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L22 total build 1.3s (experts 1.2s)
+[full] L22 build   1.3s fwd   0.17s rms=1.180 rec=531 active=3.9GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L23 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L23 total build 1.7s (experts 1.6s)
+[full] L23 build   1.7s fwd   0.17s rms=1.275 rec=531 active=5.5GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L24 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L24 total build 1.7s (experts 1.6s)
+[full] L24 build   1.7s fwd   0.17s rms=1.321 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L25 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L25 total build 1.7s (experts 1.6s)
+[full] L25 build   1.7s fwd   0.16s rms=1.429 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L26 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L26 total build 1.7s (experts 1.6s)
+[full] L26 build   1.7s fwd   0.16s rms=1.745 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L27 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L27 total build 1.7s (experts 1.6s)
+[full] L27 build   1.7s fwd   0.17s rms=1.767 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L28 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L28 total build 1.7s (experts 1.6s)
+[full] L28 build   1.7s fwd   0.17s rms=1.870 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L29 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L29 total build 1.7s (experts 1.6s)
+[full] L29 build   1.7s fwd   0.17s rms=1.995 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L30 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L30 total build 1.7s (experts 1.6s)
+[full] L30 build   1.7s fwd   0.17s rms=2.065 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L31 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L31 total build 1.7s (experts 1.6s)
+[full] L31 build   1.7s fwd   0.17s rms=2.222 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L32 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L32 total build 1.7s (experts 1.6s)
+[full] L32 build   1.7s fwd   0.18s rms=2.350 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L33 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L33 total build 1.7s (experts 1.6s)
+[full] L33 build   1.7s fwd   0.18s rms=2.572 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L34 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L34 total build 1.7s (experts 1.6s)
+[full] L34 build   1.7s fwd   0.18s rms=2.834 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L35 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L35 total build 1.7s (experts 1.6s)
+[full] L35 build   1.7s fwd   0.17s rms=3.193 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.5s v2ok=True
+  [w] L36 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L36 total build 1.7s (experts 1.6s)
+[full] L36 build   1.7s fwd   0.18s rms=3.457 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L37 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L37 total build 1.7s (experts 1.5s)
+[full] L37 build   1.7s fwd   0.18s rms=3.623 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L38 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L38 total build 1.7s (experts 1.5s)
+[full] L38 build   1.7s fwd   0.17s rms=4.151 rec=531 active=5.6GB peak=10.3GB
+    [ex] E=384 k=3 build 0.4s v2ok=True
+  [w] L39 extra=[] missing=['ffn.gate.bias_vl']
+    [b] L39 total build 1.7s (experts 1.5s)
+[full] L39 build   1.7s fwd   0.17s rms=34.582 rec=531 active=5.6GB peak=10.3GB
+[full] pass 78.5s
+[full] wrote /Users/adam.durham/p30_exl3_trace_clamp.json (0.77 MB, 21240 records)
+=== p30v2 done 2026-09-28 00:20:33 ===

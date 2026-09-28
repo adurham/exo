@@ -1,0 +1,16 @@
+p38 -- decisive head + NLL test on the clamped 40-layer states (macstudio-m4-1)
+[p38] head.mul1 header: {'dtype': 'I32', 'shape': [], 'data_offsets': [...]}
+[p38] native head: (129280, 5120) mlx.core.float32
+[p38] EXL3 head(T): (129280, 5120) | (F): (129280, 5120)
+[p38] cos(EXL3 mul1=T, native)=0.999654
+[p38] cos(EXL3 mul1=F, native)=0.000122
+[p38] cos(embed,        native)=0.022954
+[p38] cos(EXL3 norm, native norm)=1.000000
+[p38] native-head norm=EXL3  NLL mean=1.003 med=0.029 | top1 all=0.783 >100=0.777 last50=0.580 | absmax=43.41
+[p38] native-head norm=native NLL mean=1.003 med=0.029 | top1 all=0.783 >100=0.777 last50=0.580 | absmax=43.41
+[p38] EXL3head(mul1=T)       NLL mean=1.003 med=0.028 | top1 all=0.783 >100=0.777 last50=0.580 | absmax=43.40
+[p38] EXL3head(mul1=F)       NLL mean=28.243 med=27.730 | top1 all=0.000 | absmax=46.06   <- control: discriminative
+[p38] prompt tail: ', which remains the largest spread among CMIP ensembles. Regional downscaling '
+[p38] top8 next: ['cology', '2', '10', '1', ' provides', '3', '100', '4']
+    pred 'IP'  target 'IP' | pred '6' target ' ensembles' | pred '.' target '.' | pred ' \n\n' target ' Regional'
+    pred ' down' target ' down' | pred 'sc' target 'sc' | pred 'aling' target 'aling' | pred ' then' target ' '

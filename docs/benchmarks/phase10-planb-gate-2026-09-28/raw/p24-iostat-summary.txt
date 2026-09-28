@@ -1,0 +1,9 @@
+p24 SSD soak take 2 -- iostat (device) per-second samples, core window
+(drop first 40 + last 150 samples; full logs in gateway scratch p24-logs/)
+
+macstudio-m4-1: n=1311 median=6206 MB/s p10=6064 p90=6237 min=1849 max=6281 (all-window n=1501)
+macstudio-m4-2: n=1327 median=6284 MB/s p10=6159 p90=6314 min=2723 max=6354 (all-window n=1517)
+
+Soak: 35 min (2100 s), depth 8, shuffled 13.32 MB expert fetches, 196.0 GB EXL3 working set, F_NOCACHE best-effort; process-level rates are an upper bound.
+Take-1 lesson: process rate read 21-26 GB/s (cache-served); iostat is truth.
+AP1024Z spec ~6.7 GB/s; soaked 92-94%% of spec.

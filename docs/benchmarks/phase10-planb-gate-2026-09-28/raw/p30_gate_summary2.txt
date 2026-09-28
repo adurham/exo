@@ -1,0 +1,16 @@
+{
+ "routing_delta_entries": 1725,
+ "routing_total": 21240,
+ "hit_cap256_r1": 0.8979408352668213,
+ "fetch_per_token_r1": 12.247099767981439,
+ "native_mb_per_token": 230.23909694025525,
+ "exl3_mb_per_token_rank": [
+  3153.1912137354993,
+  3099.0139634338752
+ ],
+ "ceiling_native": 26.92852813616116,
+ "ceiling_exl3": [
+  1.9662619802416073,
+  2.000636355032768
+ ]
+}

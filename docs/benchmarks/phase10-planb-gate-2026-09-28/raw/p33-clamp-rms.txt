@@ -1,0 +1,11 @@
+Post-clamp vs pre-clamp rms curve (macstudio-m4-1, p30 trace)
+
+pre-clamp  L38 rms=4.207  L39 rms=150.453   (L39 experts out rms 44.9, absmax 20401)
+post-clamp L38 rms=4.151  L39 rms=34.582    (L39 experts out 9.47; whole-model NLL still 1.003)
+full post-clamp curve:
+L0:0.076 L1:0.101 L2:0.104 L3:0.120 L4:0.134 L5:0.153 L6:0.191 L7:0.240 L8:0.244 L9:0.254
+L10:0.262 L11:0.275 L12:0.292 L13:0.319 L14:0.395 L15:0.421 L16:0.508 L17:0.620 L18:0.837 L19:1.016
+L20:0.991 L21:1.147 L22:1.180 L23:1.275 L24:1.321 L25:1.429 L26:1.745 L27:1.767 L28:1.870 L29:1.995
+L30:2.065 L31:2.222 L32:2.350 L33:2.572 L34:2.834 L35:3.193 L36:3.457 L37:3.623 L38:4.151 L39:34.582
+L39 residual elevation vs trend (~4.4) is NOT explained (norm absorbs it: collapse 7.95 -> norm-out 0.206 ~ L38's 0.269).
+Routing sets differ pre/post clamp in 1725/21240 entries (8.12%), only layers >= 17.
