@@ -139,13 +139,18 @@ def engine_prefill(
 
 @dataclass
 class TurnOutcome:
-    """One turn's fed rows plus the numbers the engine reports."""
+    """One turn's fed rows plus the numbers the engine reports.
+
+    ``tokens`` is filled in by the engine once its decode rounds have run; the
+    prefill half of the turn only produces ``anchor_logits``.
+    """
 
     anchor_logits: mx.array | None
     prompt_tokens: int
     prefill_tokens: int
     reused_tokens: int
     cache_offset: int
+    tokens: list[int] = field(default_factory=list)
     hit: bool = False
     prefill_seconds: float = 0.0
     rewound_from: int | None = None
@@ -328,6 +333,29 @@ class Conversation:
         arr = _ids_of(ids)
         self.cache.mark_seen(arr)
         self._gen.extend(int(t) for t in arr)
+
+    def sync_history(self, prompt_ids: Any, generated: list[int]) -> None:
+        """Align the token history with the rows the cache ACTUALLY holds.
+
+        Called once per turn, after the decode rounds: the cache has seen the
+        prompt plus every generated token except the LAST one (that token is the
+        next turn's anchor and has not been fed). The rows in between are reported
+        to ``SessionCache`` so its own history stays exact; the per-round detail
+        is deliberately not tracked, because the decode rounds roll rows back and
+        only the end state matters.
+        """
+        prompt = _ids_of(prompt_ids)
+        want = int(prompt.shape[0]) + max(0, len(generated) - 1)
+        have = int(self.cache.tokens.shape[0])
+        if have < want:
+            tail = np.asarray(generated[: want - int(prompt.shape[0])], dtype=np.int64)
+            self.cache.mark_seen(np.concatenate([prompt, tail])[have:])
+        elif have > want:
+            raise RuntimeError(
+                f"DSV4.1 session: the cache holds {have} rows but this turn fed "
+                f"{want}; the decode rounds and the cache are out of step."
+            )
+        self._gen = [int(t) for t in generated]
 
     def finish(self, *, checkpoint: bool = True) -> None:
         """Close the turn: checkpoint the cache (and history) for the next one."""

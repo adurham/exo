@@ -97,7 +97,6 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _spec_policy,
     _stop_index,
     _stop_sequences,
-    rows_fed,
 )
 from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
 from exo.worker.engines.mlx.dsv41.vision import (
@@ -634,6 +633,7 @@ class Dsv41Engine(Engine):
         # contract ``serve.Session``/``spec.generate`` implement), and the first
         # round re-feeds it as its verify anchor.
         turn.tokens = [anchor] + self._decode(session, anchor, max_tokens - 1)
+        session.sync_history(tokens, turn.tokens)
         session.finish(checkpoint=True)
         turn.committed = True
         return turn
@@ -655,10 +655,7 @@ class Dsv41Engine(Engine):
         while len(out) < max_tokens:
             active = self._active
             self._check_cancel(active.task.task_id if active is not None else None)
-            # A round with no window yet is the priming round: it feeds ONE row
-            # (the anchor) and keeps the taps for the next round.
-            priming = head is not None and session.draft_state is None
-            committed, _ms, accepted, _gamma = _one_round(
+            committed, _ms, _accepted, _gamma = _one_round(
                 self,
                 model=self.loaded.model,
                 cache=session.cache.cache,
@@ -667,12 +664,9 @@ class Dsv41Engine(Engine):
                 policy=policy,
                 draft_state=session.draft_state,
             )
-            if priming:
-                session.mark_rows([token])
+            if session.draft_state is None and head is not None:
+                # the first round primed the window inside _one_round
                 session.draft_state = self._draft_windows.get(0)
-            else:
-                # rows this round fed and kept: its anchor + the ACCEPTED drafts
-                session.mark_rows(rows_fed(token, committed, accepted, head))
             for tid in committed:
                 out.append(int(tid))
                 if int(tid) == session.eos_id or len(out) >= max_tokens:
