@@ -46,6 +46,7 @@ from exo.shared.types.tasks import TaskId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
+from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
 from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids a circular import)
@@ -72,9 +73,12 @@ def _refuse_unsupported(
 
     Every branch here is a feature exo has and DSv4.1 does not (yet). Silently
     ignoring one would corrupt the client's assumptions invisibly -- an image
-    dropped from the prompt, a prefix reused that was never cached, logprobs
-    that are not computed -- so each one fails the request with a reason the
-    client can act on.
+    dropped from the prompt, logprobs that are not computed -- so each one fails
+    the request with a reason the client can act on.
+
+    Prefix reuse is NOT refused any more: it is served by the conversation
+    sessions in ``dsv41/session.py`` (one live ``ModelCache`` per conversation),
+    which is what ``use_prefix_cache`` means for this engine.
     """
     if params.images and not vision_available:
         raise Dsv41UnsupportedFeature(
@@ -84,14 +88,6 @@ def _refuse_unsupported(
             "token), but the exo-side wiring is not part of this build, so the "
             "honest answer is to refuse rather than silently answer from text "
             "only. Drop the images or route to an instance with vision."
-        )
-    if params.use_prefix_cache:
-        raise Dsv41UnsupportedFeature(
-            "DSv4.1: prefix-cache reuse was requested, but this engine's cache "
-            "is a custom per-layer structure (window ring + compressed KV + "
-            "compressor carry + index keys + engram id history) with no exo "
-            "KVPrefixCache adapter yet. Serving the request would mean silently "
-            "re-prefilling the whole prompt, so it is refused instead."
         )
     if params.logprobs or params.top_logprobs:
         raise Dsv41UnsupportedFeature(
@@ -196,11 +192,23 @@ def _final_response(
     reason: FinishReason,
     task_id: TaskId | None = None,
     round_stats: Any | None = None,
+    reused_tokens: int = 0,
+    prefill_tokens: int | None = None,
 ) -> GenerationResponse:
-    """The terminal response for a request, with usage and stats attached."""
-    del task_id
+    """The terminal response for a request, with usage and stats attached.
+
+    ``prompt_tokens`` is the WHOLE conversation this turn belongs to;
+    ``reused_tokens`` is the part that came from the session's live cache and
+    ``prefill_tokens`` the rows actually fed (``None`` => the whole prompt).
+    That split is what a client reads to see the multi-turn win, and it is also
+    what ``GenerationStats.prompt_tps`` is computed against.
+    """
+    del task_id, prefill_tokens  # the split is reported through usage/stats below
+    hit = "partial" if reused_tokens > 0 else "none"
     if round_stats is not None:
-        stats = round_stats.stats(prefill_tps, prompt_tokens, generated)
+        stats = round_stats.stats(prefill_tps, prompt_tokens, generated).model_copy(
+            update={"prefix_cache_hit": hit}
+        )
     else:
         stats = GenerationStats(
             prompt_tps=prefill_tps,
@@ -208,8 +216,7 @@ def _final_response(
             prompt_tokens=prompt_tokens,
             generation_tokens=generated,
             peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
-            # DSv4.1 has no prefix cache (see _refuse_unsupported).
-            prefix_cache_hit="none",
+            prefix_cache_hit=hit,
         )
     return GenerationResponse(
         text=text,
@@ -220,7 +227,7 @@ def _final_response(
             prompt_tokens=prompt_tokens,
             completion_tokens=generated,
             total_tokens=prompt_tokens + generated,
-            prompt_tokens_details=PromptTokensDetails(cached_tokens=0),
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=reused_tokens),
             # count_reasoning_tokens patches reasoning_tokens in on the way
             # out; it starts at 0 here like every other exo generator.
             completion_tokens_details=CompletionTokensDetails(reasoning_tokens=0),
@@ -246,6 +253,7 @@ def _one_round(
     token: int,
     head: Any | None,
     policy: Any | None,
+    draft_state: Any | None = None,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -278,7 +286,11 @@ def _one_round(
     def tapcat(taps: dict[int, mx.array]) -> mx.array:
         return mx.concatenate([taps[layer] for layer in taps_ids], axis=-1)
 
-    draft_state = engine._draft_windows.get(_DRAFT_KEY)
+    # ``draft_state`` is the conversation's draft window when the caller owns one
+    # (``session.Conversation``, which keeps it in step with the body cache); a
+    # bare engine falls back to the per-request window in ``_draft_windows``.
+    if draft_state is None:
+        draft_state = engine._draft_windows.get(_DRAFT_KEY)
 
     if draft_state is None:
         # Round 1 with a head: no draft window yet. Step plainly, but keep the
