@@ -91,6 +91,9 @@ TOOL_CALL_BLOCK = (
 )
 TOOL_TEXT = {DSML_SENTINEL_ID: TOOL_CALL_BLOCK}
 
+#: Script for a reasoning turn that ends in a real tool call.
+TOOL_SCRIPT = [31, 33, DSML_SENTINEL_ID, 1]
+
 
 def _sentinel_tokens(chunks: list[str]) -> list[int]:
     """Tag the chunk(s) carrying the sentinel with its real vocab id."""
@@ -103,29 +106,28 @@ def _sentinel_tokens(chunks: list[str]) -> list[int]:
 class ScriptedModel:
     """A model that answers from a PRE-BUILT logits table, one row per position.
 
-    Two properties matter, and both are what the real body does:
+    Position semantics match the real body and are the reason the expectations
+    below are what they are:
 
     * a logits forward with ``last_logit_only`` names ONE token -- the argmax
-      of the LAST row it was handed, i.e. the next token after everything the
-      caller has already fed the cache. That is why the prefill's first token
-      is ``script[0]`` and not ``script[n_chunks - 1]``;
-    * a verify forward (``argmax=True``) returns one token per row, relative to
-      the table, so a draft of the wrong shape or length is caught.
+      for the position AFTER everything the caller has fed the cache, i.e.
+      table index ``cache.offset - PROMPT_TOKENS``. So the prefill's LAST chunk
+      names ``script[0]`` regardless of how many chunks the prompt was split
+      into, and each greedy round names the next entry;
+    * a verify forward (``argmax=True``) returns one token per row, the table
+      entry after that row's own position, so a draft of the wrong length or
+      content is caught by the accept/rollback comparison.
     """
 
-    #: Number of prompt tokens the engine's fake tokenizer produces.
+    #: Token ids the engine's fake tokenizer produces for any prompt.
     PROMPT_TOKENS = 3
 
-    def __init__(self, script: list[int], *, lie_at: int | None = None) -> None:
+    def __init__(self, script: list[int]) -> None:
         self.script = list(script)
-        self.lie_at = lie_at
         self.calls: list[tuple[int, int]] = []  # (rows, cols) per forward
         self.argmax_calls: list[list[int]] = []
-        #: How many script tokens have been HANDED OUT by logits forwards. The
-        #: prefill's forward hands out script[0]; each greedy round hands out
-        #: one more. Verify (argmax) forwards do not move this.
-        self.committed = 0
         self.logits: list[mx.array] = [_one_hot(t) for t in self.script]
+        self.last_offset = 0
         self.args = _Args()
 
     def make_cache(self, bsz: int = 1, max_seq_len: int | None = None, **_: Any):
@@ -142,31 +144,26 @@ class ScriptedModel:
         del last_logit_only
         rows = int(input_ids.shape[0])
         cache.offset += rows
+        self.last_offset = cache.offset
         self.calls.append((rows, rows))
         if argmax:
-            ids = self._ids_for(input_ids)
+            ids = self._ids_for(input_ids, cache.offset)
             self.argmax_calls.append(ids)
             out = mx.array([ids], dtype=mx.int32)
             return (out, self._taps(rows)) if return_taps else out
-        logits = self.logits[min(self.committed, len(self.logits) - 1)]
-        self.committed += 1
+        logits = self.logits[self._index(cache.offset)]
         return (logits, self._taps(1)) if return_taps else logits
 
-    def _ids_for(self, input_ids: mx.array) -> list[int]:
-        """One token per verify row: the table's answer for that row's position.
+    def _index(self, offset: int) -> int:
+        """Table index for the token the position ``offset`` predicts."""
+        return max(0, min(offset - self.PROMPT_TOKENS, len(self.script) - 1))
 
-        A row's prediction is the table entry AFTER the row's own token, so a
-        draft that lies (``lie_at``, a token not in the table) gets the honest
-        answer instead -- which is exactly the accept/reject comparison under
-        test. Rows the table cannot place fall back to the current position.
-        """
+    def _ids_for(self, input_ids: mx.array, offset: int) -> list[int]:
+        """One token per verify row: the table entry after that row's position."""
+        first_row_offset = offset - int(input_ids.shape[0])
         out: list[int] = []
         for row in range(int(input_ids.shape[0])):
-            token = int(input_ids[row, -1])
-            position = (
-                self.script.index(token) + 1 if token in self.script else self.committed
-            )
-            out.append(self.script[min(position, len(self.script) - 1)])
+            out.append(self.script[self._index(first_row_offset + row + 1)])
         return out
 
     def _taps(self, rows: int) -> dict[int, mx.array]:
@@ -205,7 +202,7 @@ class MockHead:
         self, anchor: mx.array, embed: Any, head_lin: Any, dsc: Any, *, width: int
     ):
         del anchor, embed, head_lin, dsc
-        start = self.model.committed
+        start = self.model._index(self.model.last_offset) + 1
         ids = list(self.model.script[start : start + width])
         if self.lie_at is not None and self.lie_at < len(ids):
             ids[self.lie_at] = 9999  # a token the target will not confirm
@@ -582,8 +579,12 @@ def test_greedy_round_without_a_head_is_one_forward_one_token():
     assert (accepted, gamma) == (1, 1)
 
 
-def _one_hot(token: int, vocab: int = 20000) -> mx.array:
-    """A logits row whose argmax is ``token`` (otherwise flat)."""
-    row = [0.0] * vocab
+def _one_hot(token: int) -> mx.array:
+    """A logits row whose argmax is ``token`` (otherwise flat).
+
+    The row is sized to fit the token, because the script may contain real
+    checkpoint ids (e.g. the DSML sentinel, 128825) and not just small ones.
+    """
+    row = [0.0] * (token + 1)
     row[token] = 1.0
     return mx.array([row])
