@@ -170,12 +170,25 @@ class _Args:
 
 
 class MockCache:
-    """Cache stand-in: the rounds only need ``offset`` (and ``layers`` for spec)."""
+    """Cache stand-in: the rounds only need ``offset`` (and ``layers`` for spec).
+
+    It also carries the one ``SessionCache`` method ``dsv41.session``'s prefill
+    driver calls, so the conversation path is exercised on CPU too.
+    """
 
     def __init__(self, max_seq_len: int) -> None:
         self.max_seq_len = max_seq_len
         self.offset = 0
         self.layers: list[Any] = []
+
+    def mark_seen(self, ids: Any) -> None:
+        rows = (
+            int(ids.size)
+            if isinstance(ids, mx.array)
+            else len(list(ids))
+        )
+        if self.offset + rows > self.max_seq_len:
+            raise ValueError("MockCache: history past its max_seq_len")
 
 
 class MockHead:
@@ -458,12 +471,25 @@ def test_images_are_refused_loudly_when_no_vision_processor_is_attached():
     assert any(isinstance(e.chunk, ErrorChunk) for e in events)
 
 
-def test_prefix_cache_request_is_refused():
+def test_prefix_cache_request_is_served_as_a_cached_conversation():
+    """``use_prefix_cache`` is no longer refused: it selects the session path.
+
+    Stream V wired conversation sessions (``dsv41/session.py``), so a request
+    that asks for prefix reuse is served from a conversation whose live cache is
+    kept for the next turn instead of being re-prefilled. The mock model has no
+    SessionCache, so what this pins is the ENGINE-side contract: the request is
+    not refused, it answers, and the chunks come out in order.
+    """
     engine, _model, _tokenizer, _events = _engine(
-        [34, 1], text_of=ANSWER_TEXT, use_prefix_cache=True
+        [34, 1], text_of=ANSWER_TEXT, use_prefix_cache=True, max_output_tokens=8
     )
-    with pytest.raises(Dsv41UnsupportedFeature, match="prefix-cache"):
-        _drain(engine)
+    chunks = _drain(engine)
+    assert [c.text for c in chunks if isinstance(c, TokenChunk)] == ["hi"]
+    # and the terminal chunk reports the reuse it got (0 here: a fresh store)
+    terminal = [c for c in chunks if isinstance(c, TokenChunk) and c.usage is not None]
+    assert len(terminal) == 1
+    reuse = terminal[0].usage.prompt_tokens_details.cached_tokens
+    assert reuse == 0
 
 
 def test_logprobs_request_is_refused():

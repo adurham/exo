@@ -233,42 +233,48 @@ def image_spans(image_inputs: Any) -> list[tuple[int, int]]:
 
 
 class _InjectedEmbed:
-    """Stand-in for ``Model.embed`` that returns a caller-supplied embedding.
+    """Stand-in for ``Model.embed`` that carries the merged image embeddings.
 
-    The merged tensor is returned for exactly ONE forward: the full-prompt
-    prefill, i.e. the first call whose row count equals the prompt length
-    (position 0 by construction -- a cold session's first forward). Every other
-    call -- the DSpark draft head reads ``model.embed`` on every draft, and a
-    later turn's delta prefill reads it too -- is passed straight through to the
-    real table, so installing the splice cannot break decode.
+    The engine must prefill an image prompt in PIECES (the whole prompt is far
+    too large for one graph), but the reference requires the image span to sit
+    inside the forward whose cache offset is 0 -- its KV is a rotating ring, so a
+    span split across pieces would be unreadable by the time the later piece runs.
+    This stand-in therefore tracks the rows consumed so far and serves the merged
+    tensor for the FIRST piece, which the engine guarantees is large enough to
+    cover every image span (``engine._first_chunk_covers``); later pieces get the
+    ordinary table lookup, which is exactly what the merged tensor holds outside
+    the span.
 
-    A forward that does NOT cover the whole prompt at position 0 while the
-    merged embedding is still unused means the image span would be fed in pieces:
-    that is refused, because the reference requires the span inside one
-    start_pos==0 forward.
+    Anything that violates that -- a first piece too small for a span, or a
+    non-zero starting position -- raises instead of returning a partially-merged
+    embedding. Every read of ``model.embed`` that is not a prefill piece (the
+    DSpark draft head reads it on every draft) passes straight through to the
+    real table, so the splice can stay installed for the whole turn.
     """
 
-    def __init__(self, table: Any, embeddings: mx.array, start: int, count: int, total: int):
+    def __init__(self, table: Any, embeddings: mx.array, span_start: int, span_end: int):
         self.table = table
         self.embeddings = embeddings
-        self.start = int(start)
-        self.count = int(count)
-        self.total = int(total)
-        self.used = False
+        self.span_start = int(span_start)
+        self.span_end = int(span_end)
+        self.total = int(embeddings.shape[1])
+        self.pos = 0
 
     def __call__(self, input_ids: mx.array) -> mx.array:
-        rows = int(input_ids.shape[-1])
-        if not self.used and rows == self.total and self.start == 0:
-            self.used = True
-            return self.embeddings
-        if not self.used and rows < self.total:
+        rows = int(input_ids.shape[1])
+        if self.pos == 0 and rows >= self.span_end and self.span_end > 0:
+            # first prefill piece: it covers the whole image span
+            self.pos = rows
+            return self.embeddings[:, :rows]
+        if self.pos < self.span_end and rows > 0:
             raise RuntimeError(
-                f"DSv4.1 vision: this instance is prefilling an image prompt in "
-                f"{rows}-row pieces, but the whole {self.total}-row prompt must be "
-                "prefilled in ONE forward from position 0 (the reference asserts "
-                "start_pos == 0 for image spans). The engine stretches the first "
-                "chunk to cover the span -- see Dsv41Engine._run_turn."
+                f"DSv4.1 vision: image span [{self.span_start}, {self.span_end}) "
+                f"was not covered by the first prefill piece; the whole span must "
+                "be prefilled in ONE forward from position 0 (the reference "
+                "asserts start_pos == 0 for image spans, and the KV ring would "
+                "have rotated past it)."
             )
+        self.pos += rows
         return self.table(input_ids)
 
     def __getattr__(self, name: str) -> Any:
@@ -279,14 +285,19 @@ class _InjectedEmbed:
 
 @contextlib.contextmanager
 def splice_embeddings(
-    model: Any, embeddings: mx.array, start: int, count: int, total: int
+    model: Any, embeddings: mx.array, span_start: int, span_end: int
 ) -> Iterator[None]:
-    """Install ``embeddings`` as ``model.embed`` for one prompt-prefill forward."""
+    """Install the merged image embeddings as ``model.embed`` for one turn.
+
+    ``span_start``/``span_end`` bound the image span (the engine puts the whole
+    span in the first prefill piece). Every non-prefill read passes through to
+    the real table, so this can stay installed across the decode rounds too.
+    """
     original = model.embed
-    injected = _InjectedEmbed(original, embeddings, start, count, total)
+    injected = _InjectedEmbed(original, embeddings, span_start, span_end)
     model.embed = injected
     try:
-        yield
+        yield injected
     finally:
         model.embed = original
 

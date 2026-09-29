@@ -91,10 +91,13 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _cache_capacity,
     _final_response,
     _mid_response,
+    _one_round,
     _queue_of,
     _refuse_unsupported,
+    _spec_policy,
     _stop_index,
     _stop_sequences,
+    rows_fed,
 )
 from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
 from exo.worker.engines.mlx.dsv41.vision import (
@@ -261,7 +264,7 @@ class Dsv41Engine(Engine):
         # Prefill fence + progress accounting: this checkpoint needs a small
         # chunk (see DEFAULT_PREFILL_CHUNK) unless the instance says otherwise.
         self._chunk = self.prefill_chunk_size or DEFAULT_PREFILL_CHUNK
-        long_chunk = self._long_chunk or self._chunk
+        long_chunk = self.long_chunk or self._chunk
         self._sessions = Dsv41Sessions(
             self.loaded.model,
             self.loaded.head,
@@ -622,7 +625,7 @@ class Dsv41Engine(Engine):
         if embeddings is None:
             turn = session.prefill(tokens, chunk_plan=plan)
         else:
-            with splice_embeddings(self.loaded.model, embeddings, 0, total, total):
+            with splice_embeddings(self.loaded.model, embeddings, 0, image_span_end):
                 turn = session.prefill(tokens, chunk_plan=plan)
         if turn.reused_tokens:
             logger.info(f"[DSV41] turn reuse: {turn}")
@@ -669,7 +672,7 @@ class Dsv41Engine(Engine):
                 session.draft_state = self._draft_windows.get(0)
             else:
                 # rows this round fed and kept: its anchor + the ACCEPTED drafts
-                session.mark_rows([token, *committed[:accepted]])
+                session.mark_rows(rows_fed(token, committed, accepted, head))
             for tid in committed:
                 out.append(int(tid))
                 if int(tid) == session.eos_id or len(out) >= max_tokens:

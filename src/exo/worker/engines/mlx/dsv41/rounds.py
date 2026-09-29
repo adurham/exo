@@ -238,6 +238,21 @@ def _final_response(
 # --------------------------------------------------------------- decode rounds
 
 
+def rows_fed(token: int, committed: list[int], accepted: int, head: Any | None) -> list[int]:
+    """The rows one round actually fed and kept, in order.
+
+    The verify forward feeds the anchor plus EVERY drafted token, then rolls the
+    rejected suffix back, so the rows that survive are the anchor plus the first
+    ``accepted`` drafts -- which is exactly ``len(committed) - 1`` tokens (the
+    round also commits the target's own token at the first mismatch, which is NOT
+    a fed row: the next round feeds it). With no draft head the round feeds one
+    row and commits one token.
+    """
+    if head is None or accepted >= len(committed):
+        return [int(token)]
+    return [int(token), *[int(t) for t in committed[:accepted]]]
+
+
 def _spec_policy(gamma: int) -> Any:
     """Adaptive gamma policy for the speculative round (see ``spec.GammaPolicy``)."""
     from mlx_lm.models.deepseek_v41.spec import GammaPolicy
@@ -261,6 +276,11 @@ def _one_round(
     model's own argmaxes -- never an unverified draft), which is what the
     engine emits. Greedy when ``head`` is None; otherwise DSpark draft +
     chunk verify.
+
+    Rows fed vs tokens committed: a round always feeds its anchor (``token``) and
+    keeps a prefix of its drafts. The caller gets that split from
+    :func:`rows_fed` so its token history can be kept in step with the cache
+    across the rollback.
 
     Draft-context priming. The DSpark head drafts from its own window of
     context taps, and the harnesses prime it from the PREFILL forward's taps
@@ -310,7 +330,13 @@ def _one_round(
 
     gamma = int(policy.next()) if policy is not None else 1
     position = int(cache.offset)
-    drafted = head.draft(anchor, model.embed, model.head, draft_state, width=gamma)
+    drafted = head.draft(
+        anchor,
+        getattr(model, "embed", None),
+        getattr(model, "head", None),
+        draft_state,
+        width=gamma,
+    )
     drafted = drafted.astype(mx.int32)
     verify_in = mx.concatenate([anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1)
     snapshot = SP.snap(cache, position)

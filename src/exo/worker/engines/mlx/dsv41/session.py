@@ -223,6 +223,9 @@ class Conversation:
         #: (``rounds._one_round``), and checkpointed with the body cache.
         self.draft_state: Any | None = None
         self._gen: list[int] = []
+        #: Cache rows already in place when the CURRENT turn started; the
+        #: generated history is aligned to position ``_base + k`` for entry ``k``.
+        self._base = 0
         self.n_turns = 0
         self._inflight = False
 
@@ -290,6 +293,7 @@ class Conversation:
                 "cache hit) and the cache holds no anchor logits for it; append the "
                 "new user text (or the previous reply) and retry."
             )
+        self._base = self.offset - int(res.tokens_prefilled)
         self._feed_taps(taps)
         if self.draft_state is not None and self.draft_ctx() != self.offset:
             raise RuntimeError(
@@ -340,11 +344,18 @@ class Conversation:
         self.n_turns += 1
 
     def cancel(self) -> int:
-        """Roll the in-flight turn back: cache, draft window and history."""
+        """Roll the in-flight turn back: cache, draft window and history.
+
+        The generated history is truncated to the rows the cache still holds
+        (``offset - _base`` entries of this turn), so re-running the turn
+        produces the same tokens and a later turn sees the pre-turn state.
+        """
         if not self._inflight:
             return 0
         dropped = int(self.cache.cancel())
-        del self._gen[self.offset :]  # only rows the cache still holds survive
+        keep = max(0, self.offset - self._base)
+        if len(self._gen) > keep:
+            del self._gen[keep:]
         self._inflight = False
         return dropped
 
