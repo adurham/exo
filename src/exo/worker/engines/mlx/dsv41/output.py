@@ -32,8 +32,7 @@ do, and its wrapper marker never matches a V4.1 block.
 from __future__ import annotations
 
 from collections.abc import Generator, Iterator
-
-from mlx_lm.tokenizer_utils import TokenizerWrapper
+from typing import TYPE_CHECKING
 
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.chunks import GenerationChunk
@@ -55,6 +54,9 @@ from exo.worker.runner.llm_inference.model_output_parsers import (
     map_responses_to_chunks,
     parse_thinking_models,
 )
+
+if TYPE_CHECKING:  # MLX only, and only for the type annotations below
+    from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 
 def parse_dsv41(

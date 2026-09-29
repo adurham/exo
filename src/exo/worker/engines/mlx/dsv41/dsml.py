@@ -39,8 +39,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Generator
-
-from mlx_lm.tokenizer_utils import TokenizerWrapper
+from typing import TYPE_CHECKING
 
 from exo.api.types import ToolCallItem
 from exo.shared.types.worker.runner_response import (
@@ -49,6 +48,9 @@ from exo.shared.types.worker.runner_response import (
 )
 from exo.worker.engines.mlx.vendor.dsml_encoding import parse_dsml_output
 from exo.worker.runner.bootstrap import logger
+
+if TYPE_CHECKING:  # MLX only, and only for the annotations below: this module
+    from mlx_lm.tokenizer_utils import TokenizerWrapper  # is pure text handling
 
 #: V4.1's sentinel token (``｜DSML｜``, one added token in the checkpoint vocab) and
 #: the V4 sentinel it is translated to. Both are checked against the checkpoint

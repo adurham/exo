@@ -43,10 +43,12 @@ absent from the vocab entirely, the install is a no-op with a loud warning.
 from __future__ import annotations
 
 import os
-
-from mlx_lm.tokenizer_utils import TokenizerWrapper
+from typing import TYPE_CHECKING
 
 from exo.worker.runner.bootstrap import logger
+
+if TYPE_CHECKING:  # MLX only, and only for the annotations below
+    from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 #: DSv4.1's reasoning delimiters, byte-for-byte as they appear in the
 #: checkpoint's tokenizer (ids 128821 / 128822) and chat template.
