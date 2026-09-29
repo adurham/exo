@@ -271,7 +271,7 @@ def _one_round(
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
         return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
 
-    from mlx_lm.models.deepseek_v41 import spec as SP
+    from mlx_lm.models.deepseek_v41 import spec
 
     taps_ids: list[int] = list(model.args.dspark_target_layer_ids)
 
@@ -300,23 +300,29 @@ def _one_round(
     position = int(cache.offset)
     drafted = head.draft(anchor, model.embed, model.head, draft_state, width=gamma)
     drafted = drafted.astype(mx.int32)
-    verify_in = mx.concatenate([anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1)
-    snapshot = SP.snap(cache, position)
+    verify_in = mx.concatenate(
+        [anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1
+    )
+    snapshot = spec.snap(cache, position)
     logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
     mx.eval(logits)
-    stashes = SP.stashes(cache)
+    stashes = spec.stashes(cache)
     target = [int(v) for v in logits[0]]
     draft = [int(v) for v in drafted[0]]
 
     accepted = 0
-    while accepted < gamma and accepted < len(target) and target[accepted] == draft[accepted]:
+    while (
+        accepted < gamma
+        and accepted < len(target)
+        and target[accepted] == draft[accepted]
+    ):
         accepted += 1
     # The token at the first mismatch is the target's own argmax -- it is
     # committed along with the accepted drafts, so a round always commits at
     # least one token and the cache lands on a position the target produced.
     committed = draft[:accepted] + [target[accepted]]
     committed_position = position + accepted + 1
-    SP.rollback(cache, snapshot, committed_position, stashes)
+    spec.rollback(cache, snapshot, committed_position, stashes)
     head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)
     return (
         committed,

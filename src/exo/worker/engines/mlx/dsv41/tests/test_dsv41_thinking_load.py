@@ -65,8 +65,14 @@ def _shard(cls, *, device_rank: int, world_size: int):
 
 
 def test_tensor_shard_world_1_and_2_are_supported():
-    assert tp_geometry(_shard(TensorShardMetadata, device_rank=0, world_size=1)) == (0, 1)
-    assert tp_geometry(_shard(TensorShardMetadata, device_rank=1, world_size=2)) == (1, 2)
+    assert tp_geometry(_shard(TensorShardMetadata, device_rank=0, world_size=1)) == (
+        0,
+        1,
+    )
+    assert tp_geometry(_shard(TensorShardMetadata, device_rank=1, world_size=2)) == (
+        1,
+        2,
+    )
 
 
 def test_tensor_shard_world_3_is_refused():
@@ -75,7 +81,10 @@ def test_tensor_shard_world_3_is_refused():
 
 
 def test_single_rank_pipeline_shard_is_the_whole_model_on_one_node():
-    assert tp_geometry(_shard(PipelineShardMetadata, device_rank=0, world_size=1)) == (0, 1)
+    assert tp_geometry(_shard(PipelineShardMetadata, device_rank=0, world_size=1)) == (
+        0,
+        1,
+    )
 
 
 def test_multi_rank_pipeline_shard_is_refused():
@@ -174,11 +183,18 @@ def test_attribute_guard_raises_when_mlx_lm_renames_the_field(
 
 
 def test_markers_match_checkpoint_detects_a_foreign_pair():
-    tokenizer = FakeTokenizer(vocab=VOCAB, think_start="<|think|>", think_end="<|/think|>")
+    tokenizer = FakeTokenizer(
+        vocab=VOCAB, think_start="<|think|>", think_end="<|/think|>"
+    )
     assert tokenizer.has_thinking is True
     assert thinking.markers_match_checkpoint(tokenizer) is False
     assert thinking.markers_match_checkpoint(FakeTokenizer(vocab=VOCAB)) is True
-    assert thinking.markers_match_checkpoint(FakeTokenizer(vocab=VOCAB, has_thinking=False)) is False
+    assert (
+        thinking.markers_match_checkpoint(
+            FakeTokenizer(vocab=VOCAB, has_thinking=False)
+        )
+        is False
+    )
 
 
 def test_checkpoint_style_vocab_is_the_source_of_the_constants():

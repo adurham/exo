@@ -41,8 +41,8 @@ def test_sentinel_is_byte_identical_to_the_checkpoint_tokenizer():
 
 def test_wrapper_and_tag_spellings_match_the_chat_template():
     sentinel = dsml.DSML_V41
-    assert dsml.CALLS_START_V41 == f"<{sentinel} calls>"
-    assert dsml.CALLS_END_V41 == f"</{sentinel} calls>"
+    assert f"<{sentinel} calls>" == dsml.CALLS_START_V41
+    assert f"</{sentinel} calls>" == dsml.CALLS_END_V41
     # The V4.1 template writes the space INSIDE the tag, so the invoke and
     # parameter tags carry it too. Pin the exact strings the model emits and
     # the exact V4 spellings they normalize to.
@@ -75,7 +75,7 @@ def test_dsml_v41_declares_the_v41_tag_names_not_the_v4_ones():
     """
     sentinel = dsml.DSML_V41
     assert dsml.CALLS_START_V41 != dsml._CALLS_START_V4
-    assert dsml.CALLS_START_V41 == f"<{sentinel} calls>"
+    assert f"<{sentinel} calls>" == dsml.CALLS_START_V41
     assert (
         dsml.CALLS_START_V41.replace(f"{sentinel} ", sentinel).replace(
             "calls", "tool_calls"

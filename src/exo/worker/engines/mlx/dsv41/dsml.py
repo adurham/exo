@@ -137,11 +137,7 @@ def strip_orphan_dsml_v41(
     sentinel on production DSv4, and structurally identical here).
     """
     for item in stream:
-        if (
-            isinstance(item, GenerationResponse)
-            and item.text
-            and DSML_V41 in item.text
-        ):
+        if isinstance(item, GenerationResponse) and item.text and DSML_V41 in item.text:
             cleaned = strip_dsml_v41(item.text)
             if cleaned == item.text:
                 yield item

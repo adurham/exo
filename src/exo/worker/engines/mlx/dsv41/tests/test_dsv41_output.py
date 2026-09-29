@@ -59,7 +59,9 @@ def _block(name: str = "read", param: str = "path", value: str = "/tmp/a") -> st
     )
 
 
-def _parse(texts: list[str], tokenizer: FakeTokenizer, *, tokens=None, prompt: str = ""):
+def _parse(
+    texts: list[str], tokenizer: FakeTokenizer, *, tokens=None, prompt: str = ""
+):
     """Run the pipeline over a stream built from text chunks (+ their token ids)."""
     return list(
         filter(
@@ -100,7 +102,7 @@ def _parse_ids(
 
 def _stream(
     texts: list[str], tokens: list[int] | None = None
-) -> Generator[GenerationResponse | None, None, None]:
+) -> Generator[GenerationResponse | None]:
     """Production-shaped stream: None between responses, terminal chunk separate."""
     ids = tokens if tokens is not None else list(range(200, 200 + len(texts)))
     for i, text in enumerate(texts):
@@ -190,9 +192,7 @@ def test_tokenizer_without_markers_never_thinking_splits():
 
 
 def test_tool_call_becomes_a_tool_call_chunk_with_parsed_arguments():
-    chunks = _parse(
-        [_block()], FakeTokenizer(), tokens=[DSML_SENTINEL_ID]
-    )
+    chunks = _parse([_block()], FakeTokenizer(), tokens=[DSML_SENTINEL_ID])
     calls = [c for c in chunks if isinstance(c, ToolCallChunk)]
     assert len(calls) == 1
     assert calls[0].finish_reason == "tool_calls"

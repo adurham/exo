@@ -72,7 +72,11 @@ def parse_dsv41(
     the text-only fallback for tokenizers that cannot resolve the id.
     """
     stream = _parse_dsml_stream(
-        responses, CALLS_START_V41, CALLS_END_V41, parse_dsml_v41_body, dsml_special_token_ids
+        responses,
+        CALLS_START_V41,
+        CALLS_END_V41,
+        parse_dsml_v41_body,
+        dsml_special_token_ids,
     )
     stream = strip_orphan_dsml_v41(stream)
     return _recover_or_fail_sentinelless_tool_call(stream)
@@ -99,7 +103,7 @@ def dsv41_output_parser(
         )
     generator = parse_dsv41(generator, resolve_dsml_v41_ids(tokenizer))
     generator = count_reasoning_tokens(generator)
-    return map(lambda r: map_responses_to_chunks(r, model_id), generator)
+    return (map_responses_to_chunks(r, model_id) for r in generator)
 
 
 def _starts_in_thinking(prompt: str, tokenizer: TokenizerWrapper) -> bool:

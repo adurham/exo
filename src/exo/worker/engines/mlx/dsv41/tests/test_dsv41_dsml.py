@@ -88,12 +88,22 @@ def test_body_parses_one_call_with_typed_params():
 def test_body_parses_nested_json_object_argument():
     config = '{"recurring": true, "days": ["mon", "wed"], "time": "09:00"}'
     calls = parse_dsml_v41_body(
-        _block(_invoke("create_event", _param("title", "Standup"), _param("config", config, string=False)))
+        _block(
+            _invoke(
+                "create_event",
+                _param("title", "Standup"),
+                _param("config", config, string=False),
+            )
+        )
     )
     assert calls is not None
     args = json.loads(calls[0].arguments)
     assert args["title"] == "Standup"
-    assert args["config"] == {"recurring": True, "days": ["mon", "wed"], "time": "09:00"}
+    assert args["config"] == {
+        "recurring": True,
+        "days": ["mon", "wed"],
+        "time": "09:00",
+    }
 
 
 def test_body_parses_several_invokes_in_one_block():
@@ -306,26 +316,34 @@ def test_stream_tool_call_carries_usage_from_the_terminal_response():
 
 
 def test_quoted_marker_in_prose_is_not_a_tool_call(tokenizer: FakeTokenizer):
-    """The model explaining its own syntax must stream out verbatim."""
+    """The model explaining its own syntax must not become a tool call.
+
+    Measured behaviour (pinned here rather than assumed): exo's orphan-marker
+    stripper removes the SENTINEL from content unconditionally -- the standing
+    "the sentinel never reaches displayed text" invariant, shared with the V4
+    path -- so a quoted marker survives only as its non-sentinel fragments.
+    What must hold is: no tool call, no error, and no sentinel leak.
+    """
     chunks = [
         "Tool calls look like ",
         f"<{DSML_V41} calls>",
-        f"<{DSML_V41} invoke name=\"x\">",
+        f'<{DSML_V41} invoke name="x">',
         " inside a reply.",
     ]
     # No sentinel token id anywhere: ordinary BPE text of the same characters.
     parsed = list(parse_dsv41(responses(chunks), resolve_dsml_v41_ids(tokenizer)))
     assert [r for r in parsed if isinstance(r, ToolCallResponse)] == []
+    assert [
+        r
+        for r in parsed
+        if isinstance(r, GenerationResponse) and r.finish_reason == "error"
+    ] == []
     text = "".join(
         r.text for r in parsed if isinstance(r, GenerationResponse) and r.text
     )
-    # NOTE: the sentinel characters survive; the closing ">" of the quoted tag
-    # does not, because exo's orphan-marker stripper removes the bare sentinel
-    # from content unconditionally (the standing "never leak the sentinel"
-    # invariant, shared with the V4 path). A quoted marker is left readable
-    # enough for the client, and the important part -- no false tool call -- holds.
-    assert DSML_V41 in text
-    assert [r for r in parsed if isinstance(r, ToolCallResponse)] == []
+    assert DSML_V41 not in text
+    assert "Tool calls look like" in text
+    assert "inside a reply." in text
 
 
 def test_malformed_block_fails_the_turn_without_leaking_the_sentinel():
@@ -373,9 +391,18 @@ def test_malformed_block_in_legacy_mode_strips_the_markers():
 
 def test_unterminated_block_fails_the_turn():
     chunks, tokens = _sentinel_chunks(
-        [CALLS_START_V41, "\n<", DSML_V41, " invoke name=\"read\">\n<", DSML_V41, " parameter"]
+        [
+            CALLS_START_V41,
+            "\n<",
+            DSML_V41,
+            ' invoke name="read">\n<',
+            DSML_V41,
+            " parameter",
+        ]
     )
-    parsed = list(parse_dsv41(responses(chunks, tokens=tokens), frozenset({DSML_SENTINEL_ID})))
+    parsed = list(
+        parse_dsv41(responses(chunks, tokens=tokens), frozenset({DSML_SENTINEL_ID}))
+    )
     errors = [
         r
         for r in parsed
@@ -393,7 +420,7 @@ def test_legacy_mode_strips_instead_of_failing():
     residue, never fail the turn.
     """
     chunks, _ = _sentinel_chunks(
-        [CALLS_START_V41, "\n<", DSML_V41, " invoke name=\"read\">\nfeather<tool>>"]
+        [CALLS_START_V41, "\n<", DSML_V41, ' invoke name="read">\nfeather<tool>>']
     )
     stream = responses(chunks)
     parsed = list(parse_dsv41(stream, frozenset()))
@@ -424,7 +451,7 @@ def test_orphan_closers_never_leak_the_sentinel():
 def test_sentinelless_block_is_recovered_not_leaked():
     """The correct structure with NO sentinel: the DSv4 recovery path owns it."""
     chunks = [
-        "<tool_calls>\n<invoke name=\"read_file\">\n",
+        '<tool_calls>\n<invoke name="read_file">\n',
         '<parameter name="path" string="true">/tmp/a</parameter>\n',
         "</invoke>\n</tool_calls>",
     ]
@@ -448,6 +475,6 @@ def _sentinel_chunks(chunks: list[str]) -> tuple[list[str], list[int]]:
 
 def _stream_of(
     *items: GenerationResponse | None,
-) -> Generator[GenerationResponse | None, None, None]:
+) -> Generator[GenerationResponse | None]:
     """A generator over already-materialised responses (typing-clean helper)."""
     yield from items

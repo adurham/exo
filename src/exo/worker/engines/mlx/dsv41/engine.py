@@ -38,21 +38,16 @@ uses.
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass, field
-from typing import Any, BinaryIO, Literal, cast
+from typing import Any, BinaryIO
 
 import mlx.core as mx
-from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.api.types import (
-    CompletionTokensDetails,
     FinishReason,
     GenerationStats,
-    PromptTokensDetails,
-    Usage,
 )
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.chunks import ErrorChunk, GenerationChunk, PrefillProgressChunk
@@ -122,7 +117,9 @@ class _RoundStats:
         self.gammas += gamma
         self.ms += ms
 
-    def stats(self, prompt_tps: float, prompt_tokens: int, generated: int) -> GenerationStats:
+    def stats(
+        self, prompt_tps: float, prompt_tokens: int, generated: int
+    ) -> GenerationStats:
         elapsed = self.ms / 1e3
         return GenerationStats(
             prompt_tps=prompt_tps,
@@ -241,7 +238,9 @@ class Dsv41Engine(Engine):
 
     def step(
         self,
-    ) -> Iterator[tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]]:
+    ) -> Iterator[
+        tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]
+    ]:
         if self._active is None:
             self._agreement.agree_on_tasks()
             if self._agreement.queue:
@@ -425,7 +424,9 @@ class Dsv41Engine(Engine):
 
         head = self.loaded.head if self.speculative else None
         policy = (
-            _spec_policy(self.gamma) if (head is not None and self.adaptive_gamma) else None
+            _spec_policy(self.gamma)
+            if (head is not None and self.adaptive_gamma)
+            else None
         )
         round_stats = _RoundStats()
         token = first_token

@@ -53,6 +53,7 @@ from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.rounds import _one_round, _spec_policy
 from exo.worker.engines.mlx.dsv41.tests.conftest import (
     DSML_SENTINEL_ID,
+    MX_ON_CPU,
     THINK_END,
     THINK_START,
     FakeTokenizer,
@@ -61,15 +62,21 @@ from exo.worker.engines.mlx.dsv41.tests.conftest import (
 
 MODEL = model_id()
 
-#: Pin MLX to the CPU for this module. The engine tests use tiny mock arrays
-#: (argmax of a one-hot row); running them on the Metal device would touch the
-#: GPU for no reason on a machine that may be serving production. Guarded so a
-#: build without set_default_device still runs the suite.
-try:  # pragma: no cover - environment dependent
-    mx.set_default_device(mx.cpu)
-    _MX_ON_CPU = True
-except Exception:  # noqa: BLE001
-    _MX_ON_CPU = False
+
+def test_suite_never_takes_the_gpu():
+    """The whole DSv4.1 suite must run without a Metal device.
+
+    Enforced here, not just documented: it is the difference between a test run
+    that is safe to launch on a serving node and one that steals the GPU and
+    stalls behind the production job. The pin is installed by conftest.py before
+    exo's engine modules are imported (a Metal stream created at import time
+    would keep the process on the GPU no matter what a later call says).
+    """
+    import mlx.core as mx
+
+    assert MX_ON_CPU is True, "MLX default device could not be pinned to the CPU"
+    assert mx.default_device() == mx.cpu
+
 
 #: Token ids the scripted model emits, with the text each detokenizes to.
 THINK_TEXT = {30: THINK_START, 31: "why", 32: " because", 33: THINK_END}
@@ -127,7 +134,7 @@ class ScriptedModel:
     def __call__(
         self,
         input_ids: mx.array,
-        cache: "MockCache",
+        cache: MockCache,
         last_logit_only: bool = False,
         return_taps: bool = False,
         argmax: bool = False,
@@ -156,7 +163,9 @@ class ScriptedModel:
         out: list[int] = []
         for row in range(int(input_ids.shape[0])):
             token = int(input_ids[row, -1])
-            position = self.script.index(token) + 1 if token in self.script else self.committed
+            position = (
+                self.script.index(token) + 1 if token in self.script else self.committed
+            )
             out.append(self.script[min(position, len(self.script) - 1)])
         return out
 
@@ -379,11 +388,17 @@ def test_usage_is_attached_to_the_terminal_chunk_only():
         [34, 35, 1], text_of=ANSWER_TEXT, max_output_tokens=8
     )
     chunks = _drain(engine)
-    with_usage = [c for c in chunks if isinstance(c, TokenChunk) and c.usage is not None]
+    with_usage = [
+        c for c in chunks if isinstance(c, TokenChunk) and c.usage is not None
+    ]
     assert len(with_usage) == 1
     usage = with_usage[0].usage
     assert usage is not None
-    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (3, 2, 5)
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (
+        3,
+        2,
+        5,
+    )
 
 
 # --------------------------------------------------------------- reasoning

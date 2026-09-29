@@ -44,9 +44,7 @@ def token_map_path(model_path: Path) -> Path | None:
     return default_token_map_path(model_path)
 
 
-def ensure_engram_token_map(
-    model_path: Path, tokenizer: object
-) -> Path | None:
+def ensure_engram_token_map(model_path: Path, tokenizer: object) -> Path | None:
     """Return a path to the engram compressed-token map, deriving it if needed.
 
     ``tokenizer`` is the HF tokenizer behind exo's ``TokenizerWrapper``. Returns

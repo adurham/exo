@@ -14,6 +14,7 @@ Nothing here loads a checkpoint: the builders are compared by type, and
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import tomlkit
@@ -47,6 +48,7 @@ from exo.worker.engines.mlx.dsv41.dispatch import (
     make_mlx_family_builder,
 )
 
+
 def _card_file() -> Path:
     """Locate the shipped card without depending on a fixed parents[] depth.
 
@@ -66,15 +68,15 @@ DSV41_MODEL_ID = ModelId("dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw")
 
 
 def _card(**overrides) -> ModelCard:
-    base = dict(
-        model_id=ModelId("some/model"),
-        storage_size=Memory.from_mb(1000),
-        n_layers=32,
-        hidden_size=2048,
-        supports_tensor=True,
-        tasks=[ModelTask.TextGeneration],
-        backends=[Backend.MlxMetal],
-    )
+    base: dict[str, Any] = {
+        "model_id": ModelId("some/model"),
+        "storage_size": Memory.from_mb(1000),
+        "n_layers": 32,
+        "hidden_size": 2048,
+        "supports_tensor": True,
+        "tasks": [ModelTask.TextGeneration],
+        "backends": [Backend.MlxMetal],
+    }
     base.update(overrides)
     return ModelCard(**base)
 
@@ -100,7 +102,9 @@ def _bound(card: ModelCard, *, tensor: bool = True) -> BoundInstance:
         ephemeral_port=50000,
     )
     return BoundInstance(
-        instance=instance, bound_runner_id=RunnerId("runner"), bound_node_id=NodeId("node")
+        instance=instance,
+        bound_runner_id=RunnerId("runner"),
+        bound_node_id=NodeId("node"),
     )
 
 

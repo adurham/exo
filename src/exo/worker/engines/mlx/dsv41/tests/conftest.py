@@ -21,6 +21,22 @@ from typing import Any
 
 import pytest
 
+#: Pin MLX to the CPU for the WHOLE suite, before anything else imports exo or
+#: mlx_lm. The DSv4.1 tests here use only tiny mock arrays (the argmax of a
+#: one-hot row), so there is no reason to touch the GPU -- and on a cluster node
+#: a Metal default device is a real hazard: the suite would take the GPU from
+#: whatever is serving, which is exactly what an unlocked test run must never do.
+#: This has to happen before exo's engine modules are imported because some of
+#: them create arrays at import time, and a Metal stream created there keeps the
+#: process on the GPU even if the default device changes later.
+try:  # pragma: no cover - environment dependent
+    import mlx.core as _mx
+
+    _mx.set_default_device(_mx.cpu)
+    MX_ON_CPU = True
+except Exception:  # noqa: BLE001 - a build without MLX still runs the parsing tests
+    MX_ON_CPU = False
+
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.worker.runner_response import GenerationResponse
 

@@ -13,7 +13,7 @@ class Dsv41Error(Exception):
     """Base class for DSv4.1 engine errors."""
 
 
-class Dsv41UnsupportedPlacement(Dsv41Error):
+class Dsv41UnsupportedPlacement(Dsv41Error):  # noqa: N818 - name is public API
     """The instance's shard metadata cannot be served by this engine.
 
     Today that means: a Pipeline shard spanning more than one rank. DSv4.1
@@ -28,7 +28,7 @@ class Dsv41UnsupportedPlacement(Dsv41Error):
     """
 
 
-class Dsv41UnsupportedFeature(Dsv41Error):
+class Dsv41UnsupportedFeature(Dsv41Error):  # noqa: N818 - name is public API
     """A requested feature is not wired for DSv4.1 yet.
 
     Raised loudly rather than silently degrading: prefix-cache reuse and
