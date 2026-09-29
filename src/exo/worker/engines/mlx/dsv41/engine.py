@@ -59,7 +59,7 @@ from exo.shared.types.chunks import ErrorChunk, GenerationChunk, PrefillProgress
 from exo.shared.types.events import ChunkGenerated, Event
 from exo.shared.types.memory import Memory
 from exo.shared.types.tasks import GenerationTask, TaskId, TextGeneration
-from exo.shared.types.text_generation import TextGenerationTaskParams
+from exo.shared.types.text_generation import InputMessage, TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import (
     CancelledResponse,
     FinishedResponse,
@@ -74,6 +74,17 @@ from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.output import dsv41_output_parser
+from exo.worker.engines.mlx.dsv41.rounds import (
+    _cache_capacity,
+    _final_response,
+    _mid_response,
+    _one_round,
+    _queue_of,
+    _refuse_unsupported,
+    _spec_policy,
+    _stop_index,
+    _stop_sequences,
+)
 from exo.worker.engines.mlx.generator.generate import PrefillCancelled
 from exo.worker.engines.mlx.utils_mlx import apply_chat_template, get_coord_group
 from exo.worker.runner.bootstrap import logger
@@ -91,6 +102,11 @@ DEFAULT_WARMUP_TOKENS = 8
 
 #: Prompt used for warmup; deliberately a plain chat turn.
 _WARMUP_PROMPT = "Reply with the single word: ready"
+
+
+def _warmup_messages() -> list[InputMessage]:
+    """The warmup request's messages (one plain user turn)."""
+    return [InputMessage(role="user", content=_WARMUP_PROMPT)]
 
 
 @dataclass
@@ -173,9 +189,10 @@ class Dsv41Engine(Engine):
     _cancelled_tasks: set[TaskId] = field(default_factory=set, init=False)
     _agreement: RankAgreement = field(init=False)
     _active: _Active | None = field(default=None, init=False)
-    #: DSpark draft context windows, keyed by anchor token id. Rebuilt from the
-    #: verify pass' taps every round (see ``_round``); kept here only so the
-    #: object lives for the whole request.
+    #: The DSpark draft window for the request (``rounds._DRAFT_KEY``). The
+    #: head's context is continuous over the request's tokens, so one window
+    #: lives here for the whole request: primed from the first decode step's
+    #: taps and appended to on every verify round (see ``rounds._one_round``).
     _draft_windows: dict[int, Any] = field(default_factory=dict, init=False)
     _stop_sequences: tuple[str, ...] = field(default=(), init=False)
 

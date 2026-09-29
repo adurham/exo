@@ -1,0 +1,78 @@
+# DeepSeek-V4.1-Flash, abliterated + EXL3 2.9bpw, served by the dedicated
+# DSv4.1 (EXL3) engine.
+#
+# WHY `engine = "dsv41"` AND NOT THE GENERIC MLX PATH. This checkpoint is an
+# exllamav3-style EXL3 quant (2.9 bpw trellis groups, mul1 codebook, 6-bit
+# head) whose weights are consumed directly by hand-written Metal kernels in
+# the mlx-lm fork's `deepseek_v41` package. `mlx_lm.utils.load_model` cannot
+# load it, and exo's generic post-load machinery does not apply: the model has
+# its own cache object, its own cross-layer shared state, and its tensor
+# parallelism is built INTO `exl3_build.build_model`. So this card names the
+# engine explicitly; every card without the field keeps the generic path.
+#
+# GEOMETRY (from the checkpoint's config.json -> text_config, verified
+# 2026-09-29 on macstudio-m4-1):
+#   n_layers 40, hidden 5120, MoE 384 routed top-6 + 1 shared, num_key_value_heads 1
+#   (MLA: one shared 512-d KV vector per position), head_dim 512,
+#   vocab 129280, max_position_embeddings 1048576, rope theta 10000 with YaRN
+#   factor 16 from 65536, and a 128-token sliding window on the pure-window
+#   layers. NOTE the 43-vs-40 difference from the DSv4 cards: V4.1's 43 config
+#   entries include the 3 DSpark draft layers (`mtp.*`, dspark_target_layer_ids
+#   [37, 38, 39]) which are NOT part of the served body's layer count.
+#
+# storage_size = `metadata.total_size` from the checkpoint's own
+# model.safetensors.index.json (the same derivation as `fetch_safetensors_size`,
+# which defines card storage sizes): 210,713,013,432 bytes across 39 shards
+# (~196 GiB). Measured on macstudio-m4-1, not copied from a page. It INCLUDES
+# the on-disk `mtp.*`/dspark tensors, so the loaded footprint is a little lower;
+# as a placement estimate that is the safe direction. At TP=2 this is ~105 GB
+# per rank, which is what the two-node placement needs to fit in 115 GB wired.
+#
+# `backends` is Metal-only on purpose. The EXL3 trellis/MoE kernels this
+# checkpoint needs are hand-written for Metal (see exl3/gemv_metal.py in the
+# fork); claiming MlxCpu/MlxCuda would let placement put this card on a node
+# that cannot execute it.
+#
+# CAPABILITIES. The checkpoint DOES carry a vision tower (vision_config:
+# 32 layers, dim 1024, patch 14, downsample 3; and a real `image_token_id`
+# 129264 = "<|deepseek_image|>"), but the exo-side image plumbing for V4.1 is a
+# separate workstream and is not part of this build -- the engine refuses an
+# image-bearing request loudly rather than answering from text only. So "vision"
+# is deliberately NOT advertised here; add it only when that path serves
+# images for real.
+#
+# CONTEXT is the checkpoint's own 1M (validated at 256k-600k by the quant's
+# author on the reference hardware). Long-prompt PREFILL is still the open
+# performance problem for this model (74 tok/s at 8K, Metal GPU-timeout above
+# 16K on the un-fixed path), so a 1M context is a capability, not a promise
+# about throughput.
+model_id = "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw"
+n_layers = 40
+hidden_size = 5120
+num_key_value_heads = 1
+supports_tensor = true
+tasks = ["TextGeneration"]
+family = "deepseek"
+quantization = "exl3"
+base_model = "DeepSeek V4.1 Flash"
+engine = "dsv41"
+capabilities = ["text", "thinking", "thinking_toggle"]
+reasoning_dialect = "tool_conditional"
+
+context_length = 1048576
+backends = ["MlxMetal"]
+[storage_size]
+in_bytes = 210713013432
+
+# GREEDY ONLY, for now. The engine's speculative/greedy round resolves
+# argmaxes; there is no sampling path yet (a non-zero temperature is refused at
+# request time rather than silently served greedy). temperature = 0.0 is
+# therefore the honest card default: it says what this engine does instead of
+# inviting clients to ask for sampling it cannot do. min_p is pinned to 0.0
+# (not omitted) because an absent card value falls through to exo's hardcoded
+# min_p 0.05 -- irrelevant while greedy, but it would silently clip the tail
+# the moment sampling lands. The checkpoint's own README recommends higher
+# temperatures for agentic use; re-point these when sampling exists.
+[sampling_defaults]
+temperature = 0.0
+min_p = 0.0

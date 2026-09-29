@@ -10,12 +10,23 @@ making it one would drag this engine's model under
 ``mlx_lm.models.deepseek_v4``'s isinstance checks all over
 ``auto_parallel``/``batch_generate``/``pp_speculation``). Rather than edit a
 shared file for one call site, the engine builds the same pipeline here, in the
-same order, from the same pieces:
+same order, from the same pieces -- with two V4.1 substitutions:
 
-    parse_thinking_models -> parse_deepseek_v4 -> count_reasoning_tokens
+    parse_thinking_models -> parse_dsv41 (V4.1) -> count_reasoning_tokens
                           -> map_responses_to_chunks
+                          ^
+                          +-- same shape as ``parse_deepseek_v4`` (exo's
+                              ``_parse_dsml_stream`` + orphan stripping +
+                              sentinel-less recovery), but parameterized on the
+                              V4.1 wrapper markers ``<|DSML| calls>`` /
+                              ``</|DSML| calls>`` and the V4.1 body parser.
 
-so DSv4.1's chunks are byte-for-byte what the V4 path would have produced.
+The sentinel-less recovery is kept for DSv4.1 on purpose: it keys on the
+``<parameter name="…" string="true|false">`` signature and the bare
+``|DSML|`` sentinel, and BOTH of those are spelled identically in the two
+dialects, so the protection (and the clean-fail) is exactly as valid here. What
+it must not do is run the V4 parser: that is what ``parse_deepseek_v4`` would
+do, and its wrapper marker never matches a V4.1 block.
 """
 
 from __future__ import annotations
@@ -26,14 +37,45 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.chunks import GenerationChunk
-from exo.shared.types.worker.runner_response import GenerationResponse
+from exo.shared.types.worker.runner_response import (
+    GenerationResponse,
+    ToolCallResponse,
+)
+from exo.worker.engines.mlx.dsv41.dsml import (
+    CALLS_END_V41,
+    CALLS_START_V41,
+    parse_dsml_v41_body,
+    resolve_dsml_v41_ids,
+    strip_orphan_dsml_v41,
+)
 from exo.worker.runner.llm_inference.model_output_parsers import (
-    _resolve_dsml_special_token_ids,
+    _parse_dsml_stream,
+    _recover_or_fail_sentinelless_tool_call,
     count_reasoning_tokens,
     map_responses_to_chunks,
-    parse_deepseek_v4,
     parse_thinking_models,
 )
+
+
+def parse_dsv41(
+    responses: Generator[GenerationResponse | None],
+    dsml_special_token_ids: frozenset[int] = frozenset(),
+) -> Generator[GenerationResponse | ToolCallResponse | None]:
+    """Parse a DeepSeek-V4.1 DSML tool-call block out of the token stream.
+
+    The V4.1 analogue of ``model_output_parsers.parse_deepseek_v4``: same
+    skeleton, V4.1 wrapper markers and body parser. ``dsml_special_token_ids``
+    gates real-vs-quoted detection exactly as it does for V4 -- a tool call is
+    only recognized when the sentinel arrived as its dedicated vocab token
+    (id 128825 here), so the model quoting ``<|DSML| calls>`` in prose is left
+    as readable content rather than stripped or rerouted. An empty set keeps
+    the text-only fallback for tokenizers that cannot resolve the id.
+    """
+    stream = _parse_dsml_stream(
+        responses, CALLS_START_V41, CALLS_END_V41, parse_dsml_v41_body, dsml_special_token_ids
+    )
+    stream = strip_orphan_dsml_v41(stream)
+    return _recover_or_fail_sentinelless_tool_call(stream)
 
 
 def dsv41_output_parser(
@@ -45,9 +87,9 @@ def dsv41_output_parser(
     """Full output pipeline for DSv4.1: thinking split, DSML tool calls, chunks.
 
     ``prompt`` is the rendered prompt; it decides the initial state of the
-    thinking split (a prefill that ends on ``<think>`` starts inside reasoning).
+    thinking split (a prefill that ends on `` thinking`` starts inside reasoning).
     """
-    generator: Generator[GenerationResponse | None] = responses
+    generator: Generator[GenerationResponse | ToolCallResponse | None] = responses
     if tokenizer.has_thinking:
         generator = parse_thinking_models(
             generator,
@@ -55,7 +97,7 @@ def dsv41_output_parser(
             tokenizer.think_end,
             starts_in_thinking=_starts_in_thinking(prompt, tokenizer),
         )
-    generator = parse_deepseek_v4(generator, _resolve_dsml_special_token_ids(tokenizer))
+    generator = parse_dsv41(generator, resolve_dsml_v41_ids(tokenizer))
     generator = count_reasoning_tokens(generator)
     return map(lambda r: map_responses_to_chunks(r, model_id), generator)
 

@@ -1,40 +1,43 @@
-"""DSv4.1 thinking-marker detection for exo's output pipeline.
+"""DSv4.1 thinking-marker resolution for exo's output pipeline.
 
-THE PROBLEM. DeepSeek-V4.1 does not spell its reasoning markers as plain text in
-the vocabulary: it has single special tokens
-``<｜begin▁of▁thinking｜>`` (id 128821) and ``<｜end▁of▁thinking｜>``, with
-FULLWIDTH vertical bars (U+FF5C). ``mlx_lm.tokenizer_utils._infer_thinking``
-only recognises the ASCII spellings (``" thinking"``/``"</think>"``,
-longcat, XTML), so exo's ``TokenizerWrapper`` reports
-``has_thinking=False`` for this tokenizer. That is not cosmetic: with no think
-markers, exo's output pipeline never routes reasoning into
-``reasoning_content`` AND cannot tell that a continuation prompt already ends
-inside a reasoning block. Both are properties exo's DSv4 (V4) serving has and
-DSv4.1 must match, so the engine resolves the markers itself.
+WHAT THE CHECKPOINT ACTUALLY HAS (verified 2026-09-29 against
+``~/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw`` on
+macstudio-m4-1, by loading its tokenizer through this repo's mlx-lm fork):
 
-HOW. Three ways were possible:
+* `` thinking``  -- a single added token, id **128821** (utf-8 ``3c7468696e6b3e``)
+* `` response`` -- a single added token, id **128822** (utf-8 ``3c2f7468696e6b3e``)
+* the checkpoint's own ``chat_template.jinja`` emits them literally as
+  ``think_open`` / ``think_close`` around the reasoning block.
 
-1. Change ``_infer_thinking`` in the mlx-lm fork.  Rejected for now: it is a
-   submodule we do not own in this stream, and the change would affect every
-   model exo serves.
-2. Wrap the tokenizer for this model on the exo side.  The wrap has to live
-   *inside* the TokenizerWrapper instance anyway, because everything downstream
-   reads ``tokenizer.think_start``/``has_thinking`` off that object.
-3. Populate the wrapper's marker state directly, which is what this module does.
+Both are plain ASCII, and ``mlx_lm.tokenizer_utils._infer_thinking`` does
+recognise exactly this pair, so ``TokenizerWrapper`` reports
+``has_thinking=True`` for this tokenizer and exo's standard thinking pipeline
+(``parse_thinking_models`` -> ``reasoning_content``) works unmodified. That is
+the happy path and it is what the tests pin.
 
-The values written here are exactly what ``_infer_thinking`` would have produced
-had it known the DSv4.1 spelling: the marker STRINGS (never token ids). That
-matters -- the streamed text arrives with ``skip_special_tokens=1`` (the default
-in ``stream_generate``), so the markers are decoded literal text; matching on
-strings is what makes ``parse_thinking_models`` work, and matching on ids (as
-``fix_unmatched_think_end_tokens`` does for the prompt) is a separate, correct
-use that keeps working because ids 128821/128822 are real vocab entries.
+WHY THIS MODULE STILL EXISTS. It is the single place that (a) asserts the
+sentinel strings and their vocab ids are the ones this engine's parsers expect,
+and (b) installs them when a tokenizer/wrapper does NOT report them -- which
+is the failure mode to defend against rather than a description of today. The
+markers matter beyond cosmetics: without them exo cannot route reasoning into
+``reasoning_content``, and it cannot tell that a continuation prompt already
+ends inside a reasoning block -- both properties DSv4 (V4) serving has and
+DSv4.1 must match.
 
-FAILURE MODE IF mlx-lm CHANGES. ``TokenizerWrapper.__init__`` sets ``_think_start``
-et al. as plain attributes (not read-only properties), so this patch is a
-straight attribute write; if the attribute is ever renamed the guard below raises
-at load time instead of silently leaving ``has_thinking=False``. Setting
-``EXO_DSV41_THINK_MARKERS=0`` disables the patch entirely.
+HOW THE INSTALL WORKS. Everything downstream reads ``tokenizer.think_start`` /
+``think_end`` / ``has_thinking`` off the ``TokenizerWrapper`` instance, and
+``TokenizerWrapper.__init__`` sets ``_think_start`` et al. as plain attributes,
+so the install is a straight attribute write. The values written are the marker
+STRINGS (never token ids) because streamed text arrives with
+``skip_special_tokens=1`` (``stream_generate``'s default): the markers are
+decoded literal text by then, which is what makes ``parse_thinking_models``
+work. The token ids are recorded alongside them for the prompt-side helpers
+(``fix_unmatched_think_end_tokens``) that do match by id.
+
+FAILURE MODES. If mlx-lm ever renames those attributes the guard below raises
+at load time instead of silently leaving reasoning unparsed. If the markers are
+absent from the vocab entirely, the install is a no-op with a loud warning.
+``EXO_DSV41_THINK_MARKERS=0`` disables the whole thing.
 """
 
 from __future__ import annotations
@@ -45,10 +48,20 @@ from mlx_lm.tokenizer_utils import TokenizerWrapper
 
 from exo.worker.runner.bootstrap import logger
 
-#: DSv4.1's reasoning delimiters, from the checkpoint's own vocab: both are
-#: single added tokens (a real tool call likewise emits DSML as one token).
-THINK_START = "<think>"
-THINK_END = "</think>"
+#: DSv4.1's reasoning delimiters, byte-for-byte as they appear in the
+#: checkpoint's tokenizer (ids 128821 / 128822) and chat template.
+#:
+#: Spelled by concatenation on purpose: a "<" immediately followed by a letter
+#: is eaten by the source-writing toolchain used on this tree (an earlier
+#: revision of this file silently landed as " think"). The byte-exact test in
+#: tests/test_dsv41_sentinels.py is the guard.
+THINK_START = "<" + "think" + ">"
+THINK_END = "<" + "/think" + ">"
+
+#: The vocab ids above, pinned so a checkpoint swap cannot silently keep
+#: serving with markers that no longer match.
+THINK_START_ID = 128821
+THINK_END_ID = 128822
 
 _MARKER_ENV = "EXO_DSV41_THINK_MARKERS"
 
@@ -70,8 +83,9 @@ def ensure_thinking_markers(tokenizer: TokenizerWrapper) -> bool:
     """Teach ``tokenizer`` its DSv4.1 reasoning markers. True when applied.
 
     Idempotent, and a no-op when another code path already resolved markers
-    (e.g. a future mlx-lm that knows this spelling, or the harness that built
-    the tokenizer): in that case the existing value is left untouched.
+    (today's mlx-lm does for this tokenizer, see the module docstring): the
+    existing value is left untouched. Returns True only when THIS call wrote
+    the markers.
     """
     if os.environ.get(_MARKER_ENV, "1") != "1":
         logger.warning(
@@ -84,7 +98,8 @@ def ensure_thinking_markers(tokenizer: TokenizerWrapper) -> bool:
     if tokenizer.has_thinking:
         logger.info(
             f"[DSV41] tokenizer already reports thinking markers "
-            f"({tokenizer.think_start!r} <-> {tokenizer.think_end!r})"
+            f"({tokenizer.think_start!r} <-> {tokenizer.think_end!r}); "
+            "leaving them as resolved."
         )
         return False
 
@@ -95,12 +110,16 @@ def ensure_thinking_markers(tokenizer: TokenizerWrapper) -> bool:
         logger.warning(
             "[DSV41] DSv4.1 thinking markers are absent from this tokenizer's "
             "vocab; leaving has_thinking=False (reasoning will stream as "
-            "content). Expected tokens: "
-            f"{THINK_START!r}/{THINK_END!r}"
+            f"content). Expected tokens: {THINK_START!r}/{THINK_END!r}"
         )
         return False
 
-    for attr in ("_think_start", "_think_end", "_think_start_tokens", "_think_end_tokens"):
+    for attr in (
+        "_think_start",
+        "_think_end",
+        "_think_start_tokens",
+        "_think_end_tokens",
+    ):
         if not hasattr(tokenizer, attr):
             raise RuntimeError(
                 f"mlx-lm TokenizerWrapper no longer exposes {attr}; the DSv4.1 "
@@ -118,3 +137,21 @@ def ensure_thinking_markers(tokenizer: TokenizerWrapper) -> bool:
         "reasoning_content."
     )
     return True
+
+
+def markers_match_checkpoint(tokenizer: TokenizerWrapper) -> bool:
+    """True when the tokenizer's resolved markers are this checkpoint's pair.
+
+    Cheap consistency check for load-time logging and for tests: it compares
+    the STRINGS (what the parsers match) and, when the wrapper exposes them,
+    the single-token ids (what the prompt-side helpers match).
+    """
+    if not tokenizer.has_thinking:
+        return False
+    if tokenizer.think_start != THINK_START or tokenizer.think_end != THINK_END:
+        return False
+    start_ids = getattr(tokenizer, "think_start_tokens", None)
+    end_ids = getattr(tokenizer, "think_end_tokens", None)
+    if start_ids is not None and tuple(start_ids) != (THINK_START_ID,):
+        return False
+    return end_ids is None or tuple(end_ids) == (THINK_END_ID,)

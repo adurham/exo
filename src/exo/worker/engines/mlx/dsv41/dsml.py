@@ -1,29 +1,38 @@
 """DeepSeek-V4.1's DSML dialect, expressed with exo's existing DSML machinery.
 
-WHY THIS EXISTS. V4.1 renamed the tool-call sentinel AND dropped the underscore
-in the tag names:
+WHY THIS EXISTS. V4.1's tool-call block uses the SAME 6-character sentinel as
+V4 -- ``\uff5cDSML\uff5c`` (U+FF5C), a single added token, id 128825 in this
+checkpoint's vocab -- but spells the tag NAMES differently: V4.1 puts a SPACE
+between the sentinel and the name inside the same tag, where V4 runs them
+together:
 
     V4 (exo production, ``deepseek_v4_encoding.py``)   V4.1 (this checkpoint)
-    <｜DSML｜tool_calls>                          <｜DSML｜ calls>
-    <｜DSML｜invoke name="x">                    <｜DSML｜ invoke name="x">
-    <｜DSML｜parameter name="k" string="true">v  <｜DSML｜ parameter name="k" string="true">v
+    <\uff5cDSML\uff5ctool_calls>                       <\uff5cDSML\uff5c calls>
+    <\uff5cDSML\uff5cinvoke name="x">                  <\uff5cDSML\uff5c invoke name="x">
+    <\uff5cDSML\uff5cparameter name="k" ...>           <\uff5cDSML\uff5c parameter name="k" ...>
 
-``mlx_lm.chat_templates.deepseek_v32.dsml_token`` (which exo's vendor module
-rebuilds from) is the V4 spelling, so ``parse_deepseek_v4`` cannot see a V4.1
-block at all: the wrapper marker never matches. The checkpoint's own
-``chat_template.jinja`` agrees with the reference encoder (``dsml_token = "｜DSML｜"``,
-``tool_calls_block_name = " calls"``, ``tool_call_tag_name = "｜DSML｜"``,
-``tool_parameter_tag_name = "｜DSML｜"``) -- note the leading space in each tag name.
+Those V4.1 spellings are read straight out of the checkpoint's own
+``chat_template.jinja`` (``dsml = "\uff5cDSML\uff5c"``, then
+``"<" ~ dsml ~ " calls>"``, ``"<" ~ dsml ~ " invoke name=..."``,
+``"<" ~ dsml ~ " parameter name=..."``), and the sentinel's identity as vocab
+id 128825 was verified with a real ``TokenizerWrapper`` over
+``tokenizer.json``.
+
+The consequence for exo's parser is concrete: ``parse_deepseek_v4`` looks for
+``<\uff5cDSML\uff5ctool_calls>``, so it cannot see a V4.1 block at all -- the
+wrapper marker never matches. (The body tags would in fact match if reached,
+because the space is inside the tag name, not before it; the wrapper is what
+fails.)
 
 RATHER THAN FORKING THE PARSER, this module normalizes a V4.1 block into the V4
 spelling and hands it to exo's own ``parse_dsml_output``. That keeps ONE
 implementation of the subtle parts (typed-parameter decoding, the
-``string="true|false"`` semantics, tag-garble repair, the
-``ToolCallItem`` shape) and limits this module to the dialect translation plus
-the two sentinel-keyed regexes that are genuinely V4-specific
-(``strip_dsml_markers`` and the orphan-content stripper). The streaming
-skeleton itself is exo's ``_parse_dsml_stream``, unchanged: it is already
-parameterized on the wrapper markers, the body parser and the special-token ids.
+``string="true|false"`` semantics, tag-garble repair, the ``ToolCallItem``
+shape) and limits this module to the dialect translation plus the
+sentinel-keyed regexes that are genuinely dialect-specific
+(``strip_dsml_v41``, ``resolve_dsml_v41_ids``). The streaming skeleton itself
+is exo's ``_parse_dsml_stream``, unchanged: it is already parameterized on the
+wrapper markers, the body parser and the special-token ids.
 """
 
 from __future__ import annotations
