@@ -132,6 +132,10 @@ class ScriptedModel:
         self.argmax_calls: list[list[int]] = []
         self.logits: list[mx.array] = [_one_hot(t) for t in self.script]
         self.last_offset = 0
+        #: Cache offset the round started from (set to 1 when a round feeds the
+        #: anchor as its first row). The draft must answer from here, and the
+        #: verify feed answers from the rows it is handed.
+        self.round_entry_offset = 0
         self.args = _Args()
 
     def make_cache(self, bsz: int = 1, max_seq_len: int | None = None, **_: Any):
@@ -212,7 +216,9 @@ class MockHead:
         self, anchor: mx.array, embed: Any, head_lin: Any, dsc: Any, *, width: int
     ):
         del anchor, embed, head_lin, dsc
-        start = self.model._index(self.model.last_offset) + 1
+        # The draft is what the model predicts next from the current position:
+        # the table entry after the offset the round was started from.
+        start = self.model._index(self.model.round_entry_offset) + 1
         ids = list(self.model.script[start : start + width])
         if self.lie_at is not None and self.lie_at < len(ids):
             ids[self.lie_at] = 9999  # a token the target will not confirm
@@ -518,6 +524,7 @@ def test_speculative_round_commits_only_target_confirmed_tokens():
     cache = MockCache(64)
     engine = _EngineStub(_draft_windows={0: object()})
 
+    model.round_entry_offset = 1  # the round feeds the anchor as its first row
     committed, _ms, accepted, gamma = _one_round(
         engine,  # type: ignore[arg-type]
         model=model,
@@ -544,6 +551,7 @@ def test_speculative_round_rejects_a_wrong_draft_and_takes_the_target_token():
     cache = MockCache(64)
     engine = _EngineStub(_draft_windows={0: object()})
 
+    model.round_entry_offset = 1  # the round feeds the anchor as its first row
     committed, _ms, accepted, gamma = _one_round(
         engine,  # type: ignore[arg-type]
         model=model,
