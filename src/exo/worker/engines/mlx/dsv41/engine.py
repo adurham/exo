@@ -119,6 +119,8 @@ DEFAULT_WARMUP_TOKENS = 8
 
 #: Prompt used for warmup; deliberately a plain chat turn.
 _WARMUP_PROMPT = "Reply with the single word: ready"
+#: Exhaustion marker for step()'s parser pull (the parser also yields None).
+_END = object()
 
 
 def _image_span_end(image_inputs: Any) -> int:
@@ -325,11 +327,19 @@ class Dsv41Engine(Engine):
             tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
         ] = []
         try:
-            next(active.generator)
-            # Drain every chunk currently available: the parse pipeline buffers
-            # (thinking split, DSML detection) and only releases on flush points.
-            self._active = active  # keep alive across the drain
-            while (parsed := next(active.output_generator, None)) is not None:
+            # Pull ONLY through the parser pipeline (it wraps active.generator);
+            # a direct next(active.generator) here would steal a token per step.
+            # None = flush point (end of this step); _END = stream exhausted.
+            while True:
+                parsed = next(active.output_generator, _END)
+                if parsed is _END:
+                    raise StopIteration
+                if parsed is None:
+                    # A flush point with nothing released (parser still holding a
+                    # marker): keep pulling so a step never comes back empty mid-turn.
+                    if output:
+                        break
+                    continue
                 output.append((active.task.task_id, parsed))
         except (StopIteration, PrefillCancelled):
             # The parser pipeline BUFFERS (thinking split / DSML detection hold
@@ -603,7 +613,8 @@ class Dsv41Engine(Engine):
             prefill_tps=prefill_tps,
             prompt_tokens=turn.prompt_tokens,
             generated=emitted,
-            reason="stop" if emitted == 0 else "length",
+            # EOS break sets final_reason="stop"; only budget exhaustion is "length".
+            reason=final_reason or ("stop" if emitted == 0 else "length"),
             task_id=task_id,
             reused_tokens=turn.reused_tokens,
         )

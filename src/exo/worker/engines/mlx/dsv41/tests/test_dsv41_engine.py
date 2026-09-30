@@ -158,7 +158,7 @@ class ScriptedModel:
             ids = self._ids_for(input_ids, cache.offset)
             self.argmax_calls.append(ids)
             out = mx.array([ids], dtype=mx.int32)
-            return (out, self._taps(rows)) if return_taps else out
+            return (out, self._taps(fed)) if return_taps else out
         logits = self.logits[self._index(cache.offset)]
         return (logits, self._taps(1)) if return_taps else logits
 
@@ -342,7 +342,12 @@ def test_plain_turn_streams_text_and_finishes():
     # prefill's last chunk names exactly ONE token (the model's
     # ``last_logit_only`` contract), and that token is script[0] -- the fence
     # does not skip a scripted token per chunk.
-    prefill = [rows for rows, cols in model.calls if cols > 1]
+    prefill, fed = [], 0
+    for _rows, cols in model.calls:
+        if fed >= model.prompt_tokens:
+            break
+        prefill.append(cols)
+        fed += cols
     assert prefill == [2, 1]
 
 
@@ -494,12 +499,15 @@ def test_images_are_refused_loudly_when_no_vision_processor_is_attached():
     assert any(isinstance(e.chunk, ErrorChunk) for e in events)
 
 
-def test_prefix_cache_request_is_refused():
+def test_prefix_cache_request_is_served():
+    # Prefix reuse is served by the conversation sessions (rounds._refuse_unsupported
+    # docstring), so a use_prefix_cache request must complete, not be refused.
     engine, _model, _tokenizer, _events = _engine(
-        [34, 1], text_of=ANSWER_TEXT, use_prefix_cache=True
+        [34, 1], text_of=ANSWER_TEXT, use_prefix_cache=True, max_output_tokens=8
     )
-    with pytest.raises(Dsv41UnsupportedFeature, match="prefix-cache"):
-        _drain(engine)
+    chunks = _drain(engine)
+    assert _text_of(chunks) == "hi"
+    assert any(getattr(c, "finish_reason", None) == "stop" for c in chunks)
 
 
 def test_logprobs_request_is_refused():
