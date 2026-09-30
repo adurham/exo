@@ -633,7 +633,7 @@ class Dsv41Engine(Engine):
         # contract ``serve.Session``/``spec.generate`` implement), and the first
         # round re-feeds it as its verify anchor.
         turn.tokens = [anchor] + self._decode(session, anchor, max_tokens - 1)
-        session.sync_history(tokens, turn.tokens)
+        session.sync_history(tokens, turn)
         session.finish(checkpoint=True)
         turn.committed = True
         return turn

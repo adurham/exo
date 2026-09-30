@@ -334,59 +334,50 @@ class Conversation:
         self.cache.mark_seen(arr)
         self._gen.extend(int(t) for t in arr)
 
-    def sync_history(self, prompt_ids: Any, generated: list[int]) -> None:
-        """Align the token history with the rows the cache ACTUALLY holds.
-
-        Called once per turn, after the decode rounds: the cache has seen the
-        prompt plus every generated token except the LAST one (that token is the
-        next turn's anchor and has not been fed). The rows in between are reported
-        to ``SessionCache`` so its own history stays exact; the per-round detail
-        is deliberately not tracked, because the decode rounds roll rows back and
-        only the end state matters.
-        """
-        # The engine's decode rounds feed rows with ``model(...)`` directly (they
-        # bypass the prefill driver), so the cache's own token history never sees
-        # them. Reconcile it here, once per turn: the rows the cache holds are the
-        # prompt plus every generated token except the LAST one (that token is the
-        # next turn's anchor and has not been fed). The write is direct because
-        # ``mark_seen`` refuses to be used as a catch-up (it requires the two views
-        # to already agree), and this module owns the engine side of that contract.
-        prompt = _ids_of(prompt_ids)
-        rows = np.asarray(generated[: max(0, len(generated) - 1)], dtype=np.int64)
-        want = int(prompt.shape[0]) + int(rows.shape[0])
-        if int(self.cache.offset) != want:
-            raise RuntimeError(
-                f"DSV4.1 session: the cache holds {int(self.cache.offset)} rows but "
-                f"this turn fed {want}; the decode rounds and the cache are out of step."
-            )
-        # ``SessionCache`` owns ``_ids``, and its ``mark_seen`` refuses a
-        # catch-up write (it requires the two views to already agree), so the
-        # engine assigns its history directly: the decode rounds went straight to
-        # ``model(...)`` and never touched it.
-        if hasattr(self.cache, "_ids"):
-            self.cache._ids = np.ascontiguousarray(np.concatenate([prompt, rows]))
-        self._gen = [int(t) for t in generated]
-
     def finish(self, *, checkpoint: bool = True) -> None:
-        """Close the turn: checkpoint the cache (and history) for the next one."""
-        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+        """Close the turn: checkpoint the cache for the next one.
 
+        ``checkpoint=False`` leaves it uncommitted so :meth:`cancel` has something
+        real to roll back to (the engine always checkpoints).
+        """
         if checkpoint:
-            try:
-                self.cache.snapshot()
-            except _sc.CapacityError as e:  # pragma: no cover - defensive
-                raise Dsv41UnsupportedFeature(
-                    f"DSV4.1 session cannot checkpoint this instance's cache: {e}"
-                ) from e
+            self.cache.snapshot()
             self._inflight = False
         self.n_turns += 1
 
-    def cancel(self) -> int:
-        """Roll the in-flight turn back: cache, draft window and history.
+    def sync_history(self, prompt_ids: Any, turn: "TurnOutcome") -> None:
+        """Align the token history with the rows the cache ACTUALLY holds.
 
-        The generated history is truncated to the rows the cache still holds
-        (``offset - _base`` entries of this turn), so re-running the turn
-        produces the same tokens and a later turn sees the pre-turn state.
+        The engine's decode rounds feed rows with ``model(...)`` directly (they
+        bypass the prefill driver), so ``SessionCache``'s own history never sees
+        them. Reconcile it here, once per turn: after the turn the cache holds the
+        prompt's rows plus every generated token except the LAST one (that token is
+        the next turn's anchor and has not been fed). The write is direct because
+        ``SessionCache.mark_seen`` refuses to be used as a catch-up (it requires the
+        two views to already agree), and this module owns the engine side of that
+        contract.
+        """
+        prompt = _ids_of(prompt_ids)
+        rows = np.asarray(turn.tokens[: max(0, len(turn.tokens) - 1)], dtype=np.int64)
+        want = int(prompt.shape[0]) - int(turn.reused_tokens) + int(rows.shape[0])
+        held = int(self.cache.offset)
+        if held != want:
+            raise RuntimeError(
+                f"DSV4.1 session: the cache holds {held} rows but this turn fed "
+                f"{want} (prefill={turn.prefill_tokens}, reuse={turn.reused_tokens}); "
+                "the decode rounds and the cache are out of step."
+            )
+        try:
+            self.cache._ids = np.ascontiguousarray(np.concatenate([prompt, rows]))
+        except Exception:  # pragma: no cover - stand-in cache has no history
+            pass
+        self._gen = [int(t) for t in turn.tokens]
+
+    def cancel(self) -> int:
+        """Roll the in-flight turn back: cache, and the generated history.
+
+        ``_base`` is the offset the turn started from, so the history is truncated
+        to the rows the cache still holds (``offset - _base`` entries).
         """
         if not self._inflight:
             return 0
