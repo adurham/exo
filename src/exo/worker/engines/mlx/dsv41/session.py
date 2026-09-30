@@ -344,17 +344,27 @@ class Conversation:
         is deliberately not tracked, because the decode rounds roll rows back and
         only the end state matters.
         """
+        # The engine's decode rounds feed rows with ``model(...)`` directly (they
+        # bypass the prefill driver), so the cache's own token history never sees
+        # them. Reconcile it here, once per turn: the rows the cache holds are the
+        # prompt plus every generated token except the LAST one (that token is the
+        # next turn's anchor and has not been fed). The write is direct because
+        # ``mark_seen`` refuses to be used as a catch-up (it requires the two views
+        # to already agree), and this module owns the engine side of that contract.
         prompt = _ids_of(prompt_ids)
-        want = int(prompt.shape[0]) + max(0, len(generated) - 1)
-        have = int(self.cache.tokens.shape[0])
-        if have < want:
-            tail = np.asarray(generated[: want - int(prompt.shape[0])], dtype=np.int64)
-            self.cache.mark_seen(np.concatenate([prompt, tail])[have:])
-        elif have > want:
+        rows = np.asarray(generated[: max(0, len(generated) - 1)], dtype=np.int64)
+        want = int(prompt.shape[0]) + int(rows.shape[0])
+        if int(self.cache.offset) != want:
             raise RuntimeError(
-                f"DSV4.1 session: the cache holds {have} rows but this turn fed "
-                f"{want}; the decode rounds and the cache are out of step."
+                f"DSV4.1 session: the cache holds {int(self.cache.offset)} rows but "
+                f"this turn fed {want}; the decode rounds and the cache are out of step."
             )
+        # ``SessionCache`` owns ``_ids``, and its ``mark_seen`` refuses a
+        # catch-up write (it requires the two views to already agree), so the
+        # engine assigns its history directly: the decode rounds went straight to
+        # ``model(...)`` and never touched it.
+        if hasattr(self.cache, "_ids"):
+            self.cache._ids = np.ascontiguousarray(np.concatenate([prompt, rows]))
         self._gen = [int(t) for t in generated]
 
     def finish(self, *, checkpoint: bool = True) -> None:
