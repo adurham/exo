@@ -1441,6 +1441,17 @@ for NODE in "${NODES[@]}"; do
     # longer drive the OS into the pressure state that degrades the allocator.
     # Override via DSV4_WIRED_LIMIT_MB if a future footprint needs more.
     ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=${DSV4_WIRED_LIMIT_MB:-115000}"
+    # Keep GPU-wired model memory wired across idle gaps. With the collector on,
+    # macOS unwires any Metal buffer idle ~1-2 s; a ~100 GiB model then re-wires
+    # on every round (DSv4.1 spec rounds 110 ms -> ~2 s, self-sustaining;
+    # measured 2026-09-30, p122-p126 + rs_tworate probe). Not persistent
+    # across reboot, hence set here. Override: DSV4_DISABLE_WIRED_COLLECTOR=0.
+    ssh "$NODE" "sudo sysctl iogpu.disable_wired_collector=${DSV4_DISABLE_WIRED_COLLECTOR:-1}"
+    _wc=$(ssh "$NODE" "sysctl -n iogpu.disable_wired_collector" 2>/dev/null)
+    if [[ "$_wc" != "${DSV4_DISABLE_WIRED_COLLECTOR:-1}" ]]; then
+      echo "WARNING: $NODE iogpu.disable_wired_collector=$_wc (wanted ${DSV4_DISABLE_WIRED_COLLECTOR:-1})." >&2
+      echo "         Needs a NOPASSWD sudoers rule for '/usr/sbin/sysctl iogpu.disable_wired_collector=*'." >&2
+    fi
   fi
 
   echo "Killing existing Exo processes on $NODE..."
