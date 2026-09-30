@@ -108,7 +108,24 @@ def _stream(
     for i, text in enumerate(texts):
         yield GenerationResponse(text=text, token=ids[i], usage=None)
         yield None
-    yield GenerationResponse(text="", token=1, finish_reason="stop", usage=None)
+    # The terminal response carries usage -- that is where reasoning_tokens is
+    # patched in (the mid-stream responses deliberately have none).
+    yield GenerationResponse(
+        text="", token=1, finish_reason="stop", usage=_terminal_usage()
+    )
+
+
+def _terminal_usage():
+    from exo.api.types import Usage
+    from exo.api.types.api import CompletionTokensDetails, PromptTokensDetails
+
+    return Usage(
+        prompt_tokens=3,
+        completion_tokens=4,
+        total_tokens=7,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=0),
+        completion_tokens_details=CompletionTokensDetails(reasoning_tokens=0),
+    )
 
 
 def _text(chunks) -> str:

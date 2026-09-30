@@ -266,6 +266,14 @@ class Dsv41Engine(Engine):
             while (parsed := next(active.output_generator, None)) is not None:
                 output.append((active.task.task_id, parsed))
         except (StopIteration, PrefillCancelled):
+            # The parser pipeline BUFFERS (thinking split / DSML detection hold
+            # tokens until they are disambiguated), so at end-of-stream whatever
+            # it is still holding must be drained before the turn is closed --
+            # otherwise the last tokens of a turn are silently dropped and the
+            # client sees a truncated answer (observed: a 4-token turn arriving
+            # as 2 tokens, with the rest stuck in the parser's buffer).
+            while (parsed := next(active.output_generator, None)) is not None:
+                output.append((active.task.task_id, parsed))
             output.append((active.task.task_id, FinishedResponse()))
             self._agreement.forget(active.task.task_id)
             self._active = None
@@ -444,9 +452,16 @@ class Dsv41Engine(Engine):
                 policy=policy,
             )
             round_stats.add(round_ms, accepted, gamma)
-            for tid in drafted:
+            stop_at = None
+            for index, tid in enumerate(drafted):
                 if tid in eos_ids:
+                    # End the turn HERE. The draft batch can contain tokens that
+                    # follow the EOS (the verify window does not know it ended),
+                    # and the earlier version of this loop only set the reason
+                    # and broke out of the inner loop -- so the outer loop
+                    # re-drafted forever and the request never finished.
                     final_reason = "stop"
+                    stop_at = index
                     break
                 detokenizer.add_token(tid)
                 text = detokenizer.last_segment
@@ -472,6 +487,18 @@ class Dsv41Engine(Engine):
                     return
                 yield _mid_response(tid, text, task_id)
                 token = tid
+            if final_reason is not None:
+                yield _final_response(
+                    token=drafted[stop_at] if stop_at is not None else token,
+                    text="",
+                    prefill_tps=prefill_tps,
+                    prompt_tokens=prompt_len,
+                    generated=emitted,
+                    reason=final_reason,
+                    task_id=task_id,
+                    round_stats=round_stats,
+                )
+                return
         if final_reason is None:
             # Only reachable when max_tokens was 0-ish; stay honest about it.
             yield _final_response(

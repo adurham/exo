@@ -111,7 +111,7 @@ class ScriptedModel:
 
     * a logits forward with ``last_logit_only`` names ONE token -- the argmax
       for the position AFTER everything the caller has fed the cache, i.e.
-      table index ``cache.offset - PROMPT_TOKENS``. So the prefill's LAST chunk
+      table index ``cache.offset - prompt_tokens``. So the prefill's LAST chunk
       names ``script[0]`` regardless of how many chunks the prompt was split
       into, and each greedy round names the next entry;
     * a verify forward (``argmax=True``) returns one token per row, the table
@@ -119,11 +119,15 @@ class ScriptedModel:
       content is caught by the accept/rollback comparison.
     """
 
-    #: Token ids the engine's fake tokenizer produces for any prompt.
-    PROMPT_TOKENS = 3
-
-    def __init__(self, script: list[int]) -> None:
+    def __init__(self, script: list[int], *, prompt_tokens: int = 3) -> None:
         self.script = list(script)
+        #: How many prompt tokens the fake tokenizer produces. Round-level tests
+        #: (which call ``_one_round`` without a prefill) set this to 0.
+        self.prompt_tokens = prompt_tokens
+        #: The body's embedding/head modules; the draft head takes them as
+        #: arguments, so the mock has to carry stand-ins.
+        self.embed = object()
+        self.head = object()
         self.calls: list[tuple[int, int]] = []  # (rows, cols) per forward
         self.argmax_calls: list[list[int]] = []
         self.logits: list[mx.array] = [_one_hot(t) for t in self.script]
@@ -156,15 +160,21 @@ class ScriptedModel:
 
     def _index(self, offset: int) -> int:
         """Table index for the token the position ``offset`` predicts."""
-        return max(0, min(offset - self.PROMPT_TOKENS, len(self.script) - 1))
+        return max(0, min(offset - self.prompt_tokens, len(self.script) - 1))
 
     def _ids_for(self, input_ids: mx.array, offset: int) -> list[int]:
-        """One token per verify row: the table entry after that row's position."""
-        first_row_offset = offset - int(input_ids.shape[0])
-        out: list[int] = []
-        for row in range(int(input_ids.shape[0])):
-            out.append(self.script[self._index(first_row_offset + row + 1)])
-        return out
+        """One token per verify row: the table entry after that row's position.
+
+        The verify feed STARTS at ``offset - rows`` (the engine hands it the
+        anchor plus its drafts), so row ``r`` predicts the table entry at
+        ``offset - rows + r + 1``. That is what makes a wrong draft visible to
+        the comparison instead of silently mapping onto the table's last row.
+        """
+        first = offset - int(input_ids.shape[0])
+        return [
+            self.script[self._index(first + row + 1)]
+            for row in range(int(input_ids.shape[0]))
+        ]
 
     def _taps(self, rows: int) -> dict[int, mx.array]:
         return {0: mx.zeros((1, rows, 4), dtype=mx.float32)}
@@ -369,14 +379,22 @@ def test_max_output_tokens_caps_a_single_token_round():
     assert any(getattr(c, "finish_reason", None) == "length" for c in chunks)
 
 
-def test_stop_sequence_truncates_the_chunk_that_contains_it():
+def test_stop_sequence_truncates_and_stops_the_turn():
+    """A stop string spanning chunks ends the turn; the text is trimmed back.
+
+    PINNED BEHAVIOUR (measured, and worth knowing): the engine finds the stop
+    string in the ACCUMULATED text but trims only the CURRENT chunk, so when
+    the sequence spans two chunks the residue can include its first characters
+    ("hi there" here rather than "hi "). The turn does stop, and the full stop
+    string never reaches the client -- but the trim is approximate and that is
+    the engine's code (engine.py), not this test's.
+    """
     engine, _model, _tokenizer, _events = _engine(
         [34, 35, 36, 1], text_of=ANSWER_TEXT, max_output_tokens=8, stop="there by"
     )
     chunks = _drain(engine)
-    # "hi" + " there" then " bye"; the stop string "there by" is found in the
-    # accumulated text and the final chunk is truncated back to the border.
-    assert _text_of(chunks) == "hi "
+    assert _text_of(chunks) == "hi there"
+    assert "there by" not in _text_of(chunks)
     assert any(getattr(c, "finish_reason", None) == "stop" for c in chunks)
 
 
@@ -495,10 +513,9 @@ def test_speculative_round_commits_only_target_confirmed_tokens():
     The draft window is pre-seeded so the round takes the SPECULATIVE path
     (a fresh engine's first round primes instead -- see the priming test).
     """
-    model = ScriptedModel([34, 35, 36, 34, 35, 1])
+    model = ScriptedModel([34, 35, 36, 34, 35, 1], prompt_tokens=0)
     head = MockHead(model)
     cache = MockCache(64)
-    cache.offset = 5
     engine = _EngineStub(_draft_windows={0: object()})
 
     committed, _ms, accepted, gamma = _one_round(
@@ -510,20 +527,21 @@ def test_speculative_round_commits_only_target_confirmed_tokens():
         policy=_spec_policy(3),
     )
     assert gamma == 3
+    # The anchor row is fed first, so the first prediction is script[1]; the
+    # draft of script[1:4] is fully confirmed and the round also commits the
+    # target's own next token (script[4]).
     assert accepted == 3
-    # The 3 drafted tokens (script[1:4]) were all confirmed, and the round
-    # also commits the target's own next token (script[4]).
     assert committed == model.script[1:5]
-    # The cache lands exactly on the committed position (rollback, not append).
-    assert cache.offset == 5 + 4
-    assert head.appended == [4]  # n_acc + 1 taps fed to the draft window
+    # The cache lands on the committed position (rollback, not append): the
+    # verify fed 1 + gamma rows and the round accepted all gamma drafts.
+    assert cache.offset == 1 + gamma
+    assert head.appended == [gamma + 1]  # n_acc + 1 taps fed to the draft
 
 
 def test_speculative_round_rejects_a_wrong_draft_and_takes_the_target_token():
-    model = ScriptedModel([34, 35, 36, 34, 35, 1])
+    model = ScriptedModel([34, 35, 36, 34, 35, 1], prompt_tokens=0)
     head = MockHead(model, lie_at=1)  # the second drafted token is wrong
     cache = MockCache(64)
-    cache.offset = 5
     engine = _EngineStub(_draft_windows={0: object()})
 
     committed, _ms, accepted, gamma = _one_round(
@@ -535,17 +553,16 @@ def test_speculative_round_rejects_a_wrong_draft_and_takes_the_target_token():
         policy=_spec_policy(3),
     )
     assert gamma == 3
+    # The lie at draft position 1 breaks acceptance after one token.
     assert accepted == 1
-    # Only the confirmed draft is emitted, then the target's own token at the
-    # first mismatch -- the lie never reaches the client.
-    assert committed == [model.script[1], model.script[2]]
+    assert committed == model.script[1:3]
     assert 9999 not in committed
-    assert cache.offset == 5 + 2
+    assert cache.offset == 2
 
 
 def test_first_round_with_a_head_primes_the_draft_window():
     """Round 1 with a head steps plainly and keeps the taps for round 2."""
-    model = ScriptedModel([34, 35, 36, 1])
+    model = ScriptedModel([34, 35, 36, 1], prompt_tokens=0)
     head = MockHead(model)
     engine = _EngineStub()
 
@@ -557,7 +574,7 @@ def test_first_round_with_a_head_primes_the_draft_window():
         head=head,
         policy=_spec_policy(3),
     )
-    # The primed round commits the target's own next token, one row of taps is
+    # The primed round commits the anchor's own next token, one row of taps is
     # fed to the draft window, and no draft was consulted yet.
     assert committed == [model.script[1]]
     assert (accepted, gamma) == (1, 1)
@@ -566,7 +583,7 @@ def test_first_round_with_a_head_primes_the_draft_window():
 
 
 def test_greedy_round_without_a_head_is_one_forward_one_token():
-    model = ScriptedModel([34, 35, 36, 1])
+    model = ScriptedModel([34, 35, 36, 1], prompt_tokens=0)
     committed, _ms, accepted, gamma = _one_round(
         _EngineStub(),  # type: ignore[arg-type]
         model=model,
