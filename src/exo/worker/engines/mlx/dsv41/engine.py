@@ -21,13 +21,26 @@ DELIBERATELY NOT REUSED (and why):
   * ``mlx_generate``        -- assumes an mlx-lm cache + ``stream_generate``.
   * ``KVPrefixCache``       -- DSv4.1's cache is a custom per-layer structure
     (window ring + compressed KV + compressor carry + index keys + engram id
-    history). Session reuse is workstream E's deliverable; a request that asks
-    for it is refused loudly instead of silently re-prefilling.
+    history); prefix reuse is ``dsv41/session.py`` (one conversation per
+    ``ModelCache``) instead.
   * ``tensor_auto_parallel``-- TP is built into the loader.
   * sampling                -- v1 is GREEDY ONLY (the DSpark verify loop is
     greedy). A request that asks for a non-greedy temperature is REFUSED rather
     than silently served greedy; ``_resolve_sampler`` is workstream F's hook.
-  * vision                  -- workstream H; images are dropped LOUDLY.
+  * ``KVPrefixCache``       -- prefix reuse is ``dsv41/session.py`` (see below).
+
+VISION. A request carrying images renders the DSv4.1 image placeholder into the
+prompt, expands it through ``deepseek_v41.image_processor.prepare_vl_inputs``,
+and splices the merged ``(1, s, dim)`` embedding tensor (token lookup with each
+image span overwritten by its ViT/aligner block) in as ``model.embed`` for the
+prompt prefill (``dsv41/vision.py``). The reference's rule that an image span
+must be prefilled in ONE forward from position 0 is enforced by the splice.
+
+SESSIONS. Multi-turn requests join a conversation session
+(``dsv41/session.py``): turn N+1 prefills only the delta on the previous turn's
+live cache (+ DSpark draft windows), which is what makes a follow-up turn cheap.
+An image-carrying request, or one that disables prefix reuse, runs as a cold
+one-off session that is dropped when the request finishes.
 
 REQUEST PATH. ``step()`` serves one request at a time (batch size 1): prompt ->
 chunked fenced prefill -> first token -> greedy rounds (speculative when the
@@ -80,6 +93,15 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _stop_index,
     _stop_sequences,
 )
+from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
+from exo.worker.engines.mlx.dsv41.vision import (
+    Dsv41Vision,
+    build_embeddings,
+    image_spans,
+    prompt_tokens_for_request,
+    render_prompt,
+    splice_embeddings,
+)
 from exo.worker.engines.mlx.generator.generate import PrefillCancelled
 from exo.worker.engines.mlx.utils_mlx import apply_chat_template, get_coord_group
 from exo.worker.runner.bootstrap import logger
@@ -97,6 +119,26 @@ DEFAULT_WARMUP_TOKENS = 8
 
 #: Prompt used for warmup; deliberately a plain chat turn.
 _WARMUP_PROMPT = "Reply with the single word: ready"
+
+
+def _image_span_end(image_inputs: Any) -> int:
+    """Last token row any image span covers (0 when there are no images)."""
+    return max((end for _start, end in image_spans(image_inputs)), default=0)
+
+
+def _first_chunk_covers(total: int, chunk: int, span_end: int) -> list[int]:
+    """A prefill chunk plan whose FIRST piece covers every image span.
+
+    The DSv4 vision path's ``plan_prefill_chunks`` makes the same point: an
+    image span is only valid inside the forward whose cache offset is 0, so a
+    boundary that lands inside a span is a hard error rather than a slow path.
+    Returns the piece sizes for ``SessionCache.append_turn(chunk_plan=...)``.
+    """
+    first = max(int(chunk), int(span_end), 1)
+    if first >= total:
+        return [total]
+    rest = total - first
+    return [first] + [int(chunk)] * ((rest + int(chunk) - 1) // int(chunk))
 
 
 def _warmup_messages() -> list[InputMessage]:
@@ -127,7 +169,7 @@ class _RoundStats:
             prompt_tokens=prompt_tokens,
             generation_tokens=generated,
             peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
-            prefix_cache_hit="none",  # DSv4.1 has no prefix cache (stream E)
+            prefix_cache_hit="none",
         )
 
 
@@ -153,6 +195,8 @@ class _Active:
     task: TextGeneration
     generator: Generator[GenerationResponse]
     output_generator: Iterator[GenerationChunk | None]
+    #: Rows this request's prefill will feed (progress chunk totals).
+    prefill_total: int = 0
 
 
 @dataclass(eq=False)
@@ -177,8 +221,15 @@ class Dsv41Engine(Engine):
     adaptive_gamma: bool = True
     #: Sampling hook (workstream F). None => greedy, the only mode implemented.
     sampler: Any | None = None
-    #: Vision hook (workstream H). None => no vision tower for this checkpoint.
-    vision_processor: Any | None = None
+    #: The loaded DSv4.1 vision tower (``dsv41.vision.Dsv41Vision``), or None
+    #: when this instance serves text only. An image-carrying request against a
+    #: None tower is refused rather than answered about nothing.
+    vision_processor: Dsv41Vision | None = None
+    #: Resident conversation sessions (each holds a full cache + draft window).
+    max_sessions: int = 2
+    #: Prefill chunking once a conversation passes ``long_threshold`` rows.
+    long_chunk: int | None = None
+    long_threshold: int = 10**9
     #: Instance-level prefill cap, resolved from
     #: ``EXO_PREFILL_STEP_SIZE``/instance metadata by the builder.
     prefill_heartbeat_seconds: float = 15.0
@@ -192,6 +243,10 @@ class Dsv41Engine(Engine):
     #: taps and appended to on every verify round (see ``rounds._one_round``).
     _draft_windows: dict[int, Any] = field(default_factory=dict, init=False)
     _stop_sequences: tuple[str, ...] = field(default=(), init=False)
+    #: Conversation store: each session owns one ``ModelCache`` (+ the DSpark
+    #: draft windows) and serves the turns of one conversation, which is what
+    #: makes turn N+1's prefill only the delta. Created in ``__post_init__``.
+    _sessions: Dsv41Sessions = field(init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -205,6 +260,17 @@ class Dsv41Engine(Engine):
         # Prefill fence + progress accounting: this checkpoint needs a small
         # chunk (see DEFAULT_PREFILL_CHUNK) unless the instance says otherwise.
         self._chunk = self.prefill_chunk_size or DEFAULT_PREFILL_CHUNK
+        long_chunk = self.long_chunk or self._chunk
+        self._sessions = Dsv41Sessions(
+            self.loaded.model,
+            self.loaded.head,
+            max_seq_len=_cache_capacity(self),
+            chunk=self._chunk,
+            long_chunk=long_chunk,
+            long_threshold=self.long_threshold,
+            max_sessions=self.max_sessions,
+            use_draft=bool(self.speculative and self.loaded.head is not None),
+        )
 
     def warmup(self) -> None:
         """A short real generation, to compile the EXL3/Metal kernels.
@@ -289,6 +355,7 @@ class Dsv41Engine(Engine):
         self._active = None
         self._agreement.reset()
         self._draft_windows.clear()
+        self._sessions.close()
         del self.loaded
 
     def reset_after_reconnect(self) -> list[int]:
@@ -306,6 +373,10 @@ class Dsv41Engine(Engine):
         dropped.extend(int(t.task_id) for t in self._agreement.queue)
         self._agreement.reset()
         self._draft_windows.clear()
+        # A session's cache belongs to the conversation, not the request, so it
+        # survives the reconnect -- but the turn in flight is rolled back, so the
+        # next request sees the pre-turn state instead of a half-fed cache.
+        self._sessions.cancel_all()
         return dropped
 
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
@@ -325,7 +396,7 @@ class Dsv41Engine(Engine):
             output_generator = dsv41_output_parser(
                 _queue_of(generator),
                 self.loaded.tokenizer,
-                apply_chat_template(self.loaded.tokenizer, task.task_params),
+                self._render_prompt(task.task_params),
                 self.model_id,
             )
         except Exception as e:
@@ -346,10 +417,57 @@ class Dsv41Engine(Engine):
                 )
             )
 
+    def _render_prompt(self, params: TextGenerationTaskParams) -> str:
+        """Chat-templated prompt for a request.
+
+        Text-only requests go through exo's shared ``apply_chat_template``; an
+        image-carrying request needs ``vision.render_prompt``, because the shared
+        one keeps only the ``type == "text"`` content parts and would flatten the
+        image block (and therefore the model's placeholder) away.
+        """
+        if params.images and self.vision_processor is not None:
+            return render_prompt(
+                self.loaded.tokenizer, params, self.vision_processor.placeholder
+            )
+        return apply_chat_template(self.loaded.tokenizer, params)
+
     def _build_generator(self, task: TextGeneration) -> Generator[GenerationResponse]:
         params = task.task_params
-        prompt = apply_chat_template(self.loaded.tokenizer, params)
+        prompt = self._render_prompt(params)
         return self._generate(params, prompt, task_id=task.task_id)
+
+    def _conversation_key(self, params: TextGenerationTaskParams) -> str | None:
+        """Client-visible conversation id, when the request carries one."""
+        key = getattr(params, "correlation_id", None)
+        return key if isinstance(key, str) and key else None
+
+    # --------------------------------------------------------------- progress
+
+    def _session_progress(self, chunks: int, rows_done: int, elapsed: float) -> None:
+        """Per-prefill-chunk hook: cancellation + heartbeat + progress chunks.
+
+        Called from inside the prefill driver while the request's generator is
+        being advanced, which is exactly where the engine can still act on a
+        cancellation: raising here unwinds the session turn, and the session
+        rolls its own cache back.
+        """
+        del elapsed
+        active = self._active
+        task_id = active.task.task_id if active is not None else None
+        self._check_cancel(task_id)
+        if active is not None and self.device_rank == 0 and chunks > 1:
+            self.event_sender.send(
+                ChunkGenerated(
+                    command_id=active.task.command_id,
+                    chunk=PrefillProgressChunk(
+                        model=self.model_id,
+                        processed_tokens=rows_done,
+                        total_tokens=active.prefill_total or rows_done,
+                    ),
+                )
+            )
+        else:
+            self.prefill_heartbeat()
 
     # ------------------------------------------------------------------ generate
 
@@ -360,157 +478,211 @@ class Dsv41Engine(Engine):
         *,
         task_id: TaskId | None,
     ) -> Generator[GenerationResponse]:
+        """Serve one request: prompt -> token ids -> session turn -> chunks.
+
+        One turn, end to end: the conversation's delta prefill (through the
+        session, so a follow-up turn only feeds what is new), then the engine's
+        decode rounds from the prefill's anchor, then the detokenized stream.
+        """
         model = self.loaded.model
         tokenizer = self.loaded.tokenizer
-        _refuse_unsupported(params, vision_available=self.vision_processor is not None)
+        vision = self.vision_processor
+        _refuse_unsupported(params, vision_available=vision is not None)
 
         max_tokens = params.max_output_tokens or MAX_TOKENS
         eos_ids = set(tokenizer.eos_token_ids)
         stop_sequences = _stop_sequences(params)
         capacity = _cache_capacity(self)
 
-        prompt_tokens = encode_prompt(tokenizer, prompt)
-        prompt_len = int(prompt_tokens.shape[0])
+        # -- prompt -> token ids. With images this is prepare_vl_inputs'
+        #    expansion, which is NOT what tokenizer.encode(prompt) returns.
+        image_inputs = None
+        embeddings: mx.array | None = None
+        if params.images:
+            assert vision is not None  # _refuse_unsupported guarantees this
+            tokens_list, _token_types, image_inputs = prompt_tokens_for_request(
+                vision, prompt, params.images, tokenizer
+            )
+            prompt_len = len(tokens_list)
+            embeddings = build_embeddings(model, vision, tokens_list, image_inputs)
+            mx.eval(embeddings)
+            logger.info(
+                f"[DSV41] prompt expanded with {len(params.images)} image(s): "
+                f"{prompt_len} tokens, span(s)={image_spans(image_inputs)}"
+            )
+        else:
+            prompt_tokens = encode_prompt(tokenizer, prompt)
+            prompt_len = int(prompt_tokens.shape[0])
+            tokens_list = [int(t) for t in prompt_tokens]
         if prompt_len == 0:
-            raise ValueError("DSv4.1: empty prompt after chat templating")
+            raise ValueError("DSV4.1: empty prompt after chat templating")
         if prompt_len + max_tokens + 8 > capacity:
             raise Dsv41UnsupportedFeature(
-                f"DSv4.1: prompt {prompt_len} + max_output_tokens {max_tokens} "
+                f"DSV4.1: prompt {prompt_len} + max_output_tokens {max_tokens} "
                 f"needs more than the {capacity}-token cache this instance was "
                 "configured for (max_kv_tokens / card context_length)."
             )
 
-        cache = model.make_cache(1, max_seq_len=capacity)
-
-        # --- chunked, fenced prefill. Each chunk is evaluated (and the cache
-        # advanced) before the next is built, so the lazy graph stays bounded --
-        # the whole reason the Metal GPU timeout is survivable at all here.
-        started = time.perf_counter()
-        last_logits: mx.array | None = None
-        chunk = self._chunk
-        for start in range(0, prompt_len, chunk):
-            self._check_cancel(task_id)
-            if task_id is not None and self.device_rank == 0 and start > 0:
-                self.event_sender.send(
-                    ChunkGenerated(
-                        command_id=self._command_id(task_id),
-                        chunk=PrefillProgressChunk(
-                            model=self.model_id,
-                            processed_tokens=min(start + chunk, prompt_len),
-                            total_tokens=prompt_len,
-                        ),
-                    )
-                )
-            else:
-                self.prefill_heartbeat()
-            last_logits = model(
-                prompt_tokens[start : start + chunk][None], cache, last_logit_only=True
+        # -- conversation: every request joins one. The store reuses a resident
+        #    conversation when this prompt extends it (that IS the multi-turn
+        #    feature) or when the client names it, else it opens a cold one. A
+        #    benchmark request that did not ask for reuse, and any image-carrying
+        #    request (whose token stream must not join a cached conversation),
+        #    drop their conversation when the request finishes.
+        keep = not (params.bench and not params.use_prefix_cache) and embeddings is None
+        # The per-request draft-window slot is only for engines with no session
+        # (``rounds._one_round``'s fallback); a conversation owns its own.
+        self._draft_windows.clear()
+        session = self._sessions.get(tokens_list, self._conversation_key(params))
+        if self._active is not None:
+            self._active.prefill_total = prompt_len
+        try:
+            turn = self._run_turn(
+                session,
+                tokens_list,
+                max_tokens,
+                embeddings=embeddings,
+                image_span_end=_image_span_end(image_inputs),
             )
-            mx.eval(last_logits)
-        prefill_seconds = time.perf_counter() - started
-        prefill_tps = prompt_len / prefill_seconds if prefill_seconds > 0 else 0.0
-        if last_logits is None:
-            raise RuntimeError("DSv4.1: prefill produced no logits")
-        first_token = int(mx.argmax(last_logits.reshape(-1), axis=-1).item())
+        except PrefillCancelled:
+            session.cancel()
+            raise
+        except Exception:
+            if not keep:
+                self._sessions.drop(session)
+                if self._active is not None:
+                    self._active.prefill_total = 0
+            raise
+        finally:
+            if self._active is not None:
+                self._active.prefill_total = 0
+        if not keep:
+            self._sessions.drop(session)
 
+        # -- token stream
         detokenizer = tokenizer.detokenizer
         emitted = 0
-        if first_token in eos_ids:
-            yield _final_response(
-                token=first_token,
-                text="",
-                prefill_tps=prefill_tps,
-                prompt_tokens=prompt_len,
-                generated=0,
-                reason="stop",
-                task_id=task_id,
-            )
-            return
-        detokenizer.add_token(first_token)
-        emitted = 1
-        yield _mid_response(first_token, detokenizer.last_segment, task_id)
+        accumulated = ""
+        final_reason: FinishReason | None = None
+        prefill_tps = (
+            turn.prefill_tokens / turn.prefill_seconds
+            if turn.prefill_seconds > 0
+            else 0.0
+        )
+        for tid in turn.tokens:
+            if tid in eos_ids:
+                final_reason = "stop"
+                break
+            detokenizer.add_token(tid)
+            text = detokenizer.last_segment
+            emitted += 1
+            accumulated += text
+            stop_hit = _stop_index(accumulated, stop_sequences)
+            if stop_hit is not None:
+                text = text[: max(0, len(text) - (len(accumulated) - stop_hit))]
+                final_reason = "stop"
+            if final_reason is None and emitted >= max_tokens:
+                final_reason = "length"
+            if final_reason is not None:
+                yield _final_response(
+                    token=tid,
+                    text=text,
+                    prefill_tps=prefill_tps,
+                    prompt_tokens=turn.prompt_tokens,
+                    generated=emitted,
+                    reason=final_reason,
+                    task_id=task_id,
+                    reused_tokens=turn.reused_tokens,
+                )
+                return
+            yield _mid_response(tid, text, task_id)
+        # the stream ended on an EOS token, or on the conversation's budget
+        yield _final_response(
+            token=turn.tokens[-1] if turn.tokens else 0,
+            text="",
+            prefill_tps=prefill_tps,
+            prompt_tokens=turn.prompt_tokens,
+            generated=emitted,
+            reason="stop" if emitted == 0 else "length",
+            task_id=task_id,
+            reused_tokens=turn.reused_tokens,
+        )
 
+    def _run_turn(
+        self,
+        session: Any,
+        tokens: list[int],
+        max_tokens: int,
+        *,
+        embeddings: mx.array | None,
+        image_span_end: int = 0,
+    ) -> TurnOutcome:
+        """Run one conversation turn: delta prefill, then decode rounds.
+
+        ``image_span_end`` is the last row any image span covers; the delta
+        prefill is forced into one piece that covers it, because the reference
+        requires the whole span inside the forward whose cache offset is 0. The
+        splice itself passes every other ``embed`` read through to the real table
+        (the draft head reads it on every draft), so it is safe to leave
+        installed for the whole turn.
+        """
+        total = len(tokens)
+        plan = _first_chunk_covers(total, self._chunk, image_span_end) if embeddings is not None else None
+        if embeddings is None:
+            turn = session.prefill(tokens, chunk_plan=plan)
+        else:
+            with splice_embeddings(self.loaded.model, embeddings, 0, image_span_end):
+                turn = session.prefill(tokens, chunk_plan=plan)
+        if turn.reused_tokens:
+            logger.info(f"[DSV41] turn reuse: {turn}")
+        anchor = int(mx.argmax(turn.anchor_logits.reshape(-1), axis=-1).item())
+        # The prefill's argmax IS this turn's first generated token (the exact
+        # contract ``serve.Session``/``spec.generate`` implement), and the first
+        # round re-feeds it as its verify anchor.
+        turn.tokens = [anchor] + self._decode(session, anchor, max_tokens - 1)[0]
+        session.sync_history(tokens, turn)
+        session.finish(checkpoint=True)
+        turn.committed = True
+        return turn
+
+    def _decode(self, session: Any, anchor: int, max_tokens: int) -> tuple[list[int], "_RoundStats"]:
+        """Decode from the anchor using the engine's round contract.
+
+        Returns the tokens AFTER the anchor (``max_tokens`` is the number of
+        decode rounds' worth of tokens the caller still wants) plus this turn's
+        round statistics. Each round's rows are reported to the conversation, so
+        its token history tracks the cache across the speculative rollbacks.
+        """
         head = self.loaded.head if self.speculative else None
         policy = (
             _spec_policy(self.gamma)
             if (head is not None and self.adaptive_gamma)
             else None
         )
+        out: list[int] = []
+        token = anchor
         round_stats = _RoundStats()
-        token = first_token
-        accumulated = ""
-        final_reason: FinishReason | None = None
-
-        while emitted < max_tokens:
-            self._check_cancel(task_id)
-            drafted, round_ms, accepted, gamma = _one_round(
+        while len(out) < max_tokens:
+            active = self._active
+            self._check_cancel(active.task.task_id if active is not None else None)
+            committed, round_ms, accepted, gamma = _one_round(
                 self,
-                model=model,
-                cache=cache,
+                model=self.loaded.model,
+                cache=session.cache.cache,
                 token=token,
                 head=head,
                 policy=policy,
+                draft_state=session.draft_state,
             )
             round_stats.add(round_ms, accepted, gamma)
-            stop_at = None
-            for index, tid in enumerate(drafted):
-                if tid in eos_ids:
-                    # End the turn HERE. The draft batch can contain tokens that
-                    # follow the EOS (the verify window does not know it ended),
-                    # and the earlier version of this loop only set the reason
-                    # and broke out of the inner loop -- so the outer loop
-                    # re-drafted forever and the request never finished.
-                    final_reason = "stop"
-                    stop_at = index
-                    break
-                detokenizer.add_token(tid)
-                text = detokenizer.last_segment
-                emitted += 1
-                accumulated += text
-                stop_hit = _stop_index(accumulated, stop_sequences)
-                if stop_hit is not None:
-                    text = text[: max(0, len(text) - (len(accumulated) - stop_hit))]
-                    final_reason = "stop"
-                if final_reason is None and emitted >= max_tokens:
-                    final_reason = "length"
-                if final_reason is not None:
-                    yield _final_response(
-                        token=tid,
-                        text=text,
-                        prefill_tps=prefill_tps,
-                        prompt_tokens=prompt_len,
-                        generated=emitted,
-                        reason=final_reason,
-                        task_id=task_id,
-                        round_stats=round_stats,
-                    )
-                    return
-                yield _mid_response(tid, text, task_id)
-                token = tid
-            if final_reason is not None:
-                yield _final_response(
-                    token=drafted[stop_at] if stop_at is not None else token,
-                    text="",
-                    prefill_tps=prefill_tps,
-                    prompt_tokens=prompt_len,
-                    generated=emitted,
-                    reason=final_reason,
-                    task_id=task_id,
-                    round_stats=round_stats,
-                )
-                return
-        if final_reason is None:
-            # Only reachable when max_tokens was 0-ish; stay honest about it.
-            yield _final_response(
-                token=token,
-                text="",
-                prefill_tps=prefill_tps,
-                prompt_tokens=prompt_len,
-                generated=emitted,
-                reason="length",
-                task_id=task_id,
-                round_stats=round_stats,
-            )
+            # A round always commits at least one token; stop at EOS / the cap
+            # inside the batch so a draft batch cannot run past the turn's end.
+            for tid in committed:
+                out.append(int(tid))
+                if int(tid) == session.eos_id or len(out) >= max_tokens:
+                    return out, round_stats
+                token = int(tid)
+        return out, round_stats
 
     # ------------------------------------------------------------------ rounds
 

@@ -72,9 +72,12 @@ def _refuse_unsupported(
 
     Every branch here is a feature exo has and DSv4.1 does not (yet). Silently
     ignoring one would corrupt the client's assumptions invisibly -- an image
-    dropped from the prompt, a prefix reused that was never cached, logprobs
-    that are not computed -- so each one fails the request with a reason the
-    client can act on.
+    dropped from the prompt, logprobs that are not computed -- so each one fails
+    the request with a reason the client can act on.
+
+    Prefix reuse is NOT refused any more: it is served by the conversation
+    sessions in ``dsv41/session.py`` (one live ``ModelCache`` per conversation),
+    which is what ``use_prefix_cache`` means for this engine.
     """
     if params.images and not vision_available:
         raise Dsv41UnsupportedFeature(
@@ -84,14 +87,6 @@ def _refuse_unsupported(
             "token), but the exo-side wiring is not part of this build, so the "
             "honest answer is to refuse rather than silently answer from text "
             "only. Drop the images or route to an instance with vision."
-        )
-    if params.use_prefix_cache:
-        raise Dsv41UnsupportedFeature(
-            "DSv4.1: prefix-cache reuse was requested, but this engine's cache "
-            "is a custom per-layer structure (window ring + compressed KV + "
-            "compressor carry + index keys + engram id history) with no exo "
-            "KVPrefixCache adapter yet. Serving the request would mean silently "
-            "re-prefilling the whole prompt, so it is refused instead."
         )
     if params.logprobs or params.top_logprobs:
         raise Dsv41UnsupportedFeature(
@@ -196,11 +191,23 @@ def _final_response(
     reason: FinishReason,
     task_id: TaskId | None = None,
     round_stats: Any | None = None,
+    reused_tokens: int = 0,
+    prefill_tokens: int | None = None,
 ) -> GenerationResponse:
-    """The terminal response for a request, with usage and stats attached."""
-    del task_id
+    """The terminal response for a request, with usage and stats attached.
+
+    ``prompt_tokens`` is the WHOLE conversation this turn belongs to;
+    ``reused_tokens`` is the part that came from the session's live cache and
+    ``prefill_tokens`` the rows actually fed (``None`` => the whole prompt).
+    That split is what a client reads to see the multi-turn win, and it is also
+    what ``GenerationStats.prompt_tps`` is computed against.
+    """
+    del task_id, prefill_tokens  # the split is reported through usage/stats below
+    hit = "partial" if reused_tokens > 0 else "none"
     if round_stats is not None:
-        stats = round_stats.stats(prefill_tps, prompt_tokens, generated)
+        stats = round_stats.stats(prefill_tps, prompt_tokens, generated).model_copy(
+            update={"prefix_cache_hit": hit}
+        )
     else:
         stats = GenerationStats(
             prompt_tps=prefill_tps,
@@ -208,8 +215,7 @@ def _final_response(
             prompt_tokens=prompt_tokens,
             generation_tokens=generated,
             peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
-            # DSv4.1 has no prefix cache (see _refuse_unsupported).
-            prefix_cache_hit="none",
+            prefix_cache_hit=hit,
         )
     return GenerationResponse(
         text=text,
@@ -220,7 +226,7 @@ def _final_response(
             prompt_tokens=prompt_tokens,
             completion_tokens=generated,
             total_tokens=prompt_tokens + generated,
-            prompt_tokens_details=PromptTokensDetails(cached_tokens=0),
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=reused_tokens),
             # count_reasoning_tokens patches reasoning_tokens in on the way
             # out; it starts at 0 here like every other exo generator.
             completion_tokens_details=CompletionTokensDetails(reasoning_tokens=0),
@@ -229,6 +235,21 @@ def _final_response(
 
 
 # --------------------------------------------------------------- decode rounds
+
+
+def rows_fed(token: int, committed: list[int], accepted: int, head: Any | None) -> list[int]:
+    """The rows one round actually fed and kept, in order.
+
+    The verify forward feeds the anchor plus EVERY drafted token, then rolls the
+    rejected suffix back, so the rows that survive are the anchor plus the first
+    ``accepted`` drafts -- which is exactly ``len(committed) - 1`` tokens (the
+    round also commits the target's own token at the first mismatch, which is NOT
+    a fed row: the next round feeds it). With no draft head the round feeds one
+    row and commits one token.
+    """
+    if head is None or accepted >= len(committed):
+        return [int(token)]
+    return [int(token), *[int(t) for t in committed[:accepted]]]
 
 
 def _spec_policy(gamma: int) -> Any:
@@ -246,6 +267,7 @@ def _one_round(
     token: int,
     head: Any | None,
     policy: Any | None,
+    draft_state: Any | None = None,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -253,6 +275,11 @@ def _one_round(
     model's own argmaxes -- never an unverified draft), which is what the
     engine emits. Greedy when ``head`` is None; otherwise DSpark draft +
     chunk verify.
+
+    Rows fed vs tokens committed: a round always feeds its anchor (``token``) and
+    keeps a prefix of its drafts. The caller gets that split from
+    :func:`rows_fed` so its token history can be kept in step with the cache
+    across the rollback.
 
     Draft-context priming. The DSpark head drafts from its own window of
     context taps, and the harnesses prime it from the PREFILL forward's taps
@@ -278,7 +305,11 @@ def _one_round(
     def tapcat(taps: dict[int, mx.array]) -> mx.array:
         return mx.concatenate([taps[layer] for layer in taps_ids], axis=-1)
 
-    draft_state = engine._draft_windows.get(_DRAFT_KEY)
+    # ``draft_state`` is the conversation's draft window when the caller owns one
+    # (``session.Conversation``, which keeps it in step with the body cache); a
+    # bare engine falls back to the per-request window in ``_draft_windows``.
+    if draft_state is None:
+        draft_state = engine._draft_windows.get(_DRAFT_KEY)
 
     if draft_state is None:
         # Round 1 with a head: no draft window yet. Step plainly, but keep the
@@ -298,7 +329,13 @@ def _one_round(
 
     gamma = int(policy.next()) if policy is not None else 1
     position = int(cache.offset)
-    drafted = head.draft(anchor, model.embed, model.head, draft_state, width=gamma)
+    drafted = head.draft(
+        anchor,
+        getattr(model, "embed", None),
+        getattr(model, "head", None),
+        draft_state,
+        width=gamma,
+    )
     drafted = drafted.astype(mx.int32)
     verify_in = mx.concatenate(
         [anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1
@@ -319,8 +356,11 @@ def _one_round(
         accepted += 1
     # The token at the first mismatch is the target's own argmax -- it is
     # committed along with the accepted drafts, so a round always commits at
-    # least one token and the cache lands on a position the target produced.
-    committed = draft[:accepted] + [target[accepted]]
+    # least one token and the cache lands on a position the target produced. A
+    # draft that ran out of script (``len(draft) < gamma``) is exhausted: the
+    # round then commits what it did produce plus the target's answer for the next
+    # position, so the decoded count still advances by one.
+    committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
     committed_position = position + accepted + 1
     spec.rollback(cache, snapshot, committed_position, stashes)
     head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)

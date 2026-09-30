@@ -150,10 +150,10 @@ class ScriptedModel:
         argmax: bool = False,
     ):
         del last_logit_only
-        rows = int(input_ids.shape[0])
-        cache.offset += rows
+        rows, fed = int(input_ids.shape[0]), int(input_ids.shape[-1])
+        cache.offset += fed
         self.last_offset = cache.offset
-        self.calls.append((rows, rows))
+        self.calls.append((rows, fed))
         if argmax:
             ids = self._ids_for(input_ids, cache.offset)
             self.argmax_calls.append(ids)
@@ -174,10 +174,10 @@ class ScriptedModel:
         ``offset - rows + r + 1``. That is what makes a wrong draft visible to
         the comparison instead of silently mapping onto the table's last row.
         """
-        first = offset - int(input_ids.shape[0])
+        rows = int(input_ids.shape[-1])
+        first = offset - rows
         return [
-            self.script[self._index(first + row + 1)]
-            for row in range(int(input_ids.shape[0]))
+            self.script[self._index(first + row + 1)] for row in range(rows)
         ]
 
     def _taps(self, rows: int) -> dict[int, mx.array]:
@@ -218,7 +218,7 @@ class MockHead:
         del anchor, embed, head_lin, dsc
         # The draft is what the model predicts next from the current position:
         # the table entry after the offset the round was started from.
-        start = self.model._index(self.model.round_entry_offset) + 1
+        start = self.model._index(self.model.round_entry_offset)
         ids = list(self.model.script[start : start + width])
         if self.lie_at is not None and self.lie_at < len(ids):
             ids[self.lie_at] = 9999  # a token the target will not confirm
