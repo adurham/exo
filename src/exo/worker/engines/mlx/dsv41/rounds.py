@@ -351,9 +351,11 @@ def _one_round(
         accepted += 1
     # The token at the first mismatch is the target's own argmax -- it is
     # committed along with the accepted drafts, so a round always commits at
-    # least one token and the cache lands on a position the target produced.
-    committed = draft[:accepted] + [target[accepted]]
-    committed_position = position + accepted + 1
+    # least one token and the cache lands on a position the target produced. A
+    # draft that ran out of script (``len(draft) < gamma``) is exhausted: the
+    # round then commits what it did produce plus the target's answer for the next
+    # position, so the decoded count still advances by one.
+    committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
     SP.rollback(cache, snapshot, committed_position, stashes)
     head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)
     return (
