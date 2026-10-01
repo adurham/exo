@@ -1,0 +1,3 @@
+# Raw per-arm logits are large binaries (0.5 MB each) and fully reproducible from
+# the pinned prompt ids + the committed harness; keep the JSON evidence, not these.
+*.npy -text -diff

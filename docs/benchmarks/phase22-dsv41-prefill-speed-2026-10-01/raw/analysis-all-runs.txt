@@ -1,0 +1,185 @@
+== run: 12 arms, ops_per_buffer=200, session_md5=bcfb09f661315b5783661875232db690
+== run2: 12 arms, ops_per_buffer=200, session_md5=bcfb09f661315b5783661875232db690
+== run3: 12 arms, ops_per_buffer=200, session_md5=bcfb09f661315b5783661875232db690
+== ops24: 2 arms, ops_per_buffer=24, session_md5=bcfb09f661315b5783661875232db690
+== ops5: 4 arms, ops_per_buffer=5, session_md5=bcfb09f661315b5783661875232db690
+
+=== ARMS
+tag        label                                   L  chunk   tok/s   gpu%  peak_gb  dec ms dec tok/s
+run        rep0_L2048_base                      2048   2048   231.3      -   111.19    59.5      16.8
+run        rep0_L8192_base                      8192   2048   239.1      -   112.58    61.7      16.2
+run        rep0_L8192_notaps                    8192   2048   248.1      -   112.40    61.4      16.3
+run        rep0_L8192_pf_fenced                 8192   2048   247.7      -   112.40    61.3      16.3
+run        rep0_L8192_msl16384                  8192   2048   245.9      -   112.64    61.5      16.3
+run        rep0_L16384_base                    16384   2048   239.6      -   113.76    64.0      15.6
+run        rep1_L2048_base                      2048   2048   240.3      -   111.46    59.0      16.9
+run        rep1_L8192_base                      8192   2048   245.6      -   112.77    61.4      16.3
+run        rep1_L8192_notaps                    8192   2048   238.2      -   112.58    61.7      16.2
+run        rep1_L8192_pf_fenced                 8192   2048   245.9      -   112.58    61.4      16.3
+run        rep1_L8192_msl16384                  8192   2048   244.0      -   112.82    61.3      16.3
+run        rep1_L16384_base                    16384   2048   238.4      -   113.88    64.0      15.6
+run2       rep0_L2048_base                      2048   2048   230.7      -   111.19    59.5      16.8
+run2       rep0_L8192_base                      8192   2048   237.8      -   112.58    61.8      16.2
+run2       rep0_L8192_notaps                    8192   2048   245.5      -   112.40    61.4      16.3
+run2       rep0_L8192_pf_fenced                 8192   2048   245.6      -   112.40    61.4      16.3
+run2       rep0_L8192_msl16384                  8192   2048   246.2      -   112.64    61.5      16.3
+run2       rep0_L16384_base                    16384   2048   238.1      -   113.76    64.0      15.6
+run2       rep1_L2048_base                      2048   2048   237.2      -   111.46    59.2      16.9
+run2       rep1_L8192_base                      8192   2048   244.1      -   112.77    61.3      16.3
+run2       rep1_L8192_notaps                    8192   2048   237.5      -   112.58    61.7      16.2
+run2       rep1_L8192_pf_fenced                 8192   2048   245.9      -   112.58    61.4      16.3
+run2       rep1_L8192_msl16384                  8192   2048   244.6      -   112.82    61.4      16.3
+run2       rep1_L16384_base                    16384   2048   237.4      -   113.88    64.0      15.6
+run3       rep0_L8192_base                      8192   2048   233.6      -   112.59    61.6      16.2
+run3       rep0_L8192_chunk4096                 8192   4096   256.3      -   115.27    61.5      16.3
+run3       rep0_L8192_chunk8192                 8192   8192   233.0      -   117.23    61.6      16.2
+run3       rep0_L16384_base                    16384   2048   232.1      -   112.71    64.0      15.6
+run3       rep0_L16384_chunk4096               16384   4096   249.4      -   116.71    63.9      15.6
+run3       rep0_L16384_chunk8192               16384   8192   229.9      -   117.43    63.7      15.7
+run3       rep1_L8192_base                      8192   2048   242.1      -   112.77    61.8      16.2
+run3       rep1_L8192_chunk4096                 8192   4096   253.9      -   115.45    61.6      16.2
+run3       rep1_L8192_chunk8192                 8192   8192   234.4      -   117.41    61.7      16.2
+run3       rep1_L16384_base                    16384   2048   231.8      -   112.70    63.9      15.6
+run3       rep1_L16384_chunk4096               16384   4096   248.2      -   116.71    63.9      15.6
+run3       rep1_L16384_chunk8192               16384   8192   229.6      -   117.43    63.9      15.6
+ops24      rep0_L8192_base                      8192   2048   235.1      -   111.82    59.0      16.9
+ops24      rep0_L16384_base                    16384   2048   240.5      -   112.93    61.1      16.4
+ops5       rep0_L8192_base                      8192   2048   236.0      -   110.41    62.3      16.1
+ops5       rep0_L16384_base                    16384   2048   240.6      -   110.95    64.1      15.6
+ops5       rep1_L8192_base                      8192   2048   245.4      -   110.60    62.0      16.1
+ops5       rep1_L16384_base                    16384   2048   242.6      -   111.06    63.7      15.7
+
+=== PER-CHUNK (wall ms delta / gpu ms delta / peak_gb / tokens-per-expert)
+run rep0_L2048_base: c0(p2048) 8812/0ms 111.19GB 5596.8MB
+run rep0_L8192_base: c0(p2048) 8154/0ms 111.21GB 5848.5MB | c1(p4096) 8713/0ms 111.66GB 6482.4MB | c2(p6144) 8638/0ms 112.15GB 6495.0MB | c3(p8192) 8630/0ms 112.58GB 5295.6MB
+run rep0_L8192_notaps: c0(p2048) 8055/0ms 111.3GB 5743.6MB | c1(p4096) 8287/0ms 111.68GB 6692.1MB | c2(p6144) 8318/0ms 112.08GB 6583.8MB | c3(p8192) 8357/0ms 112.4GB 6641.0MB
+run rep0_L8192_pf_fenced: c0(p8192) 33074/0ms 112.4GB 0.1MB
+run rep0_L8192_msl16384: c0(p2048) 8217/0ms 111.33GB 5840.1MB | c1(p4096) 8202/0ms 111.79GB 6482.3MB | c2(p6144) 8415/0ms 112.25GB 6369.0MB | c3(p8192) 8355/0ms 112.64GB 5542.0MB
+run rep0_L16384_base: c0(p2048) 8034/0ms 111.34GB 5848.5MB | c1(p4096) 8287/0ms 111.8GB 6230.8MB | c2(p6144) 8362/0ms 112.26GB 6369.0MB | c3(p8192) 8436/0ms 112.64GB 5542.0MB | c4(p10240) 8746/0ms 113.02GB 5515.7MB | c5(p12288) 8708/0ms 113.31GB 5699.2MB | c6(p14336) 8743/0ms 113.76GB 5875.9MB | c7(p16384) 8816/0ms 113.76GB 5714.0MB
+run rep1_L2048_base: c0(p2048) 8489/0ms 111.46GB 5848.5MB
+run rep1_L8192_base: c0(p2048) 8328/0ms 111.48GB 5596.8MB | c1(p4096) 8303/0ms 111.93GB 6100.7MB | c2(p6144) 8301/0ms 112.38GB 6182.0MB | c3(p8192) 8304/0ms 112.77GB 5519.0MB
+run rep1_L8192_notaps: c0(p2048) 8608/0ms 111.48GB 5743.6MB | c1(p4096) 8511/0ms 111.86GB 6377.6MB | c2(p6144) 8732/0ms 112.26GB 6508.3MB | c3(p8192) 8539/0ms 112.58GB 6510.9MB
+run rep1_L8192_pf_fenced: c0(p8192) 33312/0ms 112.58GB 0.1MB
+run rep1_L8192_msl16384: c0(p2048) 8187/0ms 111.51GB 5588.4MB | c1(p4096) 8427/0ms 111.97GB 5815.4MB | c2(p6144) 8437/0ms 112.43GB 6201.2MB | c3(p8192) 8404/0ms 112.82GB 5512.7MB
+run rep1_L16384_base: c0(p2048) 8254/0ms 111.52GB 5848.5MB | c1(p4096) 8395/0ms 111.98GB 5815.4MB | c2(p6144) 8495/0ms 112.44GB 6201.2MB | c3(p8192) 8448/0ms 112.82GB 5193.9MB | c4(p10240) 8716/0ms 113.2GB 5515.7MB | c5(p12288) 8732/0ms 113.49GB 5741.1MB | c6(p14336) 8654/0ms 113.88GB 5385.0MB | c7(p16384) 8782/0ms 113.88GB 5830.3MB
+run2 rep0_L2048_base: c0(p2048) 8842/0ms 111.19GB 5848.4MB
+run2 rep0_L8192_base: c0(p2048) 8182/0ms 111.21GB 5848.5MB | c1(p4096) 8785/0ms 111.66GB 6230.8MB | c2(p6144) 8672/0ms 112.15GB 6243.4MB | c3(p8192) 8684/0ms 112.58GB 5550.4MB
+run2 rep0_L8192_notaps: c0(p2048) 8216/0ms 111.3GB 5743.6MB | c1(p4096) 8316/0ms 111.68GB 6692.0MB | c2(p6144) 8395/0ms 112.08GB 6583.8MB | c3(p8192) 8437/0ms 112.4GB 6641.0MB
+run2 rep0_L8192_pf_fenced: c0(p8192) 33359/0ms 112.4GB 0.1MB
+run2 rep0_L8192_msl16384: c0(p2048) 8042/0ms 111.33GB 5840.1MB | c1(p4096) 8332/0ms 111.79GB 6230.8MB | c2(p6144) 8372/0ms 112.25GB 6369.0MB | c3(p8192) 8414/0ms 112.64GB 5407.8MB
+run2 rep0_L16384_base: c0(p2048) 8194/0ms 111.34GB 5848.5MB | c1(p4096) 8247/0ms 111.8GB 6482.3MB | c2(p6144) 8490/0ms 112.26GB 6369.0MB | c3(p8192) 8460/0ms 112.64GB 5290.4MB | c4(p10240) 8849/0ms 113.02GB 5264.0MB | c5(p12288) 8740/0ms 113.31GB 5950.8MB | c6(p14336) 8652/0ms 113.76GB 5875.9MB | c7(p16384) 8932/0ms 113.76GB 5712.9MB
+run2 rep1_L2048_base: c0(p2048) 8600/0ms 111.46GB 5596.8MB
+run2 rep1_L8192_base: c0(p2048) 8369/0ms 111.48GB 5596.8MB | c1(p4096) 8300/0ms 111.93GB 6100.7MB | c2(p6144) 8339/0ms 112.38GB 6182.0MB | c3(p8192) 8426/0ms 112.77GB 5519.0MB
+run2 rep1_L8192_notaps: c0(p2048) 8494/0ms 111.48GB 5743.6MB | c1(p4096) 8565/0ms 111.86GB 6377.4MB | c2(p6144) 8812/0ms 112.26GB 6508.3MB | c3(p8192) 8626/0ms 112.58GB 6510.9MB
+run2 rep1_L8192_pf_fenced: c0(p8192) 33311/0ms 112.58GB 0.1MB
+run2 rep1_L8192_msl16384: c0(p2048) 8202/0ms 111.51GB 5588.4MB | c1(p4096) 8389/0ms 111.97GB 5563.7MB | c2(p6144) 8378/0ms 112.43GB 5949.5MB | c3(p8192) 8409/0ms 112.82GB 5261.0MB
+run2 rep1_L16384_base: c0(p2048) 8246/0ms 111.52GB 5848.5MB | c1(p4096) 8522/0ms 111.98GB 5563.8MB | c2(p6144) 8403/0ms 112.44GB 6201.2MB | c3(p8192) 8450/0ms 112.82GB 5412.0MB | c4(p10240) 8804/0ms 113.2GB 5515.7MB | c5(p12288) 8696/0ms 113.49GB 5741.1MB | c6(p14336) 8853/0ms 113.88GB 5636.7MB | c7(p16384) 8793/0ms 113.88GB 5830.3MB
+run3 rep0_L8192_base: c0(p2048) 8858/0ms 111.22GB 5848.4MB | c1(p4096) 8754/0ms 111.66GB 6482.4MB | c2(p6144) 8685/0ms 112.15GB 6495.0MB | c3(p8192) 8647/0ms 112.59GB 5298.7MB
+run3 rep0_L8192_chunk4096: c0(p4096) 15874/0ms 113.92GB 6441.1MB | c1(p8192) 15972/0ms 115.27GB 6338.5MB
+run3 rep0_L8192_chunk8192: c0(p8192) 35043/0ms 117.23GB 5751.0MB
+run3 rep0_L16384_base: c0(p2048) 8348/0ms 109.29GB 5210.1MB | c1(p4096) 8547/0ms 109.84GB 6265.6MB | c2(p6144) 8640/0ms 110.58GB 6012.6MB | c3(p8192) 8712/0ms 110.58GB 6107.5MB | c4(p10240) 8909/0ms 110.58GB 5015.4MB | c5(p12288) 9082/0ms 110.69GB 5512.9MB | c6(p14336) 9066/0ms 111.14GB 5763.1MB | c7(p16384) 9050/0ms 111.14GB 5768.8MB
+run3 rep0_L16384_chunk4096: c0(p4096) 16226/0ms 114.13GB 6239.7MB | c1(p8192) 15961/0ms 115.5GB 6102.8MB | c2(p12288) 16631/0ms 116.71GB 5976.5MB | c3(p16384) 16652/0ms 116.71GB 5854.1MB
+run3 rep0_L16384_chunk8192: c0(p8192) 34991/0ms 117.43GB 5751.0MB | c1(p16384) 36047/0ms 117.43GB 5231.2MB
+run3 rep1_L8192_base: c0(p2048) 8186/0ms 111.48GB 5596.8MB | c1(p4096) 8327/0ms 111.93GB 6100.5MB | c2(p6144) 8598/0ms 112.38GB 5930.4MB | c3(p8192) 8601/0ms 112.77GB 5351.2MB
+run3 rep1_L8192_chunk4096: c0(p4096) 15998/0ms 114.1GB 6239.8MB | c1(p8192) 16142/0ms 115.45GB 6157.3MB
+run3 rep1_L8192_chunk8192: c0(p8192) 34834/0ms 117.41GB 5751.0MB
+run3 rep1_L16384_base: c0(p2048) 8586/0ms 109.47GB 5210.1MB | c1(p4096) 8431/0ms 110.02GB 6013.9MB | c2(p6144) 8719/0ms 110.76GB 6012.6MB | c3(p8192) 8678/0ms 110.76GB 6115.9MB | c4(p10240) 8897/0ms 110.76GB 4889.5MB | c5(p12288) 9000/0ms 110.87GB 5504.5MB | c6(p14336) 9133/0ms 111.25GB 5691.7MB | c7(p16384) 8994/0ms 111.25GB 5663.9MB
+run3 rep1_L16384_chunk4096: c0(p4096) 16225/0ms 114.13GB 6239.7MB | c1(p8192) 16408/0ms 115.5GB 6102.8MB | c2(p12288) 16536/0ms 116.71GB 5976.5MB | c3(p16384) 16594/0ms 116.71GB 5854.1MB
+run3 rep1_L16384_chunk8192: c0(p8192) 34914/0ms 117.43GB 5751.0MB | c1(p16384) 36224/0ms 117.43GB 5231.2MB
+ops24 rep0_L8192_base: c0(p2048) 8789/0ms 110.77GB 5848.4MB | c1(p4096) 8704/0ms 111.18GB 6482.3MB | c2(p6144) 8631/0ms 111.6GB 6243.2MB | c3(p8192) 8604/0ms 111.82GB 5530.3MB
+ops24 rep0_L16384_base: c0(p2048) 7965/0ms 110.88GB 5596.8MB | c1(p4096) 8321/0ms 111.32GB 6398.4MB | c2(p6144) 8328/0ms 111.68GB 6369.0MB | c3(p8192) 8334/0ms 111.87GB 5290.2MB | c4(p10240) 8681/0ms 112.2GB 5211.6MB | c5(p12288) 8801/0ms 112.54GB 5935.1MB | c6(p14336) 8655/0ms 112.93GB 5860.2MB | c7(p16384) 8798/0ms 112.93GB 5948.8MB
+ops5 rep0_L8192_base: c0(p2048) 8744/0ms 109.94GB 5660.5MB | c1(p4096) 8698/0ms 110.12GB 6657.2MB | c2(p6144) 8595/0ms 110.41GB 6500.1MB | c3(p8192) 8553/0ms 110.41GB 6179.8MB
+ops5 rep0_L16384_base: c0(p2048) 8063/0ms 110.05GB 5408.9MB | c1(p4096) 8268/0ms 110.26GB 5985.6MB | c2(p6144) 8298/0ms 110.48GB 6445.6MB | c3(p8192) 8293/0ms 110.48GB 5921.9MB | c4(p10240) 8654/0ms 110.48GB 5185.8MB | c5(p12288) 8758/0ms 110.52GB 5838.0MB | c6(p14336) 8777/0ms 110.95GB 5758.6MB | c7(p16384) 8755/0ms 110.95GB 5867.0MB
+ops5 rep1_L8192_base: c0(p2048) 8375/0ms 110.21GB 5660.6MB | c1(p4096) 8284/0ms 110.39GB 6237.2MB | c2(p6144) 8357/0ms 110.6GB 6289.2MB | c3(p8192) 8246/0ms 110.6GB 6177.7MB
+ops5 rep1_L16384_base: c0(p2048) 8317/0ms 110.23GB 5660.6MB | c1(p4096) 8249/0ms 110.44GB 6237.2MB | c2(p6144) 8344/0ms 110.66GB 5925.3MB | c3(p8192) 8313/0ms 110.66GB 5921.9MB | c4(p10240) 8387/0ms 110.66GB 5020.1MB | c5(p12288) 8525/0ms 110.7GB 5670.2MB | c6(p14336) 8569/0ms 111.06GB 5435.8MB | c7(p16384) 8602/0ms 111.06GB 5931.8MB
+
+=== ORACLE
+ops24 rep0_L16384_base: sha=b270128bdeb26ef8 dec_ms=61.1 tok_s=16.4
+ops24 rep0_L8192_base: sha=fde9cc3797cfd245 dec_ms=59.0 tok_s=16.9
+ops5 rep0_L16384_base: sha=b270128bdeb26ef8 dec_ms=64.1 tok_s=15.6
+ops5 rep0_L8192_base: sha=fde9cc3797cfd245 dec_ms=62.3 tok_s=16.1
+ops5 rep1_L16384_base: sha=b270128bdeb26ef8 dec_ms=63.7 tok_s=15.7
+ops5 rep1_L8192_base: sha=fde9cc3797cfd245 dec_ms=62.0 tok_s=16.1
+run rep0_L16384_base: sha=b270128bdeb26ef8 dec_ms=64.0 tok_s=15.6
+run rep0_L2048_base: sha=b1774115a7c78210 dec_ms=59.5 tok_s=16.8
+run rep0_L8192_base: sha=fde9cc3797cfd245 dec_ms=61.7 tok_s=16.2
+run rep0_L8192_msl16384: sha=fde9cc3797cfd245 dec_ms=61.5 tok_s=16.3
+run rep0_L8192_notaps: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run rep0_L8192_pf_fenced: sha=fde9cc3797cfd245 dec_ms=61.3 tok_s=16.3
+run rep1_L16384_base: sha=b270128bdeb26ef8 dec_ms=64.0 tok_s=15.6
+run rep1_L2048_base: sha=b1774115a7c78210 dec_ms=59.0 tok_s=16.9
+run rep1_L8192_base: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run rep1_L8192_msl16384: sha=fde9cc3797cfd245 dec_ms=61.3 tok_s=16.3
+run rep1_L8192_notaps: sha=fde9cc3797cfd245 dec_ms=61.7 tok_s=16.2
+run rep1_L8192_pf_fenced: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run2 rep0_L16384_base: sha=b270128bdeb26ef8 dec_ms=64.0 tok_s=15.6
+run2 rep0_L2048_base: sha=b1774115a7c78210 dec_ms=59.5 tok_s=16.8
+run2 rep0_L8192_base: sha=fde9cc3797cfd245 dec_ms=61.8 tok_s=16.2
+run2 rep0_L8192_msl16384: sha=fde9cc3797cfd245 dec_ms=61.5 tok_s=16.3
+run2 rep0_L8192_notaps: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run2 rep0_L8192_pf_fenced: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run2 rep1_L16384_base: sha=b270128bdeb26ef8 dec_ms=64.0 tok_s=15.6
+run2 rep1_L2048_base: sha=b1774115a7c78210 dec_ms=59.2 tok_s=16.9
+run2 rep1_L8192_base: sha=fde9cc3797cfd245 dec_ms=61.3 tok_s=16.3
+run2 rep1_L8192_msl16384: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run2 rep1_L8192_notaps: sha=fde9cc3797cfd245 dec_ms=61.7 tok_s=16.2
+run2 rep1_L8192_pf_fenced: sha=fde9cc3797cfd245 dec_ms=61.4 tok_s=16.3
+run3 rep0_L16384_base: sha=b270128bdeb26ef8 dec_ms=64.0 tok_s=15.6
+run3 rep0_L16384_chunk4096: sha=10b27462a4a7f005 dec_ms=63.9 tok_s=15.6
+run3 rep0_L16384_chunk8192: sha=10b27462a4a7f005 dec_ms=63.7 tok_s=15.7
+run3 rep0_L8192_base: sha=fde9cc3797cfd245 dec_ms=61.6 tok_s=16.2
+run3 rep0_L8192_chunk4096: sha=fa7ecf9f96cb8451 dec_ms=61.5 tok_s=16.3
+run3 rep0_L8192_chunk8192: sha=f8dd2bf3baed0d4f dec_ms=61.6 tok_s=16.2
+run3 rep1_L16384_base: sha=b270128bdeb26ef8 dec_ms=63.9 tok_s=15.6
+run3 rep1_L16384_chunk4096: sha=10b27462a4a7f005 dec_ms=63.9 tok_s=15.6
+run3 rep1_L16384_chunk8192: sha=10b27462a4a7f005 dec_ms=63.9 tok_s=15.6
+run3 rep1_L8192_base: sha=fde9cc3797cfd245 dec_ms=61.8 tok_s=16.2
+run3 rep1_L8192_chunk4096: sha=fa7ecf9f96cb8451 dec_ms=61.6 tok_s=16.2
+run3 rep1_L8192_chunk8192: sha=f8dd2bf3baed0d4f dec_ms=61.7 tok_s=16.2
+
+-- L=2048: reference logits ('run', 'rep0_L2048_base') (argmax=31541)
+   ('run', 'rep1_L2048_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=31541
+   ('run2', 'rep0_L2048_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=31541
+   ('run2', 'rep1_L2048_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=31541
+
+-- L=8192: reference logits ('ops24', 'rep0_L8192_base') (argmax=10624)
+   ('ops5', 'rep0_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('ops5', 'rep1_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep0_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep0_L8192_msl16384'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep0_L8192_notaps'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep0_L8192_pf_fenced'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep1_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep1_L8192_msl16384'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep1_L8192_notaps'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run', 'rep1_L8192_pf_fenced'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep0_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep0_L8192_msl16384'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep0_L8192_notaps'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep0_L8192_pf_fenced'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep1_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep1_L8192_msl16384'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep1_L8192_notaps'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run2', 'rep1_L8192_pf_fenced'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run3', 'rep0_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run3', 'rep0_L8192_chunk4096'): max|dlogit|=1.47656 mean=0.216499 top1_agree=True argmax=10624
+   ('run3', 'rep0_L8192_chunk8192'): max|dlogit|=1.60156 mean=0.224245 top1_agree=True argmax=10624
+   ('run3', 'rep1_L8192_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=10624
+   ('run3', 'rep1_L8192_chunk4096'): max|dlogit|=1.47656 mean=0.216499 top1_agree=True argmax=10624
+   ('run3', 'rep1_L8192_chunk8192'): max|dlogit|=1.60156 mean=0.224245 top1_agree=True argmax=10624
+
+-- L=16384: reference logits ('ops24', 'rep0_L16384_base') (argmax=366)
+   ('ops5', 'rep0_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('ops5', 'rep1_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run', 'rep0_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run', 'rep1_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run2', 'rep0_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run2', 'rep1_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run3', 'rep0_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run3', 'rep0_L16384_chunk4096'): max|dlogit|=1.86328 mean=0.164709 top1_agree=True argmax=366
+   ('run3', 'rep0_L16384_chunk8192'): max|dlogit|=0.988281 mean=0.137396 top1_agree=True argmax=366
+   ('run3', 'rep1_L16384_base'): max|dlogit|=0 mean=0 top1_agree=True argmax=366
+   ('run3', 'rep1_L16384_chunk4096'): max|dlogit|=1.86328 mean=0.164709 top1_agree=True argmax=366
+   ('run3', 'rep1_L16384_chunk8192'): max|dlogit|=0.988281 mean=0.137396 top1_agree=True argmax=366
+
+=== ATTR BUCKETS (eval-fenced: shares only)

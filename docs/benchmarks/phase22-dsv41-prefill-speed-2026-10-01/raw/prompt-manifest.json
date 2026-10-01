@@ -1,0 +1,29 @@
+{
+ "source": "/Users/adam.durham/p150_long.txt",
+ "tokenizer": "/Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw/tokenizer.json",
+ "corpus_tokens": 28659,
+ "corpus_sha256": "8d06577c625470475ddb4a626c3c26485f49fc3d67538c9cc4f6a4db2731a628",
+ "prompts": {
+  "2k": {
+   "tokens": 2048,
+   "ids_sha256": "ddd128217ea0441c22aafd8dd991dd3fb4b113235d99d2dcda569ba89912b7fb",
+   "ids_bytes": 11383,
+   "text_sha256": "5972d7ff1d1730720d29cf62a7dffeaffcf96fcc293a63ed0a3f9d963169d368",
+   "text_bytes": 6218
+  },
+  "8k": {
+   "tokens": 8192,
+   "ids_sha256": "7e850e4af8b89fc02aed8d58c779bdddc853e295aec704e6c39d1a644880b43d",
+   "ids_bytes": 46017,
+   "text_sha256": "f1b14b592f67d93dea6ebef26365e2f774be3c8caff7d4dee772d512a6c4a6c8",
+   "text_bytes": 26629
+  },
+  "16k": {
+   "tokens": 16384,
+   "ids_sha256": "76361b148f861fca70b28903a4507e7344dd5649bd03d54a8329054fd7cc2686",
+   "ids_bytes": 92212,
+   "text_sha256": "c839f1301cf0bad46664d23693392cffd90221a66620e1a70facf68ae7658041",
+   "text_bytes": 54179
+  }
+ }
+}

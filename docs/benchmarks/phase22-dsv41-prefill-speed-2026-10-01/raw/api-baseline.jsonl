@@ -1,0 +1,3 @@
+{"prompt": "2k", "wall_s": 9.879, "ttft_s": 9.389, "prompt_tokens": 2052, "completion_tokens": 8, "stats": null, "prefill_progress_events": 0, "text": "# DSv4-Flash-Vision", "prompt_tps_upper": 218.6}
+{"prompt": "8k", "wall_s": 36.998, "ttft_s": 36.598, "prompt_tokens": 8196, "completion_tokens": 8, "stats": null, "prefill_progress_events": 0, "text": "# DSv4-Flash-Vision", "prompt_tps_upper": 223.9}
+{"prompt": "16k", "wall_s": 1.63, "ttft_s": null, "prompt_tokens": null, "completion_tokens": null, "stats": null, "prefill_progress_events": 0, "text": ""}

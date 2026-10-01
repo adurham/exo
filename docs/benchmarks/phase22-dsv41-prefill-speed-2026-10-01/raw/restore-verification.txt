@@ -1,0 +1,33 @@
+=== RESTORE VERIFICATION 2026-10-01T20:11:33Z
+--- 1. API status + models
+GET /v1/models -> 200
+{"object":"list","data":[{"id":"mlx-community/MiniMax-M2.7-4bit","object":"model","created":1790885493,"owned_by":"exo","hugging_face_id":"mlx-community/MiniMax-M2.7-4bit","name":"MiniMax-M2.7-4bit","description":"","context_length":196608,"tags":[],"storage_size_megabytes":122721,"supports_tensor":
+--- 2. model placed
+{"models":[{"name":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","size":0,"digest":null,"details":null,"expires_at":null,"size_vram":null}]}
+--- 3. runners ready (from /state)
+runner count: 2
+  63cd7586 RunnerReady
+  b834c389 RunnerReady
+instances: ['MlxJacclInstance']
+--- 4. real chat completion (temp=0)
+wall 0.7s
+content: 'restored'
+finish: stop usage: {'prompt_tokens': 11, 'completion_tokens': 2, 'total_tokens': 13, 'prompt_tokens_details': {'cached_tokens': 0, 'audio_tokens': 0}, 'completion_tokens_details': {'reasoning_tokens': 0, 'audio_tokens': 0, 'accepted_prediction_tokens': 0, 'rejected_prediction_tokens': 0}}
+--- 5. env on FRESH pids vs pre-stop recorded env
+== macstudio-m4-1
+   env IDENTICAL to pre-stop
+   key values:
+EXO_PREFILL_STEP_SIZE=2048
+EXO_PREFILL_STEP_SIZE_CROSSOVER=500000
+EXO_PREFILL_STEP_SIZE_HIGH_CTX=128
+MLX_MAX_OPS_PER_BUFFER=200
+== macstudio-m4-2
+   env IDENTICAL to pre-stop
+   key values:
+EXO_PREFILL_STEP_SIZE=2048
+EXO_PREFILL_STEP_SIZE_CROSSOVER=500000
+EXO_PREFILL_STEP_SIZE_HIGH_CTX=128
+MLX_MAX_OPS_PER_BUFFER=200
+--- 6. 8K decode + TTFT check through the API
+2K prompt TTFT=9.75s wall=10.45s (post-restore)
+text: '# DSv4-Flash-Vision-Exp — Phase 5 Procedure ('

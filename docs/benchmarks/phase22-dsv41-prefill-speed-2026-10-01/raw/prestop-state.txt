@@ -1,0 +1,34 @@
+=== PRE-STOP STATE 2026-10-01T19:07:23Z
+--- macstudio-m4-1
+exo pid: 57623
+screen:
+There is a screen on:
+	57623.exorun	(Detached)
+1 Socket in /var/folders/w6/9crwsl1n217bq0y62qk2d2h00000gn/T/.screen.
+vm_stat:
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                   333071.
+Pages active:                                 343933.
+Pages inactive:                               831944.
+Pages speculative:                               282.
+wired+compressor:
+111.9 GB
+swap:
+total = 1024.00M  used = 84.88M  free = 939.12M  (encrypted)
+--- macstudio-m4-2
+exo pid: 21053
+screen:
+There is a screen on:
+	21053.exorun	(Detached)
+1 Socket in /var/folders/_v/f6dgc0056znfw21n8_zhr6000000gn/T/.screen.
+vm_stat:
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                   374108.
+Pages active:                                 424319.
+Pages inactive:                               724194.
+Pages speculative:                               185.
+wired+compressor:
+111.7 GB
+swap:
+total = 1024.00M  used = 96.62M  free = 927.38M  (encrypted)
+200

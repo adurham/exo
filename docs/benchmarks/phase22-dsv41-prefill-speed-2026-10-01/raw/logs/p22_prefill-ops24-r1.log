@@ -1,0 +1,69 @@
+[jaccl-v2] rank=1 standing pool armed (8 recvs, sz=2)
+[p22 r1] env {"tag": "ops24", "base_chunk": 2048, "chunks": [], "lens": [8192, 16384], "reps": 1, "arms": ["base"], "attr": false, "oracle": true, "session_py": "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/dsv41/session.py", "session_md5": "bcfb09f661315b5783661875232db690", "ops_per_buffer": "24", "max_mb_per_buffer": "200"}
+[p22 r1] imports {"mlx_lm": "/Users/adam.durham/dsv41-test/mlx_lm/__init__.py", "deepseek_v41_model": "/Users/adam.durham/dsv41-test/mlx_lm/models/deepseek_v41/model.py", "sys_path0": "/Users/adam.durham/dsv41-test", "mlx": "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx/core.cpython-313-darwin.so"}
+[jaccl-v2] ENTER rank=1 call_id=1 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=1 call_id=1 rounds=0
+[p22 r1] head_attached {"stages": 3, "block": 5}
+[jaccl-v2] ENTER rank=1 call_id=2 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=2 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=3 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=4 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=5 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=6 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=7 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=8 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=8 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=9 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=9 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=10 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=10 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=11 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=11 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=12 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=12 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=13 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=13 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=14 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=14 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=15 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=1 call_id=15 rounds=1
+[jaccl-v2] ENTER rank=1 call_id=16 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=1 call_id=16 rounds=1
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+mx.metal.get_cache_memory is deprecated and will be removed in a future version. Use mx.get_cache_memory instead.
+[p22 r1] built {"build_s": 59.7, "warmup_s": 82.1, "warmup": {"chunk512_a": 79.47411004104652, "chunk512_b": 1.7394459170755, "chunk128": 0.5430448340484872, "decode1": 0.09161199990194291, "total": 82.08550141693559}, "active_gb": 107.59, "peak_gb": 110.53, "cache_gb": 0.0}
+[p22 r1] arm {"label": "rep0_L8192_base", "driver": "engine", "taps": true, "rows": 8192, "chunk": 2048, "n_chunks": 4, "max_seq_len": 9216, "total_s": 34.85, "tok_s": 235.0, "peak_gb": 111.82, "gpu_ms_total": 0.0, "dispatches_total": 0, "tokens_per_expert_at_chunk": 64.0, "oracle_sha256": "fde9cc3797cfd24548ed0e8b65e21cc53547e5a11807f00b8b37ecfa5d09bd12", "decode_ms_median": 58.9, "decode_tok_s": 17.0, "rep": 0, "L": 8192}
+[p22 r1] per_chunk {"label": "rep0_L8192_base", "v": [[0, 2048, 8793.1, 0.0, 110.77, 5848.4], [1, 4096, 17497.4, 0.0, 111.18, 6230.7], [2, 6144, 26128.6, 0.0, 111.54, 6243.3], [3, 8192, 34732.5, 0.0, 111.82, 5270.4]]}
+[p22 r1] oracle {"label": "rep0_L8192_base", "sha": "fde9cc3797cfd24548ed0e8b65e21cc53547e5a11807f00b8b37ecfa5d09bd12", "dec_ms": 58.9, "tok_s": 17.0, "toks": [10624, 3608, 476, 54975, 412, 270, 2883, 4271, 16, 4147, 2619, 2869]}
+[p22 r1] arm {"label": "rep0_L16384_base", "driver": "engine", "taps": true, "rows": 16384, "chunk": 2048, "n_chunks": 8, "max_seq_len": 17408, "total_s": 68.11, "tok_s": 240.5, "peak_gb": 112.93, "gpu_ms_total": 0.0, "dispatches_total": 0, "tokens_per_expert_at_chunk": 64.0, "oracle_sha256": "b270128bdeb26ef88f9fe1c1b7161a8b4bae34b6e369ef9310bb57c0435c1ce5", "decode_ms_median": 61.1, "decode_tok_s": 16.4, "rep": 0, "L": 16384}
+[p22 r1] per_chunk {"label": "rep0_L16384_base", "v": [[0, 2048, 7965.6, 0.0, 110.88, 5848.5], [1, 4096, 16286.9, 0.0, 111.32, 6482.4], [2, 6144, 24615.2, 0.0, 111.68, 6369.0], [3, 8192, 32949.1, 0.0, 111.87, 5541.9], [4, 10240, 41630.3, 0.0, 112.2, 5211.6], [5, 12288, 50430.9, 0.0, 112.54, 5683.4], [6, 14336, 59085.8, 0.0, 112.93, 5608.5], [7, 16384, 67883.6, 0.0, 112.93, 5697.2]]}
+[p22 r1] oracle {"label": "rep0_L16384_base", "sha": "b270128bdeb26ef88f9fe1c1b7161a8b4bae34b6e369ef9310bb57c0435c1ce5", "dec_ms": 61.1, "tok_s": 16.4, "toks": [366, 25126, 81451, 117715, 223, 436, 4086, 270, 2041, 12275, 22343, 603]}
+[p22 r1] WROTE {"dir": "/Users/adam.durham/p22_out/ops24"}
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2

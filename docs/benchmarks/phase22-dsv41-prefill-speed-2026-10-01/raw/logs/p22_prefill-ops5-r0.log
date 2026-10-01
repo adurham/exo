@@ -1,0 +1,62 @@
+[jaccl-v2] rank=0 standing pool armed (8 recvs, sz=2)
+[p22 r0] env {"tag": "ops5", "base_chunk": 2048, "chunks": [], "lens": [8192, 16384], "reps": 2, "arms": ["base"], "attr": false, "oracle": true, "session_py": "/Users/adam.durham/repos/exo/src/exo/worker/engines/mlx/dsv41/session.py", "session_md5": "bcfb09f661315b5783661875232db690", "ops_per_buffer": "5", "max_mb_per_buffer": "200"}
+[p22 r0] imports {"mlx_lm": "/Users/adam.durham/dsv41-test/mlx_lm/__init__.py", "deepseek_v41_model": "/Users/adam.durham/dsv41-test/mlx_lm/models/deepseek_v41/model.py", "sys_path0": "/Users/adam.durham/dsv41-test", "mlx": "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx/core.cpython-313-darwin.so"}
+[jaccl-v2] ENTER rank=0 call_id=1 total_bytes=4 sz=2 num_chunks=1 small=1
+[jaccl-v2] EXIT rank=0 call_id=1 rounds=0
+[p22 r0] head_attached {"stages": 3, "block": 5}
+[jaccl-v2] ENTER rank=0 call_id=2 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=2 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=3 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=3 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=4 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=4 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=5 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=5 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=6 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=6 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=7 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=7 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=8 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=8 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=9 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=9 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=10 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=10 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=11 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=11 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=12 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=12 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=13 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=13 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=14 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=14 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=15 total_bytes=10485760 sz=2 num_chunks=641 small=0
+[jaccl-v2] EXIT rank=0 call_id=15 rounds=1
+[jaccl-v2] ENTER rank=0 call_id=16 total_bytes=5242880 sz=2 num_chunks=321 small=0
+[jaccl-v2] EXIT rank=0 call_id=16 rounds=1
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+[wait_for_one] slow: elapsed=3.1s n_active=11 (polling; self-abort at 20000ms)
+mx.metal.get_cache_memory is deprecated and will be removed in a future version. Use mx.get_cache_memory instead.
+[p22 r0] built {"build_s": 60.2, "warmup_s": 68.0, "warmup": {"chunk512_a": 65.364813333028, "chunk512_b": 1.7027994999662042, "chunk128": 0.5482879170449451, "decode1": 0.0935980420326814, "total": 67.95163254195359}, "active_gb": 107.59, "peak_gb": 110.4, "cache_gb": 0.0}
+[p22 r0] arm {"label": "rep0_L8192_base", "driver": "engine", "taps": true, "rows": 8192, "chunk": 2048, "n_chunks": 4, "max_seq_len": 9216, "total_s": 34.71, "tok_s": 236.0, "peak_gb": 110.41, "gpu_ms_total": 0.0, "dispatches_total": 0, "tokens_per_expert_at_chunk": 64.0, "oracle_sha256": "fde9cc3797cfd24548ed0e8b65e21cc53547e5a11807f00b8b37ecfa5d09bd12", "decode_ms_median": 62.3, "decode_tok_s": 16.1, "rep": 0, "L": 8192}
+[p22 r0] per_chunk {"label": "rep0_L8192_base", "v": [[0, 2048, 8743.5, 0.0, 109.94, 5660.5], [1, 4096, 17442.0, 0.0, 110.12, 6657.2], [2, 6144, 26037.1, 0.0, 110.41, 6500.1], [3, 8192, 34589.8, 0.0, 110.41, 6179.8]]}
+[p22 r0] oracle {"label": "rep0_L8192_base", "sha": "fde9cc3797cfd24548ed0e8b65e21cc53547e5a11807f00b8b37ecfa5d09bd12", "dec_ms": 62.3, "tok_s": 16.1, "toks": [10624, 3608, 476, 54975, 412, 270, 2883, 4271, 16, 4147, 2619, 2869]}
+[p22 r0] arm {"label": "rep0_L16384_base", "driver": "engine", "taps": true, "rows": 16384, "chunk": 2048, "n_chunks": 8, "max_seq_len": 17408, "total_s": 68.1, "tok_s": 240.6, "peak_gb": 110.95, "gpu_ms_total": 0.0, "dispatches_total": 0, "tokens_per_expert_at_chunk": 64.0, "oracle_sha256": "b270128bdeb26ef88f9fe1c1b7161a8b4bae34b6e369ef9310bb57c0435c1ce5", "decode_ms_median": 64.1, "decode_tok_s": 15.6, "rep": 0, "L": 16384}
+[p22 r0] per_chunk {"label": "rep0_L16384_base", "v": [[0, 2048, 8062.9, 0.0, 110.05, 5408.9], [1, 4096, 16331.4, 0.0, 110.26, 5985.6], [2, 6144, 24629.8, 0.0, 110.48, 6445.6], [3, 8192, 32923.2, 0.0, 110.48, 5921.9], [4, 10240, 41577.7, 0.0, 110.48, 5185.8], [5, 12288, 50335.7, 0.0, 110.52, 5838.0], [6, 14336, 59113.0, 0.0, 110.95, 5758.6], [7, 16384, 67868.0, 0.0, 110.95, 5867.0]]}
+[p22 r0] oracle {"label": "rep0_L16384_base", "sha": "b270128bdeb26ef88f9fe1c1b7161a8b4bae34b6e369ef9310bb57c0435c1ce5", "dec_ms": 64.1, "tok_s": 15.6, "toks": [366, 25126, 81451, 117715, 223, 436, 4086, 270, 2041, 12275, 22343, 603]}
+[p22 r0] arm {"label": "rep1_L8192_base", "driver": "engine", "taps": true, "rows": 8192, "chunk": 2048, "n_chunks": 4, "max_seq_len": 9216, "total_s": 33.38, "tok_s": 245.4, "peak_gb": 110.6, "gpu_ms_total": 0.0, "dispatches_total": 0, "tokens_per_expert_at_chunk": 64.0, "oracle_sha256": "fde9cc3797cfd24548ed0e8b65e21cc53547e5a11807f00b8b37ecfa5d09bd12", "decode_ms_median": 62.0, "decode_tok_s": 16.1, "rep": 1, "L": 8192}
+[p22 r0] per_chunk {"label": "rep1_L8192_base", "v": [[0, 2048, 8374.7, 0.0, 110.21, 5660.6], [1, 4096, 16658.9, 0.0, 110.39, 6237.2], [2, 6144, 25015.6, 0.0, 110.6, 6289.2], [3, 8192, 33261.9, 0.0, 110.6, 6177.7]]}
+[p22 r0] oracle {"label": "rep1_L8192_base", "sha": "fde9cc3797cfd24548ed0e8b65e21cc53547e5a11807f00b8b37ecfa5d09bd12", "dec_ms": 62.0, "tok_s": 16.1, "toks": [10624, 3608, 476, 54975, 412, 270, 2883, 4271, 16, 4147, 2619, 2869]}
+[p22 r0] arm {"label": "rep1_L16384_base", "driver": "engine", "taps": true, "rows": 16384, "chunk": 2048, "n_chunks": 8, "max_seq_len": 17408, "total_s": 67.54, "tok_s": 242.6, "peak_gb": 111.06, "gpu_ms_total": 0.0, "dispatches_total": 0, "tokens_per_expert_at_chunk": 64.0, "oracle_sha256": "b270128bdeb26ef88f9fe1c1b7161a8b4bae34b6e369ef9310bb57c0435c1ce5", "decode_ms_median": 63.7, "decode_tok_s": 15.7, "rep": 1, "L": 16384}
+[p22 r0] per_chunk {"label": "rep1_L16384_base", "v": [[0, 2048, 8316.9, 0.0, 110.23, 5660.6], [1, 4096, 16566.0, 0.0, 110.44, 6237.2], [2, 6144, 24910.2, 0.0, 110.66, 5925.3], [3, 8192, 33223.3, 0.0, 110.66, 5921.9], [4, 10240, 41610.6, 0.0, 110.66, 5020.1], [5, 12288, 50135.4, 0.0, 110.7, 5670.2], [6, 14336, 58704.1, 0.0, 111.06, 5435.8], [7, 16384, 67306.0, 0.0, 111.06, 5931.8]]}
+[p22 r0] oracle {"label": "rep1_L16384_base", "sha": "b270128bdeb26ef88f9fe1c1b7161a8b4bae34b6e369ef9310bb57c0435c1ce5", "dec_ms": 63.7, "tok_s": 15.7, "toks": [366, 25126, 81451, 117715, 223, 436, 4086, 270, 2041, 12275, 22343, 603]}
+[p22 r0] WROTE {"dir": "/Users/adam.durham/p22_out/ops5"}
+P22_DONE
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
+IOConnectUnmapMemory failed: kr=0xe00002c2
