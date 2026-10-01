@@ -383,7 +383,9 @@ def render_prompt(tokenizer: Any, params: TextGenerationTaskParams, placeholder:
             "and the message content must agree -- expanding them would pair "
             "images with the wrong spans."
         )
-    from exo.worker.engines.mlx.utils_mlx import _needs_v4_encoding  # pyright: ignore[reportPrivateUsage]
+    from exo.worker.engines.mlx.utils_mlx import (
+        _needs_v4_encoding,  # pyright: ignore[reportPrivateUsage]
+    )
 
     if _needs_v4_encoding(params):
         # The vendored Vision-Exp encoder substitutes image blocks itself (and
