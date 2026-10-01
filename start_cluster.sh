@@ -433,7 +433,10 @@ fi
 # DIFFERENT PP layer splits and therefore different cross-rank parity --
 # exactly what hid the Section 45 advance-budget deadlock from Section
 # 40's investigation (Section 49's "still open" item 2).
-: "${DSV4_MODEL_ID:=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}"
+# 2026-10-01: default is DeepSeek-V4.1-Flash (EXL3 2.9bpw, dedicated dsv41
+# engine; measured 27.4 tok/s through exo). Previous default, still supported:
+# DSV4_MODEL_ID=deepseek-ai/DeepSeek-V4-Flash-Vision-Exp
+: "${DSV4_MODEL_ID:=dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw}"
 : "${DSV4_ENABLED:=1}"
 # DEFAULT ON 2026-07-23: Pipeline sharding + PP DSpark speculative decode is
 # now the validated production config (see refs/pp-dspark-required-flags-
@@ -626,6 +629,11 @@ fi
 # return.
 : "${DSV4_MAX_PREFIX_SESSIONS:=4}"
 : "${DSV4_MAX_KV_TOKENS:=}"
+# DSv4.1 preallocates its cache for the full instance capacity; with no cap it
+# would size it for the checkpoint's 1M context. 16K is what was measured.
+if [ -z "$DSV4_MAX_KV_TOKENS" ] && [[ "$DSV4_MODEL_ID" == *DeepSeek-V4.1* ]]; then
+  DSV4_MAX_KV_TOKENS=16384
+fi
 # DSV4_MAX_PREFIX_BYTES (set 2026-09-23): TOTAL retained prefix-cache bytes.
 #
 # STATUS: EFFECTIVE. This cap was previously STRUCTURALLY UNREACHABLE, not
