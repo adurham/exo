@@ -336,6 +336,9 @@ def _one_round(
         draft_state,
         width=gamma,
     )
+    # The real DSparkHead.draft returns (tokens, per-position confidence).
+    if isinstance(drafted, tuple):
+        drafted = drafted[0]
     drafted = drafted.astype(mx.int32)
     verify_in = mx.concatenate(
         [anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1

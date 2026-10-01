@@ -222,7 +222,8 @@ class MockHead:
         ids = list(self.model.script[start : start + width])
         if self.lie_at is not None and self.lie_at < len(ids):
             ids[self.lie_at] = 9999  # a token the target will not confirm
-        return mx.array([ids], dtype=mx.int32)
+        # Same shape as the real DSparkHead.draft: (tokens, confidence).
+        return mx.array([ids], dtype=mx.int32), mx.ones((1, len(ids)))
 
 
 class _Sender:

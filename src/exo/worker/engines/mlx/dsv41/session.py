@@ -196,7 +196,7 @@ class Conversation:
         chunk: int | None = None,
         long_chunk: int | None = None,
         long_threshold: int | None = None,
-        max_snapshots: int = 4,
+        max_snapshots: int = 8,
         eos_id: int = 1,
         progress: Any = None,
     ) -> None:
@@ -225,6 +225,9 @@ class Conversation:
         #: prefill's per-chunk taps, appended to by the engine's verify rounds
         #: (``rounds._one_round``), and checkpointed with the body cache.
         self.draft_state: Any | None = None
+        #: Draft-window copies keyed by cache checkpoint position: a cache rewind
+        #: must rewind the draft window to the same row, or the two drift apart.
+        self._draft_snaps: dict[int, list[tuple[Any, int]] | None] = {0: None}
         self._gen: list[int] = []
         #: Cache rows already in place when the CURRENT turn started; the
         #: generated history is aligned to position ``_base + k`` for entry ``k``.
@@ -297,12 +300,17 @@ class Conversation:
                 "new user text (or the previous reply) and retry."
             )
         self._base = self.offset - int(res.tokens_prefilled)
+        if self.draft_ctx() not in (-1, self._base):
+            self._restore_draft(self._base)
         self._feed_taps(taps)
         if self.draft_state is not None and self.draft_ctx() != self.offset:
             raise RuntimeError(
                 f"DSV4.1 session: the draft window holds {self.draft_ctx()} rows "
                 f"but the cache is at {self.offset}: they must advance together."
             )
+        # Checkpoint the prompt end: a follow-up turn whose re-rendered reply
+        # differs from the generated tokens then reuses this whole prompt.
+        self._checkpoint()
         self._inflight = True
         return TurnOutcome(
             anchor_logits=res.logits,
@@ -339,9 +347,35 @@ class Conversation:
         real to roll back to (the engine always checkpoints).
         """
         if checkpoint:
-            self.cache.snapshot()
+            self._checkpoint()
             self._inflight = False
         self.n_turns += 1
+
+    def _checkpoint(self) -> None:
+        """Snapshot the body cache and the draft window at the same row."""
+        self.cache.snapshot()
+        if self.draft_state is not None:
+            saved = [(w.win_kv + 0, int(w.n_ctx)) for w in self.draft_state]
+            mx.eval([kv for kv, _ in saved])
+            self._draft_snaps[self.offset] = saved
+        keep = set(self.cache.boundaries)
+        for pos in [p for p in self._draft_snaps if p not in keep]:
+            del self._draft_snaps[pos]
+
+    def _restore_draft(self, pos: int) -> None:
+        """Put the draft window back to the row the body cache was rewound to."""
+        if pos not in self._draft_snaps:
+            raise RuntimeError(
+                f"DSV4.1 session: the cache rewound to {pos} but no draft-window "
+                f"checkpoint exists there (have {sorted(self._draft_snaps)})."
+            )
+        saved = self._draft_snaps[pos]
+        if saved is None or self.draft_state is None:
+            self.draft_state = None
+            return
+        for w, (kv, n_ctx) in zip(self.draft_state, saved, strict=True):
+            w.win_kv = kv + 0
+            w.n_ctx = n_ctx
 
     def sync_history(self, prompt_ids: Any, turn: "TurnOutcome") -> None:
         """Align the token history with the rows the cache ACTUALLY holds.
@@ -357,7 +391,9 @@ class Conversation:
         """
         prompt = _ids_of(prompt_ids)
         rows = np.asarray(turn.tokens[: max(0, len(turn.tokens) - 1)], dtype=np.int64)
-        want = int(prompt.shape[0]) - int(turn.reused_tokens) + int(rows.shape[0])
+        # Absolute rows: the full prompt (reused prefix + this turn's prefill)
+        # plus every generated token but the last.
+        want = int(prompt.shape[0]) + int(rows.shape[0])
         held = int(self.cache.offset)
         if held != want:
             raise RuntimeError(
@@ -377,7 +413,13 @@ class Conversation:
         """
         if not self._inflight:
             return 0
-        dropped = int(self.cache.cancel())
+        # Back to the turn START (the prompt-end checkpoint is newer than it).
+        if self._base in self.cache.boundaries:
+            dropped = int(self.cache.rewind(self._base))
+        else:
+            dropped = int(self.cache.cancel())
+        if self.draft_ctx() != -1:
+            self._restore_draft(self.offset)
         keep = max(0, self.offset - self._base)
         if len(self._gen) > keep:
             del self._gen[keep:]
@@ -418,7 +460,7 @@ class Dsv41Sessions:
         long_chunk: int | None = None,
         long_threshold: int | None = None,
         max_sessions: int = 2,
-        max_snapshots: int = 4,
+        max_snapshots: int = 8,
         eos_id: int = 1,
         use_draft: bool = True,
     ) -> None:
