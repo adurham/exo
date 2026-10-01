@@ -189,6 +189,8 @@ def test_dsv41_builder_builds_the_engine_for_its_loaded_checkpoint(monkeypatch):
         builder_module, "build_draft_head", lambda _loaded, _group: None
     )
     monkeypatch.setattr(builder_module, "speculation_enabled", lambda: False)
+    warmed: list[object] = []
+    monkeypatch.setattr(builder_module, "load_warmup", warmed.append)
 
     builder = Dsv41Builder(
         model_id=model_id(),  # type: ignore[arg-type]
@@ -198,6 +200,8 @@ def test_dsv41_builder_builds_the_engine_for_its_loaded_checkpoint(monkeypatch):
     bound = _bound(_card(engine=DSV41_ENGINE, model_id=DSV41_MODEL_ID))
     assert list(builder.load(bound)) == [None]  # drives the loader generator
     assert builder.loaded_dsv41 is loaded
+    # the compile-storm warmup runs at load, before any request (p114/p115)
+    assert warmed == [loaded]
 
     engine = builder.build()
     assert isinstance(engine, Dsv41Engine)

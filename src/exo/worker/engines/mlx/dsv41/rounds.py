@@ -330,7 +330,7 @@ def _one_round(
     gamma = int(policy.next()) if policy is not None else 1
     position = int(cache.offset)
     drafted = head.draft(
-        anchor,
+        anchor.reshape(-1),  # DSparkHead.draft takes [b] anchor ids
         getattr(model, "embed", None),
         getattr(model, "head", None),
         draft_state,

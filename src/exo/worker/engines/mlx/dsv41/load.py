@@ -41,6 +41,10 @@ from exo.worker.runner.bootstrap import logger
 #: Build only these layers (comma-separated) instead of the full stack. The
 #: harness path for layer-subset validation on one node; unset in serving.
 _LAYERS_ENV = "EXO_DSV41_LAYERS"
+#: Native (unquantized) DSv4.1 release holding the engram tables of layers 1/14;
+#: the EXL3 checkpoint does not carry them. Default: the sibling model dir.
+_ENGRAM_DIR_ENV = "EXO_DSV41_ENGRAM_DIR"
+_ENGRAM_DIR_NAME = "deepseek-ai--DeepSeek-V4.1-Flash-engram"
 
 
 @dataclass
@@ -148,8 +152,10 @@ def load_dsv41(
         f"(rank {rank}/{world}, wired limit raised for "
         f"{model_card.storage_size.in_gb:.1f} GB)"
     )
+    native_dir = _resolve_engram_dir(path, args, requested)
     model, report = exl3_build.build_model(
         str(path),
+        native_dir=None if native_dir is None else str(native_dir),
         layers=requested,
         rank=rank,
         world=world,
@@ -232,6 +238,31 @@ def build_draft_head(
         f"markov_rank={head.markov_rank}, taps={list(head.args.dspark_target_layer_ids)})"
     )
     return head
+
+
+def _resolve_engram_dir(
+    path: Path, args: Any, requested: list[int] | None
+) -> Path | None:
+    """Native release dir for the engram tables, when the build has engram layers.
+
+    The EXL3 checkpoint has no engram tables; ``build_block`` reads them
+    row-on-demand from the native release and raises without it.
+    """
+    engram_layers = set(getattr(args, "engram_layer_ids", ()) or ())
+    if requested is not None:
+        engram_layers &= set(requested)
+    if not engram_layers:
+        return None
+    override = os.environ.get(_ENGRAM_DIR_ENV)
+    native = Path(override).expanduser() if override else path.parent / _ENGRAM_DIR_NAME
+    if not native.is_dir():
+        raise FileNotFoundError(
+            f"DSv4.1 layers {sorted(engram_layers)} need the native engram release "
+            f"(not in the EXL3 checkpoint); expected it at {native}. Download "
+            f"deepseek-ai/DeepSeek-V4.1-Flash engram tables there or set {_ENGRAM_DIR_ENV}."
+        )
+    logger.info(f"[DSV41] engram tables: {native}")
+    return native
 
 
 def _resolve_engram_token_map(

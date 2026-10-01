@@ -68,6 +68,10 @@ class Dsv41Builder(MlxBuilder):
                 f"[DSV41] {_SPEC_ENV}=0: skipping the DSpark draft head "
                 "(plain greedy decode)."
             )
+        # Compile every serving kernel shape now, with host-synced collectives,
+        # before any real forward: without it the first forward's ~47 s compile
+        # storm skews the ranks and trips the Metal watchdog (p114/p115).
+        load_warmup(loaded)
         self.loaded_dsv41 = loaded
         # ``MlxBuilder``'s fields are unused for this engine: there is no
         # mlx-lm model object and no BatchGenerator. Set the tokenizer anyway
@@ -95,6 +99,14 @@ class Dsv41Builder(MlxBuilder):
             f"prefill chunk {engine._chunk} tokens."
         )
         return engine
+
+
+def load_warmup(loaded: Dsv41Loaded) -> None:
+    """Compile every serving kernel shape (body + draft head) before serving."""
+    from mlx_lm.models.deepseek_v41 import prefill as _prefill
+
+    times = _prefill.load_warmup(loaded.model, loaded.head)
+    logger.info(f"[DSV41] load warmup (kernel compile): {times}")
 
 
 def _engine_kwargs_from_instance(bound_instance: BoundInstance) -> dict[str, Any]:

@@ -686,13 +686,12 @@ class Dsv41Engine(Engine):
                 draft_state=session.draft_state,
             )
             round_stats.add(round_ms, accepted, gamma)
-            # A round always commits at least one token; stop at EOS / the cap
-            # inside the batch so a draft batch cannot run past the turn's end.
-            for tid in committed:
-                out.append(int(tid))
-                if int(tid) == session.eos_id or len(out) >= max_tokens:
-                    return out, round_stats
-                token = int(tid)
+            # Keep the WHOLE batch: the cache already holds its rows, so the
+            # turn history must too (the emitter stops at EOS / the cap).
+            out.extend(int(t) for t in committed)
+            token = int(committed[-1])
+            if session.eos_id in committed or len(out) >= max_tokens:
+                return out, round_stats
         return out, round_stats
 
     # ------------------------------------------------------------------ rounds
