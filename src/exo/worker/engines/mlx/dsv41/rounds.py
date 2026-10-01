@@ -88,13 +88,7 @@ def _refuse_unsupported(
             "honest answer is to refuse rather than silently answer from text "
             "only. Drop the images or route to an instance with vision."
         )
-    if params.logprobs or params.top_logprobs:
-        raise Dsv41UnsupportedFeature(
-            "DSv4.1: logprobs were requested, but the DSv4.1 decode path "
-            "returns no per-token logprobs (the round resolves argmaxes). "
-            "Refusing rather than returning an empty logprobs block that a "
-            "client would read as 'no alternatives'."
-        )
+
 
 
 def _cache_capacity(engine: Dsv41Engine) -> int:
@@ -169,7 +163,9 @@ def _stop_index(text: str, sequences: tuple[str, ...]) -> int | None:
 # --------------------------------------------------------------- response shape
 
 
-def _mid_response(token: int, text: str, task_id: TaskId | None) -> GenerationResponse:
+def _mid_response(
+    token: int, text: str, task_id: TaskId | None, logprob: Any = None
+) -> GenerationResponse:
     """A non-terminal response: text for the client, no usage.
 
     Usage/stats are attached only to the terminal response, exactly as exo's
@@ -178,7 +174,10 @@ def _mid_response(token: int, text: str, task_id: TaskId | None) -> GenerationRe
     than none.
     """
     del task_id  # only used by the runner's per-task chunk correlation
-    return GenerationResponse(text=text, token=token, usage=None)
+    sel, top = logprob if logprob is not None else (None, None)
+    return GenerationResponse(
+        text=text, token=token, usage=None, logprob=sel, top_logprobs=top
+    )
 
 
 def _final_response(
@@ -193,6 +192,7 @@ def _final_response(
     round_stats: Any | None = None,
     reused_tokens: int = 0,
     prefill_tokens: int | None = None,
+    logprob: Any = None,
 ) -> GenerationResponse:
     """The terminal response for a request, with usage and stats attached.
 
@@ -217,9 +217,12 @@ def _final_response(
             peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
             prefix_cache_hit=hit,
         )
+    sel, top = logprob if logprob is not None else (None, None)
     return GenerationResponse(
         text=text,
         token=token,
+        logprob=sel,
+        top_logprobs=top,
         finish_reason=reason,
         stats=stats,
         usage=Usage(
@@ -252,6 +255,27 @@ def rows_fed(token: int, committed: list[int], accepted: int, head: Any | None) 
     return [int(token), *[int(t) for t in committed[:accepted]]]
 
 
+def _row_logprobs(logits: mx.array, k: int, lp_out: list[Any] | None) -> None:
+    """Log-probs of the greedy token of one full logits row, into ``lp_out``."""
+    if not k or lp_out is None:
+        return
+    from mlx_lm.models.deepseek_v41 import logprobs as _lp
+
+    _ids, sel, tid, tlp = _lp.from_logits(logits.reshape(1, -1), k)
+    mx.eval(sel, tid, tlp)
+    lp_out.append((float(sel[0].item()), tid[0].tolist(), tlp[0].tolist()))
+
+
+def _rows_logprobs(lp: dict[str, mx.array], n: int, lp_out: list[Any]) -> None:
+    """The first ``n`` verify rows' log-probs (batch row 0), into ``lp_out``."""
+    sel = lp["selected"].reshape(-1)[:n]
+    tid = lp["top_ids"].reshape(-1, lp["top_ids"].shape[-1])[:n]
+    tlp = lp["top_logprobs"].reshape(-1, lp["top_logprobs"].shape[-1])[:n]
+    mx.eval(sel, tid, tlp)
+    for s_, i_, l_ in zip(sel.tolist(), tid.tolist(), tlp.tolist(), strict=True):
+        lp_out.append((float(s_), i_, l_))
+
+
 def _spec_policy(gamma: int) -> Any:
     """Adaptive gamma policy for the speculative round (see ``spec.GammaPolicy``)."""
     from mlx_lm.models.deepseek_v41.spec import GammaPolicy
@@ -268,6 +292,8 @@ def _one_round(
     head: Any | None,
     policy: Any | None,
     draft_state: Any | None = None,
+    logprobs: int = 0,
+    lp_out: list[Any] | None = None,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -296,6 +322,7 @@ def _one_round(
     if head is None:
         logits = model(anchor, cache, last_logit_only=True)
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
+        _row_logprobs(logits, logprobs, lp_out)
         return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
 
     from mlx_lm.models.deepseek_v41 import spec
@@ -316,7 +343,7 @@ def _one_round(
         # taps so round 2 can draft.
         logits, taps = model(anchor, cache, last_logit_only=True, return_taps=True)
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
-        mx.eval(next_token)
+        _row_logprobs(logits, logprobs, lp_out)
         draft_state = head.make_cache(1)
         head.append_ctx(tapcat(taps), draft_state)
         engine._draft_windows[_DRAFT_KEY] = draft_state
@@ -344,7 +371,12 @@ def _one_round(
         [anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1
     )
     snapshot = spec.snap(cache, position)
-    logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
+    if logprobs:
+        logits, taps, lp = model(verify_in, cache, return_taps=True, argmax=True,
+                                 logprobs=logprobs)
+    else:
+        logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
+        lp = None
     mx.eval(logits)
     stashes = spec.stashes(cache)
     target = [int(v) for v in logits[0]]
@@ -364,6 +396,10 @@ def _one_round(
     # round then commits what it did produce plus the target's answer for the next
     # position, so the decoded count still advances by one.
     committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
+    if lp is not None and lp_out is not None:
+        # committed[i] == target[i] (accepted drafts match the target), so row
+        # i of the verify forward carries committed token i's log-probs.
+        _rows_logprobs(lp, len(committed), lp_out)
     committed_position = position + accepted + 1
     spec.rollback(cache, snapshot, committed_position, stashes)
     head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)

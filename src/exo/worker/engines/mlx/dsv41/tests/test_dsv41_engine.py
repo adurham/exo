@@ -33,7 +33,6 @@ from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
-import pytest
 
 from exo.shared.types.chunks import ErrorChunk, TokenChunk, ToolCallChunk
 from exo.shared.types.common import CommandId
@@ -48,7 +47,6 @@ from exo.shared.types.worker.instances import InstanceId
 from exo.shared.types.worker.runner_response import FinishedResponse
 from exo.worker.engines.mlx.dsv41.dsml import CALLS_END_V41, CALLS_START_V41, DSML_V41
 from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
-from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.rounds import _one_round, _spec_policy
 from exo.worker.engines.mlx.dsv41.tests.conftest import (
@@ -148,6 +146,7 @@ class ScriptedModel:
         last_logit_only: bool = False,
         return_taps: bool = False,
         argmax: bool = False,
+        logprobs: int = 0,
     ):
         del last_logit_only
         rows, fed = int(input_ids.shape[0]), int(input_ids.shape[-1])
@@ -158,6 +157,14 @@ class ScriptedModel:
             ids = self._ids_for(input_ids, cache.offset)
             self.argmax_calls.append(ids)
             out = mx.array([ids], dtype=mx.int32)
+            if logprobs:
+                k = int(logprobs)
+                lp = {
+                    "selected": mx.zeros((1, fed)),
+                    "top_ids": mx.array([[[t] * k for t in ids]], dtype=mx.int32),
+                    "top_logprobs": mx.zeros((1, fed, k)),
+                }
+                return (out, self._taps(fed), lp) if return_taps else (out, lp)
             return (out, self._taps(fed)) if return_taps else out
         logits = self.logits[self._index(cache.offset)]
         return (logits, self._taps(1)) if return_taps else logits
@@ -495,9 +502,9 @@ def test_images_are_refused_loudly_when_no_vision_processor_is_attached():
         text_of=ANSWER_TEXT,
         images=[Base64Image("iVBORw0KGgo=")],
     )
-    with pytest.raises(Dsv41UnsupportedFeature, match="image"):
-        _drain(engine)
-    assert any(isinstance(e.chunk, ErrorChunk) for e in events)
+    _drain(engine)  # the request fails alone; the runner keeps serving
+    errs = [e.chunk for e in events if isinstance(e.chunk, ErrorChunk)]
+    assert errs and "image" in (errs[0].error_message or "")
 
 
 def test_prefix_cache_request_is_served():
@@ -511,12 +518,19 @@ def test_prefix_cache_request_is_served():
     assert any(getattr(c, "finish_reason", None) == "stop" for c in chunks)
 
 
-def test_logprobs_request_is_refused():
+def test_logprobs_request_is_served():
+    """The exo dashboard sends logprobs=true + top_logprobs=5 on every chat
+    request; refusing it crashed the runner (seen live). Each token chunk now
+    carries its own log-prob and the top alternatives."""
     engine, _model, _tokenizer, _events = _engine(
-        [34, 1], text_of=ANSWER_TEXT, logprobs=True
+        [34, 35, 36, 1], text_of=ANSWER_TEXT, logprobs=True, max_output_tokens=8
     )
-    with pytest.raises(Dsv41UnsupportedFeature, match="logprobs"):
-        _drain(engine)
+    chunks = _drain(engine)
+    assert _text_of(chunks) == "hi there bye"
+    toks = [c for c in chunks if isinstance(c, TokenChunk) and c.text]
+    assert toks and all(c.logprob is not None for c in toks)
+    # one-hot rows: the greedy token holds almost all the mass
+    assert all(c.logprob <= 0.0 for c in toks)
 
 
 # --------------------------------------------------------------- spec rounds
@@ -639,3 +653,39 @@ def test_tokens_stream_before_the_turn_finishes():
     assert first_chunk_calls is not None
     _drain(engine)
     assert first_chunk_calls < len(model.calls), (first_chunk_calls, len(model.calls))
+
+
+def test_speculative_round_reports_one_logprob_per_committed_token():
+    model = ScriptedModel([34, 35, 36, 34, 35, 1], prompt_tokens=0)
+    head = MockHead(model, lie_at=1)
+    cache = MockCache(64)
+    engine = _EngineStub(_draft_windows={0: object()})
+    model.round_entry_offset = 1
+    lps: list[object] = []
+    committed, _ms, accepted, _gamma = _one_round(
+        engine,  # type: ignore[arg-type]
+        model=model, cache=cache, token=model.script[0], head=head,
+        policy=_spec_policy(3), logprobs=2, lp_out=lps,
+    )
+    assert accepted == 1 and len(committed) == 2
+    assert len(lps) == len(committed)
+    assert [entry[1][0] for entry in lps] == committed  # type: ignore[index]
+
+
+def test_a_refused_request_fails_alone_and_the_engine_keeps_serving():
+    """A refusal used to escape step() and crash the runner (a ~2 min reload)."""
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=100_000
+    )
+    chunks = _drain(engine)  # FinishedResponse, no exception
+    assert not any(isinstance(c, TokenChunk) for c in chunks)
+    assert any(isinstance(e.chunk, ErrorChunk) for e in events)
+
+
+def test_no_max_tokens_fits_the_cache_instead_of_refusing():
+    """The dashboard sends no max_tokens; the 32K default must not exceed the
+    instance cache and get the request refused."""
+    engine, _model, _tokenizer, events = _engine([34, 35, 36, 1], text_of=ANSWER_TEXT)
+    chunks = _drain(engine)
+    assert _text_of(chunks) == "hi there bye"
+    assert not any(isinstance(e.chunk, ErrorChunk) for e in events)
