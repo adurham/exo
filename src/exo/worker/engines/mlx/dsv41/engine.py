@@ -61,6 +61,7 @@ import mlx.core as mx
 from exo.api.types import (
     FinishReason,
     GenerationStats,
+    TopLogprobItem,
 )
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.chunks import ErrorChunk, GenerationChunk, PrefillProgressChunk
@@ -89,6 +90,7 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _one_round,
     _queue_of,
     _refuse_unsupported,
+    _row_logprobs,
     _spec_policy,
     _stop_index,
     _stop_sequences,
@@ -341,6 +343,16 @@ class Dsv41Engine(Engine):
                         break
                     continue
                 output.append((active.task.task_id, parsed))
+        except Dsv41UnsupportedFeature as e:
+            # A request this build cannot serve: fail the REQUEST with the
+            # reason, keep the runner (both ranks raise the same refusal for
+            # the same params, so they stay in step).
+            self._send_error(active.task, e)
+            output.append((active.task.task_id, FinishedResponse()))
+            self._agreement.forget(active.task.task_id)
+            self._active = None
+            if self._agreement.queue:
+                self._start_next()
         except (StopIteration, PrefillCancelled):
             # The parser pipeline BUFFERS (thinking split / DSML detection hold
             # tokens until they are disambiguated), so at end-of-stream whatever
@@ -526,7 +538,10 @@ class Dsv41Engine(Engine):
             tokens_list = [int(t) for t in prompt_tokens]
         if prompt_len == 0:
             raise ValueError("DSV4.1: empty prompt after chat templating")
-        if prompt_len + max_tokens + 8 > capacity:
+        if params.max_output_tokens is None:
+            # Client did not ask for a length: generate up to what the cache holds.
+            max_tokens = min(max_tokens, capacity - prompt_len - 8)
+        if max_tokens < 1 or prompt_len + max_tokens + 8 > capacity:
             raise Dsv41UnsupportedFeature(
                 f"DSV4.1: prompt {prompt_len} + max_output_tokens {max_tokens} "
                 f"needs more than the {capacity}-token cache this instance was "
@@ -568,12 +583,32 @@ class Dsv41Engine(Engine):
         #    ``produced`` is every committed token (the cache holds all of
         #    them but the last), even past a stop point inside one round.
         produced: list[int] = [anchor]
+        # Log-probs: computed only when asked (an extra small all_sum per round).
+        top_n = int(params.top_logprobs or 0)
+        lp_k = max(top_n, 1) if (params.logprobs or top_n) else 0
+        anchor_lp: list[Any] = []
+        _row_logprobs(turn.anchor_logits, lp_k, anchor_lp)
 
-        def committed_tokens() -> Iterator[int]:
-            yield anchor
-            for batch in self._rounds(session, anchor, max_tokens - 1):
+        def committed_tokens() -> Iterator[tuple[int, Any]]:
+            yield anchor, (anchor_lp[0] if anchor_lp else None)
+            for batch, lps in self._rounds(session, anchor, max_tokens - 1, logprobs=lp_k):
                 produced.extend(batch)
-                yield from batch
+                for i, t in enumerate(batch):
+                    yield t, (lps[i] if i < len(lps) else None)
+
+        def as_logprob(entry: Any) -> Any:
+            if entry is None:
+                return None
+            sel, ids, vals = entry
+            items = [
+                TopLogprobItem(
+                    token=(s := tokenizer.decode([int(i)])),
+                    logprob=float(v),
+                    bytes=list(s.encode("utf-8")),
+                )
+                for i, v in zip(ids[:top_n], vals[:top_n], strict=True)
+            ]
+            return (float(sel), items)
 
         detokenizer = tokenizer.detokenizer
         emitted = 0
@@ -586,7 +621,7 @@ class Dsv41Engine(Engine):
         )
         last_tid = anchor
         try:
-            for tid in committed_tokens():
+            for tid, lp_entry in committed_tokens():
                 last_tid = tid
                 if tid in eos_ids:
                     final_reason = "stop"
@@ -612,9 +647,10 @@ class Dsv41Engine(Engine):
                         reason=final_reason,
                         task_id=task_id,
                         reused_tokens=turn.reused_tokens,
+                        logprob=as_logprob(lp_entry),
                     )
                     return
-                yield _mid_response(tid, text, task_id)
+                yield _mid_response(tid, text, task_id, as_logprob(lp_entry))
         except BaseException:
             session.cancel()
             if not keep:
@@ -668,7 +704,7 @@ class Dsv41Engine(Engine):
             session, tokens, embeddings=embeddings, image_span_end=image_span_end
         )
         produced = [anchor]
-        for batch in self._rounds(session, anchor, max_tokens - 1):
+        for batch, _lps in self._rounds(session, anchor, max_tokens - 1):
             produced.extend(batch)
         turn.tokens = produced
         session.sync_history(tokens, turn)
@@ -697,8 +733,11 @@ class Dsv41Engine(Engine):
         anchor = int(mx.argmax(turn.anchor_logits.reshape(-1), axis=-1).item())
         return turn, anchor
 
-    def _rounds(self, session: Any, anchor: int, max_tokens: int) -> Iterator[list[int]]:
-        """Decode rounds from the anchor; yields each round's committed tokens.
+    def _rounds(
+        self, session: Any, anchor: int, max_tokens: int, *, logprobs: int = 0
+    ) -> Iterator[tuple[list[int], list[Any]]]:
+        """Decode rounds from the anchor; yields each round's committed tokens
+        and (when ``logprobs`` > 0) their log-prob entries.
 
         Stops once ``max_tokens`` tokens after the anchor are committed or a
         round commits EOS. A round's whole batch is yielded: the cache already
@@ -715,6 +754,7 @@ class Dsv41Engine(Engine):
         while n < max_tokens:
             active = self._active
             self._check_cancel(active.task.task_id if active is not None else None)
+            lps: list[Any] = []
             committed, _round_ms, _accepted, _gamma = _one_round(
                 self,
                 model=self.loaded.model,
@@ -723,11 +763,13 @@ class Dsv41Engine(Engine):
                 head=head,
                 policy=policy,
                 draft_state=session.draft_state,
+                logprobs=logprobs,
+                lp_out=lps if logprobs else None,
             )
             batch = [int(t) for t in committed]
             n += len(batch)
             token = batch[-1]
-            yield batch
+            yield batch, lps
             if session.eos_id in batch:
                 return
 
