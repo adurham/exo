@@ -14,8 +14,8 @@ now measured: at 16K the prefill is dominated by the EXL3 expert matmuls
 collectives (16.9%); attention+indexer together are only ~19%. Two exceptions
 worth acting on, both measured:
 
-- **Chunk size 2048 → 4096 is worth +5.9% / +7.1% at 8K / 16K** (reproduced in
-  both reps), but it pushes peak to 116.7 GB at 16K — **over the 115 GB wired
+- **Chunk size 2048 → 4096 is worth roughly +5% to +10% at 8K (rep0 +9.7%, rep1 +4.9%) and +7.1% at 16K** (16K reproduced in
+  both reps; 8K is noisier than the first draft claimed), but it pushes peak to 116.7 GB at 16K — **over the 115 GB wired
   limit**, so it is not shippable without reclaiming memory first.
 - **Chunk 8192 is worse than 2048** (229.6 vs 231.8 tok/s at 16K) and peaks at
   117.4 GB. Bigger is not better past 4096.
@@ -84,7 +84,7 @@ and `raw/logs/`.
 | `run` (ops=200) | 239.1 / 245.6 | 239.6 / 238.4 |
 | `run2` (ops=200, independent process + cold load) | 237.8 / 244.1 | 238.1 / 237.4 |
 
-Run-to-run within a process and across a full cold restart agree to ~±1%. Every
+Run-to-run within a process and across a full cold restart agree to ~±1% at 16K (0.93% spread) but **3.28% at 8K** (237.8–245.6); the 8K figure is the honest noise band for later comparisons (reviewer recompute, 2026-10-01). Every
 one of the 12 arms in `run` and `run2` produced the **same 64-token sha256**
 (`2K b1774115…`, `8K fde9cc37…`, `16K b270128b…`), and the `pf_fenced`,
 `notaps` and `msl16384` variants are **bit-identical to `base`**
@@ -102,7 +102,7 @@ c0(+2048) 8255  c1(+4096) 8403  c2(+6144) 8490  c3(+8192) 8427
 c4(+10240) 8716 c5(+12288) 8731 c6(+14336) 8652 c7(+16384) 8782
 ```
 
-The last chunk costs **+6%** more than the first, not 2-3×. Attention and the
+The last chunk costs **+6% (8K) to +8–10% (16K)** more than the first (reviewer recompute), not 2-3×. Attention and the
 indexer therefore do **not** dominate at 16K on this model — the earlier
 phase-21 subset result (indexer growing +29 ms at 8K / +63 ms at 16K per 512-row
 chunk on 2 layers) is real but is not the driver of the full model's flat
@@ -145,12 +145,12 @@ Fixed 2048-row chunks vs 4096 vs 8192, same prompts, same driver (`run3`):
 
 | prompt | chunk 2048 | chunk 4096 | chunk 8192 | 4096 vs 2048 | peak @4096 |
 |---:|---:|---:|---:|---:|---:|
-| 8K (rep0/rep1) | 233.6 / 242.1 | **256.3 / 253.9** | 233.0 / 234.4 | **+5.9%** | 115.3 / 115.5 GB |
+| 8K (rep0/rep1) | 233.6 / 242.1 | **256.3 / 253.9** | 233.0 / 234.4 | **+5.9% (rep-averaged figure in the report; recomputed per rep: +9.7% / +4.9%, mean +7.3%)** | 115.3 / 115.5 GB |
 | 16K (rep0/rep1) | 232.1 / 231.8 | **249.4 / 248.2** | 229.9 / 229.6 | **+7.1%** | 116.7 GB |
 
 - The win is real and reproduced, and the shape is the expected one: bigger M
   amortises the trellis weight traffic per token across the expert GEMMs.
-- It is **not shippable as-is**: peak reaches 116.71 GB at 16K against a 115000 MB
+- It is **not shippable as-is**: peak reaches 116.71 GB at 16K against a 115000 MB (`iogpu.wired_limit_mb`, captured in raw/wired-limit-2026-10-01.txt)
   (`112.3 GiB`) `iogpu.wired_limit_mb`, and the harness's own headroom was
   consumed down to ~-4 GB of the limit. On this box that is the paging regime
   (bad numbers, not a crash).
@@ -221,7 +221,7 @@ Three mechanisms, all real, and they compound:
    far shorter than at 16K; the indexer's per-row cost grows with the
    accumulated compressed positions.
 
-272 → 245 is a ~10% TP tax, which is the right size for one `all_sum` per layer
+272 → 245 is a ~10% TP tax (arithmetic only: the single-node 8-layer run behind the 679 figure is not in this repo, so this reconciliation is UNSUPPORTED by raw data here), which is the right size for one `all_sum` per layer
 per chunk plus non-overlapped collective latency — and §3.3 now prices that
 collective directly at **16.9% of prefill time**. So the subset number was never
 scalable: it was a different workload on a different topology. **Report the 679
