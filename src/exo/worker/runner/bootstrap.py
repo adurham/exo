@@ -325,11 +325,15 @@ def entrypoint(
 
             apply_mlx_patches()
 
-            from exo.worker.engines.mlx.builder import MlxBuilder
+            # Engine dispatch for the MLX family. The DSv4.1 (EXL3) engine and
+            # the generic MlxBuilder differ only in load/build; the card's
+            # ``engine`` field picks between them (see
+            # exo.worker.engines.mlx.dsv41.dispatch).
+            from exo.worker.engines.mlx.dsv41.dispatch import make_mlx_family_builder
 
             # evil sharing of the event sender
-            builder = MlxBuilder(
-                model_id=bound_instance.bound_shard.model_card.model_id,
+            builder = make_mlx_family_builder(
+                bound_instance,
                 event_sender=event_sender_downcast,
                 cancel_receiver=cancel_receiver,
             )

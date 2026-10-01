@@ -1,0 +1,25 @@
+{
+  "provenance": {
+    "checkpoint": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+    "host": "macstudio-m4-1",
+    "date": "2026-09-29",
+    "sources": [
+      "tokenizer.json added_tokens",
+      "chat_template.jinja"
+    ],
+    "note": "Thinking markers are given as utf-8 hex because a bare angle-bracket literal is fragile in source; decode with bytes.fromhex(...).decode() if you need the characters."
+  },
+  "dsml": {
+    "sentinel": "\uff5cDSML\uff5c",
+    "sentinel_utf8_hex": "efbd9c44534d4cefbd9c",
+    "sentinel_id": 128825,
+    "calls_start": "<\uff5cDSML\uff5c calls>",
+    "calls_end": "</\uff5cDSML\uff5c calls>"
+  },
+  "thinking": {
+    "start_utf8_hex": "3c7468696e6b3e",
+    "end_utf8_hex": "3c2f7468696e6b3e",
+    "start_id": 128821,
+    "end_id": 128822
+  }
+}

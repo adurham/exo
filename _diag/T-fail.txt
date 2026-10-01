@@ -1,0 +1,184 @@
+.................................FFFFFFFFFF...FF........................ [ 88%]
+.........                                                                [100%]
+=================================== FAILURES ===================================
+__________________ test_plain_turn_streams_text_and_finishes ___________________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:338: in test_plain_turn_streams_text_and_finishes
+    chunks = _drain(engine)
+             ^^^^^^^^^^^^^^
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:323: in _drain
+    assert finished, "engine never reported FinishedResponse"
+E   AssertionError: engine never reported FinishedResponse
+E   assert False
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.167 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.168 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+__________ test_prefill_is_fenced_and_names_the_first_scripted_token ___________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:353: in test_prefill_is_fenced_and_names_the_first_scripted_token
+    chunks = _drain(engine)
+             ^^^^^^^^^^^^^^
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:323: in _drain
+    assert finished, "engine never reported FinishedResponse"
+E   AssertionError: engine never reported FinishedResponse
+E   assert False
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.231 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.232 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+________________ test_generation_stops_on_eos_before_max_tokens ________________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:363: in test_generation_stops_on_eos_before_max_tokens
+    chunks = _drain(engine)
+             ^^^^^^^^^^^^^^
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:323: in _drain
+    assert finished, "engine never reported FinishedResponse"
+E   AssertionError: engine never reported FinishedResponse
+E   assert False
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.243 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.243 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+______________ test_max_output_tokens_stops_the_turn_with_length _______________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:375: in test_max_output_tokens_stops_the_turn_with_length
+    assert _text_of(chunks) == "hi there"
+E   AssertionError: assert 'hi' == 'hi there'
+E     
+E     - hi there
+E     + hi
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.262 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.263 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+_______________ test_max_output_tokens_caps_a_single_token_round _______________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:384: in test_max_output_tokens_caps_a_single_token_round
+    assert _text_of(chunks) == "hi"
+E   AssertionError: assert '' == 'hi'
+E     
+E     - hi
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.273 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.273 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+_______________ test_stop_sequence_truncates_and_stops_the_turn ________________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:402: in test_stop_sequence_truncates_and_stops_the_turn
+    assert _text_of(chunks) == "hi there"
+E   AssertionError: assert 'hi' == 'hi there'
+E     
+E     - hi there
+E     + hi
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.286 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.286 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+______________ test_usage_is_attached_to_the_terminal_chunk_only _______________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:418: in test_usage_is_attached_to_the_terminal_chunk_only
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (
+E   assert (3, 3, 6) == (3, 2, 5)
+E     
+E     At index 1 diff: 3 != 2
+E     Use -v to get more diff
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.298 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.298 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+______________ test_reasoning_is_routed_and_then_content_follows _______________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:435: in test_reasoning_is_routed_and_then_content_follows
+    chunks = _drain(engine)
+             ^^^^^^^^^^^^^^
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:323: in _drain
+    assert finished, "engine never reported FinishedResponse"
+E   AssertionError: engine never reported FinishedResponse
+E   assert False
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.309 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.309 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+_____________ test_stray_open_marker_inside_reasoning_never_leaks ______________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:457: in test_stray_open_marker_inside_reasoning_never_leaks
+    chunks = _drain(engine)
+             ^^^^^^^^^^^^^^
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:323: in _drain
+    assert finished, "engine never reported FinishedResponse"
+E   AssertionError: engine never reported FinishedResponse
+E   assert False
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.320 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.320 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜><｜User｜>hello<｜Assistant｜><think>
+___________ test_tool_call_turn_emits_one_tool_call_chunk_with_usage ___________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:473: in test_tool_call_turn_emits_one_tool_call_chunk_with_usage
+    chunks = _drain(engine)
+             ^^^^^^^^^^^^^^
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:323: in _drain
+    assert finished, "engine never reported FinishedResponse"
+E   AssertionError: engine never reported FinishedResponse
+E   assert False
+----------------------------- Captured stderr call -----------------------------
+2026-09-30 22:57:39.337 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜>
+
+## Tools
+
+You have access to a set of tools to help answer the user's question. You can invoke tools by writing a "<｜DSML｜tool_calls>" block like the following:
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="$TOOL_NAME">
+<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>
+...
+</｜DSML｜invoke>
+<｜DSML｜invoke name="$TOOL_NAME2">
+...
+</｜DSML｜invoke>
+</｜DSML｜tool_calls>
+
+String parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.
+
+If thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.
+
+Otherwise, output directly after </think> with tool calls or final response.
+
+### Available Tool Schemas
+
+{"name": "read", "parameters": {}}
+
+You MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.
+<｜User｜>hello<｜Assistant｜><think>
+2026-09-30 22:57:39.337 | DEBUG    | exo.worker.engines.mlx.utils_mlx:apply_chat_template:1987 - <｜begin▁of▁sentence｜>
+
+## Tools
+
+You have access to a set of tools to help answer the user's question. You can invoke tools by writing a "<｜DSML｜tool_calls>" block like the following:
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="$TOOL_NAME">
+<｜DSML｜parameter name="$PARAMETER_NAME" string="true|false">$PARAMETER_VALUE</｜DSML｜parameter>
+...
+</｜DSML｜invoke>
+<｜DSML｜invoke name="$TOOL_NAME2">
+...
+</｜DSML｜invoke>
+</｜DSML｜tool_calls>
+
+String parameters should be specified as is and set `string="true"`. For all other types (numbers, booleans, arrays, objects), pass the value in JSON format and set `string="false"`.
+
+If thinking_mode is enabled (triggered by <think>), you MUST output your complete reasoning inside <think>...</think> BEFORE any tool calls or final response.
+
+Otherwise, output directly after </think> with tool calls or final response.
+
+### Available Tool Schemas
+
+{"name": "read", "parameters": {}}
+
+You MUST strictly follow the above defined tool name and parameter schemas to invoke tool calls.
+<｜User｜>hello<｜Assistant｜><think>
+_________ test_speculative_round_commits_only_target_confirmed_tokens __________
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:540: in test_speculative_round_commits_only_target_confirmed_tokens
+    assert accepted == 3
+E   assert 0 == 3
+___ test_speculative_round_rejects_a_wrong_draft_and_takes_the_target_token ____
+src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py:565: in test_speculative_round_rejects_a_wrong_draft_and_takes_the_target_token
+    assert accepted == 1
+E   assert 0 == 1
+=========================== short test summary info ============================
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_plain_turn_streams_text_and_finishes
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_prefill_is_fenced_and_names_the_first_scripted_token
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_generation_stops_on_eos_before_max_tokens
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_max_output_tokens_stops_the_turn_with_length
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_max_output_tokens_caps_a_single_token_round
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_stop_sequence_truncates_and_stops_the_turn
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_usage_is_attached_to_the_terminal_chunk_only
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_reasoning_is_routed_and_then_content_follows
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_stray_open_marker_inside_reasoning_never_leaks
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_tool_call_turn_emits_one_tool_call_chunk_with_usage
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_speculative_round_commits_only_target_confirmed_tokens
+FAILED src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py::test_speculative_round_rejects_a_wrong_draft_and_takes_the_target_token
+12 failed, 69 passed in 0.78s

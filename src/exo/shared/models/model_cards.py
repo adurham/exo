@@ -122,6 +122,25 @@ class ModelTask(str, Enum):
     ImageToImage = "ImageToImage"
 
 
+class ModelEngine(str, Enum):
+    """Which worker engine serves a model card.
+
+    ``Mlx`` is the generic path: ``load_mlx_items`` + ``BatchGenerator``/
+    ``SequentialGenerator``. Any other value names a dedicated engine that
+    replaces the loader AND the generator for that card, because it does not
+    fit the generic path at all (DSv4.1: an EXL3 checkpoint with hand-written
+    Metal kernels, its own cache object and no batched decode).
+
+    Expressed on the card -- not inferred from ``quantization``/``family`` --
+    so a reviewer can read which engine serves a model without following
+    imports, and so the NEXT checkpoint of the same family cannot be silently
+    routed into an engine that speaks a different weight layout.
+    """
+
+    Mlx = "mlx"
+    Dsv41 = "dsv41"
+
+
 class ComponentInfo(FrozenModel):
     component_name: str
     component_path: str
@@ -204,6 +223,10 @@ class ModelCard(FrozenModel):
     base_model: str = ""
     capabilities: list[str] = []
     backends: list[Backend]
+    #: Which worker engine serves this card (see :class:`ModelEngine`).
+    #: ``None``/unset means the generic MLX path, so every pre-existing card
+    #: keeps behaving exactly as before.
+    engine: ModelEngine | None = None
     reasoning_dialect: ReasoningDialect = "none"
     context_length: int = 0
     uses_cfg: bool = False
@@ -239,6 +262,15 @@ class ModelCard(FrozenModel):
     @classmethod
     def _validate_backends(cls, v: list[str | Backend]) -> list[Backend]:
         return [item if isinstance(item, Backend) else Backend(item) for item in v]
+
+    @field_validator("engine", mode="before")
+    @classmethod
+    def _validate_engine(cls, v: str | ModelEngine | None) -> ModelEngine | None:
+        # Cards are hand-written TOML; accept the plain string ("dsv41") as
+        # well as the enum member. Same shape as tasks/backends above.
+        if v is None or isinstance(v, ModelEngine):
+            return v
+        return ModelEngine(v)
 
     async def save(self, path: Path) -> None:
         async with await open_file(path, "w") as f:

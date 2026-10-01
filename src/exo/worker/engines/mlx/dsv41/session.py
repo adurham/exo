@@ -1,0 +1,563 @@
+"""Multi-turn session wiring for the DSv4.1 engine.
+
+WHAT THIS IS. The engine's conversation store, and the piece that turns a
+request's prompt into a turn on a LIVE cache instead of a fresh one. Without it
+``use_prefix_cache`` would be a lie: the engine would re-prefill the whole prompt
+on every request. With it, turn N+1 of a conversation prefills only the delta
+(``turn-2 prefill < 10% of turn 1``), which is the multi-turn acceptance bar.
+
+It is deliberately NOT ``serve.Session``. That class owns a whole turn -- prefill
+AND the speculative decode loop via ``spec.generate`` -- while this engine drives
+decode with ``rounds._one_round``, whose contract the engine tests pin (fenced
+prefill chunks, one anchor, tap-fed draft window). So this module takes the half
+that is about STATE from the mlx-lm fork's ``session_cache.SessionCache``
+(prefix match, rewind, checkpoint, token history) and leaves the decode loop to
+the engine:
+
+* :class:`Conversation` wraps one ``SessionCache`` -- the live ``ModelCache``
+  (window ring + compressed KV + compressor carry + index keys + engram id
+  history) -- plus the DSpark draft window that must stay in step with it.
+* :meth:`Conversation.prefill` feeds a turn's NEW rows with the engine's own
+  chunk loop (:func:`engine_prefill`: ``last_logit_only`` per chunk, no eval
+  fences, no post-prefill decode-prime probe, one sync per chunk) and returns the
+  anchor row's logits. The prefill's per-chunk taps are pushed into the draft
+  window here, so its ``n_ctx`` tracks ``cache.offset`` exactly.
+* :meth:`Conversation.finish` checkpoints the whole turn (cache + history) so the
+  next turn can extend it and :meth:`Conversation.cancel` can roll it back.
+
+Reuse is exact: ``SessionCache`` rewinds to the newest checkpoint at or below the
+common prefix and re-feeds only the delta, so a reused prefix is bitwise the
+state a full prefill would have produced for the same chunk boundaries (the
+fork's own suite measures cache-state |delta| = 0 with matching chunk plans).
+
+MEASURED: see ``bench/pV7_engine_e2e.py`` for the command and the numbers.
+"""
+
+from __future__ import annotations
+
+import collections
+import contextlib
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+import mlx.core as mx
+import numpy as np
+
+from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
+from exo.worker.runner.bootstrap import logger
+
+__all__ = [
+    "Conversation",
+    "Dsv41Sessions",
+    "GreedySession",
+    "TurnOutcome",
+    "engine_prefill",
+]
+
+#: Rows of shared prefix required before a resident conversation is reused for a
+#: prompt that is not an exact extension of it. Deliberately not 0: every pair of
+#: chat prompts shares the system header, and rewinding a big conversation to
+#: "fix" a twenty-token overlap is worse than starting cold.
+MIN_REUSE_TOKENS = 64
+
+
+def engine_prefill(
+    model: Any,
+    ids: Any,
+    cache: Any,
+    *,
+    chunk: int | None = None,
+    long_chunk: int | None = None,
+    long_threshold: int | None = None,
+    last_logit_only: bool = True,
+    argmax: bool = False,
+    return_taps: bool = False,
+    taps_out: Any = None,
+    progress: Any = None,
+    **rest: Any,
+) -> Any:
+    """The engine's prefill loop, as a driver for ``SessionCache``.
+
+    Same signature and chunk policy as ``prefill.prefill``/``chunked_prefill`` so
+    ``SessionCache`` can take it as ``prefill_fn``, but with the engine's own
+    shape: every chunk is one ``last_logit_only`` forward (intermediate chunks
+    need no full-row head projection), one sync each, with no eval fences, no
+    periodic pool clears and no post-prefill decode-prime probe. A reused-prefix
+    turn and a cold turn run this SAME loop, so session reuse cannot change the
+    tokens it produces.
+
+    ``taps_out`` collects the per-chunk DSpark taps (the draft window's context
+    feed); ``progress`` is ``fn(chunks, rows_done, elapsed_s)`` and doubles as
+    the engine's cancellation point.
+    """
+    del rest  # tolerated, unused driver keywords (forward compatibility)
+    if isinstance(ids, mx.array):
+        ids_mx = ids if ids.ndim == 2 else ids[None]
+    else:
+        ids_mx = mx.array(np.asarray(ids, dtype=np.int64)[None])
+    total = int(ids_mx.shape[1])
+    if total == 0:
+        raise ValueError("engine_prefill: empty ids")
+
+    base = 512 if chunk is None else int(chunk)
+    long_step = 128 if long_chunk is None else int(long_chunk)
+    threshold = 10**9 if long_threshold is None else int(long_threshold)
+    want_taps = bool(return_taps or taps_out is not None)
+
+    t0 = time.perf_counter()
+    out = None
+    done = 0
+    nchunks = 0
+    last_taps = None
+    while done < total:
+        step = long_step if int(cache.offset) >= threshold else base
+        stop = min(done + step, total)
+        piece = ids_mx[:, done:stop]
+        last = stop == total
+        res = model(
+            piece,
+            cache,
+            last_logit_only=True if not last else last_logit_only,
+            return_taps=want_taps,
+            argmax=argmax if last else False,
+        )
+        handle, taps = res if isinstance(res, tuple) else (res, None)
+        if taps is not None and taps_out is not None:
+            taps_out.append(taps)
+            last_taps = taps
+        mx.eval(handle, *(taps.values() if taps else []))
+        if last:
+            out = handle
+        done = stop
+        nchunks += 1
+        if progress is not None:
+            progress(nchunks, done, time.perf_counter() - t0)
+    if return_taps:
+        return out, (last_taps if last_taps is not None else {})
+    return out
+
+
+@dataclass
+class TurnOutcome:
+    """One turn's fed rows plus the numbers the engine reports.
+
+    ``tokens`` is filled in by the engine once its decode rounds have run; the
+    prefill half of the turn only produces ``anchor_logits``.
+    """
+
+    anchor_logits: mx.array | None
+    prompt_tokens: int
+    prefill_tokens: int
+    reused_tokens: int
+    cache_offset: int
+    tokens: list[int] = field(default_factory=list)
+    hit: bool = False
+    prefill_seconds: float = 0.0
+    rewound_from: int | None = None
+    committed: bool = False
+
+    @property
+    def reuse_ratio(self) -> float:
+        return self.prefill_tokens / self.prompt_tokens if self.prompt_tokens else 0.0
+
+    def __str__(self) -> str:
+        return (
+            f"prompt={self.prompt_tokens} prefill={self.prefill_tokens} "
+            f"reuse={self.reused_tokens} cache={self.cache_offset}"
+            + (f" rewind={self.rewound_from}" if self.rewound_from is not None else "")
+            + ("" if self.committed else " UNCOMMITTED")
+        )
+
+
+def _ids_of(ids: Any) -> np.ndarray:
+    arr = np.array(ids) if isinstance(ids, mx.array) else np.asarray(ids)
+    if arr.ndim == 2 and arr.shape[0] == 1:
+        arr = arr[0]
+    if arr.ndim != 1:
+        raise ValueError(f"session ids must be [n] or [1, n], got {arr.shape}")
+    return np.ascontiguousarray(arr, dtype=np.int64)
+
+
+class Conversation:
+    """One conversation's live cache, draft window and token history.
+
+    Serves both decode modes: the engine's round drafts and verifies when a head
+    is attached (``uses_draft``), and steps one row at a time otherwise. The
+    session state is identical either way.
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        head: Any | None,
+        *,
+        max_seq_len: int,
+        chunk: int | None = None,
+        long_chunk: int | None = None,
+        long_threshold: int | None = None,
+        max_snapshots: int = 8,
+        eos_id: int = 1,
+        progress: Any = None,
+    ) -> None:
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        self.model = model
+        self.head = head
+        self.uses_draft = head is not None
+        self.eos_id = int(eos_id)
+        try:
+            self.cache = _sc.SessionCache(
+                model,
+                max_seq_len=int(max_seq_len),
+                max_snapshots=max_snapshots,
+                prefill_fn=engine_prefill,
+                chunk=chunk,
+                long_chunk=long_chunk,
+                long_threshold=long_threshold,
+                progress=progress,
+            )
+        except _sc.CapacityError as e:  # pragma: no cover - defensive
+            raise Dsv41UnsupportedFeature(
+                f"DSV4.1 conversation does not fit this instance's cache: {e}"
+            ) from e
+        #: The DSpark draft window (``head.make_cache(1)``): primed from the
+        #: prefill's per-chunk taps, appended to by the engine's verify rounds
+        #: (``rounds._one_round``), and checkpointed with the body cache.
+        self.draft_state: Any | None = None
+        #: Draft-window copies keyed by cache checkpoint position: a cache rewind
+        #: must rewind the draft window to the same row, or the two drift apart.
+        self._draft_snaps: dict[int, list[tuple[Any, int]] | None] = {0: None}
+        #: Next-token logits at each prompt-end checkpoint, so an exact repeat
+        #: of a prompt (zero new rows) still has an anchor.
+        self._anchor_at: dict[int, Any] = {}
+        self._gen: list[int] = []
+        #: Cache rows already in place when the CURRENT turn started; the
+        #: generated history is aligned to position ``_base + k`` for entry ``k``.
+        self._base = 0
+        self.n_turns = 0
+        self._inflight = False
+
+    # -- introspection ----------------------------------------------------
+    @property
+    def offset(self) -> int:
+        return int(self.cache.offset)
+
+    @property
+    def tokens(self) -> list[int]:
+        return [int(t) for t in self.cache.tokens]
+
+    @property
+    def generated(self) -> list[int]:
+        return list(self._gen)
+
+    def draft_ctx(self) -> int:
+        """Rows the draft window holds (must equal ``offset`` between turns)."""
+        try:
+            return int(self.draft_state[0].n_ctx)
+        except Exception:  # pragma: no cover - no draft window
+            return -1
+
+    def summary(self) -> str:
+        return (
+            f"Conversation(turns={self.n_turns} cache={self.offset} "
+            f"generated={len(self._gen)} draft_ctx={self.draft_ctx()}"
+            + (" INFLIGHT" if self._inflight else "")
+            + ")"
+        )
+
+    # -- turn -------------------------------------------------------------
+    def prefill(self, prompt_ids: Any, *, chunk_plan: Any = None) -> TurnOutcome:
+        """Feed this turn's NEW rows onto the live cache; returns the anchor.
+
+        ``anchor_logits`` is the last fed row's logits: its argmax is this turn's
+        first token, and it is what the engine hands to its first round.
+        """
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        ids = _ids_of(prompt_ids)
+        if ids.shape[0] == 0:
+            raise ValueError("session turn: empty prompt")
+        taps: list = []
+        t0 = time.perf_counter()
+        try:
+            res = self.cache.append_turn(
+                ids,
+                argmax=False,
+                return_taps=False,
+                taps_out=taps,
+                chunk_plan=chunk_plan,
+                checkpoint=False,
+            )
+        except _sc.CapacityError as e:
+            raise Dsv41UnsupportedFeature(
+                f"DSV4.1 session out of context: {e}"
+            ) from e
+        except _sc.RollbackError as e:
+            raise Dsv41UnsupportedFeature(f"DSV4.1 session rewind failed: {e}") from e
+        pre_s = time.perf_counter() - t0
+        logits = res.logits
+        if logits is None and int(res.tokens_prefilled) == 0:
+            logits = self._anchor_at.get(self.offset)
+        if logits is None:
+            raise Dsv41UnsupportedFeature(
+                "DSV4.1 session: this turn fed no new rows (the prompt is an exact "
+                "cache hit) and the cache holds no anchor logits for it; append the "
+                "new user text (or the previous reply) and retry."
+            )
+        self._base = self.offset - int(res.tokens_prefilled)
+        if self.draft_ctx() not in (-1, self._base):
+            self._restore_draft(self._base)
+        self._feed_taps(taps)
+        if self.draft_state is not None and self.draft_ctx() != self.offset:
+            raise RuntimeError(
+                f"DSV4.1 session: the draft window holds {self.draft_ctx()} rows "
+                f"but the cache is at {self.offset}: they must advance together."
+            )
+        # Checkpoint the prompt end: a follow-up turn whose re-rendered reply
+        # differs from the generated tokens then reuses this whole prompt.
+        self._checkpoint()
+        self._anchor_at[self.offset] = logits
+        self._inflight = True
+        return TurnOutcome(
+            anchor_logits=logits,
+            prompt_tokens=int(ids.shape[0]),
+            prefill_tokens=int(res.tokens_prefilled),
+            reused_tokens=int(res.tokens_reused),
+            cache_offset=self.offset,
+            hit=bool(res.hit),
+            prefill_seconds=pre_s,
+            rewound_from=res.rolled_back_from,
+        )
+
+    def _feed_taps(self, taps: list) -> None:
+        """Push the prefill's per-chunk DSpark taps into the draft window."""
+        if self.head is None or not taps:
+            return
+        ids = list(self.model.args.dspark_target_layer_ids)
+        if self.draft_state is None:
+            self.draft_state = self.head.make_cache(1)
+        for chunk_taps in taps:
+            cat = mx.concatenate([chunk_taps[layer] for layer in ids], axis=-1)
+            self.head.append_ctx(cat, self.draft_state)
+
+    def mark_rows(self, ids: Any) -> None:
+        """Book-keeping append for rows the engine's decode loop fed itself."""
+        arr = _ids_of(ids)
+        self.cache.mark_seen(arr)
+        self._gen.extend(int(t) for t in arr)
+
+    def finish(self, *, checkpoint: bool = True) -> None:
+        """Close the turn: checkpoint the cache for the next one.
+
+        ``checkpoint=False`` leaves it uncommitted so :meth:`cancel` has something
+        real to roll back to (the engine always checkpoints).
+        """
+        if checkpoint:
+            self._checkpoint()
+            self._inflight = False
+        self.n_turns += 1
+
+    def _checkpoint(self) -> None:
+        """Snapshot the body cache and the draft window at the same row."""
+        self.cache.snapshot()
+        if self.draft_state is not None:
+            saved = [(w.win_kv + 0, int(w.n_ctx)) for w in self.draft_state]
+            mx.eval([kv for kv, _ in saved])
+            self._draft_snaps[self.offset] = saved
+        keep = set(self.cache.boundaries)
+        for pos in [p for p in self._draft_snaps if p not in keep]:
+            del self._draft_snaps[pos]
+        for pos in [p for p in self._anchor_at if p not in keep]:
+            del self._anchor_at[pos]
+
+    def _restore_draft(self, pos: int) -> None:
+        """Put the draft window back to the row the body cache was rewound to."""
+        if pos not in self._draft_snaps:
+            raise RuntimeError(
+                f"DSV4.1 session: the cache rewound to {pos} but no draft-window "
+                f"checkpoint exists there (have {sorted(self._draft_snaps)})."
+            )
+        saved = self._draft_snaps[pos]
+        if saved is None or self.draft_state is None:
+            self.draft_state = None
+            return
+        for w, (kv, n_ctx) in zip(self.draft_state, saved, strict=True):
+            w.win_kv = kv + 0
+            w.n_ctx = n_ctx
+
+    def sync_history(self, prompt_ids: Any, turn: "TurnOutcome") -> None:
+        """Align the token history with the rows the cache ACTUALLY holds.
+
+        The engine's decode rounds feed rows with ``model(...)`` directly (they
+        bypass the prefill driver), so ``SessionCache``'s own history never sees
+        them. Reconcile it here, once per turn: after the turn the cache holds the
+        prompt's rows plus every generated token except the LAST one (that token is
+        the next turn's anchor and has not been fed). The write is direct because
+        ``SessionCache.mark_seen`` refuses to be used as a catch-up (it requires the
+        two views to already agree), and this module owns the engine side of that
+        contract.
+        """
+        prompt = _ids_of(prompt_ids)
+        rows = np.asarray(turn.tokens[: max(0, len(turn.tokens) - 1)], dtype=np.int64)
+        # Absolute rows: the full prompt (reused prefix + this turn's prefill)
+        # plus every generated token but the last.
+        want = int(prompt.shape[0]) + int(rows.shape[0])
+        held = int(self.cache.offset)
+        if held != want:
+            raise RuntimeError(
+                f"DSV4.1 session: the cache holds {held} rows but this turn fed "
+                f"{want} (prefill={turn.prefill_tokens}, reuse={turn.reused_tokens}); "
+                "the decode rounds and the cache are out of step."
+            )
+        with contextlib.suppress(Exception):  # pragma: no cover - no stand-in history
+            self.cache._ids = np.ascontiguousarray(np.concatenate([prompt, rows]))
+        self._gen = [int(t) for t in turn.tokens]
+
+    def cancel(self) -> int:
+        """Roll the in-flight turn back: cache, and the generated history.
+
+        ``_base`` is the offset the turn started from, so the history is truncated
+        to the rows the cache still holds (``offset - _base`` entries).
+        """
+        if not self._inflight:
+            return 0
+        # Back to the turn START (the prompt-end checkpoint is newer than it).
+        if self._base in self.cache.boundaries:
+            dropped = int(self.cache.rewind(self._base))
+        else:
+            dropped = int(self.cache.cancel())
+        if self.draft_ctx() != -1:
+            self._restore_draft(self.offset)
+        keep = max(0, self.offset - self._base)
+        if len(self._gen) > keep:
+            del self._gen[keep:]
+        self._inflight = False
+        return dropped
+
+    def close(self) -> None:
+        self.cache.del_cache()
+        self.draft_state = None
+
+
+class GreedySession(Conversation):
+    """A conversation with no DSpark head: same protocol, no drafting."""
+
+
+@dataclass
+class _Entry:
+    session: Any
+    last_used: float = field(default_factory=time.monotonic)
+
+
+class Dsv41Sessions:
+    """The engine's conversation store: bounded LRU of conversations.
+
+    ``get(prompt_ids, key=...)`` returns the conversation this request belongs
+    to: the one named by ``key`` when the client supplied a conversation id, else
+    the resident conversation sharing the longest prefix with ``prompt_ids`` (at
+    least :data:`MIN_REUSE_TOKENS` rows), else a new cold one.
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        head: Any | None,
+        *,
+        max_seq_len: int,
+        chunk: int | None = None,
+        long_chunk: int | None = None,
+        long_threshold: int | None = None,
+        max_sessions: int = 2,
+        max_snapshots: int = 8,
+        eos_id: int = 1,
+        use_draft: bool = True,
+    ) -> None:
+        self.model = model
+        self.head = head if use_draft else None
+        self.max_seq_len = int(max_seq_len)
+        self.max_sessions = max(1, int(max_sessions))
+        self.kw = dict(
+            chunk=chunk,
+            long_chunk=long_chunk,
+            long_threshold=long_threshold,
+            max_snapshots=max_snapshots,
+            eos_id=eos_id,
+        )
+        self._entries: "collections.OrderedDict[str, _Entry]" = collections.OrderedDict()
+        self.stats = collections.Counter()
+
+    # -- key resolution ---------------------------------------------------
+    @staticmethod
+    def key_for(prompt_ids: Any, key: str | None) -> str:
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        if key:
+            return f"id:{key}"
+        return "p:" + _sc.prefix_hash(_ids_of(prompt_ids))
+
+    def get(self, prompt_ids: Any, key: str | None = None) -> Conversation:
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        ids = _ids_of(prompt_ids)
+        if key:
+            entry = self._entries.get(f"id:{key}")
+            if entry is not None:
+                self._entries.move_to_end(f"id:{key}")
+                self.stats["reuse"] += 1
+                return entry.session
+            return self._open(f"id:{key}")
+
+        best, best_lcp = None, 0
+        for k, entry in self._entries.items():
+            lcp = _sc.common_prefix_len(ids, entry.session.tokens)
+            if lcp > best_lcp:
+                best, best_lcp = k, lcp
+        if best is not None and best_lcp >= MIN_REUSE_TOKENS:
+            self._entries.move_to_end(best)
+            self.stats["reuse"] += 1
+            logger.info(
+                f"[DSV41] session reuse: this {len(ids)}-token prompt matches a "
+                f"resident conversation on {best_lcp} rows"
+            )
+            return self._entries[best].session
+        self.stats["cold"] += 1
+        return self._open("p:" + _sc.prefix_hash(ids))
+
+    def _open(self, key: str) -> Conversation:
+        session = Conversation(
+            self.model, self.head, max_seq_len=self.max_seq_len, **self.kw
+        )
+        self._entries[key] = _Entry(session)
+        while len(self._entries) > self.max_sessions:
+            _, victim = self._entries.popitem(last=False)
+            logger.info("[DSV41] session store evicting an idle conversation")
+            victim.session.close()
+            self.stats["evicted"] += 1
+        return session
+
+    def drop(self, session: Any) -> None:
+        """Forget + close a conversation (a one-off request has finished).
+
+        The cache is released immediately, so a later request cannot be answered
+        from a conversation nobody asked to keep (an image request, or one that
+        disabled prefix reuse).
+        """
+        for k, entry in list(self._entries.items()):
+            if entry.session is session:
+                del self._entries[k]
+                entry.session.close()
+                self.stats["dropped"] += 1
+                return
+
+    def cancel_all(self) -> int:
+        """Cancel every in-flight turn (the post-reconnect / cancel-all path)."""
+        dropped = 0
+        for entry in self._entries.values():
+            dropped += int(entry.session.cancel())
+        return dropped
+
+    def close(self) -> None:
+        for entry in self._entries.values():
+            entry.session.close()
+        self._entries.clear()
