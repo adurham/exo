@@ -33,13 +33,11 @@
 # fork); claiming MlxCpu/MlxCuda would let placement put this card on a node
 # that cannot execute it.
 #
-# CAPABILITIES. The checkpoint DOES carry a vision tower (vision_config:
-# 32 layers, dim 1024, patch 14, downsample 3; and a real `image_token_id`
-# 129264 = "<|deepseek_image|>"), but the exo-side image plumbing for V4.1 is a
-# separate workstream and is not part of this build -- the engine refuses an
-# image-bearing request loudly rather than answering from text only. So "vision"
-# is deliberately NOT advertised here; add it only when that path serves
-# images for real.
+# CAPABILITIES. The checkpoint carries a vision tower (32 layers, dim 1024,
+# patch 14, downsample 3; image_token_id 129264 = "<|deepseek_image|>"). The
+# dsv41 builder loads it (~1 GB/rank; EXO_DSV41_VISION=0 to skip) and the
+# engine serves image requests. Verified through exo's API 2026-10-01: color,
+# shape and OCR prompts answered correctly ("Red", "blue circle", "HELLO EXO 42").
 #
 # CONTEXT is the checkpoint's own 1M (validated at 256k-600k by the quant's
 # author on the reference hardware). Long-prompt PREFILL is still the open
@@ -56,7 +54,7 @@ family = "deepseek"
 quantization = "exl3"
 base_model = "DeepSeek V4.1 Flash"
 engine = "dsv41"
-capabilities = ["text", "thinking", "thinking_toggle"]
+capabilities = ["text", "thinking", "thinking_toggle", "vision"]
 reasoning_dialect = "tool_conditional"
 
 context_length = 1048576

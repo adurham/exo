@@ -27,6 +27,8 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Any
 
+import mlx.core as mx
+
 from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runner_response import ModelLoadingResponse
 from exo.worker.engines.base import Engine
@@ -54,6 +56,8 @@ class Dsv41Builder(MlxBuilder):
     #: constructor arguments (its own dataclass fields) rather than reading
     #: ``bound_instance`` at request time.
     engine_kwargs: dict[str, Any] = field(default_factory=dict)
+    #: The DSv4.1 vision tower (~1 GB/rank), or None when disabled/absent.
+    vision: Any | None = None
 
     def load(self, bound_instance: BoundInstance) -> Generator[ModelLoadingResponse]:
         self.bound_instance = bound_instance
@@ -73,11 +77,14 @@ class Dsv41Builder(MlxBuilder):
         # storm skews the ranks and trips the Metal watchdog (p114/p115).
         load_warmup(loaded)
         self.loaded_dsv41 = loaded
+        self.vision = _load_vision(loaded)
         # ``MlxBuilder``'s fields are unused for this engine: there is no
         # mlx-lm model object and no BatchGenerator. Set the tokenizer anyway
         # so ``close()`` (inherited) has a consistent object to drop.
         self.tokenizer = loaded.tokenizer
         self.engine_kwargs = _engine_kwargs_from_instance(bound_instance)
+        if self.vision is not None:
+            self.engine_kwargs["vision_processor"] = self.vision
 
     def build(self) -> Engine:
         loaded = self.loaded_dsv41
@@ -99,6 +106,27 @@ class Dsv41Builder(MlxBuilder):
             f"prefill chunk {engine._chunk} tokens."
         )
         return engine
+
+
+def _load_vision(loaded: Dsv41Loaded) -> Any | None:
+    """Load the checkpoint's vision tower so image requests are served.
+
+    ``EXO_DSV41_VISION=0`` skips it (text-only; image requests are refused per
+    request). A checkpoint without a tower also serves text only.
+    """
+    if os.environ.get("EXO_DSV41_VISION", "1") == "0" or loaded.model_path is None:
+        logger.info("[DSV41] vision tower not loaded (EXO_DSV41_VISION=0)")
+        return None
+    from exo.worker.engines.mlx.dsv41.vision import load_dsv41_vision
+
+    try:
+        vision = load_dsv41_vision(loaded.model_path)
+    except ValueError as e:
+        logger.warning(f"[DSV41] no vision tower: {e}")
+        return None
+    mx.eval(vision.tower.parameters())
+    logger.info(f"[DSV41] vision tower loaded: {vision}")
+    return vision
 
 
 def load_warmup(loaded: Dsv41Loaded) -> None:

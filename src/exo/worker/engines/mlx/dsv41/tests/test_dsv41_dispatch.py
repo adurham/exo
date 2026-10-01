@@ -191,6 +191,7 @@ def test_dsv41_builder_builds_the_engine_for_its_loaded_checkpoint(monkeypatch):
     monkeypatch.setattr(builder_module, "speculation_enabled", lambda: False)
     warmed: list[object] = []
     monkeypatch.setattr(builder_module, "load_warmup", warmed.append)
+    monkeypatch.setattr(builder_module, "_load_vision", lambda _loaded: None)
 
     builder = Dsv41Builder(
         model_id=model_id(),  # type: ignore[arg-type]
