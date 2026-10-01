@@ -198,3 +198,17 @@ def test_engine_turn_wires_prefill_anchor_and_reporting():
     # prefill + decode rounds; the last generated token stays un-fed (the anchor)
     assert conv.offset == 3 + STEPS - 1
     assert conv.generated == turn.tokens
+
+
+def test_exact_repeat_prompt_reuses_the_saved_anchor():
+    """The same prompt twice: zero new rows, so the anchor comes from the
+    prompt-end checkpoint instead of failing the request (seen live: a
+    benchmark repeating a prompt crashed the runner)."""
+    store = s_.Dsv41Sessions(StubBody(), None, max_seq_len=256, chunk=4,
+                             long_chunk=4, long_threshold=10**9)
+    p1 = np.arange(10, 90, dtype=np.int64)
+    conv, r1, gen1 = _run_turn(store, p1)
+    conv2, r2, gen2 = _run_turn(store, p1)
+    assert conv2 is conv
+    assert r2.prefill_tokens == 0 and r2.reused_tokens == len(p1), f"{r2}"
+    assert gen2 == gen1

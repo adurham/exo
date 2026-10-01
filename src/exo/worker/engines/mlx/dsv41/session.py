@@ -228,6 +228,9 @@ class Conversation:
         #: Draft-window copies keyed by cache checkpoint position: a cache rewind
         #: must rewind the draft window to the same row, or the two drift apart.
         self._draft_snaps: dict[int, list[tuple[Any, int]] | None] = {0: None}
+        #: Next-token logits at each prompt-end checkpoint, so an exact repeat
+        #: of a prompt (zero new rows) still has an anchor.
+        self._anchor_at: dict[int, Any] = {}
         self._gen: list[int] = []
         #: Cache rows already in place when the CURRENT turn started; the
         #: generated history is aligned to position ``_base + k`` for entry ``k``.
@@ -293,7 +296,10 @@ class Conversation:
         except _sc.RollbackError as e:
             raise Dsv41UnsupportedFeature(f"DSV4.1 session rewind failed: {e}") from e
         pre_s = time.perf_counter() - t0
-        if res.logits is None:
+        logits = res.logits
+        if logits is None and int(res.tokens_prefilled) == 0:
+            logits = self._anchor_at.get(self.offset)
+        if logits is None:
             raise Dsv41UnsupportedFeature(
                 "DSV4.1 session: this turn fed no new rows (the prompt is an exact "
                 "cache hit) and the cache holds no anchor logits for it; append the "
@@ -311,9 +317,10 @@ class Conversation:
         # Checkpoint the prompt end: a follow-up turn whose re-rendered reply
         # differs from the generated tokens then reuses this whole prompt.
         self._checkpoint()
+        self._anchor_at[self.offset] = logits
         self._inflight = True
         return TurnOutcome(
-            anchor_logits=res.logits,
+            anchor_logits=logits,
             prompt_tokens=int(ids.shape[0]),
             prefill_tokens=int(res.tokens_prefilled),
             reused_tokens=int(res.tokens_reused),
@@ -361,6 +368,8 @@ class Conversation:
         keep = set(self.cache.boundaries)
         for pos in [p for p in self._draft_snaps if p not in keep]:
             del self._draft_snaps[pos]
+        for pos in [p for p in self._anchor_at if p not in keep]:
+            del self._anchor_at[pos]
 
     def _restore_draft(self, pos: int) -> None:
         """Put the draft window back to the row the body cache was rewound to."""

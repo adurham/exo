@@ -547,10 +547,9 @@ class Dsv41Engine(Engine):
         if self._active is not None:
             self._active.prefill_total = prompt_len
         try:
-            turn = self._run_turn(
+            turn, anchor = self._start_turn(
                 session,
                 tokens_list,
-                max_tokens,
                 embeddings=embeddings,
                 image_span_end=_image_span_end(image_inputs),
             )
@@ -560,16 +559,22 @@ class Dsv41Engine(Engine):
         except Exception:
             if not keep:
                 self._sessions.drop(session)
-                if self._active is not None:
-                    self._active.prefill_total = 0
             raise
         finally:
             if self._active is not None:
                 self._active.prefill_total = 0
-        if not keep:
-            self._sessions.drop(session)
 
-        # -- token stream
+        # -- token stream: emitted round by round as the rounds commit them.
+        #    ``produced`` is every committed token (the cache holds all of
+        #    them but the last), even past a stop point inside one round.
+        produced: list[int] = [anchor]
+
+        def committed_tokens() -> Iterator[int]:
+            yield anchor
+            for batch in self._rounds(session, anchor, max_tokens - 1):
+                produced.extend(batch)
+                yield from batch
+
         detokenizer = tokenizer.detokenizer
         emitted = 0
         accumulated = ""
@@ -579,36 +584,46 @@ class Dsv41Engine(Engine):
             if turn.prefill_seconds > 0
             else 0.0
         )
-        for tid in turn.tokens:
-            if tid in eos_ids:
-                final_reason = "stop"
-                break
-            detokenizer.add_token(tid)
-            text = detokenizer.last_segment
-            emitted += 1
-            accumulated += text
-            stop_hit = _stop_index(accumulated, stop_sequences)
-            if stop_hit is not None:
-                text = text[: max(0, len(text) - (len(accumulated) - stop_hit))]
-                final_reason = "stop"
-            if final_reason is None and emitted >= max_tokens:
-                final_reason = "length"
-            if final_reason is not None:
-                yield _final_response(
-                    token=tid,
-                    text=text,
-                    prefill_tps=prefill_tps,
-                    prompt_tokens=turn.prompt_tokens,
-                    generated=emitted,
-                    reason=final_reason,
-                    task_id=task_id,
-                    reused_tokens=turn.reused_tokens,
-                )
-                return
-            yield _mid_response(tid, text, task_id)
+        last_tid = anchor
+        try:
+            for tid in committed_tokens():
+                last_tid = tid
+                if tid in eos_ids:
+                    final_reason = "stop"
+                    break
+                detokenizer.add_token(tid)
+                text = detokenizer.last_segment
+                emitted += 1
+                accumulated += text
+                stop_hit = _stop_index(accumulated, stop_sequences)
+                if stop_hit is not None:
+                    text = text[: max(0, len(text) - (len(accumulated) - stop_hit))]
+                    final_reason = "stop"
+                if final_reason is None and emitted >= max_tokens:
+                    final_reason = "length"
+                if final_reason is not None:
+                    self._end_turn(session, tokens_list, turn, produced, keep)
+                    yield _final_response(
+                        token=tid,
+                        text=text,
+                        prefill_tps=prefill_tps,
+                        prompt_tokens=turn.prompt_tokens,
+                        generated=emitted,
+                        reason=final_reason,
+                        task_id=task_id,
+                        reused_tokens=turn.reused_tokens,
+                    )
+                    return
+                yield _mid_response(tid, text, task_id)
+        except BaseException:
+            session.cancel()
+            if not keep:
+                self._sessions.drop(session)
+            raise
+        self._end_turn(session, tokens_list, turn, produced, keep)
         # the stream ended on an EOS token, or on the conversation's budget
         yield _final_response(
-            token=turn.tokens[-1] if turn.tokens else 0,
+            token=last_tid,
             text="",
             prefill_tps=prefill_tps,
             prompt_tokens=turn.prompt_tokens,
@@ -618,6 +633,18 @@ class Dsv41Engine(Engine):
             task_id=task_id,
             reused_tokens=turn.reused_tokens,
         )
+
+    def _end_turn(
+        self, session: Any, tokens: list[int], turn: TurnOutcome,
+        produced: list[int], keep: bool,
+    ) -> None:
+        """Close a turn: history in step with the cache, checkpoint, maybe drop."""
+        turn.tokens = list(produced)
+        session.sync_history(tokens, turn)
+        session.finish(checkpoint=True)
+        turn.committed = True
+        if not keep:
+            self._sessions.drop(session)
 
     def _run_turn(
         self,
@@ -637,6 +664,27 @@ class Dsv41Engine(Engine):
         (the draft head reads it on every draft), so it is safe to leave
         installed for the whole turn.
         """
+        turn, anchor = self._start_turn(
+            session, tokens, embeddings=embeddings, image_span_end=image_span_end
+        )
+        produced = [anchor]
+        for batch in self._rounds(session, anchor, max_tokens - 1):
+            produced.extend(batch)
+        turn.tokens = produced
+        session.sync_history(tokens, turn)
+        session.finish(checkpoint=True)
+        turn.committed = True
+        return turn
+
+    def _start_turn(
+        self,
+        session: Any,
+        tokens: list[int],
+        *,
+        embeddings: mx.array | None,
+        image_span_end: int = 0,
+    ) -> tuple[TurnOutcome, int]:
+        """Delta prefill; returns the turn and its anchor (first generated token)."""
         total = len(tokens)
         plan = _first_chunk_covers(total, self._chunk, image_span_end) if embeddings is not None else None
         if embeddings is None:
@@ -647,22 +695,14 @@ class Dsv41Engine(Engine):
         if turn.reused_tokens:
             logger.info(f"[DSV41] turn reuse: {turn}")
         anchor = int(mx.argmax(turn.anchor_logits.reshape(-1), axis=-1).item())
-        # The prefill's argmax IS this turn's first generated token (the exact
-        # contract ``serve.Session``/``spec.generate`` implement), and the first
-        # round re-feeds it as its verify anchor.
-        turn.tokens = [anchor] + self._decode(session, anchor, max_tokens - 1)[0]
-        session.sync_history(tokens, turn)
-        session.finish(checkpoint=True)
-        turn.committed = True
-        return turn
+        return turn, anchor
 
-    def _decode(self, session: Any, anchor: int, max_tokens: int) -> tuple[list[int], "_RoundStats"]:
-        """Decode from the anchor using the engine's round contract.
+    def _rounds(self, session: Any, anchor: int, max_tokens: int) -> Iterator[list[int]]:
+        """Decode rounds from the anchor; yields each round's committed tokens.
 
-        Returns the tokens AFTER the anchor (``max_tokens`` is the number of
-        decode rounds' worth of tokens the caller still wants) plus this turn's
-        round statistics. Each round's rows are reported to the conversation, so
-        its token history tracks the cache across the speculative rollbacks.
+        Stops once ``max_tokens`` tokens after the anchor are committed or a
+        round commits EOS. A round's whole batch is yielded: the cache already
+        holds its rows (the emitter applies EOS / stop / the cap).
         """
         head = self.loaded.head if self.speculative else None
         policy = (
@@ -670,13 +710,12 @@ class Dsv41Engine(Engine):
             if (head is not None and self.adaptive_gamma)
             else None
         )
-        out: list[int] = []
+        n = 0
         token = anchor
-        round_stats = _RoundStats()
-        while len(out) < max_tokens:
+        while n < max_tokens:
             active = self._active
             self._check_cancel(active.task.task_id if active is not None else None)
-            committed, round_ms, accepted, gamma = _one_round(
+            committed, _round_ms, _accepted, _gamma = _one_round(
                 self,
                 model=self.loaded.model,
                 cache=session.cache.cache,
@@ -685,14 +724,12 @@ class Dsv41Engine(Engine):
                 policy=policy,
                 draft_state=session.draft_state,
             )
-            round_stats.add(round_ms, accepted, gamma)
-            # Keep the WHOLE batch: the cache already holds its rows, so the
-            # turn history must too (the emitter stops at EOS / the cap).
-            out.extend(int(t) for t in committed)
-            token = int(committed[-1])
-            if session.eos_id in committed or len(out) >= max_tokens:
-                return out, round_stats
-        return out, round_stats
+            batch = [int(t) for t in committed]
+            n += len(batch)
+            token = batch[-1]
+            yield batch
+            if session.eos_id in batch:
+                return
 
     # ------------------------------------------------------------------ rounds
 

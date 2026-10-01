@@ -622,3 +622,20 @@ def _one_hot(token: int) -> mx.array:
     row = [0.0] * (token + 1)
     row[token] = 1.0
     return mx.array([row])
+
+
+def test_tokens_stream_before_the_turn_finishes():
+    """The first token chunk leaves step() before the remaining decode rounds
+    run (the engine used to run every round before emitting anything)."""
+    engine, model, _tokenizer, _events = _engine(
+        [34, 35, 36, 34, 35, 36, 1], text_of=ANSWER_TEXT, max_output_tokens=8
+    )
+    first_chunk_calls = None
+    for _ in range(50):
+        out = list(engine.step())
+        if any(isinstance(c, TokenChunk) and c.text for _t, c in out):
+            first_chunk_calls = len(model.calls)
+            break
+    assert first_chunk_calls is not None
+    _drain(engine)
+    assert first_chunk_calls < len(model.calls), (first_chunk_calls, len(model.calls))
