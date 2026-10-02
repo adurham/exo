@@ -254,9 +254,11 @@ def test_shipped_card_is_greedy_by_default():
     assert card.sampling_defaults.min_p == 0.0
 
 
-def test_shipped_card_does_not_advertise_vision_yet():
-    """The checkpoint HAS a vision tower; the exo image path is not wired."""
+def test_shipped_card_advertises_vision():
+    """The image path is live: the builder loads the vision tower and serves
+    image requests (verified through exo's API 2026-10-01, commit 6909d121),
+    so the card advertises vision for the dashboard's image upload."""
     card = ModelCard.model_validate(tomlkit.loads(CARD_FILE.read_text()))
-    assert "vision" not in card.capabilities
-    assert card.capabilities == ["text", "thinking", "thinking_toggle"]
+    assert "vision" in card.capabilities
+    assert card.capabilities == ["text", "thinking", "thinking_toggle", "vision"]
     assert card.reasoning_dialect == "tool_conditional"
