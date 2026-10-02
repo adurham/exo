@@ -56,6 +56,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only (avoids a circular import)
 #: let a request build a cache the machine cannot hold.
 _DEFAULT_CACHE_TOKENS = 8192
 
+#: Rows kept free above ``prompt_len + max_output_tokens`` when a request is
+#: admitted. A decode round feeds the anchor plus up to ``gamma`` verified draft
+#: rows in ONE forward (``rounds._one_round``); the adaptive gamma policy tops
+#: out at 4, so a round can write up to gamma + 1 = 5 rows before its rollback
+#: trims the cache back to what it committed -- the reserve absorbs that
+#: transient overshoot. The acceptance boundary is therefore
+#: ``prompt_len + max_output_tokens <= capacity - ADMISSION_SLACK``.
+ADMISSION_SLACK = 8
+
 #: Key for the single DSpark draft window kept alive for a request. The head's
 #: context is continuous over the request's tokens, so one window per request
 #: is what the round needs -- see ``_one_round``.
@@ -107,6 +116,53 @@ def _cache_capacity(engine: Dsv41Engine) -> int:
     args = getattr(getattr(engine, "loaded", None), "args", None)
     model_max = getattr(args, "max_seq_len", 0) or 0
     return int(model_max) if int(model_max) > 0 else _DEFAULT_CACHE_TOKENS
+
+
+def _admit(
+    *,
+    capacity: int,
+    prompt_len: int,
+    max_output_tokens: int | None,
+    max_tokens_default: int,
+) -> tuple[int | None, str | None]:
+    """The cache-capacity admission rule, pure so tests can pin it.
+
+    ``prompt_len`` is the POST-chat-template token count -- the rows the
+    prefill will actually write -- which is the correct quantity to compare
+    against the preallocated cache (a raw prompt under the cap with +4
+    template rows is over it and MUST be refused). ``max_output_tokens=None``
+    means the client did not cap the turn: admit it with the output clamped
+    to what the cache holds rather than refusing.
+
+    Returns ``(max_tokens, None)`` when the request is admitted, or
+    ``(None, message)`` with the explicit refusal reason when it is not.
+    """
+    max_tokens = max_output_tokens or max_tokens_default
+    if max_output_tokens is None:
+        # Client did not ask for a length: generate up to what the cache holds.
+        max_tokens = min(max_tokens, capacity - prompt_len - ADMISSION_SLACK)
+    if max_tokens < 1:
+        return None, (
+            f"DSV4.1: prompt {prompt_len} leaves no room to generate in the "
+            f"{capacity}-token cache this instance was configured for "
+            "(max_kv_tokens / card context_length); raise the instance's "
+            "max_kv_tokens or shorten the prompt."
+        )
+    if prompt_len > capacity:
+        return None, (
+            f"DSV4.1: prompt {prompt_len} is already longer than the "
+            f"{capacity}-token cache this instance was configured for "
+            "(max_kv_tokens / card context_length); it cannot be prefilled "
+            "at any max_output_tokens."
+        )
+    if prompt_len + max_tokens + ADMISSION_SLACK > capacity:
+        return None, (
+            f"DSV4.1: prompt {prompt_len} + max_output_tokens {max_tokens} "
+            f"+ {ADMISSION_SLACK} reserve needs more than the {capacity}-token "
+            "cache this instance was configured for (max_kv_tokens / card "
+            "context_length)."
+        )
+    return max_tokens, None
 
 
 # --------------------------------------------------------------- prompt / stream

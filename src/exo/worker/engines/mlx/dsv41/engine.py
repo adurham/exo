@@ -84,6 +84,7 @@ from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.output import dsv41_output_parser
 from exo.worker.engines.mlx.dsv41.rounds import (
+    _admit,
     _cache_capacity,
     _final_response,
     _mid_response,
@@ -538,15 +539,14 @@ class Dsv41Engine(Engine):
             tokens_list = [int(t) for t in prompt_tokens]
         if prompt_len == 0:
             raise ValueError("DSV4.1: empty prompt after chat templating")
-        if params.max_output_tokens is None:
-            # Client did not ask for a length: generate up to what the cache holds.
-            max_tokens = min(max_tokens, capacity - prompt_len - 8)
-        if max_tokens < 1 or prompt_len + max_tokens + 8 > capacity:
-            raise Dsv41UnsupportedFeature(
-                f"DSV4.1: prompt {prompt_len} + max_output_tokens {max_tokens} "
-                f"needs more than the {capacity}-token cache this instance was "
-                "configured for (max_kv_tokens / card context_length)."
-            )
+        max_tokens, refusal = _admit(
+            capacity=capacity,
+            prompt_len=prompt_len,
+            max_output_tokens=params.max_output_tokens,
+            max_tokens_default=MAX_TOKENS,
+        )
+        if refusal is not None or max_tokens is None:
+            raise Dsv41UnsupportedFeature(refusal or "DSV4.1: request refused")
 
         # -- conversation: every request joins one. The store reuses a resident
         #    conversation when this prompt extends it (that IS the multi-turn
