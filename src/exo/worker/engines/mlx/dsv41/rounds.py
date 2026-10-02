@@ -277,7 +277,21 @@ def _rows_logprobs(lp: dict[str, mx.array], n: int, lp_out: list[Any]) -> None:
 
 
 def _spec_policy(gamma: int) -> Any:
-    """Adaptive gamma policy for the speculative round (see ``spec.GammaPolicy``)."""
+    """Gamma policy for the speculative round.
+
+    Default (``DSV41_GAMMA_ADAPT`` unset/0): the legacy ``spec.GammaPolicy``.
+    ``_one_round`` never feeds it, so it stays at ``gamma`` (D1 report §7) --
+    unchanged served behaviour. ``DSV41_GAMMA_ADAPT=1``: the round-level cost
+    model policy in :mod:`.gamma`, which ``_one_round`` updates every round.
+    """
+    from exo.worker.engines.mlx.dsv41.gamma import (
+        RoundCostGammaPolicy,
+        gamma_adapt_enabled,
+    )
+
+    if gamma_adapt_enabled():
+        return RoundCostGammaPolicy(start=gamma)
+
     from mlx_lm.models.deepseek_v41.spec import GammaPolicy
 
     return GammaPolicy(start=gamma)
@@ -400,6 +414,11 @@ def _one_round(
         # committed[i] == target[i] (accepted drafts match the target), so row
         # i of the verify forward carries committed token i's log-probs.
         _rows_logprobs(lp, len(committed), lp_out)
+    if policy is not None and getattr(policy, "observes_rounds", False):
+        # Only the opt-in policy (DSV41_GAMMA_ADAPT=1) is fed here; the legacy
+        # GammaPolicy is left un-updated so the default path is unchanged, and
+        # harnesses that call update() themselves on it do not double-count.
+        policy.update(gamma, accepted)
     committed_position = position + accepted + 1
     spec.rollback(cache, snapshot, committed_position, stashes)
     head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)
