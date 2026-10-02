@@ -519,10 +519,11 @@ class Dsv41Engine(Engine):
         # -- prompt -> token ids. With images this is prepare_vl_inputs'
         #    expansion, which is NOT what tokenizer.encode(prompt) returns.
         image_inputs = None
+        token_types: list[int] | None = None
         embeddings: mx.array | None = None
         if params.images:
             assert vision is not None  # _refuse_unsupported guarantees this
-            tokens_list, _token_types, image_inputs = prompt_tokens_for_request(
+            tokens_list, token_types, image_inputs = prompt_tokens_for_request(
                 vision, prompt, params.images, tokenizer
             )
             prompt_len = len(tokens_list)
@@ -567,6 +568,7 @@ class Dsv41Engine(Engine):
                 tokens_list,
                 embeddings=embeddings,
                 image_span_end=_image_span_end(image_inputs),
+                token_types=token_types,
             )
         except PrefillCancelled:
             session.cancel()
@@ -690,6 +692,7 @@ class Dsv41Engine(Engine):
         *,
         embeddings: mx.array | None,
         image_span_end: int = 0,
+        token_types: list[int] | None = None,
     ) -> TurnOutcome:
         """Run one conversation turn: delta prefill, then decode rounds.
 
@@ -701,7 +704,11 @@ class Dsv41Engine(Engine):
         installed for the whole turn.
         """
         turn, anchor = self._start_turn(
-            session, tokens, embeddings=embeddings, image_span_end=image_span_end
+            session,
+            tokens,
+            embeddings=embeddings,
+            image_span_end=image_span_end,
+            token_types=token_types,
         )
         produced = [anchor]
         for batch, _lps in self._rounds(session, anchor, max_tokens - 1):
@@ -719,14 +726,22 @@ class Dsv41Engine(Engine):
         *,
         embeddings: mx.array | None,
         image_span_end: int = 0,
+        token_types: list[int] | None = None,
     ) -> tuple[TurnOutcome, int]:
-        """Delta prefill; returns the turn and its anchor (first generated token)."""
+        """Delta prefill; returns the turn and its anchor (first generated token).
+
+        ``token_types`` (image requests) marks the image-span rows so the model
+        routes them with the VL bias and keeps them out of the engram n-grams,
+        as the reference does; the mask is installed for this prefill only.
+        """
         total = len(tokens)
         plan = _first_chunk_covers(total, self._chunk, image_span_end) if embeddings is not None else None
         if embeddings is None:
             turn = session.prefill(tokens, chunk_plan=plan)
         else:
-            with splice_embeddings(self.loaded.model, embeddings, 0, image_span_end):
+            with splice_embeddings(
+                self.loaded.model, embeddings, 0, image_span_end, token_types
+            ):
                 turn = session.prefill(tokens, chunk_plan=plan)
         if turn.reused_tokens:
             logger.info(f"[DSV41] turn reuse: {turn}")

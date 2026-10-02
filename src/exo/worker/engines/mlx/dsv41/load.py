@@ -181,6 +181,9 @@ def load_dsv41(
         f"built={len(built)}/{int(getattr(args, 'n_layers', total))} layers",
         f"rank={rank}/{world}",
         f"mtp_layers_skipped={report.get('n_mtp_layers_skipped')}",
+        # image rows route with gate.bias_vl (checkpoint or sidecar); False means
+        # an image span would be routed with the text bias
+        f"vl_bias_loaded={report.get('vl_bias_loaded')}",
     ]
     logger.info(
         f"[DSV41] body loaded in {load_seconds:.1f}s: {', '.join(notes)}; "

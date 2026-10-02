@@ -55,6 +55,7 @@ __all__ = [
     "Dsv41Vision",
     "IMAGE_PLACEHOLDER",
     "build_embeddings",
+    "image_row_mask",
     "image_spans",
     "load_dsv41_vision",
     "prompt_tokens_for_request",
@@ -283,23 +284,48 @@ class _InjectedEmbed:
         return getattr(self.table, name)
 
 
+def image_row_mask(token_types: Any) -> np.ndarray:
+    """``(1, n)`` bool, True on image-span rows (reference: ``token_types >= 0``)."""
+    return (np.asarray(token_types, dtype=np.int64) >= 0).reshape(1, -1)
+
+
 @contextlib.contextmanager
 def splice_embeddings(
-    model: Any, embeddings: mx.array, span_start: int, span_end: int
+    model: Any,
+    embeddings: mx.array,
+    span_start: int,
+    span_end: int,
+    token_types: Any = None,
 ) -> Iterator[None]:
     """Install the merged image embeddings as ``model.embed`` for one turn.
 
     ``span_start``/``span_end`` bound the image span (the engine puts the whole
     span in the first prefill piece). Every non-prefill read passes through to
     the real table, so this can stay installed across the decode rounds too.
+
+    ``token_types`` (``prepare_vl_inputs``' per-position sentinel types) is
+    installed as ``model.vl_mask`` for the same turn: the reference model
+    treats image rows differently from text in two places the embedding splice
+    alone does not reach -- the MoE gate selects experts with ``gate.bias_vl``
+    on image rows, and the engram n-gram hash/gate skips image rows. Without it
+    the image span is routed and engram-mixed as if it were text.
     """
     original = model.embed
     injected = _InjectedEmbed(original, embeddings, span_start, span_end)
+    had_mask = hasattr(model, "vl_mask")
+    previous = getattr(model, "vl_mask", None)
     model.embed = injected
+    if token_types is not None:
+        model.vl_mask = image_row_mask(token_types)
     try:
         yield injected
     finally:
         model.embed = original
+        if token_types is not None:
+            if had_mask:
+                model.vl_mask = previous
+            else:
+                del model.vl_mask
 
 
 def _images_in_messages(messages: list[dict[str, Any]]) -> int:
