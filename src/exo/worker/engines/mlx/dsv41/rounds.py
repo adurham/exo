@@ -28,6 +28,7 @@ documented chunk-shape effect of the body, never through an unverified draft.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
@@ -60,6 +61,20 @@ _DEFAULT_CACHE_TOKENS = 8192
 #: context is continuous over the request's tokens, so one window per request
 #: is what the round needs -- see ``_one_round``.
 _DRAFT_KEY = 0
+
+#: DSV41_RD_ONDEV_ACCEPT=1 (default OFF, D2 round-sync work): compute the
+#: speculative round's acceptance scan and committed-token row on-device,
+#: inside the same lazy graph as the verify forward, so ONE mx.eval per
+#: round commits target ids + accepted count + committed ids together
+#: instead of a host comparison loop over readback'd ids. Numerically
+#: identical to the host loop (see ``_accept_on_device``). Read at call
+#: time (not import time) so a process can flip it between rounds -- tests
+#: rely on that, and the flag is per-experiment.
+_ONDEV_ACCEPT_ENV = "DSV41_RD_ONDEV_ACCEPT"
+
+
+def _ondev_accept_enabled() -> bool:
+    return os.environ.get(_ONDEV_ACCEPT_ENV, "0") == "1"
 
 
 # --------------------------------------------------------------- request gating
@@ -283,6 +298,61 @@ def _spec_policy(gamma: int) -> Any:
     return GammaPolicy(start=gamma)
 
 
+#: Path probe used ONLY by the tests to pin that the flagged round actually
+#: takes the on-device acceptance path (see ``_one_round``). Not read by any
+#: production code. Set per round; ``None`` for rounds that never reached the
+#: acceptance step (greedy / priming).
+_last_accept_path: str | None = None
+
+
+def _accept_on_device(
+    logits: mx.array, drafted: mx.array, gamma: int
+) -> tuple[mx.array, mx.array]:
+    """Acceptance scan + committed ids as lazy tensors (ONE eval covers both).
+
+    ``logits`` is the verify forward's argmax row (``[1, rows]`` int32,
+    rows = gamma+1) and ``drafted`` the draft head's token row (``[1, gamma]``).
+    Returns ``(acc, committed_full)`` where
+
+    * ``acc`` is the int32 scalar count of accepted drafts -- the index of the
+      first target/draft mismatch, or ``gamma`` when every draft matched
+      (exactly the unflagged host loop at ``rounds.py``:385-391, computed
+      in-graph with a first-occurrence argmin over the equality row);
+    * ``committed_full[i]`` is the token the round commits at slot i for
+      i <= acc (``draft[:acc] + [target[acc]]``) and 0-padded beyond, so the
+      caller trims with the host ``acc`` after the round's single eval.
+
+    Bit-exactness vs the host loop: for i < acc the draft id EQUALS the target
+    id (that is what acceptance means), so selecting the draft row there is
+    the same value the host loop appends; at i == acc the target row is taken,
+    same as the host loop's ``target[min(acc, len(target)-1)]`` -- ``mx.take``
+    with the in-graph ``acc`` handles the exhausted-draft corner with the same
+    clamping (acc <= len(draft) <= len(target) always holds: ``eq`` only
+    compares the overlapping prefix).
+    """
+    tgt = logits.reshape(-1)                     # [rows] int32
+    drf = drafted.reshape(-1)                    # [gamma] int32
+    n = drf.shape[0]
+    rows = tgt.shape[0]
+    eq = (tgt[:n] == drf)                        # bool [gamma]
+    acc = mx.where(
+        mx.sum(eq) == n,
+        mx.array(n, dtype=mx.int32),
+        mx.argmin(eq).astype(mx.int32),
+    )
+    # committed[i] = draft[i] for i < acc else target[acc]; clamp the take for
+    # the (impossible on the real head) draft-shorter-than-target corner.
+    take_idx = mx.minimum(acc, mx.array(rows - 1, dtype=mx.int32))
+    bonus = mx.take(tgt, take_idx, axis=0)
+    # pad the draft row out to `rows` so the where() broadcasts (values beyond
+    # len(draft) are never selected: acc <= len(draft) always holds).
+    drf_full = mx.pad(drf, [(0, rows - n)])
+    committed_full = mx.where(
+        mx.arange(rows, dtype=mx.int32) < acc, drf_full, bonus
+    )
+    return acc, committed_full
+
+
 def _one_round(
     engine: Dsv41Engine,
     *,
@@ -318,6 +388,8 @@ def _one_round(
     in, the only change here is to append them before the first draft.
     """
     started = time.perf_counter()
+    global _last_accept_path
+    _last_accept_path = None
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
     if head is None:
         logits = model(anchor, cache, last_logit_only=True)
@@ -377,25 +449,45 @@ def _one_round(
     else:
         logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
         lp = None
-    mx.eval(logits)
-    stashes = spec.stashes(cache)
-    target = [int(v) for v in logits[0]]
-    draft = [int(v) for v in drafted[0]]
 
-    accepted = 0
-    while (
-        accepted < gamma
-        and accepted < len(target)
-        and target[accepted] == draft[accepted]
-    ):
-        accepted += 1
-    # The token at the first mismatch is the target's own argmax -- it is
-    # committed along with the accepted drafts, so a round always commits at
-    # least one token and the cache lands on a position the target produced. A
-    # draft that ran out of script (``len(draft) < gamma``) is exhausted: the
-    # round then commits what it did produce plus the target's answer for the next
-    # position, so the decoded count still advances by one.
-    committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
+    on_device = _ondev_accept_enabled() and lp is None
+    if on_device:
+        # DSV41_RD_ONDEV_ACCEPT=1 (default OFF): fold the acceptance scan and
+        # the committed-token row into the SAME lazy graph as the verify
+        # forward, so the round's single mx.eval below commits target ids,
+        # accepted count and committed ids together. The host loop over
+        # readback'd ids (and its per-token compares) disappears; what the
+        # host still reads after the eval is ONE accepted scalar plus the
+        # committed ids it would have read anyway. Bit-exactness:
+        # see _accept_on_device.
+        acc_mx, committed_mx = _accept_on_device(logits, drafted, gamma)
+        mx.eval(logits, acc_mx, committed_mx)
+        _last_accept_path = "device"
+        accepted = int(acc_mx.item())
+        committed_full = committed_mx.tolist()
+        committed = [int(v) for v in committed_full[: accepted + 1]]
+    else:
+        mx.eval(logits)
+        _last_accept_path = "host" if lp is None else None
+        target = [int(v) for v in logits[0]]
+        draft = [int(v) for v in drafted[0]]
+
+        accepted = 0
+        while (
+            accepted < gamma
+            and accepted < len(target)
+            and target[accepted] == draft[accepted]
+        ):
+            accepted += 1
+        # The token at the first mismatch is the target's own argmax -- it is
+        # committed along with the accepted drafts, so a round always commits
+        # at least one token and the cache lands on a position the target
+        # produced. A draft that ran out of script (``len(draft) < gamma``)
+        # is exhausted: the round then commits what it did produce plus the
+        # target's answer for the next position, so the decoded count still
+        # advances by one.
+        committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
+    stashes = spec.stashes(cache)
     if lp is not None and lp_out is not None:
         # committed[i] == target[i] (accepted drafts match the target), so row
         # i of the verify forward carries committed token i's log-probs.
