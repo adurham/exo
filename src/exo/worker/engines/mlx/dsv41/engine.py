@@ -610,7 +610,9 @@ class Dsv41Engine(Engine):
         else:
             prompt_tokens = encode_prompt(tokenizer, prompt)
             prompt_len = int(prompt_tokens.shape[0])
-            tokens_list = [int(t) for t in prompt_tokens]
+            # .tolist() converts in one call; iterating an mx.array and int()-ing
+            # each element costs ~0.17 s per 16K prompt (identical list).
+            tokens_list = [int(t) for t in prompt_tokens.tolist()]
         if prompt_len == 0:
             raise ValueError("DSV4.1: empty prompt after chat templating")
         if params.max_output_tokens is None:
