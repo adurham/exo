@@ -13,6 +13,46 @@ from exo.shared.types.common import ModelId, TruncatingString
 
 MessageRole = Literal["user", "assistant", "system", "developer", "tool"]
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+# Union of the reasoning-effort vocabularies clients may send, weakest ->
+# strongest. Hermes / OpenAI-style clients send levels ABOVE this wire's
+# ceiling (e.g. "max", "ultra"); those are clamped DOWN to the ceiling at the
+# API boundary by clamp_reasoning_effort() instead of tripping the pydantic
+# Literal with a 422.
+REASONING_EFFORT_LADDER = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+)
+# Strongest level this wire accepts. The DeepSeek-V4 encoder maps wire "xhigh"
+# to its own strongest ("max") prompt, so "xhigh" IS this wire's model-max tier.
+REASONING_EFFORT_CEILING = "xhigh"
+
+
+def clamp_reasoning_effort(effort: str) -> str:
+    """Clamp a client-supplied reasoning effort to this wire's ceiling.
+
+    Clients may request a level stronger than this wire accepts (e.g. ``max``
+    or ``ultra``); per the "assume the model's max" directive those are clamped
+    DOWN to ``REASONING_EFFORT_CEILING`` rather than rejected. An ``effort``
+    that is NOT in ``REASONING_EFFORT_LADDER`` is returned unchanged, so a
+    genuine typo still reaches the ``ReasoningEffort`` Literal and is rejected
+    with a 422 naming the valid set -- only ladder-known over-ceiling levels
+    clamp.
+    """
+    if effort not in REASONING_EFFORT_LADDER:
+        return effort
+    if REASONING_EFFORT_LADDER.index(effort) <= REASONING_EFFORT_LADDER.index(
+        REASONING_EFFORT_CEILING
+    ):
+        return effort
+    return REASONING_EFFORT_CEILING
+
+
 # How a model wants prior-turn reasoning content handled. Drives both the
 # server-side encoder (drop vs keep) and the integration configs we emit
 # (e.g. opencode's per-model `interleaved` flag).

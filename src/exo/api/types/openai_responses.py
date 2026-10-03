@@ -9,10 +9,10 @@ task params type used by the inference pipeline, see
 import time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from exo.shared.types.common import ModelId
-from exo.shared.types.text_generation import ReasoningEffort
+from exo.shared.types.text_generation import ReasoningEffort, clamp_reasoning_effort
 
 # Type aliases
 ResponseStatus = Literal["completed", "failed", "in_progress", "incomplete"]
@@ -305,6 +305,19 @@ class Reasoning(BaseModel, frozen=True):
 
     effort: ReasoningEffort | None = None
     summary: Literal["auto", "concise", "detailed"] | None = None
+
+    @field_validator("effort", mode="before")
+    @classmethod
+    def clamp_over_ceiling_effort(cls, v: object) -> object:
+        """Clamp over-ceiling effort names down to the wire ceiling.
+
+        Clients may send ``max``/``ultra``; clamp those to ``xhigh`` instead of
+        rejecting. Non-str values and unknown names pass through untouched so
+        the 422 for a genuine typo still names the valid set.
+        """
+        if not isinstance(v, str):
+            return v
+        return clamp_reasoning_effort(v)
 
 
 class ResponsesRequest(BaseModel, frozen=True):

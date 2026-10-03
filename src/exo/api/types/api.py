@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field, field_validator
 from exo.shared.models.model_cards import ModelCard, ModelId
 from exo.shared.types.common import CommandId, NodeId
 from exo.shared.types.memory import Memory
-from exo.shared.types.text_generation import ReasoningDialect, ReasoningEffort
+from exo.shared.types.text_generation import (
+    ReasoningDialect,
+    ReasoningEffort,
+    clamp_reasoning_effort,
+)
 from exo.shared.types.worker.instances import Instance, InstanceId, InstanceMeta
 from exo.shared.types.worker.shards import Sharding, ShardMetadata
 from exo.utils.pydantic_ext import FrozenModel
@@ -297,6 +301,20 @@ class ChatCompletionRequest(BaseModel):
     # its own in-flight request (and so cancel it) mid-prefill. Not
     # interpreted by exo and not required to be unique.
     correlation_id: str | None = None
+
+    @field_validator("reasoning_effort", mode="before")
+    @classmethod
+    def clamp_over_ceiling_reasoning_effort(cls, v: object) -> object:
+        """Clamp over-ceiling effort names down to the wire ceiling.
+
+        Hermes / OpenAI-style clients may send ``max``/``ultra``; clamp those to
+        ``xhigh`` instead of rejecting. Non-str values and unknown names pass
+        through untouched so normal validation (and the 422 that names the
+        valid set for a genuine typo) is unchanged.
+        """
+        if not isinstance(v, str):
+            return v
+        return clamp_reasoning_effort(v)
 
 
 class BenchChatCompletionRequest(ChatCompletionRequest):
