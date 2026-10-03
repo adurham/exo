@@ -2810,6 +2810,12 @@ for NODE in "${NODES[@]}"; do
   : "${MLX_JACCL_RELIABLE_MAX_SZ:=2}" # 16KB — MUST stay <=2 (>=sz4 UC sends stick)
   [ -n "${MLX_JACCL_RELIABLE_MAX_SZ:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_MAX_SZ=$MLX_JACCL_RELIABLE_MAX_SZ"
   # MLX_JACCL_RELIABLE_IDLE_US: sleep per idle drain poll (anti-CPU-spin).
+  # DEFAULT 0 since 2026-10-03: the 15 us sleep overshoots on macOS and capped
+  # all_sum at ~2.0 GB/s (W13). Served A/B (W14, 63/63 outputs byte-identical,
+  # 0 timeouts, p99/median 1.06 both arms): 16K TTFT 63.8 -> 58.8 s (-7.85%),
+  # decode +2.87%, runner busy-polls ~+4 pts of one core (hosts have ~10 idle
+  # P-cores). Set MLX_JACCL_RELIABLE_IDLE_US=15 to restore the old behaviour.
+  : "${MLX_JACCL_RELIABLE_IDLE_US:=0}"
   [ -n "${MLX_JACCL_RELIABLE_IDLE_US:-}" ] && EXO_ENV="$EXO_ENV MLX_JACCL_RELIABLE_IDLE_US=$MLX_JACCL_RELIABLE_IDLE_US"
   # MLX_EVENT_WAIT_*: interruptible GPU-event wait (mlx event.cpp). Event::wait
   # now POLLS MTL::SharedEvent::signaledValue() in userspace instead of Apple's
