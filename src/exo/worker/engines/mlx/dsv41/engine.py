@@ -80,7 +80,11 @@ from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
-from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
+from exo.worker.engines.mlx.dsv41.errors import (
+    Dsv41InvalidRequest,
+    Dsv41UnsupportedFeature,
+    reclassify_input_error,
+)
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.output import dsv41_output_parser
 from exo.worker.engines.mlx.dsv41.rounds import (
@@ -311,23 +315,21 @@ class Dsv41Engine(Engine):
     ) -> Iterator[
         tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]
     ]:
-        if self._active is None:
-            self._agreement.agree_on_tasks()
-            if self._agreement.queue:
-                self._start_next()
-            else:
-                return iter(
-                    [
-                        (task_id, CancelledResponse())
-                        for task_id in self._cancelled_tasks
-                    ]
-                )
-
-        active = self._active
-        assert active is not None
         output: list[
             tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
         ] = []
+        if self._active is None:
+            self._agreement.agree_on_tasks()
+            self._activate_next(output)
+            if self._active is None:
+                output.extend(
+                    (task_id, CancelledResponse())
+                    for task_id in self._cancelled_tasks
+                )
+                return iter(output)
+
+        active = self._active
+        assert active is not None
         try:
             # Pull ONLY through the parser pipeline (it wraps active.generator);
             # a direct next(active.generator) here would steal a token per step.
@@ -343,16 +345,14 @@ class Dsv41Engine(Engine):
                         break
                     continue
                 output.append((active.task.task_id, parsed))
-        except Dsv41UnsupportedFeature as e:
-            # A request this build cannot serve: fail the REQUEST with the
-            # reason, keep the runner (both ranks raise the same refusal for
-            # the same params, so they stay in step).
-            self._send_error(active.task, e)
-            output.append((active.task.task_id, FinishedResponse()))
-            self._agreement.forget(active.task.task_id)
-            self._active = None
-            if self._agreement.queue:
-                self._start_next()
+        except (Dsv41UnsupportedFeature, Dsv41InvalidRequest) as e:
+            # A request this build cannot serve (unsupported feature) or whose
+            # own input is invalid (e.g. the literal image placeholder token in
+            # message text): fail the REQUEST with the reason, keep the runner
+            # (both ranks raise the same refusal for the same params, so they
+            # stay in step).
+            self._fail_request(active.task, e, output)
+            self._activate_next(output)
         except (StopIteration, PrefillCancelled):
             # The parser pipeline BUFFERS (thinking split / DSML detection hold
             # tokens until they are disambiguated), so at end-of-stream whatever
@@ -365,13 +365,70 @@ class Dsv41Engine(Engine):
             output.append((active.task.task_id, FinishedResponse()))
             self._agreement.forget(active.task.task_id)
             self._active = None
-            if self._agreement.queue:
-                self._start_next()
+            self._activate_next(output)
         except Exception as e:
             self._send_error(active.task, e)
             self._active = None
             raise
         return iter(output)
+
+    def _fail_request(
+        self,
+        task: TextGeneration,
+        e: Exception,
+        output: list[
+            tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]
+        ],
+    ) -> None:
+        """Fail one request, emit its terminal response, and forget it.
+
+        Shared by step()'s refusal handlers and by ``_activate_next``, whose
+        eager ``_render_prompt`` can raise before a request ever becomes active
+        (the placeholder-in-text case that used to crash the runner): both must
+        produce the SAME terminal shape -- an error chunk (rank 0 only, per
+        ``_send_error``) plus FinishedResponse -- so the runner closes the task
+        instead of waiting forever on a stream that will never start, and the
+        next queued task can run.
+        """
+        self._send_error(task, e)
+        output.append((task.task_id, FinishedResponse()))
+        self._agreement.forget(task.task_id)
+        self._active = None
+
+    def _activate_next(
+        self,
+        output: list[
+            tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]
+        ],
+    ) -> None:
+        """Start the next queued request, skipping ones whose START fails.
+
+        A task whose own start (render/validation) fails with a request-level
+        error is failed here and skipped; a genuine internal failure still
+        propagates loudly. The loop matters as much as the catch:
+        ``_activate_next`` is also called by step()'s handlers, so a bad task
+        sitting at the head of the queue must not be able to crash the step
+        that just finished a turn -- and with several bad tasks queued, one
+        step must not raise on the first.
+        """
+        while self._agreement.queue:
+            task = self._agreement.queue.popleft()
+            try:
+                self._active = self._start(task)
+            except Dsv41InvalidRequest as e:
+                logger.warning(
+                    f"[DSV41] invalid request {task.task_id}: {e}; "
+                    "failing the request and serving the next queued task."
+                )
+                self._fail_request(task, e, output)
+                continue
+            except Exception as e:
+                # A start failure that is NOT request input is an engine bug: it
+                # must crash loudly (the supervisor re-creates the runner), with
+                # the client still told why -- exactly the pre-fix behaviour.
+                self._send_error(task, e)
+                raise
+            return
 
     def close(self) -> None:
         self._active = None
@@ -411,20 +468,25 @@ class Dsv41Engine(Engine):
 
     # ------------------------------------------------------------------ requests
 
-    def _start_next(self) -> None:
-        task = self._agreement.queue.popleft()
-        try:
-            generator = self._build_generator(task)
-            output_generator = dsv41_output_parser(
-                _queue_of(generator),
-                self.loaded.tokenizer,
-                self._render_prompt(task.task_params),
-                self.model_id,
-            )
-        except Exception as e:
-            self._send_error(task, e)
-            raise
-        self._active = _Active(task, generator, output_generator)
+    def _start(self, task: TextGeneration) -> _Active:
+        """Build the request's generator + parser pipeline (eager render).
+
+        The eager ``_render_prompt`` here runs outside any active-request try
+        block, so a request-input ValueError (the literal image placeholder
+        token in message text, an unreadable image block) has already been
+        translated to :class:`Dsv41InvalidRequest` at the render seam, which is
+        what lets ``_activate_next`` fail just this request and move on. Any
+        other exception escapes unchanged -- a genuine engine bug must still
+        crash loudly.
+        """
+        generator = self._build_generator(task)
+        output_generator = dsv41_output_parser(
+            _queue_of(generator),
+            self.loaded.tokenizer,
+            self._render_prompt(task.task_params),
+            self.model_id,
+        )
+        return _Active(task, generator, output_generator)
 
     def _send_error(self, task: TextGeneration, e: Exception) -> None:
         if self.device_rank == 0:
@@ -446,12 +508,24 @@ class Dsv41Engine(Engine):
         image-carrying request needs ``vision.render_prompt``, because the shared
         one keeps only the ``type == "text"`` content parts and would flatten the
         image block (and therefore the model's placeholder) away.
+
+        Rendering is the EAGER step of starting a request (it runs before the
+        generator is pulled), so a request-input validation failure from the
+        vendored DSv4 encoder -- the literal image placeholder token typed into
+        message text is the live one -- is reclassified to
+        :class:`Dsv41InvalidRequest` here, at the source. ValueErrors that are
+        not request input (engine bugs) re-raise unchanged and still crash the
+        runner loudly.
         """
-        if params.images and self.vision_processor is not None:
-            return render_prompt(
-                self.loaded.tokenizer, params, self.vision_processor.placeholder
-            )
-        return apply_chat_template(self.loaded.tokenizer, params)
+        try:
+            if params.images and self.vision_processor is not None:
+                return render_prompt(
+                    self.loaded.tokenizer, params, self.vision_processor.placeholder
+                )
+            return apply_chat_template(self.loaded.tokenizer, params)
+        except ValueError as e:
+            reclassify_input_error(e)
+            raise
 
     def _build_generator(self, task: TextGeneration) -> Generator[GenerationResponse]:
         params = task.task_params

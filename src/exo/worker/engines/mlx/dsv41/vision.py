@@ -49,6 +49,10 @@ import mlx.core as mx
 import numpy as np
 
 from exo.shared.types.text_generation import Base64Image, TextGenerationTaskParams
+from exo.worker.engines.mlx.dsv41.errors import (
+    Dsv41InvalidRequest,
+    reclassify_input_error,
+)
 from exo.worker.runner.bootstrap import logger
 
 __all__ = [
@@ -162,14 +166,24 @@ def prompt_tokens_for_request(
     content blocks). ``prepare_vl_inputs`` re-tokenizes it and expands each
     placeholder into its sentinel span, so the token list it returns is what the
     model must be fed -- NOT simply ``tokenizer.encode(prompt)``.
+
+    The image processor's own request checks (placeholder count vs image list,
+    an unreadable image payload) raise ValueError for REQUEST-shaped failures:
+    those are reclassified to :class:`Dsv41InvalidRequest` so the engine fails
+    just this request. A ValueError that is not request input propagates
+    unchanged.
     """
     from mlx_lm.models.deepseek_v41 import image_processor as _mip
 
-    tokens, token_types, image_inputs = _mip.prepare_vl_inputs(
-        prompt, _image_records(images), tokenizer, vision.cfg
-    )
+    try:
+        tokens, token_types, image_inputs = _mip.prepare_vl_inputs(
+            prompt, _image_records(images), tokenizer, vision.cfg
+        )
+    except ValueError as e:
+        reclassify_input_error(e)
+        raise
     if not image_inputs:
-        raise ValueError(
+        raise Dsv41InvalidRequest(
             "DSv4.1 vision: the request carries "
             f"{len(images)} image(s) but the rendered prompt contains no "
             f"{vision.placeholder!r} placeholder, so no image span was built. "
@@ -177,7 +191,7 @@ def prompt_tokens_for_request(
             "placeholder (workstream T owns the template/card wiring)."
         )
     if len(image_inputs) != len(images):
-        raise ValueError(
+        raise Dsv41InvalidRequest(
             f"DSv4.1 vision: {len(images)} image(s) supplied but {len(image_inputs)} "
             "image span(s) expanded out of the prompt."
         )
@@ -403,7 +417,7 @@ def render_prompt(tokenizer: Any, params: TextGenerationTaskParams, placeholder:
 
     found = _images_in_messages(messages)
     if found != len(params.images):
-        raise ValueError(
+        raise Dsv41InvalidRequest(
             f"DSv4.1 vision: the request carries {len(params.images)} image(s) but "
             f"its rendered messages contain {found} image block(s). The image list "
             "and the message content must agree -- expanding them would pair "

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
+import pytest
 
 from exo.shared.types.chunks import ErrorChunk, TokenChunk, ToolCallChunk
 from exo.shared.types.common import CommandId
@@ -47,6 +48,10 @@ from exo.shared.types.worker.instances import InstanceId
 from exo.shared.types.worker.runner_response import FinishedResponse
 from exo.worker.engines.mlx.dsv41.dsml import CALLS_END_V41, CALLS_START_V41, DSML_V41
 from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
+from exo.worker.engines.mlx.dsv41.errors import (
+    Dsv41InvalidRequest,
+    reclassify_input_error,
+)
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.rounds import _one_round, _spec_policy
 from exo.worker.engines.mlx.dsv41.tests.conftest import (
@@ -257,6 +262,32 @@ class _EngineStub:
     _draft_windows: dict[int, Any] = field(default_factory=dict)
 
 
+def _submit(
+    engine: Dsv41Engine,
+    task_id: str,
+    *,
+    content: str,
+    max_output_tokens: int | None = None,
+    images: list[Base64Image] | None = None,
+) -> None:
+    """Queue one more request on an engine built by ``_engine``."""
+    params = TextGenerationTaskParams(
+        model=MODEL,
+        input=[InputMessage(role="user", content=InputMessageContent(content))],
+        max_output_tokens=max_output_tokens,
+        temperature=0.0,
+        images=images or [],
+    )
+    engine.submit(
+        TextGeneration(
+            task_id=TaskId(task_id),
+            command_id=CommandId(f"cmd-{task_id}"),
+            task_params=params,
+            instance_id=InstanceId("inst-1"),
+        )
+    )
+
+
 def _engine(
     script: list[int],
     *,
@@ -268,6 +299,7 @@ def _engine(
     use_prefix_cache: bool = False,
     logprobs: bool = False,
     tools: list[dict[str, Any]] | None = None,
+    content: str = "hello",
 ) -> tuple[Dsv41Engine, ScriptedModel, FakeTokenizer, list[Any]]:
     tokenizer = FakeTokenizer(text_of=text_of)
     model = ScriptedModel(script)
@@ -296,7 +328,7 @@ def _engine(
     )
     params = TextGenerationTaskParams(
         model=MODEL,
-        input=[InputMessage(role="user", content=InputMessageContent("hello"))],
+        input=[InputMessage(role="user", content=InputMessageContent(content))],
         max_output_tokens=max_output_tokens,
         temperature=0.0,
         stop=stop,
@@ -313,6 +345,24 @@ def _engine(
     )
     engine.submit(task)
     return engine, model, tokenizer, sender.events
+
+
+def _drain_pairs(
+    engine: Dsv41Engine, *, limit: int = 500
+) -> list[tuple[TaskId, Any]]:
+    """Drive step() until it is empty, KEEPING the task id of every response.
+
+    ``_drain`` discards the ids because single-request tests never need them;
+    the invalid-request tests do, to tell a failed request's terminal from the
+    next request's stream.
+    """
+    out: list[tuple[TaskId, Any]] = []
+    for _ in range(limit):
+        step = list(engine.step())
+        if not step:
+            break
+        out.extend(step)
+    return out
 
 
 def _drain(engine: Dsv41Engine, *, limit: int = 500) -> list[Any]:
@@ -689,3 +739,302 @@ def test_no_max_tokens_fits_the_cache_instead_of_refusing():
     chunks = _drain(engine)
     assert _text_of(chunks) == "hi there bye"
     assert not any(isinstance(e.chunk, ErrorChunk) for e in events)
+
+
+# ------------------------------------------------- invalid request (no crash)
+
+
+#: The literal image placeholder text, fullwidth bars U+FF5C, spelled by
+#: CONCATENATION like conftest's markers (the toolchain eats a "<" that is
+#: immediately followed by a letter). Production crashed on exactly this text
+#: typed into a user message: the vendored encoder refuses it, and the refusal
+#: used to escape step() and take the runner down with it.
+IMAGE_TEXT = "<" + "\uff5cdeepseek_image\uff5c>"
+
+
+def _errors_for(events: list[Any], command_id: str) -> list[ErrorChunk]:
+    return [
+        e.chunk
+        for e in events
+        if isinstance(e.chunk, ErrorChunk)
+        and e.command_id == CommandId(command_id)
+    ]
+
+
+def test_image_placeholder_text_in_a_message_fails_the_request_alone():
+    """A user message containing the literal placeholder token must fail THIS
+    request (error chunk with the reason, engine._active cleared) instead of
+    raising out of step() and crashing the runner."""
+    from exo.worker.engines.mlx.dsv41.vision import IMAGE_PLACEHOLDER
+
+    assert IMAGE_TEXT == IMAGE_PLACEHOLDER  # pin: this is the encoder's token
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, content=f"please explain {IMAGE_TEXT} here"
+    )
+    pairs = _drain_pairs(engine)  # no exception
+
+    assert engine._active is None
+    assert not any(isinstance(item, TokenChunk) for _tid, item in pairs)
+    assert [tid for tid, item in pairs if isinstance(item, FinishedResponse)] == [
+        TaskId("task-1")
+    ]
+    errs = _errors_for(events, "cmd-1")
+    assert errs and "image special token" in (errs[0].error_message or "")
+
+
+def test_invalid_request_does_not_block_the_next_queued_request():
+    """The bad request fails; the NEXT queued (valid) request still completes."""
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, content=f"a {IMAGE_TEXT} b", max_output_tokens=8
+    )
+    _submit(engine, "task-2", content="hello", max_output_tokens=8)
+    pairs = _drain_pairs(engine)
+
+    finished = {tid for tid, item in pairs if isinstance(item, FinishedResponse)}
+    assert finished == {TaskId("task-1"), TaskId("task-2")}
+    good_text = "".join(
+        item.text
+        for tid, item in pairs
+        if tid == TaskId("task-2") and isinstance(item, TokenChunk)
+    )
+    assert good_text == "hi"
+    assert not any(
+        tid == TaskId("task-1") and isinstance(item, TokenChunk)
+        for tid, item in pairs
+    ), "the failed request must not start streaming tokens"
+    assert engine._active is None
+    assert _errors_for(events, "cmd-task-2") == []
+    assert _errors_for(events, "cmd-1")
+
+
+def test_invalid_next_task_inside_the_stop_handler_does_not_crash_the_step():
+    """After a turn finishes, step()'s handler starts the next queued task; that
+    next task being invalid must fail it THERE (same step) rather than raising
+    through the handler and crashing the loop."""
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=8
+    )
+    _submit(engine, "task-2", content=f"x {IMAGE_TEXT}", max_output_tokens=8)
+
+    steps: list[list[tuple[TaskId, Any]]] = []
+    for _ in range(50):
+        step = list(engine.step())
+        if not step:
+            break
+        steps.append(step)
+
+    task1_final = [
+        i for i, step in enumerate(steps) if (TaskId("task-1"), FinishedResponse()) in step
+    ]
+    assert task1_final, "task-1 never finished"
+    final_step = steps[task1_final[0]]
+    # The bad task-2 was failed by the very step that closed task-1: the handler
+    # called the activation helper, which skipped it without raising.
+    assert (TaskId("task-2"), FinishedResponse()) in final_step
+    assert engine._active is None
+    assert _errors_for(events, "cmd-task-2")
+
+
+def test_invalid_next_task_inside_the_refusal_handler_does_not_crash_the_step():
+    """Same, from the OTHER handler: a refused request (max_tokens over cache)
+    fails, and the invalid next task must be skipped in the same step."""
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=100_000
+    )
+    _submit(engine, "task-2", content=f"y {IMAGE_TEXT}", max_output_tokens=8)
+
+    steps: list[list[tuple[TaskId, Any]]] = []
+    for _ in range(50):
+        step = list(engine.step())
+        if not step:
+            break
+        steps.append(step)
+
+    task1_final = [
+        i for i, step in enumerate(steps) if (TaskId("task-1"), FinishedResponse()) in step
+    ]
+    assert task1_final, "task-1 never reported its refusal"
+    # The refusal's handler started the next request; task-2 is invalid, so it
+    # must be failed in that SAME step instead of raising through the handler.
+    assert (TaskId("task-2"), FinishedResponse()) in steps[task1_final[0]]
+    assert engine._active is None
+    assert _errors_for(events, "cmd-1")  # the refusal's reason
+    assert _errors_for(events, "cmd-task-2")
+
+
+def test_an_internal_render_error_still_crashes_loudly(monkeypatch: Any):
+    """A render failure that is NOT request input is an engine bug: it must
+    still propagate out of step() (so the supervisor re-creates the runner),
+    with the client told why -- exactly the pre-fix behaviour."""
+    engine, _model, _tokenizer, events = _engine([34, 1], text_of=ANSWER_TEXT)
+
+    def broken(_params: Any) -> str:
+        raise ValueError("internal render bookkeeping broke")
+
+    monkeypatch.setattr(engine, "_render_prompt", broken)
+    with pytest.raises(ValueError, match="internal render bookkeeping"):
+        list(engine.step())
+    assert any(isinstance(e.chunk, ErrorChunk) for e in events)
+
+
+def test_reclassify_input_error_leaves_an_internal_value_error_alone():
+    """The classifier is marker-based: unknown ValueErrors pass through, so the
+    engine's internal checks can never be swallowed as 'invalid request'."""
+    with pytest.raises(ValueError, match="resize solve overflowed"):
+        try:
+            raise ValueError("resize solve overflowed the token budget")
+        except ValueError as e:
+            reclassify_input_error(e)
+            raise
+    with pytest.raises(Dsv41InvalidRequest, match="image special token"):
+        try:
+            raise ValueError("Message content contains image special token 'x'.")
+        except ValueError as e:
+            reclassify_input_error(e)
+            raise
+
+
+def test_undecodable_image_payload_is_an_invalid_request():
+    """An image payload the REQUEST sent that cannot be decoded (bad base64) is
+    reclassified at the ``prompt_tokens_for_request`` seam -- the request fails,
+    it does not crash the runner."""
+    from exo.worker.engines.mlx.dsv41.vision import (
+        Dsv41Vision,
+        prompt_tokens_for_request,
+    )
+
+    class _Cfg:
+        #: Flat ``vision_*`` bag, the shape ``_as_preprocess_config`` accepts.
+        image_token_id = 129264
+        vision_patch_size = 14
+        vision_downsample_ratio = 2
+        vision_max_n_token = 4096
+        vision_min_pixels = 1
+        vision_max_wh_ratio = None
+
+    class _EncodedPrompt:
+        def encode(self, _text: str) -> list[int]:
+            return [10, 129264, 11]  # exactly one placeholder, as rendered
+
+    vision = Dsv41Vision(
+        tower=object(),
+        cfg=_Cfg(),
+        placeholder=IMAGE_TEXT,
+        image_token_id=129264,
+        text_dim=8,
+        n_vit_layers=1,
+    )
+    with pytest.raises(Dsv41InvalidRequest, match="base64"):
+        prompt_tokens_for_request(vision, "x", [Base64Image("A")], _EncodedPrompt())
+
+
+def test_image_list_without_matching_message_blocks_is_an_invalid_request():
+    """The client sent an image but its messages contain no image block: the
+    renderer refuses at ``render_prompt`` and the request fails alone while the
+    next queued request completes."""
+    from exo.worker.engines.mlx.dsv41.vision import IMAGE_PLACEHOLDER
+
+    class _Vision:
+        placeholder = IMAGE_PLACEHOLDER
+
+    # task-1 carries an image but its message text has no image block; the tower
+    # is attached before step() runs so the renderer actually takes the vision
+    # path. task-2 (valid, queued behind) proves the failed skip.
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=8,
+        images=[Base64Image("A")],
+    )
+    engine.vision_processor = _Vision()  # type: ignore[assignment]
+    _submit(engine, "task-2", content="hello", max_output_tokens=8)
+
+    pairs = _drain_pairs(engine)
+    assert engine._active is None
+    finished = {tid for tid, item in pairs if isinstance(item, FinishedResponse)}
+    assert finished == {TaskId("task-1"), TaskId("task-2")}
+    errs = _errors_for(events, "cmd-1")
+    assert errs and "must agree" in (errs[0].error_message or "")
+    good_text = "".join(
+        item.text
+        for tid, item in pairs
+        if tid == TaskId("task-2") and isinstance(item, TokenChunk)
+    )
+    assert good_text == "hi"
+
+
+def test_image_expansion_failure_inside_the_generator_fails_the_request():
+    """The image expansion runs LAZILY inside the generator (``_generate`` ->
+    ``prompt_tokens_for_request``); its request-input failure must be handled by
+    step() exactly like an eager one -- error chunk, engine cleared, no crash.
+    """
+    from exo.worker.engines.mlx.dsv41.vision import (
+        IMAGE_PLACEHOLDER,
+        Dsv41Vision,
+    )
+
+    class _Cfg:
+        #: Flat ``vision_*`` bag, the shape ``_as_preprocess_config`` accepts.
+        image_token_id = 129264
+        vision_patch_size = 14
+        vision_downsample_ratio = 2
+        vision_max_n_token = 4096
+        vision_min_pixels = 1
+        vision_max_wh_ratio = None
+
+    tokenizer = FakeTokenizer(text_of=ANSWER_TEXT)
+    model = ScriptedModel([34, 1])
+    sender = _Sender()
+    engine = Dsv41Engine(
+        loaded=Dsv41Loaded(
+            model=model,
+            tokenizer=tokenizer,
+            args=model.args,
+            model_path=Path("/nonexistent-checkpoint"),
+            built_layers=list(range(40)),
+            full_stack=True,
+            rank=0,
+            world=1,
+            load_seconds=0.0,
+            head=None,
+        ),
+        model_id=MODEL,
+        group=None,
+        cancel_receiver=_Receiver(),  # type: ignore[arg-type]
+        event_sender=sender,  # type: ignore[arg-type]
+        device_rank=0,
+        speculative=False,
+        prefill_chunk_size=2,
+    )
+    engine.vision_processor = Dsv41Vision(
+        tower=object(),
+        cfg=_Cfg(),
+        placeholder=IMAGE_PLACEHOLDER,
+        image_token_id=129264,
+        text_dim=8,
+        n_vit_layers=1,
+    )
+    # An image rides the request, but the checkpoint-shaped tokenizer's encode
+    # returns no placeholder id for the rendered prompt -- the image processor's
+    # own count check ("Found N image tokens but got M images") fires.
+    params = TextGenerationTaskParams(
+        model=MODEL,
+        input=[InputMessage(role="user", content=InputMessageContent("see this"))],
+        max_output_tokens=8,
+        temperature=0.0,
+        images=[Base64Image("A")],
+        chat_template_messages=[
+            {"role": "user", "content": [{"type": "image", "url": "exo-image:0"}]}
+        ],
+    )
+    engine.submit(
+        TextGeneration(
+            task_id=TaskId("task-1"),
+            command_id=CommandId("cmd-1"),
+            task_params=params,
+            instance_id=InstanceId("inst-1"),
+        )
+    )
+    chunks = _drain(engine)  # no exception
+    assert engine._active is None
+    assert not any(isinstance(c, TokenChunk) for c in chunks)
+    errs = _errors_for(sender.events, "cmd-1")
+    assert errs and "image tokens" in (errs[0].error_message or "")

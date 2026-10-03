@@ -37,3 +37,64 @@ class Dsv41UnsupportedFeature(Dsv41Error):  # noqa: N818 - name is public API
     request we cannot honour would corrupt results invisibly, which is the
     failure mode this engine deliberately refuses.
     """
+
+
+class Dsv41InvalidRequest(Dsv41Error):  # noqa: N818 - name is public API
+    """The request's own input is invalid -- and the request's fault only.
+
+    Raised for request-content validation failures: e.g. the literal image
+    placeholder token typed inside message text, which the vendored DSv4
+    encoder refuses because an image must arrive as its own content block.
+    The engine fails ONLY that request (an error chunk carrying the reason)
+    and moves on to the next queued task -- every rank raises the same
+    refusal for the same params, so they stay in step, and no internal state
+    is implicated. A failure that IS an engine bug must keep raising its own
+    exception loudly instead: this class is for input, not for crashes.
+    """
+
+
+#: Message fragments that identify a ValueError raised while RENDERING or
+#: EXPANDING a request as request-input validation rather than an engine bug.
+#: Kept explicit (not a blanket ``except ValueError``) so a genuine internal
+#: failure -- the resize solver's token-budget overflow, the embedding-table
+#: guard, an MLX shape error -- still propagates and crashes loudly.
+#:
+#: The first three are the vendored DSv4 encoder's own request checks
+#: (``vendor/deepseek_v4_encoding.py``); the rest come from expanding the
+#: request's images in mlx-lm's DSv4 image processor. Both layers are vendored
+#: upstream code this engine does not edit, so the messages themselves are the
+#: stable interface; ``test_dsv41_engine``'s invalid-request tests pin them so
+#: a vendored refresh that rewords one fails a test instead of silently
+#: restoring the runner crash.
+_INPUT_ERROR_MARKERS: tuple[str, ...] = (
+    # encoder: placeholder token in `content` / `reasoning_content`
+    "image special token",
+    # encoder: placeholder token inside a text content block
+    "Text block contains image placeholder",
+    # encoder: an image block with no usable source
+    "Image block does not contain a valid source",
+    # image processor: placeholder count does not match the image list
+    "image tokens but got",
+    # image processor: the request's image payload cannot be read
+    "Unsupported data URL encoding",
+    "Cannot load image from record",
+    "Invalid base64-encoded string",
+    "Incorrect padding",
+)
+
+
+def reclassify_input_error(e: ValueError) -> None:
+    """Raise :class:`Dsv41InvalidRequest` when ``e`` is request-input validation.
+
+    Use at a render/expansion boundary::
+
+        except ValueError as e:
+            reclassify_input_error(e)  # input -> Dsv41InvalidRequest (from e)
+            raise                      # anything else -> unchanged, crashes loudly
+
+    The caller's fall-through ``raise`` is what keeps engine bugs loud; this
+    function itself never returns silently for a recognized input error.
+    """
+    message = str(e)
+    if any(marker in message for marker in _INPUT_ERROR_MARKERS):
+        raise Dsv41InvalidRequest(message) from e
