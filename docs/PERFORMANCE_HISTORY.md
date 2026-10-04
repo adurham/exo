@@ -10134,3 +10134,12 @@ reached ~90+ min before the deploy teardown killed it mid-flight (client curl ca
 soaks: server-side prefill of ~600K delta rows at ~75 tok/s takes ~2 h, set client
 max-time accordingly or capture via a reuse turn). Peak footprint during deep rungs:
 118-135 GB with compression absorbing the realloc spikes; no wedge, no kills.
+
+**LIVE PARK PROOF (12:40 CDT, same deploy):** three distinct ~7K-token conversations A,B,C;
+C's arrival evicted A -> `[DSV41] parked an idle conversation to SSD (7029 rows)` with 44 MB
+on disk under ~/.exo/dsv41_park/ (189 files). Re-requesting A's exact prompt ->
+`[DSV41] parked session restored: 7029 rows from SSD` + `turn reuse: prompt=6998 prefill=0
+reuse=6998` -> **1.6 s wall vs 26 s cold (16x), prefill 0**. The round trip is bit-exact by
+construction (verified in unit tests) and the live behavior matches. Also observed: the
+pre-gather-direct build's eviction log line (`session store evicting an idle conversation`)
+is replaced by the park-aware path (`_evict:804 parked an idle conversation to SSD`).
