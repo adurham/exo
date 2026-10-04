@@ -24,77 +24,11 @@ import pytest
 
 from exo.worker.engines.mlx.dsv41 import session as s_
 
-#: Decoded tokens each turn produces after its anchor.
-STEPS = 6
-
-
-class StubBody:
-    """Deterministic body over a real ``ModelCache`` (see the fork's own tests)."""
-
-    def __init__(self, initial_capacity: int | None = None) -> None:
-        from mlx_lm.models.deepseek_v41 import cache as c_
-        from mlx_lm.models.deepseek_v41.config import ModelArgs
-
-        self._C = c_
-        self.initial_capacity = initial_capacity
-        self.args = ModelArgs(
-            vocab_size=1000, window_size=8, compress_ratios=(2, 2),
-            kv_source_layers=(0,), index_source_layers=(0, 1),
-            engram_layer_ids=(),
-        )
-        self.embed: Any = None
-        self.head: Any = None
-
-    def make_cache(self, bsz: int = 1, max_seq_len: int | None = None,
-                   dtype: Any = None, initial_capacity: int | None = None,
-                   **_: Any):
-        return self._C.ModelCache(
-            self.args, bsz, max_seq_len or 64,
-            initial_capacity=(initial_capacity if initial_capacity is not None
-                              else self.initial_capacity))
-
-    def __call__(self, ids: Any, cache: Any, last_logit_only: bool = False,
-                 return_taps: bool = False, argmax: bool = False):
-        arr = np.asarray(ids)
-        if arr.ndim == 1:
-            arr = arr[None]
-        b, n = arr.shape
-        pos = int(cache.offset)
-        # The real driver's invariant: grow (eval-clean) before any write.
-        cache.ensure_capacity(pos + n)
-        for lc in cache.layers:
-            r = max(int(lc.ratio or 0), 1)
-            cs = lc.comp_state
-            if cs is not None:
-                for i in range(n):
-                    cs.kv_state[0, (pos + i) % r] = float(pos + i)
-                    cs.score_state[0, (pos + i) % r] = float(pos + i)
-            w = int(lc.window)
-            for i in range(n):
-                lc.win_kv[0, (pos + i) % w] = float(pos + i)
-        cache.offset = pos + n
-        out = mx.array(((arr + 1) % 1000).astype(np.int32))
-        if argmax:
-            return (out, {0: mx.zeros((b, n, 4))}) if return_taps else out
-        if return_taps:
-            return mx.array([[float(arr[0, -1])]]), {0: mx.zeros((1, 1, 4))}
-        return mx.array([[float(arr[0, -1])]])
-
-
-def _run_turn(store: s_.Dsv41Sessions, ids: "np.ndarray", *, checkpoint: bool = True):
-    """Prefill + ``STEPS`` decode rounds on one conversation; returns it."""
-    conv = store.get(ids.tolist(), "conv")
-    fed = conv.prefill(ids)
-    gen = [int(np.asarray(fed.anchor_logits).reshape(-1)[-1])]
-    for _ in range(STEPS - 1):
-        row = np.asarray(
-            conv.model(mx.array([[gen[-1]]], dtype=mx.int32), conv.cache.cache,
-                              last_logit_only=True, argmax=True)
-        ).reshape(-1)
-        conv.mark_rows([gen[-1]])
-        gen.append(int(row[-1]))
-    conv.finish(checkpoint=checkpoint)
-    return conv, fed, gen
+# The stub body + turn driver now live in the shared harness (``_stub_harness``)
+# so the SSD-park tests build the SAME conversation/cache path; the aliases keep
+# this module's existing names (``StubBody``, ``_run_turn``) working unchanged.
+from ._stub_harness import STEPS, StubBody
+from ._stub_harness import run_turn as _run_turn
 
 
 def test_turn_two_prefills_only_the_delta():

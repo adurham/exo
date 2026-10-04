@@ -43,13 +43,16 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mlx.core as mx
 import numpy as np
 
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.runner.bootstrap import logger
+
+if TYPE_CHECKING:  # pragma: no cover - typing only (park imports this module)
+    from exo.worker.engines.mlx.dsv41.park import ParkedStore
 
 __all__ = [
     "Conversation",
@@ -65,6 +68,20 @@ __all__ = [
 #: chat prompts shares the system header, and rewinding a big conversation to
 #: "fix" a twenty-token overlap is worse than starting cold.
 MIN_REUSE_TOKENS = 64
+
+#: SSD parking of idle conversations (see ``dsv41/park.py``). Enabled by
+#: default; ``EXO_DSV41_PARK=0`` disables it and makes eviction hard-discard, as
+#: it was before. The park store itself owns the directory / budget / min-token
+#: gates (``EXO_DSV41_PARK_DIR`` / ``EXO_DSV41_PARK_MAX_GB`` /
+#: ``EXO_DSV41_PARK_MIN_TOKENS``).
+PARK_ENV = "EXO_DSV41_PARK"
+
+
+def _park_enabled() -> bool:
+    """Whether SSD parking is on (default on; ``0``/``false``/``no``/``off`` off)."""
+    return os.environ.get(PARK_ENV, "1").strip().lower() not in (
+        "0", "false", "no", "off")
+
 
 #: Layer spacing for the model-level eval fence on the engine prefill path. The
 #: mlx-lm ``Model.__call__`` commits the chunk every ``_fence_every`` layers of a
@@ -614,6 +631,7 @@ class Dsv41Sessions:
         eos_id: int = 1,
         use_draft: bool = True,
         progress: Callable[[int, int, float], None] | None = None,
+        park_store: Any = None,
     ) -> None:
         self.model = model
         self.head = head if use_draft else None
@@ -635,6 +653,11 @@ class Dsv41Sessions:
         self._progress: Callable[[int, int, float], None] | None = progress
         self._entries: "collections.OrderedDict[str, _Entry]" = collections.OrderedDict()
         self.stats = collections.Counter()
+        #: An injected park store (the tests pass one rooted at ``tmp_path``);
+        #: ``None`` builds the default store lazily on the first eviction.
+        self._park: "ParkedStore | None" = park_store
+        #: Latched once a park-store build fails, so it is not retried per eviction.
+        self._park_failed = False
 
     # -- key resolution ---------------------------------------------------
     @staticmethod
@@ -655,6 +678,11 @@ class Dsv41Sessions:
                 self._entries.move_to_end(f"id:{key}")
                 self.stats["reuse"] += 1
                 return entry.session
+            # Not resident: a parked session with the same conversation key is
+            # the best possible match (no prefix threshold -- the client named it).
+            restored = self._restore_parked(ids, key=key)
+            if restored is not None:
+                return restored
             return self._open(f"id:{key}")
 
         best, best_lcp = None, 0
@@ -670,8 +698,67 @@ class Dsv41Sessions:
                 f"resident conversation on {best_lcp} rows"
             )
             return self._entries[best].session
+        # No resident match: consult the parked store before paying a cold
+        # prefill. A hit restores the conversation (and its cache) from SSD.
+        restored = self._restore_parked(ids, key=None)
+        if restored is not None:
+            return restored
         self.stats["cold"] += 1
         return self._open("p:" + _sc.prefix_hash(ids))
+
+    # -- parking ----------------------------------------------------------
+
+    def _park_store(self) -> "ParkedStore | None":
+        """The park store (injected by tests, else built once from the env).
+
+        Built lazily: a worker that never overflows its store never pays for it,
+        and a store that cannot be constructed is not retried per eviction.
+        """
+        if self._park is not None:
+            return self._park
+        if self._park_failed:
+            return None
+        try:
+            from exo.worker.engines.mlx.dsv41.park import ParkedStore
+
+            self._park = ParkedStore(
+                self.model, self.head,
+                conv_kw=self.kw, progress=self._progress,
+            )
+            return self._park
+        except Exception as exc:  # noqa: BLE001 - parking is best-effort
+            logger.warning(
+                f"[DSV41] park store unavailable ({type(exc).__name__}: {exc}); "
+                "eviction will hard-discard"
+            )
+            self._park_failed = True
+            return None
+
+    def _restore_parked(self, ids: Any, *, key: str | None) -> Conversation | None:
+        """Try to restore a parked session for ``ids``; ``None`` on any miss."""
+        if not _park_enabled():
+            return None
+        store = self._park_store()
+        if store is None:
+            return None
+        try:
+            conv = store.try_restore(ids, key=key)
+        except Exception as exc:  # noqa: BLE001 - restore never breaks a request
+            logger.warning(
+                f"[DSV41] parked restore failed ({type(exc).__name__}: {exc}); "
+                "falling back to a cold open")
+            self.stats["park_failed"] += 1
+            return None
+        if conv is None:
+            return None
+        store_key = self.key_for(ids, key)
+        self._entries[store_key] = _Entry(conv)
+        self.stats["restored"] += 1
+        logger.info(
+            f"[DSV41] parked session restored: {len(conv.tokens)} rows from SSD "
+            f"(key={store_key})"
+        )
+        return conv
 
     def _open(self, key: str) -> Conversation:
         session = Conversation(
@@ -683,11 +770,45 @@ class Dsv41Sessions:
         )
         self._entries[key] = _Entry(session)
         while len(self._entries) > self.max_sessions:
-            _, victim = self._entries.popitem(last=False)
-            logger.info("[DSV41] session store evicting an idle conversation")
-            victim.session.close()
-            self.stats["evicted"] += 1
+            victim_key, victim = self._entries.popitem(last=False)
+            # Preserve the conversation id (if any) so a parked session can be
+            # found by key later; prefix-keyed entries carry no client id.
+            ckey = victim_key[3:] if victim_key.startswith("id:") else None
+            self._evict(victim.session, key=ckey)
         return session
+
+    def _evict(self, session: Any, *, key: str | None = None) -> None:
+        """Park an idle conversation to SSD if possible, else close it outright.
+
+        Parking is best-effort and must never raise: any failure (disabled,
+        too short, mid-flight, unsafe draft window, disk error) falls back to the
+        original hard ``close()``. The path is deliberately conservative --
+        ``drop``/``close``/``cancel_all`` never reach here, so explicit
+        discards stay hard.
+        """
+        parked = False
+        if _park_enabled():
+            store = self._park_store()
+            if store is not None:
+                try:
+                    parked = bool(store.park(session, key=key))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        f"[DSV41] park of an evicted session failed "
+                        f"({type(exc).__name__}: {exc}); discarding"
+                    )
+                    self.stats["park_failed"] += 1
+                    parked = False
+        if parked:
+            self.stats["parked"] += 1
+            logger.info(
+                f"[DSV41] parked an idle conversation to SSD "
+                f"({len(session.tokens)} rows)"
+            )
+        else:
+            logger.info("[DSV41] session store evicting an idle conversation")
+        session.close()
+        self.stats["evicted"] += 1
 
     def drop(self, session: Any) -> None:
         """Forget + close a conversation (a one-off request has finished).
