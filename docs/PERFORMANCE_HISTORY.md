@@ -10107,3 +10107,30 @@ past-cliff live proof are the evidence; run the full-length soak on the next nat
 
 **Hermes-side pins bumped to match: `~/.hermes/config.yaml`, `~/.hermes/profiles/exo/config.yaml`,
 homelab `ansible/roles/hermes_gateway/templates/config.yaml.j2` (all 131072 -> 1048576).**
+
+## 2026-10-04 (deploy 2) — bundle: idle-session SSD parking + gather-direct comp_kv + 120 GB wired limit
+
+Deployed exo main `7a3096e85` (mlx-lm pin `4cc8395`) via `DSV4_KV_CACHE_BITS=0
+./start_cluster.sh`. Both nodes synchronized on 7a3096e85, READY (2/2), wired limit
+120000 MB on both. Old cluster torn down CLEAN_EXIT (1 s, no SIGKILL).
+
+**What shipped:**
+1. **Gather-direct comp_kv** (mlx-lm `4cc8395`): `sparse_attn` gains an optional second K/V
+   source so the dense `comp_kv` concat is replaced by a direct two-source gather — removes
+   the ~31 GiB/step dense materialization at 1M (analytic; independent review: bit-exact
+   parity, backward-compatible, sabotage-proved).
+2. **Idle-session SSD parking** (exo `0626478d2`): evicted DSv4.1 conversations are
+   serialized to `~/.exo/dsv41_park` (~3.18 GiB/session: win_kv + comp_kv + index_k + carries
+   + engram + snapshots + draft windows via the disaggregated adapter codec, temp-then-rename,
+   manifest as commit record) and restored when a later request matches their prefix;
+   env gates EXO_DSV41_PARK / _DIR / _MAX_GB (12) / _MIN_TOKENS (4096). Independent review:
+   bit-exact round-trip, poison/zero-fill sabotage-proved, all fallback paths exercised, GO.
+3. **Wired limit 115000 -> 120000** (launcher default; node sudoers extended for the new value).
+
+**Soak results this session (pre-deploy build, proving the 1M serve):** r160 instant reuse;
+r450 HTTP 200 at 449,977 prompt tokens (64.8 min delta prefill); r750 server-side prefill
+reached ~90+ min before the deploy teardown killed it mid-flight (client curl capped at its
+90-min max-time first — a client timeout does NOT cancel server work; noted for future
+soaks: server-side prefill of ~600K delta rows at ~75 tok/s takes ~2 h, set client
+max-time accordingly or capture via a reuse turn). Peak footprint during deep rungs:
+118-135 GB with compression absorbing the realloc spikes; no wedge, no kills.
