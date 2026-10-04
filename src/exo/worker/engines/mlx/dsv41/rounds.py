@@ -283,6 +283,36 @@ def _spec_policy(gamma: int) -> Any:
     return GammaPolicy(start=gamma)
 
 
+def _ensure_capacity_for_round(cache: Any, rows: int) -> None:
+    """Grow the mlx-lm cache BEFORE this round's forward graph is built.
+
+    ``cache`` is the raw ``mlx_lm.models.deepseek_v41.cache.ModelCache``
+    (``session.cache.cache``). Growth reallocates the compressed/index/engram
+    buffers, so it must happen at an eval-clean boundary -- before the round
+    builds its forward, never mid-graph. ``rows`` is the worst case this round
+    can write: 1 for the greedy single-row forward, ``1 + gamma`` for the
+    draft + verify forward (the verify feeds the anchor plus every drafted row
+    before the rollback trims the rejected suffix).
+
+    A cache double / older fork without growth support is a no-op; the mlx-lm
+    ``CapacityError`` (and any allocator failure, which ``ensure_capacity``
+    re-raises as one) maps to the engine's ``Dsv41UnsupportedFeature`` refusal
+    so a too-long request fails cleanly instead of crashing the runner.
+    """
+    ensure = getattr(cache, "ensure_capacity", None)
+    if ensure is None:
+        return
+    from mlx_lm.models.deepseek_v41.cache import CapacityError as _CapErr
+
+    try:
+        ensure(int(cache.offset) + int(rows))
+    except _CapErr as e:
+        raise Dsv41UnsupportedFeature(
+            f"DSV4.1 out of context: cache cannot hold "
+            f"{int(cache.offset) + int(rows)} tokens ({e})"
+        ) from e
+
+
 def _one_round(
     engine: Dsv41Engine,
     *,
@@ -320,6 +350,8 @@ def _one_round(
     started = time.perf_counter()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
     if head is None:
+        # Plain greedy: one row in, one token out. Grow for that row first.
+        _ensure_capacity_for_round(cache, 1)
         logits = model(anchor, cache, last_logit_only=True)
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
         _row_logprobs(logits, logprobs, lp_out)
@@ -341,6 +373,7 @@ def _one_round(
     if draft_state is None:
         # Round 1 with a head: no draft window yet. Step plainly, but keep the
         # taps so round 2 can draft.
+        _ensure_capacity_for_round(cache, 1)
         logits, taps = model(anchor, cache, last_logit_only=True, return_taps=True)
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
         _row_logprobs(logits, logprobs, lp_out)
@@ -355,6 +388,10 @@ def _one_round(
         return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
 
     gamma = int(policy.next()) if policy is not None else 1
+    # Speculative verify feeds the anchor + EVERY drafted row in ONE forward
+    # (1 + gamma rows) before the rollback trims the rejected suffix, so grow
+    # for that whole worst case here, at the eval-clean boundary.
+    _ensure_capacity_for_round(cache, 1 + gamma)
     position = int(cache.offset)
     drafted = head.draft(
         anchor.reshape(-1),  # DSparkHead.draft takes [b] anchor ids

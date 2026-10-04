@@ -629,19 +629,27 @@ fi
 # return.
 : "${DSV4_MAX_PREFIX_SESSIONS:=4}"
 : "${DSV4_MAX_KV_TOKENS:=}"
-# DSv4.1 preallocates its cache for the full instance capacity; with no cap it
-# would size it for the checkpoint's 1M context (8.7 GB/session). Was 16384
-# (initial integration default) -- but a real Hermes turn carries a ~25K-token
-# base prompt, so the 16K cap refused EVERY conversation
-# ("prompt 25451 + max_output_tokens ... needs more than the 16384-token cache").
-# 2026-10-03: raised to 131072 (128K). Measured from the dsv41 cache code:
-# ~1.12 GB/session (fp32 window ring + compressed-KV + index caches), 2 resident
-# sessions (Dsv41Engine.max_sessions=2) = ~2.2 GB -- fits the ~12 GB steady /
-# ~5 GB peak headroom under the 115 GB wired limit (runner footprint 103 GB
-# steady / 110 GB peak measured live 2026-10-03). Verify footprint per node
-# after a real >25K request before ever raising further.
+# DSv4.1's cache is now bf16 grid-exact AND grow-on-demand (fix/dsv41-1m-context):
+# the three quantized-grid buffers (window ring, compressed-KV, index keys) are
+# stored in bf16 (lossless for their <=6-significant-bit values, half the bytes)
+# and the latent buffers/engram history start small and grow geometrically only
+# when a session actually approaches the cap. So a 1M cap no longer costs 1M
+# tokens of allocation up front: at full context a session is ~3.2 GiB bf16
+# (~6.4 GiB in the old fp32 preallocation), and an IDLE session costs only the
+# initial 65536-token allocation (well under 0.5 GiB). Was 16384 (initial
+# integration default) -- but a real Hermes turn carries a ~25K-token base
+# prompt, so the 16K cap refused EVERY conversation ("prompt 25451 +
+# max_output_tokens ... needs more than the 16384-token cache"). 2026-10-03:
+# raised to 131072 (128K). 2026-10-04: raised to the checkpoint's full 1M
+# context, now that preallocation no longer makes a big cap impossible. Peak
+# cost is only reached if a session truly approaches 1M: 2 resident sessions
+# (Dsv41Engine.max_sessions=2) at full context ~6.4 GiB total, but the common
+# case is far below (a 25K turn's latent rows are ~a few hundred MB). Under the
+# 115 GB wired limit the measured runner footprint was 103 GB steady / 110 GB
+# peak (2026-10-03); verify footprint per node after a real >25K request before
+# ever raising further (the wired limit itself is NOT raised here).
 if [ -z "$DSV4_MAX_KV_TOKENS" ] && [[ "$DSV4_MODEL_ID" == *DeepSeek-V4.1* ]]; then
-  DSV4_MAX_KV_TOKENS=131072
+  DSV4_MAX_KV_TOKENS=1048576
 fi
 # DSV4_MAX_PREFIX_BYTES (set 2026-09-23): TOTAL retained prefix-cache bytes.
 #

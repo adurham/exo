@@ -34,6 +34,7 @@ from typing import Any, cast
 
 import mlx.core as mx
 import pytest
+from mlx_lm.models.deepseek_v41.cache import CapacityError as _ScCapacityError
 
 from exo.shared.types.chunks import (
     ErrorChunk,
@@ -218,6 +219,15 @@ class MockCache:
         self.max_seq_len = max_seq_len
         self.offset = 0
         self.layers: list[Any] = []
+        # The real ``ModelCache`` grows on demand; the mock mirrors the surface
+        # so the engine's ensure wiring is exercised (growth is a no-op here).
+        self.capacity = max_seq_len
+
+    def ensure_capacity(self, required_tokens: int) -> None:
+        if int(required_tokens) > self.max_seq_len:
+            raise _ScCapacityError(
+                f"cache holds {self.max_seq_len} tokens; a request at "
+                f"{required_tokens} exceeds it")
 
 
 class MockHead:

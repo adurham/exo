@@ -30,11 +30,12 @@ STEPS = 6
 class StubBody:
     """Deterministic body over a real ``ModelCache`` (see the fork's own tests)."""
 
-    def __init__(self) -> None:
+    def __init__(self, initial_capacity: int | None = None) -> None:
         from mlx_lm.models.deepseek_v41 import cache as c_
         from mlx_lm.models.deepseek_v41.config import ModelArgs
 
         self._C = c_
+        self.initial_capacity = initial_capacity
         self.args = ModelArgs(
             vocab_size=1000, window_size=8, compress_ratios=(2, 2),
             kv_source_layers=(0,), index_source_layers=(0, 1),
@@ -43,8 +44,13 @@ class StubBody:
         self.embed: Any = None
         self.head: Any = None
 
-    def make_cache(self, bsz: int = 1, max_seq_len: int | None = None, **_: Any):
-        return self._C.ModelCache(self.args, bsz, max_seq_len or 64)
+    def make_cache(self, bsz: int = 1, max_seq_len: int | None = None,
+                   dtype: Any = None, initial_capacity: int | None = None,
+                   **_: Any):
+        return self._C.ModelCache(
+            self.args, bsz, max_seq_len or 64,
+            initial_capacity=(initial_capacity if initial_capacity is not None
+                              else self.initial_capacity))
 
     def __call__(self, ids: Any, cache: Any, last_logit_only: bool = False,
                  return_taps: bool = False, argmax: bool = False):
@@ -53,6 +59,8 @@ class StubBody:
             arr = arr[None]
         b, n = arr.shape
         pos = int(cache.offset)
+        # The real driver's invariant: grow (eval-clean) before any write.
+        cache.ensure_capacity(pos + n)
         for lc in cache.layers:
             r = max(int(lc.ratio or 0), 1)
             cs = lc.comp_state
@@ -212,3 +220,43 @@ def test_exact_repeat_prompt_reuses_the_saved_anchor():
     assert conv2 is conv
     assert r2.prefill_tokens == 0 and r2.reused_tokens == len(p1), f"{r2}"
     assert gen2 == gen1
+
+
+def _widen(buf: Any) -> "np.ndarray":
+    return np.array(buf.astype(mx.float32))
+
+
+def test_growth_matches_full_capacity_twin():
+    """A conversation whose cache grows on demand is bitwise a twin that was
+    preallocated to the cap: the engine's ensure wiring grows buffers across
+    >= 2 boundaries without changing any output or cache state."""
+    p1 = np.arange(10, 42, dtype=np.int64)
+    p2 = np.concatenate([p1, np.asarray([0, 1, 2, 3, 4, 0], dtype=np.int64),
+                         np.asarray([90, 91], dtype=np.int64)])
+
+    def run(cap: int):
+        store = s_.Dsv41Sessions(StubBody(cap), None, max_seq_len=256, chunk=4,
+                                 long_chunk=4, long_threshold=10**9)
+        conv, _, gen1 = _run_turn(store, p1)
+        conv.prefill(p2)
+        return conv, gen1
+
+    grew, g1g = run(8)                      # starts tiny -> must grow
+    fixed, g1f = run(256)                   # preallocated to the cap -> never grows
+
+    assert grew.cache.cache.capacity >= 32, grew.cache.cache.capacity
+    assert grew.cache.cache.capacity > 8    # the growing path really crossed boundaries
+    assert grew.offset == fixed.offset
+    assert [int(t) for t in grew.tokens] == [int(t) for t in fixed.tokens]
+    assert g1g == g1f
+    # Buffer contents beyond the live rows must agree (the growth copied the
+    # used rows and zero-filled the rest, exactly like the preallocated twin).
+    ng = grew.offset // 2
+    for a, b in zip(grew.cache.cache.layers, fixed.cache.cache.layers,
+                    strict=True):
+        assert np.array_equal(_widen(a.win_kv), _widen(b.win_kv))
+        if a.comp_kv is not None:
+            assert np.array_equal(_widen(a.comp_kv[:, :ng]),
+                                  _widen(b.comp_kv[:, :ng]))
+            assert np.array_equal(_widen(a.index_k[:, :ng]),
+                                  _widen(b.index_k[:, :ng]))
