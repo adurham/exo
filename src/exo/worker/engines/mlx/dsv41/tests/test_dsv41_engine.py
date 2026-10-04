@@ -59,7 +59,11 @@ from exo.worker.engines.mlx.dsv41.errors import (
     reclassify_input_error,
 )
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
-from exo.worker.engines.mlx.dsv41.rounds import _one_round, _spec_policy
+from exo.worker.engines.mlx.dsv41.rounds import (
+    _cache_capacity,
+    _one_round,
+    _spec_policy,
+)
 from exo.worker.engines.mlx.dsv41.tests.conftest import (
     DSML_SENTINEL_ID,
     MX_ON_CPU,
@@ -737,6 +741,33 @@ def test_a_refused_request_fails_alone_and_the_engine_keeps_serving():
     chunks = _drain(engine)  # FinishedResponse, no exception
     assert not any(isinstance(c, TokenChunk) for c in chunks)
     assert any(isinstance(e.chunk, ErrorChunk) for e in events)
+
+
+def test_cache_capacity_refusal_is_client_classifiable():
+    """The prompt-exceeds-cache refusal must be classifiable by OpenAI-style
+    clients: standard ``maximum context length is {N} tokens`` wording plus the
+    canonical ``context_length_exceeded`` structured code, while keeping the
+    exact same condition and capacity source (the fake model's max_seq_len)."""
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=100_000
+    )
+    # Same capacity source as the refusal itself (``_cache_capacity``): the
+    # fake checkpoint's ``max_seq_len``, since no ``max_kv_tokens`` is set.
+    capacity = _cache_capacity(engine)
+    assert capacity == 4096  # the fixture's _Args.max_seq_len
+    _drain(engine)
+
+    errs = [e.chunk for e in events if isinstance(e.chunk, ErrorChunk)]
+    assert errs, "expected a context-length refusal"
+    message = errs[0].error_message or ""
+    # Standard OpenAI wording, with the real capacity, for clients that only
+    # pattern-match the message.
+    assert f"maximum context length is {capacity} tokens" in message
+    # The prompt / max-output breakdown is preserved (semantics unchanged).
+    assert "3 prompt tokens" in message
+    assert "100000 max_output_tokens" in message
+    # And the structured code, for clients that read ``error.code``.
+    assert errs[0].error_code == "context_length_exceeded"
 
 
 def test_no_max_tokens_fits_the_cache_instead_of_refusing():

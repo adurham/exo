@@ -36,6 +36,12 @@ class ErrorChunk(BaseChunk):
     error_message: str
     finish_reason: Literal["error"] = "error"
 
+    # OpenAI-style structured error code, when the failure has a canonical one
+    # (e.g. ``context_length_exceeded`` for a prompt that exceeds the served
+    # window). ``None`` for an ordinary failure, so clients that only read the
+    # message keep working unchanged.
+    error_code: str | None = None
+
     # Set when this error is a tool-call parse failure, so the master can count
     # it by kind (exo_tool_call_parse_failures_total). None for other errors.
     tool_call_parse_failure_kind: ToolCallParseFailureKind | None = None

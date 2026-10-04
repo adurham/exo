@@ -40,7 +40,10 @@ class ErrorInfo(BaseModel):
     message: str
     type: str
     param: str | None = None
-    code: int
+    # int for HTTP-status failures (the historical shape); str for a canonical
+    # OpenAI structured code such as ``context_length_exceeded``. Clients read
+    # this key either way.
+    code: int | str
 
 
 class ErrorResponse(BaseModel):

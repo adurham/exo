@@ -291,11 +291,14 @@ async def generate_chat_stream(
                 yield f": prefill_progress {chunk.model_dump_json()}\n\n"
 
             case ErrorChunk():
+                # Carry the canonical code when the engine emitted one (e.g.
+                # ``context_length_exceeded``); fall back to the status-number
+                # code for an ordinary failure. The message is always emitted.
                 error_response = ErrorResponse(
                     error=ErrorInfo(
                         message=chunk.error_message or "Internal server error",
                         type="InternalServerError",
-                        code=500,
+                        code=chunk.error_code if chunk.error_code is not None else 500,
                     )
                 )
                 yield f"data: {error_response.model_dump_json(exclude_none=True)}\n\n"

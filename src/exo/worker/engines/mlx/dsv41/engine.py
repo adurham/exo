@@ -128,6 +128,46 @@ _WARMUP_PROMPT = "Reply with the single word: ready"
 #: Exhaustion marker for step()'s parser pull (the parser also yields None).
 _END = object()
 
+#: Canonical OpenAI error code for a request whose prompt exceeds the served
+#: window. Emitted on the wire so OpenAI-compatible clients (and Hermes'
+#: error classifier, which maps ``context_length_exceeded`` ->
+#: _V_CONTEXT_OVERFLOW) route it to compaction instead of blind retries.
+CONTEXT_LENGTH_EXCEEDED_CODE = "context_length_exceeded"
+
+
+class Dsv41ContextLengthExceeded(Dsv41UnsupportedFeature):  # noqa: N818 - name
+    """The request's prompt exceeds this instance's served context window.
+
+    A deterministic CLIENT-INPUT refusal -- the same request will never fit --
+    so it is a distinct type. It is still a
+    :class:`Dsv41UnsupportedFeature` (same catch sites, same fail-one-request
+    semantics) but carries the canonical ``context_length_exceeded`` code so
+    the API layer can hand clients a classifiable error instead of a generic
+    "internal error" stream event.
+    """
+
+    #: OpenAI-style structured code carried to the client.
+    code: str = CONTEXT_LENGTH_EXCEEDED_CODE
+
+
+def _context_length_message(prompt_len: int, max_tokens: int, capacity: int) -> str:
+    """The refusal text, phrased in OpenAI's standard context-length wording.
+
+    ``maximum context length is {N} tokens`` is the exact phrase OpenAI's own
+    overflow 400 uses, so any client that pattern-matches context overflow
+    (including wording-only clients that ignore the structured code) classifies
+    it correctly. The leading ``DSV4.1:`` tag is retained for operator logs,
+    and the numeric breakdown is preserved (no semantic change).
+    """
+    return (
+        f"DSV4.1: this model's maximum context length is {capacity} tokens. "
+        f"However, your request resulted in a prompt of {prompt_len} prompt "
+        f"tokens plus {max_tokens} max_output_tokens, which exceeds the "
+        f"{capacity}-token cache this instance was configured for (prompt + "
+        f"max_output_tokens + 8 > capacity; max_kv_tokens / card "
+        f"context_length). Please reduce the length of the messages."
+    )
+
 
 def _image_span_end(image_inputs: Any) -> int:
     """Last token row any image span covers (0 when there are no images)."""
@@ -495,6 +535,11 @@ class Dsv41Engine(Engine):
 
     def _send_error(self, task: TextGeneration, e: Exception) -> None:
         if self.device_rank == 0:
+            # A context-length refusal carries the canonical OpenAI
+            # ``context_length_exceeded`` code so the API layer can hand the
+            # client a classifiable error; every other failure stays a plain
+            # message (no code).
+            error_code = getattr(e, "code", None)
             self.event_sender.send(
                 ChunkGenerated(
                     command_id=task.command_id,
@@ -502,6 +547,7 @@ class Dsv41Engine(Engine):
                         model=self.model_id,
                         finish_reason="error",
                         error_message=str(e),
+                        error_code=error_code,
                     ),
                 )
             )
@@ -624,10 +670,14 @@ class Dsv41Engine(Engine):
             # Client did not ask for a length: generate up to what the cache holds.
             max_tokens = min(max_tokens, capacity - prompt_len - 8)
         if max_tokens < 1 or prompt_len + max_tokens + 8 > capacity:
-            raise Dsv41UnsupportedFeature(
-                f"DSV4.1: prompt {prompt_len} + max_output_tokens {max_tokens} "
-                f"needs more than the {capacity}-token cache this instance was "
-                "configured for (max_kv_tokens / card context_length)."
+            # Standard OpenAI wording + the canonical ``context_length_exceeded``
+            # code (see ``_context_length_error`` / ``ErrorChunk.error_code``).
+            # This is a deterministic CLIENT-INPUT refusal -- the prompt alone
+            # exceeds the served window -- so it must be classifiable by any
+            # OpenAI-compatible client (which keys on the wording/code and
+            # compacts rather than burning retries on an opaque stream error).
+            raise Dsv41ContextLengthExceeded(
+                _context_length_message(prompt_len, max_tokens, capacity)
             )
 
         # -- conversation: every request joins one. The store reuses a resident

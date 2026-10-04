@@ -164,6 +164,47 @@ class TestErrorStreamShape:
         for value in events[0]["error"].values():
             assert value is not None
 
+    async def test_error_chunk_without_code_defaults_to_status_code(self):
+        """An ordinary error (no structured code) keeps the historical shape:
+        ``code`` is the 500 status number, so existing clients are unchanged."""
+        chunks: list[PrefillProgressChunk | ErrorChunk | ToolCallChunk | TokenChunk] = [
+            ErrorChunk(model=_TEST_MODEL, error_message="boom"),
+        ]
+        lines: list[str] = []
+        async for event in generate_chat_stream(
+            CommandId("test-cmd-err-plain"), _stream(chunks)
+        ):
+            lines.append(event)
+
+        events = _parse_data_events(lines)
+        assert events[0]["error"]["code"] == 500
+
+    async def test_context_length_error_carries_structured_code(self):
+        """A context-length refusal emits the canonical
+        ``context_length_exceeded`` code, so an OpenAI-compatible client can
+        classify it (compact) instead of treating it as a generic error."""
+        chunks: list[PrefillProgressChunk | ErrorChunk | ToolCallChunk | TokenChunk] = [
+            ErrorChunk(
+                model=_TEST_MODEL,
+                error_message=(
+                    "DSV4.1: this model's maximum context length is 131072 tokens. "
+                    "Please reduce the length of the messages."
+                ),
+                error_code="context_length_exceeded",
+            ),
+        ]
+        lines: list[str] = []
+        async for event in generate_chat_stream(
+            CommandId("test-cmd-ctx-err"), _stream(chunks)
+        ):
+            lines.append(event)
+
+        events = _parse_data_events(lines)
+        assert events[0]["error"]["code"] == "context_length_exceeded"
+        assert (
+            "maximum context length is 131072 tokens" in events[0]["error"]["message"]
+        )
+
 
 class TestNonStreamingResponseShape:
     async def test_collected_response_message_has_no_disallowed_nulls(self):
