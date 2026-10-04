@@ -193,6 +193,8 @@ def _final_response(
     reused_tokens: int = 0,
     prefill_tokens: int | None = None,
     logprob: Any = None,
+    mtp_cycles: int = 0,
+    mtp_accepted: int = 0,
 ) -> GenerationResponse:
     """The terminal response for a request, with usage and stats attached.
 
@@ -201,12 +203,20 @@ def _final_response(
     ``prefill_tokens`` the rows actually fed (``None`` => the whole prompt).
     That split is what a client reads to see the multi-turn win, and it is also
     what ``GenerationStats.prompt_tps`` is computed against.
+
+    ``mtp_cycles``/``mtp_accepted`` are the session-cumulative speculative
+    counters (same meaning as the batch-generator's ``mtp_*_cumulative``:
+    deltas across successive requests give the live acceptance rate).
     """
     del task_id, prefill_tokens  # the split is reported through usage/stats below
     hit = "partial" if reused_tokens > 0 else "none"
     if round_stats is not None:
         stats = round_stats.stats(prefill_tps, prompt_tokens, generated).model_copy(
-            update={"prefix_cache_hit": hit}
+            update={
+                "prefix_cache_hit": hit,
+                "mtp_cycles_cumulative": mtp_cycles,
+                "mtp_accepted_drafts_cumulative": mtp_accepted,
+            }
         )
     else:
         stats = GenerationStats(
@@ -216,6 +226,8 @@ def _final_response(
             generation_tokens=generated,
             peak_memory_usage=Memory.from_gb(mx.get_peak_memory() / 1e9),
             prefix_cache_hit=hit,
+            mtp_cycles_cumulative=mtp_cycles,
+            mtp_accepted_drafts_cumulative=mtp_accepted,
         )
     sel, top = logprob if logprob is not None else (None, None)
     return GenerationResponse(

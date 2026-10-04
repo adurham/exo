@@ -304,6 +304,13 @@ class Dsv41Engine(Engine):
     #: draft windows) and serves the turns of one conversation, which is what
     #: makes turn N+1's prefill only the delta. Created in ``__post_init__``.
     _sessions: Dsv41Sessions = field(init=False)
+    #: Cumulative speculative counters since process start (rounds started,
+    #: draft tokens accepted, draft tokens attempted). Deltas across
+    #: successive requests give the live acceptance rate -- the decode-depth
+    #: ladder reads these via the API's ``mtp_*`` stats fields.
+    _spec_rounds: int = field(default=0, init=False)
+    _spec_accepted: int = field(default=0, init=False)
+    _spec_drafted: int = field(default=0, init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -791,6 +798,8 @@ class Dsv41Engine(Engine):
                         task_id=task_id,
                         reused_tokens=turn.reused_tokens,
                         logprob=as_logprob(lp_entry),
+                        mtp_cycles=self._spec_drafted,
+                        mtp_accepted=self._spec_accepted,
                     )
                     return
                 yield _mid_response(tid, text, task_id, as_logprob(lp_entry))
@@ -811,6 +820,8 @@ class Dsv41Engine(Engine):
             reason=final_reason or ("stop" if emitted == 0 else "length"),
             task_id=task_id,
             reused_tokens=turn.reused_tokens,
+            mtp_cycles=self._spec_drafted,
+            mtp_accepted=self._spec_accepted,
         )
 
     def _end_turn(
@@ -922,6 +933,12 @@ class Dsv41Engine(Engine):
                 logprobs=logprobs,
                 lp_out=lps if logprobs else None,
             )
+            # Cumulative spec counters (deltas across requests = live
+            # acceptance rate; _accepted == _gamma means a fully-accepted round).
+            if head is not None:
+                self._spec_rounds += 1
+                self._spec_accepted += int(_accepted)
+                self._spec_drafted += int(_gamma)
             batch = [int(t) for t in committed]
             n += len(batch)
             token = batch[-1]
