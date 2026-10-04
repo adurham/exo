@@ -9929,3 +9929,59 @@ out) is that it may be pure context-length cost (a DSA indexer top-k budget
 cliff) that merely correlates with "image present" rather than anything
 image-specific -- a length-matched text-only control script is written
 (`/tmp/vision_length_matched_probe.py`) but not yet run.
+
+## 2026-10-03 — reasoning_effort 422 + 16K KV cap + never-wired prefill-progress hook (three stacked blockers, all shipped + live-verified)
+
+Trigger: the user switched a Hermes session onto the cluster's DSv4.1 instance and every
+reply silently fell back to ollama-cloud. Root-caused three INDEPENDENT blockers stacked in
+the request path — each invisible until the one above it was fixed.
+
+1. **Wire 422 on `reasoning_effort` (`1a54be214`).** Hermes' effort ladder goes to `max`/`ultra`;
+   exo's pydantic `ReasoningEffort` Literal stops at `xhigh`, so the request died with
+   `literal_error ... input: 'max'` before anything ran. Fix: `clamp_reasoning_effort()` +
+   `mode='before'` validators on `ChatCompletionRequest.reasoning_effort` AND the Responses
+   `Reasoning.effort` — ladder-known over-ceiling levels clamp DOWN to the ceiling (`xhigh`,
+   which the DSv4 encoder maps to its strongest prompt tier); genuine typos still 422 naming
+   the valid set. 5 files, 22 tests, RED->GREEN + discrimination check proven.
+
+2. **16K KV cap refused every real conversation (`5c6aab13f`).** The 10-01 integration default
+   `DSV4_MAX_KV_TOKENS=16384` is smaller than Hermes' ~25K-token base prompt, so requests were
+   rejected with `needs more than the 16384-token cache this instance was configured for`
+   (the engine preallocates for the instance capacity; the cap exists to stop it sizing for
+   the checkpoint's 1M). Raised to **131072 (128K = ~1.12 GB/session from the cache code, 2
+   resident sessions ~2.2 GB)** inside the measured headroom (runner footprint 103 GB steady /
+   110 GB peak under a 115 GB wired limit, both nodes).
+
+3. **Prefill-progress hook built but NEVER WIRED (`63acbd3b7`).** With 1 and 2 fixed, the
+   runner was SIGKILLed at ~70s by the supervisor hang watchdog. Root cause: the dsv41 engine's
+   `_session_progress` (rank-0 `PrefillProgressChunk` / rank!=0 heartbeat / mid-prefill cancel
+   check) existed but was passed through NOTHING — `Dsv41Sessions` neither accepted nor
+   forwarded `progress`, while the whole downstream chain (Conversation -> SessionCache ->
+   `engine_prefill`) already supported it and the runner already installs the heartbeat callback
+   ("the engine calls this (throttled) from its prefill-progress callback"). A 25K prompt is
+   ~100s of prefill; >45s of event silence -> liveness probe sees the preallocated footprint
+   flat -> kill. This was UNREACHABLE before fix 2 landed (the 16K cap refused every long
+   prefill), i.e. fix 2 exposed a latent bug that would have hit ANY long request. Fix: thread
+   `progress` through engine -> sessions -> conversations; 2 RED-first tests (rank-0 emits
+   chunks and the terminal one reports processed==total; rank-1 heartbeats and emits no
+   client-visible chunks), scoped suite 101 passed, discrimination-checked.
+
+**LIVE VERIFICATION (22:03 CDT, both nodes, no env overrides):** a real `hermes chat -q` turn on
+the cluster model — primary route, NO fallback — completed: `in=25451 out=49 latency=99.9s`,
+`finish_reason=stop`, **10 `ChunkGenerated` progress events at ~7.5s intervals during the
+prefill** (matches 25,451 tokens / 2,048-token chunks), zero `silent for` lines during the
+request window, zero SIGKILLs across the whole boot, both runners `RunnerReady`, footprint
+105 GB steady / 110 GB peak per node. The two load-time "silent for 46-49s ... extending 20s"
+lines are the kernel-warmup phase (both resolved by the growth probe, WARNING only).
+
+**Deploy note:** the laptop's `.local` mDNS names are dead again (studios' LocalHostName
+drifted to M4-4/M4-5) and the laptop's `macstudio-m4-*` ssh aliases still point at them, but
+the launcher was run FROM m4-1 (its own aliases were repointed to Tailscale on 2026-09-28), so
+no laptop-side config edit was needed. Node sync: `git reset --hard 63acbd3b7` on m4-1; the
+launcher's rsync carries the tree to m4-2.
+
+**LESSON (recurring class):** when a serving path gains a long-operation branch, check that
+EVERY liveness/progress hook the OLD path wires is also wired on the new one — an unwired
+`progress`/`heartbeat` callable makes the hang watchdog kill healthy work, and the failure only
+appears once long requests become REACHABLE. Same class as the 2026-09-21 false-positive, but
+this time the missing link was in the engine, not the watchdog.
