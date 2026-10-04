@@ -57,3 +57,39 @@ against the stale `.201`/`.202` constants so the launcher takes its "remote
 controller" path — the same path the last good boot (2026-09-23) took — and
 launch-time discovery falls back to the Tailscale unicast target (resolved via
 the now-working aliases). If the next relaunch fails, start here.
+
+---
+
+## UPDATE 2026-10-03 — the drift repair completed on the LAPTOP too, chain reordered
+
+The 09-28 repair above only repointed m4-1's ssh config (the launcher ran from
+m4-1). The LAPTOP's aliases still mapped to the dead `.local` mDNS names, so
+every laptop-side ssh to the cluster failed until reached via Tailscale FQDNs.
+Fixed now, all verified live:
+
+- **Laptop `~/.ssh/config`**: `macstudio-m4-1/2` → Tailscale IPs
+  (100.91.246.26 / 100.66.38.13). Backup: `~/.ssh/config.bak.20261003_2306`.
+  The dead `adams-mac-studio-m4-*.local` Host names are KEPT as compat shims
+  now pointing at the Tailscale FQDNs — in TWO separate blocks, because
+  ssh_config first-wins semantics make a single combined block silently point
+  m4-2 at m4-1. FQDN blocks pin `exo_cluster` so `ssh macstudio-m4-1.tail19c543.ts.net`
+  is deterministic without the 1P agent.
+- **`cluster-diag.sh`**: NODE1/2_HOST now Tailscale FQDNs; NODE1_IP →
+  100.91.246.26 (was the dead .201/.local pair). Verified: health/sha/ps/env
+  on both nodes, from the laptop AND from m4-1.
+- **`start_cluster.sh` API_HOST chain reordered to Tailscale-first**
+  (TS → mDNS → hardcoded; was mDNS → TS → hardcoded). NXDOMAIN for the .local
+  names is confirmed from the laptop AND both studios, so the old chain paid a
+  guaranteed-failed mDNS ping on every launch. $M4_1_TS_IP is resolved at the
+  top of the script via SSH before this block.
+- **Laptop `.zshrc`**: `claude-exo` alias BASE_URL → the Tailscale FQDN (the
+  dead `.local` name). NOTE for future edits: the alias contains
+  `ANTHROPIC_API_KEY="exo"` and must never be round-tripped through tooling
+  that redacts secrets — patch it with a byte-level diff check or it silently
+  becomes the redaction placeholder.
+
+Remaining known-stale (deliberately): the `IS_M4_*` self-id still compares
+`.201`/`.202` LAN constants (moot by design — the launcher takes the remote-
+controller path from both laptop and m4-1), and `$M4_1_IP/$M4_2_IP` remain as
+last-resort fallbacks only.
+
