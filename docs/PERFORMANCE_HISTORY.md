@@ -10027,3 +10027,56 @@ synchronized on `b8b3d77b2`, `READY (2/2)`, clean teardown of the previous boot
 client's classifier recognizes (or the canonical structured code) is part of the error contract,
 not cosmetic. And check BOTH sides when a serving boundary emits one: the client cannot recover
 what it cannot name, and the server cannot compact what it cannot express.
+
+## 2026-10-04 — DSv4.1 "serve 1M context": memory-model rebuild (per-call RoPE, bf16 grid-exact caches, grow-on-demand, fenced transient-bounded prefill)
+
+**Requirement:** the cluster must serve the checkpoint's full 1M-token context (the card advertises
+1M; serving stopped at 131K). Root cause was NOT the model: the dsv41 serving path allocated memory
+linearly in the configured cap — an fp32 KV preallocation of ~6.3 GiB/session at 1M x 2 resident
+sessions plus ~21 GiB of per-layer cached cos/sin RoPE tables at 1M — so the cap was set low to keep
+the two 128 GiB nodes under `iogpu.wired_limit_mb=115000` (~120.6 GB).
+
+**Changes (all on branches `fix/dsv41-1m-context`, mlx-lm + exo; pushed, NOT deployed):**
+
+1. **Per-call RoPE (mlx-lm `903d839`).** `Attention._freqs` built and cached `[2*end_pos,32]` fp32
+   cos/sin per layer (+3 MTP stages): ~2.7 GiB at 131K, **~21 GiB at 1M**. Replaced with a per-layer
+   `_freqvec` + `cos_sin_at(positions)` computed for exactly the positions each forward needs
+   (query rows `[start,end)`; compressor/indexer latents `(g0+arange(g))*ratio`; MTP draft/verify).
+   Bit-exactness: values are elementwise fp32 functions of position, so computed values equal the old
+   table rows bitwise (independently verified: 136/136 bitwise checks, incl. >131072 and near 1M).
+2. **bf16 storage for the quantized-grid caches (mlx-lm `e55f3e8`).** `win_kv` / `comp_kv` /
+   `index_k` now store bf16. Bit-exact because every stored value is fake-quantized onto a coarse
+   grid (fp8 e4m3 <=4 significant bits; fp4 e2m1 x e4m3/ue8m0 scales <=6) and bf16 carries 8 —
+   independently verified (432 structured + 600 random cases, 0 failures; writer/reader audit table
+   clean). Effect: cache per session at 1M drops 6.3 -> ~3.2 GiB.
+3. **Grow-on-demand capacity (mlx-lm `e55f3e8`, exo `970566031`).** caches start at 64K tokens and
+   grow geometrically (used-rows-only copies, zero-fill, `mx.clear_cache`); `ensure_capacity` runs at
+   every write entry (mlx-lm session_cache piece/append paths; exo `rounds._ensure_capacity_for_round`
+   sized for 1+gamma+2 per round); `CapacityError` at the cap, and allocation failure maps to
+   `CapacityError` so the refusal path stays the clean `Dsv41ContextLengthExceeded` on the wire.
+   An idle session now costs ~0 instead of the full cap. Launcher default `DSV4_MAX_KV_TOKENS`
+   131072 -> **1048576**.
+4. **Fenced, transient-bounded prefill (exo `24f0a6348`).** The engine prefill loop ran UNFENCED and
+   its lazy graph held every layer's O(context) transients until the final `mx.eval` (indexer score
+   row ~8.6 GB/layer at end=1M r=1; compressor `kv_all` copies ~0.5-1.1 GB/layer; ~78 GB worst case)
+   — today's ~116 GB peak at 131K is this transient. Now: `model._fence_every` set for the loop
+   (env `EXO_PREFILL_FENCE_EVERY`, default 2, restore in finally; fences are byte-exact) and a
+   transient-budget chunk policy `choose_prefill_step` (env `EXO_PREFILL_TRANSIENT_BUDGET_MB`,
+   default 2048): keep 2048-row chunks until `step*offset*4` bytes would exceed the budget, then
+   shrink toward a 128-row floor. Legacy explicit `long_threshold` still selects the fixed-crossover
+   branch (used by SessionCache's forced chunk plan, e.g. image spans).
+
+**New memory model:** ~108.5 GB base + ~3.2 GiB/session ONLY as context actually grows (~0 idle),
+two 1M sessions ~114.4 GB — inside the wired limit only because of the bf16 + growth + fence combo.
+
+**Verification:** independent review rounds — 136/136 RoPE bitwise checks; 432+600 bf16 grid cases;
+grow==never-grow + rollback-poison sabotage tests with teeth; canonical scoped suite 103 -> 121
+passed, zero new failures; launcher diff clean; writer/reader + alias-lifetime audits documented.
+**NOT yet live-verified** — deployment (merge mlx-lm -> main, gitlink re-point + `uv lock`, Hermes
+pins 131072 -> 1048576, relaunch) and the live growth test (session past 131K with real completions,
+then toward 1M) are pending the user's go-ahead.
+
+**LESSON:** a serving ceiling is a property of the ALLOCATION STRATEGY, not the checkpoint — audit
+every buffer, table, and lazy-graph binding whose size is a function of the configured context
+before concluding a model "cannot" serve its advertised window. And when the transient is the
+ceiling, the fix is fences + budgeted chunking, not trimming the steady-state state.
