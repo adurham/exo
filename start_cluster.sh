@@ -3396,20 +3396,20 @@ done
 # because mDNS resolution is now dead (LocalHostName drift) and the hardcoded
 # constant is dead (DHCP drift). See the fallback comment in the block below
 # and docs/launcher-address-drift-repair-2026-09-28.md.
-API_HOST="adams-mac-studio-m4-1.local"
-if ! ping -c1 -t2 "$API_HOST" >/dev/null 2>&1; then
-  # 2026-09-28: this fallback now fires on every launch. mDNS no longer
-  # resolves -- both Studios' LocalHostName drifted (m4-1 reports
-  # Adams-Mac-Studio-M4-4) -- and the hardcoded $M4_1_IP is currently dead
-  # (.201; the DHCP LAN address has moved to .48). Try the Tailscale IP that
-  # the top of this script just resolved ($M4_1_TS_IP -- stable across LAN
-  # DHCP churn; the macstudio-m4-1 SSH alias points at it as of 2026-09-28)
-  # before ever trusting the hardcoded constant. Verified live 2026-09-28:
-  # http://100.91.246.26:52415/state answers with real cluster JSON.
-  echo "WARNING: mDNS resolution of $API_HOST failed; trying Tailscale IP $M4_1_TS_IP." >&2
-  API_HOST="$M4_1_TS_IP"
+# 2026-10-03: chain REPORDERED to Tailscale-first. mDNS is permanently dead
+# (both Studios' LocalHostName drifted to M4-4/M4-5; NXDOMAIN confirmed from
+# the laptop AND the studios) and the hardcoded constant is dead (DHCP drift:
+# .201 -> .48). The previous mDNS -> TS -> hardcoded chain "worked" only by
+# paying a failed mDNS ping on EVERY launch. Tailscale is the stable
+# reference (fixed tailnet IP; reachable from anywhere); keep the other two
+# as fallbacks for the corner case where the tailnet is down but the LAN is
+# not. $M4_1_TS_IP was resolved at the top of this script via SSH.
+API_HOST="$M4_1_TS_IP"
+if [ -z "$API_HOST" ] || ! ping -c1 -t2 "$API_HOST" >/dev/null 2>&1; then
+  echo "WARNING: Tailscale IP '$M4_1_TS_IP' unreachable; trying mDNS name." >&2
+  API_HOST="adams-mac-studio-m4-1.local"
   if ! ping -c1 -t2 "$API_HOST" >/dev/null 2>&1; then
-    echo "WARNING: Tailscale IP $M4_1_TS_IP unreachable too; falling back to hardcoded $M4_1_IP (may be stale)." >&2
+    echo "WARNING: mDNS resolution of $API_HOST failed too; falling back to hardcoded $M4_1_IP (may be stale)." >&2
     API_HOST="$M4_1_IP"
   fi
 fi

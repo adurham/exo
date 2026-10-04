@@ -28,9 +28,9 @@
 # diff) — never extend by accepting a raw command string as an argument.
 set -euo pipefail
 
-NODE1_HOST="adams-mac-studio-m4-1.local"
-NODE2_HOST="adams-mac-studio-m4-2.local"
-NODE1_IP="192.168.86.201"
+NODE1_HOST="macstudio-m4-1.tail19c543.ts.net"
+NODE2_HOST="macstudio-m4-2.tail19c543.ts.net"
+NODE1_IP="100.91.246.26"
 API_PORT=52415
 SSH_USER="adam.durham"
 SSH_OPTS=(-o ConnectTimeout=8 -o BatchMode=yes)
@@ -55,7 +55,8 @@ case "$cmd" in
   health)
     host="$(resolve_host "$node")"
     ip="$([ "$node" = "m4-1" ] || [ "$node" = "node1" ] || [ "$node" = "1" ] && echo "$NODE1_IP" || echo "")"
-    # Prefer the .local hostname; only node1 has a documented static IP fallback.
+    # Prefer the Tailscale FQDN (stable; LAN IP is DHCP); hardcoded IP only
+    # as a fallback for node1.
     curl -s -m 5 "http://${host}:${API_PORT}/v1/models" || {
       [ -n "$ip" ] && curl -s -m 5 "http://${ip}:${API_PORT}/v1/models"
     }
