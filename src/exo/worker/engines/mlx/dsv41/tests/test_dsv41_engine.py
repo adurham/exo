@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import mlx.core as mx
@@ -1137,3 +1138,37 @@ def test_nonzero_rank_prefill_heartbeats():
     assert not any(isinstance(c, PrefillProgressChunk) for c in emitted), (
         "rank!=0 must not emit client-visible prefill progress chunks"
     )
+
+
+# ------------------------------------------------- transient budget (builder)
+
+
+def _fake_bound_instance(**fields: Any) -> Any:
+    """A BoundInstance-shaped stub: only the instance's fields are read."""
+    return SimpleNamespace(instance=SimpleNamespace(**fields))
+
+
+def test_engine_kwargs_reads_the_transient_budget_env(monkeypatch: pytest.MonkeyPatch):
+    """The builder forwards EXO_PREFILL_TRANSIENT_BUDGET_MB to the engine."""
+    from exo.worker.engines.mlx.dsv41.builder import _engine_kwargs_from_instance
+
+    monkeypatch.setenv("EXO_PREFILL_TRANSIENT_BUDGET_MB", "4096")
+    kwargs = _engine_kwargs_from_instance(_fake_bound_instance())
+    assert kwargs["prefill_transient_budget_mb"] == 4096
+
+
+def test_engine_kwargs_omits_the_transient_budget_when_unset(monkeypatch: pytest.MonkeyPatch):
+    from exo.worker.engines.mlx.dsv41.builder import _engine_kwargs_from_instance
+
+    monkeypatch.delenv("EXO_PREFILL_TRANSIENT_BUDGET_MB", raising=False)
+    kwargs = _engine_kwargs_from_instance(_fake_bound_instance())
+    assert "prefill_transient_budget_mb" not in kwargs
+
+
+def test_engine_kwargs_ignores_a_malformed_transient_budget(monkeypatch: pytest.MonkeyPatch):
+    """A non-integer override falls back to the engine default (not passed)."""
+    from exo.worker.engines.mlx.dsv41.builder import _engine_kwargs_from_instance
+
+    monkeypatch.setenv("EXO_PREFILL_TRANSIENT_BUDGET_MB", "not-a-number")
+    kwargs = _engine_kwargs_from_instance(_fake_bound_instance())
+    assert "prefill_transient_budget_mb" not in kwargs

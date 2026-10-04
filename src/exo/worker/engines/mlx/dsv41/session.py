@@ -18,10 +18,11 @@ the engine:
   (window ring + compressed KV + compressor carry + index keys + engram id
   history) -- plus the DSpark draft window that must stay in step with it.
 * :meth:`Conversation.prefill` feeds a turn's NEW rows with the engine's own
-  chunk loop (:func:`engine_prefill`: ``last_logit_only`` per chunk, no eval
-  fences, no post-prefill decode-prime probe, one sync per chunk) and returns the
-  anchor row's logits. The prefill's per-chunk taps are pushed into the draft
-  window here, so its ``n_ctx`` tracks ``cache.offset`` exactly.
+  chunk loop (:func:`engine_prefill`: ``last_logit_only`` per chunk, a
+  model-level eval fence every K layers, no post-prefill decode-prime probe, one
+  sync per chunk) and returns the anchor row's logits. The prefill's per-chunk
+  taps are pushed into the draft window here, so its ``n_ctx`` tracks
+  ``cache.offset`` exactly.
 * :meth:`Conversation.finish` checkpoints the whole turn (cache + history) so the
   next turn can extend it and :meth:`Conversation.cancel` can roll it back.
 
@@ -37,6 +38,8 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import functools
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -53,6 +56,7 @@ __all__ = [
     "Dsv41Sessions",
     "GreedySession",
     "TurnOutcome",
+    "choose_prefill_step",
     "engine_prefill",
 ]
 
@@ -61,6 +65,89 @@ __all__ = [
 #: chat prompts shares the system header, and rewinding a big conversation to
 #: "fix" a twenty-token overlap is worse than starting cold.
 MIN_REUSE_TOKENS = 64
+
+#: Layer spacing for the model-level eval fence on the engine prefill path. The
+#: mlx-lm ``Model.__call__`` commits the chunk every ``_fence_every`` layers of a
+#: multi-row forward (same ops, same dtypes -- fenced and unfenced are
+#: bit-identical), which releases a chunk's O(context) indexer/compressor
+#: transients as it progresses instead of holding them until the final
+#: ``mx.eval``. ``0`` disables.
+PREFILL_FENCE_EVERY_ENV = "EXO_PREFILL_FENCE_EVERY"
+DEFAULT_PREFILL_FENCE_EVERY = 2
+
+#: Per-chunk transient budget in DECIMAL megabytes for the chunk-size policy:
+#: the indexer's worst-case score row for a chunk is ``step * offset * 4`` bytes
+#: (fp32, [1, n, nb] with nb ~= end_pos/ratio), so the chunk shrinks as the
+#: context grows to keep that row within the budget.
+PREFILL_TRANSIENT_BUDGET_ENV = "EXO_PREFILL_TRANSIENT_BUDGET_MB"
+DEFAULT_PREFILL_TRANSIENT_BUDGET_MB = 2048
+#: Bytes per decimal MB (the budget env is named in MB, sizes are bytes).
+_MBYTES_PER_MB = 1_000_000
+
+
+def _read_int_env(name: str, default: int) -> int:
+    """Integer env override, falling back to ``default`` on a bad value.
+
+    A malformed override must not crash a worker at engine-construction time;
+    the fallback keeps the node serving with the documented default.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(
+            f"[DSV41] ignoring non-integer {name}={raw!r}; using {default}"
+        )
+        return int(default)
+
+
+def choose_prefill_step(
+    offset: int,
+    total: int,
+    base: int,
+    budget_bytes: int,
+    floor: int = 128,
+) -> int:
+    """Rows for the next prefill chunk under a transient-memory budget.
+
+    Pure policy (no model, no MLX), so the schedule is unit-testable on the CPU.
+    ``offset`` is the absolute cache position the chunk starts at and ``total``
+    the absolute row this feed ends at (so ``total - offset`` rows remain). The
+    indexer's worst-case score row for a chunk grows with ``step * offset`` (its
+    logical length ``nb`` is the END position, which is ~offset here); with fp32
+    that is ``step * offset * 4`` bytes. We therefore keep the full ``base``
+    chunk while that row fits in ``budget_bytes`` and shrink as the context
+    grows. ``base`` is also the ceiling (only shrinking, never growing), and
+    ``floor`` is the smallest chunk ever chosen (throughput does not profit from
+    going lower). The result is clamped to the rows remaining and to at least 1,
+    so ``total <= offset`` (nothing left) yields 1.
+    """
+    offset = max(int(offset), 0)
+    remaining = int(total) - offset
+    if remaining <= 0:
+        return 1
+    worst_row = 4 * max(offset, 1)  # bytes per row of the [1, n, nb] fp32 score
+    rows = min(int(base), max(int(floor), int(budget_bytes) // worst_row))
+    return max(1, min(rows, remaining))
+
+
+def _resolve_transient_budget_bytes(transient_budget_mb: int | None) -> int:
+    """Transient budget in bytes: explicit MB wins, else the env, else default."""
+    mb = (
+        _read_int_env(PREFILL_TRANSIENT_BUDGET_ENV, DEFAULT_PREFILL_TRANSIENT_BUDGET_MB)
+        if transient_budget_mb is None
+        else int(transient_budget_mb)
+    )
+    return max(1, mb) * _MBYTES_PER_MB
+
+
+def _resolve_fence_every(fence_every: int | None) -> int:
+    """Fence spacing: explicit value wins, else the env, else the default."""
+    if fence_every is None:
+        return max(0, _read_int_env(PREFILL_FENCE_EVERY_ENV, DEFAULT_PREFILL_FENCE_EVERY))
+    return max(0, int(fence_every))
 
 
 def engine_prefill(
@@ -71,6 +158,8 @@ def engine_prefill(
     chunk: int | None = None,
     long_chunk: int | None = None,
     long_threshold: int | None = None,
+    fence_every: int | None = None,
+    transient_budget_bytes: int | None = None,
     last_logit_only: bool = True,
     argmax: bool = False,
     return_taps: bool = False,
@@ -83,10 +172,29 @@ def engine_prefill(
     Same signature and chunk policy as ``prefill.prefill``/``chunked_prefill`` so
     ``SessionCache`` can take it as ``prefill_fn``, but with the engine's own
     shape: every chunk is one ``last_logit_only`` forward (intermediate chunks
-    need no full-row head projection), one sync each, with no eval fences, no
-    periodic pool clears and no post-prefill decode-prime probe. A reused-prefix
-    turn and a cold turn run this SAME loop, so session reuse cannot change the
-    tokens it produces.
+    need no full-row head projection), one sync each, no periodic pool clears
+    and no post-prefill decode-prime probe. A reused-prefix turn and a cold turn
+    run this SAME loop, so session reuse cannot change the tokens it produces.
+
+    Transient bound (a 1M-token prefill must not OOM a 128 GiB node):
+
+    * **eval fences** -- the whole loop runs with ``model._fence_every`` set
+      (from ``fence_every``, else ``EXO_PREFILL_FENCE_EVERY``, default 2), so
+      ``Model.__call__`` commits each multi-row chunk in K-layer command buffers
+      instead of one giant lazy graph. That releases each layer's O(context)
+      indexer score rows / compressor ``kv_all`` copies as the chunk progresses
+      instead of pinning them until the final ``mx.eval``. Fences change no op
+      and no dtype (fenced and unfenced runs are bit-identical); single-row
+      (decode) forwards ignore them. The previous value is restored in a
+      ``finally``.
+    * **transient-budget chunking** -- unless the caller pins ``long_threshold``
+      (legacy fixed-crossover behaviour, kept for compatibility and for
+      ``SessionCache._prefill_planned``), the chunk size comes from
+      :func:`choose_prefill_step`: the indexer's worst-case score row for a
+      chunk is ``step * offset * 4`` bytes, so the chunk stays at ``chunk`` while
+      that row fits ``transient_budget_bytes`` (else
+      ``EXO_PREFILL_TRANSIENT_BUDGET_MB``, default 2048 MB) and shrinks to a
+      128-row floor as the context grows.
 
     ``taps_out`` collects the per-chunk DSpark taps (the draft window's context
     feed); ``progress`` is ``fn(chunks, rows_done, elapsed_s)`` and doubles as
@@ -103,7 +211,17 @@ def engine_prefill(
 
     base = 512 if chunk is None else int(chunk)
     long_step = 128 if long_chunk is None else int(long_chunk)
-    threshold = 10**9 if long_threshold is None else int(long_threshold)
+    # ``long_threshold`` is None for the engine's own path (budget policy); a
+    # caller that sets it explicitly (e.g. SessionCache's forced chunk plan)
+    # gets the legacy fixed-crossover branch, which takes precedence.
+    threshold = None if long_threshold is None else int(long_threshold)
+    # ``transient_budget_bytes`` is already bytes (the partial in Conversation
+    # resolved the MB env); absent => resolve the env/default here.
+    budget_bytes = (
+        _resolve_transient_budget_bytes(None)
+        if transient_budget_bytes is None
+        else int(transient_budget_bytes)
+    )
     want_taps = bool(return_taps or taps_out is not None)
 
     t0 = time.perf_counter()
@@ -111,29 +229,38 @@ def engine_prefill(
     done = 0
     nchunks = 0
     last_taps = None
-    while done < total:
-        step = long_step if int(cache.offset) >= threshold else base
-        stop = min(done + step, total)
-        piece = ids_mx[:, done:stop]
-        last = stop == total
-        res = model(
-            piece,
-            cache,
-            last_logit_only=True if not last else last_logit_only,
-            return_taps=want_taps,
-            argmax=argmax if last else False,
-        )
-        handle, taps = res if isinstance(res, tuple) else (res, None)
-        if taps is not None and taps_out is not None:
-            taps_out.append(taps)
-            last_taps = taps
-        mx.eval(handle, *(taps.values() if taps else []))
-        if last:
-            out = handle
-        done = stop
-        nchunks += 1
-        if progress is not None:
-            progress(nchunks, done, time.perf_counter() - t0)
+    fence_prev = getattr(model, "_fence_every", None)
+    model._fence_every = _resolve_fence_every(fence_every)
+    try:
+        while done < total:
+            offset: int = int(cache.offset)
+            if threshold is not None:
+                step = long_step if offset >= threshold else base
+            else:
+                step = choose_prefill_step(offset, total, base, budget_bytes)
+            stop = min(done + step, total)
+            piece = ids_mx[:, done:stop]
+            last = stop == total
+            res = model(
+                piece,
+                cache,
+                last_logit_only=True if not last else last_logit_only,
+                return_taps=want_taps,
+                argmax=argmax if last else False,
+            )
+            handle, taps = res if isinstance(res, tuple) else (res, None)
+            if taps is not None and taps_out is not None:
+                taps_out.append(taps)
+                last_taps = taps
+            mx.eval(handle, *(taps.values() if taps else []))
+            if last:
+                out = handle
+            done = stop
+            nchunks += 1
+            if progress is not None:
+                progress(nchunks, done, time.perf_counter() - t0)
+    finally:
+        model._fence_every = fence_prev if fence_prev is not None else 0
     if return_taps:
         return out, (last_taps if last_taps is not None else {})
     return out
@@ -197,6 +324,7 @@ class Conversation:
         chunk: int | None = None,
         long_chunk: int | None = None,
         long_threshold: int | None = None,
+        transient_budget_mb: int | None = None,
         max_snapshots: int = 8,
         eos_id: int = 1,
         progress: Any = None,
@@ -207,12 +335,23 @@ class Conversation:
         self.head = head
         self.uses_draft = head is not None
         self.eos_id = int(eos_id)
+        # Transient bound: run the prefill driver under an eval fence, and pass
+        # the per-chunk byte budget the driver's chunk-size policy honours.
+        # Both are driver-only keywords SessionCache does not forward, so they
+        # ride ``prefill_fn`` via ``functools.partial``; ``inspect.signature``
+        # on a partial keeps the underlying ``**rest``, so SessionCache still
+        # sees the ``chunk``/``long_chunk``/``long_threshold`` capabilities.
+        prefill_fn = functools.partial(
+            engine_prefill,
+            fence_every=None,  # None => the driver reads EXO_PREFILL_FENCE_EVERY
+            transient_budget_bytes=_resolve_transient_budget_bytes(transient_budget_mb),
+        )
         try:
             self.cache = _sc.SessionCache(
                 model,
                 max_seq_len=int(max_seq_len),
                 max_snapshots=max_snapshots,
-                prefill_fn=engine_prefill,
+                prefill_fn=prefill_fn,
                 chunk=chunk,
                 long_chunk=long_chunk,
                 long_threshold=long_threshold,
@@ -469,6 +608,7 @@ class Dsv41Sessions:
         chunk: int | None = None,
         long_chunk: int | None = None,
         long_threshold: int | None = None,
+        transient_budget_mb: int | None = None,
         max_sessions: int = 2,
         max_snapshots: int = 8,
         eos_id: int = 1,
@@ -483,6 +623,7 @@ class Dsv41Sessions:
             chunk=chunk,
             long_chunk=long_chunk,
             long_threshold=long_threshold,
+            transient_budget_mb=transient_budget_mb,
             max_snapshots=max_snapshots,
             eos_id=eos_id,
         )

@@ -115,7 +115,9 @@ from exo.worker.runner.bootstrap import logger
 #: Chunk size for the chunked prefill loop. PREFILL IS THE KNOWN BLOCKER for
 #: this model (74 tok/s at 8K, Metal GPU-timeout above 16K -- exo phase 19), and
 #: workstream C owns the fix. Until then the engine keeps chunks small so a long
-#: prompt cannot build one enormous lazy graph, and fences every chunk.
+#: prompt cannot build one enormous lazy graph, fences each multi-row forward
+#: (``dsv41.session.engine_prefill``'s model-level eval fence) and shrinks the
+#: chunk further as the context grows (the transient-budget policy there).
 DEFAULT_PREFILL_CHUNK = 512
 
 #: Warmup generation length. Short on purpose: the point is to compile the EXL3
@@ -276,8 +278,15 @@ class Dsv41Engine(Engine):
     #: Resident conversation sessions (each holds a full cache + draft window).
     max_sessions: int = 2
     #: Prefill chunking once a conversation passes ``long_threshold`` rows.
+    #: ``long_threshold`` defaults to None: the engine's own prefill uses the
+    #: transient-budget policy (:func:`dsv41.session.choose_prefill_step`), and
+    #: a caller that sets a finite threshold reverts to the fixed-crossover
+    #: ``long_chunk`` behaviour.
     long_chunk: int | None = None
-    long_threshold: int = 10**9
+    long_threshold: int | None = None
+    #: Per-chunk transient budget (MB) for the prefill chunk-size policy; None
+    #: => ``EXO_PREFILL_TRANSIENT_BUDGET_MB`` (default 2048 MB).
+    prefill_transient_budget_mb: int | None = None
     #: Instance-level prefill cap, resolved from
     #: ``EXO_PREFILL_STEP_SIZE``/instance metadata by the builder.
     prefill_heartbeat_seconds: float = 15.0
@@ -316,6 +325,7 @@ class Dsv41Engine(Engine):
             chunk=self._chunk,
             long_chunk=long_chunk,
             long_threshold=self.long_threshold,
+            transient_budget_mb=self.prefill_transient_budget_mb,
             max_sessions=self.max_sessions,
             use_draft=bool(self.speculative and self.loaded.head is not None),
             # Wire the per-chunk progress hook through to the session cache: it

@@ -156,4 +156,23 @@ def _engine_kwargs_from_instance(bound_instance: BoundInstance) -> dict[str, Any
         prefill_step_size = int(env_step) if env_step else None
     if prefill_step_size is not None:
         kwargs["prefill_chunk_size"] = int(prefill_step_size)
+    # Per-chunk prefill transient budget (MB). Not an instance field, so it only
+    # comes from the environment; absent => the engine's own default (2048 MB).
+    # A malformed value falls back to the default rather than crashing a worker
+    # at engine-construction time.
+    transient_budget_mb = _env_int("EXO_PREFILL_TRANSIENT_BUDGET_MB")
+    if transient_budget_mb is not None:
+        kwargs["prefill_transient_budget_mb"] = transient_budget_mb
     return kwargs
+
+
+def _env_int(name: str) -> int | None:
+    """Parse an integer env var; ``None`` when unset, ``None`` when malformed."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(f"[DSV41] ignoring non-integer {name}={raw!r}")
+        return None
