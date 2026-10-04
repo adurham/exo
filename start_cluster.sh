@@ -2646,6 +2646,12 @@ for NODE in "${NODES[@]}"; do
   # >0 caps the (B,64,L,P) indexer transient by processing pooled-P in blocks —
   # bounds the high-context prefill alloc spikes. Default OFF in the model.
   [ -n "${EXO_DSV4_INDEXER_PBLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_INDEXER_PBLOCK=$EXO_DSV4_INDEXER_PBLOCK"
+  # mlx-lm DSv4.1 indexer score-row dtype (deepseek_v41/indexer.py,
+  # DSV41_INDEXER_ROW_BF16). bf16 halved the deep-context prefill score-row
+  # transient + score-GEMM width; NOT bit-exact (near-tie top-k flips), gated
+  # per-model quality battery. Unset = the module default (bf16 since the
+  # perf/dsv41-bf16-score-row merge); =0 forces the fp32 row for A/B.
+  [ -n "${DSV41_INDEXER_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_ROW_BF16=$DSV41_INDEXER_ROW_BF16"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).
