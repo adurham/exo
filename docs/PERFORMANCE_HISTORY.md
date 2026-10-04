@@ -10080,3 +10080,30 @@ then toward 1M) are pending the user's go-ahead.
 every buffer, table, and lazy-graph binding whose size is a function of the configured context
 before concluding a model "cannot" serve its advertised window. And when the transient is the
 ceiling, the fix is fences + budgeted chunking, not trimming the steady-state state.
+
+## 2026-10-04 (deploy) — 1M-context batch LIVE VERIFIED on the cluster
+
+Deployed `900b797e4` (exo main) + `a6cee47` (mlx-lm main) via `DSV4_KV_CACHE_BITS=0
+./start_cluster.sh`; both nodes synchronized on 900b797e4, `READY (2/2)`.
+
+**Wire evidence:**
+- `/state` instance `maxKvTokens = 1048576` (was 131072). The 1M cap is live.
+- Small request end-to-end: 200, `finish_reason=stop`, 1.1 s.
+- Cold prefill ~106.4K tokens: 200 in 456 s. Node footprint FLAT at 107–108 GB during the
+  entire prefill (pre-change steady was 112.4 GB with 116 GB peaks) — the bf16 grid-exact
+  caches + grow-on-demand removed both the fp32 cache residency and the unfenced transients.
+- **Past-the-cliff proof: a 159,995-token prompt (prompt+output+8 > the old 131072 cap — the
+  exact refusal condition) returned 200 / `finish_reason=stop`; zero `context length` refusals
+  in the exo logs on either node.** Before this batch that shape was refused mid-stream.
+- Memory during the 160K run: footprint 108–110 GB, one 115 GB transient blip on m4-1 (the
+  fenced chunk transients), no kills, no watch-dog events beyond the launch-time kernel-compile
+  warnings. Node ramAvailable ~13–16 GiB throughout.
+
+**Caveats (honest):** the 160K run reused a 15,986-row prefix from the previous request (the
+session store matched it), so its measured cost is only the ~144K-row delta prefill; the growth
+path was exercised 65536 -> 262144 through two doublings. A full 1M cold prefill (~80+ min at
+the observed ~200 tok/s) was NOT run — the batch's structural + unit proof plus this
+past-cliff live proof are the evidence; run the full-length soak on the next natural occasion.
+
+**Hermes-side pins bumped to match: `~/.hermes/config.yaml`, `~/.hermes/profiles/exo/config.yaml`,
+homelab `ansible/roles/hermes_gateway/templates/config.yaml.j2` (all 131072 -> 1048576).**
