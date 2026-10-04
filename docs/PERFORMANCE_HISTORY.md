@@ -9985,3 +9985,45 @@ EVERY liveness/progress hook the OLD path wires is also wired on the new one —
 `progress`/`heartbeat` callable makes the hang watchdog kill healthy work, and the failure only
 appears once long requests become REACHABLE. Same class as the 2026-09-21 false-positive, but
 this time the missing link was in the engine, not the watchdog.
+
+## 2026-10-03 (late) — DSv4.1 cache-cap refusal made client-classifiable; Hermes classifier paired (`b8b3d77b2`)
+
+Follow-on to the entry above (same failure family). After blockers 1-3 landed, the 128K-capped
+DSv4.1 instance STILL wedged every Hermes session that grew past ~131K tokens: the refusal
+`DSV4.1: prompt N + max_output_tokens M needs more than the 131072-token cache this instance was
+configured for` arrived MID-STREAM (HTTP 200 already committed once SSE starts, so no status can
+attach), and it matched NO pattern in Hermes' error classifier — so it classified as `unknown`,
+burned 3 retries, and fell back to ollama-cloud without ever compressing. 88 occurrences in one
+night of Hermes error logs; sessions past the cap re-failed every turn.
+
+Two-layer fix, both sides shipped:
+
+1. **exo (`b8b3d77b2`):** new `Dsv41ContextLengthExceeded` (subclass of `Dsv41UnsupportedFeature`,
+   same catch sites) carrying the canonical OpenAI code `context_length_exceeded`; message reworded
+   to OpenAI's standard `this model's maximum context length is {capacity} tokens ... Please reduce
+   the length of the messages` while preserving the numeric breakdown and the `DSV4.1:` operator
+   tag; `ErrorChunk.error_code` + `ErrorInfo.code: int | str` carry the code to the chat-completions
+   SSE frame. Ordinary errors keep the byte-identical historical shape (code=500). Same condition
+   and capacity source (`_cache_capacity`) — semantics unchanged.
+
+2. **Hermes (`4dbeb8c625`, adurham/hermes-agent):** classifier pattern for the old wording +
+   `(\d{4,})-token cache` parse so the compressor adopts the real capacity (131072) from the
+   refusal; regression-tested RED->GREEN with the literal log string, and against the NEW wording
+   as well (either deploy order works).
+
+**LIVE VERIFICATION (00:10 CDT, deploy `b8b3d77b2`):** refusal-shape probe (small prompt +
+`max_tokens: 200000` hits the same raise site without a long prefill) returned on the wire:
+`data: {"error":{"message":"DSV4.1: this model's maximum context length is 131072 tokens. ...", "type":"InternalServerError","code":"context_length_exceeded"}}` —
+code + standard wording both present. Normal small request still serves (finish_reason=stop,
+1.04s). Hermes' live tree classifies the live wording: `context_overflow | should_compress=True`,
+parse 131072, adopt 131072.
+
+**Deploy note:** launcher run from the laptop (`DSV4_KV_CACHE_BITS=0 ./start_cluster.sh`);
+push-gate passed (local HEAD == origin/main), rsync carried the tree to both nodes, both
+synchronized on `b8b3d77b2`, `READY (2/2)`, clean teardown of the previous boot
+(`EXO_SHUTDOWN_VERDICT=CLEAN_EXIT`).
+
+**LESSON:** a deterministic client-input refusal must be CLASSIFIABLE by the client — wording the
+client's classifier recognizes (or the canonical structured code) is part of the error contract,
+not cosmetic. And check BOTH sides when a serving boundary emits one: the client cannot recover
+what it cannot name, and the server cannot compact what it cannot express.
