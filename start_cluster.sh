@@ -1465,7 +1465,20 @@ for NODE in "${NODES[@]}"; do
     # DSv4+Qwen+worst-case retained KV still fit, but a transient spike can no
     # longer drive the OS into the pressure state that degrades the allocator.
     # Override via DSV4_WIRED_LIMIT_MB if a future footprint needs more.
-    ssh "$NODE" "sudo sysctl iogpu.wired_limit_mb=${DSV4_WIRED_LIMIT_MB:-115000}"
+    # 2026-10-04: default 115000 -> 120000 for the 1M-context work (deep-context
+    # delta prefills observed spiking to ~123-127 GB phys_footprint under the old
+    # cap; compression engaged and recovered — 120000 leaves ~10 GB non-wired for
+    # OS + compressor). The node NOPASSWD sudoers rule pins the exact old value, so
+    # a refused set WARNS below but does not abort the launch; extend the node rule
+    # (one-shot /tmp/exo_set_wired_limit.sh) before relying on the new value.
+    _want_wl="${DSV4_WIRED_LIMIT_MB:-120000}"
+    if ! ssh "$NODE" "sudo -n sysctl iogpu.wired_limit_mb=$_want_wl"; then
+      echo "WARNING: $NODE refused iogpu.wired_limit_mb=$_want_wl via sudo (NOPASSWD rule for this value?)." >&2
+    fi
+    _wl=$(ssh "$NODE" "sysctl -n iogpu.wired_limit_mb" 2>/dev/null | tr -d '\r\n' || true)
+    if [ "$_wl" != "$_want_wl" ]; then
+      echo "WARNING: $NODE iogpu.wired_limit_mb=$_wl (wanted $_want_wl)." >&2
+    fi
     # Keep GPU-wired model memory wired across idle gaps. With the collector on,
     # macOS unwires any Metal buffer idle ~1-2 s; a ~100 GiB model then re-wires
     # on every round (DSv4.1 spec rounds 110 ms -> ~2 s, self-sustaining;
