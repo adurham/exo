@@ -278,6 +278,11 @@ class Dsv41Engine(Engine):
             long_threshold=self.long_threshold,
             max_sessions=self.max_sessions,
             use_draft=bool(self.speculative and self.loaded.head is not None),
+            # Wire the per-chunk progress hook through to the session cache: it
+            # emits PrefillProgressChunk (rank 0) / heartbeats (rank != 0) during
+            # a long prefill. Unwired, a prefill longer than the supervisor's
+            # hang-watchdog window emits no events and kills a healthy runner.
+            progress=self._session_progress,
         )
 
     def warmup(self) -> None:

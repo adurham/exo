@@ -38,6 +38,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -472,6 +473,7 @@ class Dsv41Sessions:
         max_snapshots: int = 8,
         eos_id: int = 1,
         use_draft: bool = True,
+        progress: Callable[[int, int, float], None] | None = None,
     ) -> None:
         self.model = model
         self.head = head if use_draft else None
@@ -484,6 +486,12 @@ class Dsv41Sessions:
             max_snapshots=max_snapshots,
             eos_id=eos_id,
         )
+        #: Forwarded to Conversation -> SessionCache (kept OUT of ``self.kw`` so
+        #: its value type does not widen the dict and break ``**`` unpacking).
+        #: Without it the engine's per-chunk prefill-progress hook is unreachable
+        #: and a prefill longer than the supervisor's hang-watchdog window emits
+        #: no events, so a healthy runner is SIGKILLed mid-prefill.
+        self._progress: Callable[[int, int, float], None] | None = progress
         self._entries: "collections.OrderedDict[str, _Entry]" = collections.OrderedDict()
         self.stats = collections.Counter()
 
@@ -526,7 +534,11 @@ class Dsv41Sessions:
 
     def _open(self, key: str) -> Conversation:
         session = Conversation(
-            self.model, self.head, max_seq_len=self.max_seq_len, **self.kw
+            self.model,
+            self.head,
+            max_seq_len=self.max_seq_len,
+            progress=self._progress,
+            **self.kw,
         )
         self._entries[key] = _Entry(session)
         while len(self._entries) > self.max_sessions:

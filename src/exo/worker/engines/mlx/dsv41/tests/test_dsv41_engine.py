@@ -30,13 +30,19 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import mlx.core as mx
 import pytest
 
-from exo.shared.types.chunks import ErrorChunk, TokenChunk, ToolCallChunk
+from exo.shared.types.chunks import (
+    ErrorChunk,
+    PrefillProgressChunk,
+    TokenChunk,
+    ToolCallChunk,
+)
 from exo.shared.types.common import CommandId
+from exo.shared.types.events import ChunkGenerated
 from exo.shared.types.tasks import TaskId, TextGeneration
 from exo.shared.types.text_generation import (
     Base64Image,
@@ -300,6 +306,7 @@ def _engine(
     logprobs: bool = False,
     tools: list[dict[str, Any]] | None = None,
     content: str = "hello",
+    device_rank: int = 0,
 ) -> tuple[Dsv41Engine, ScriptedModel, FakeTokenizer, list[Any]]:
     tokenizer = FakeTokenizer(text_of=text_of)
     model = ScriptedModel(script)
@@ -322,7 +329,7 @@ def _engine(
         group=None,
         cancel_receiver=_Receiver(),  # type: ignore[arg-type]
         event_sender=sender,  # type: ignore[arg-type]
-        device_rank=0,
+        device_rank=device_rank,
         speculative=head is not None,
         prefill_chunk_size=2,
     )
@@ -1038,3 +1045,54 @@ def test_image_expansion_failure_inside_the_generator_fails_the_request():
     assert not any(isinstance(c, TokenChunk) for c in chunks)
     errs = _errors_for(sender.events, "cmd-1")
     assert errs and "image tokens" in (errs[0].error_message or "")
+
+
+# ------------------------------------------------- prefill progress / heartbeat
+
+
+def test_long_prefill_emits_progress_chunks():
+    """A prefill split into >=2 chunks reports progress to the client.
+
+    The engine's prefill-progress hook (``_session_progress``) fires once per
+    prefill chunk and, on rank 0, sends a ``PrefillProgressChunk``. That hook is
+    wired through ``Dsv41Sessions`` -> ``Conversation`` -> mlx-lm's
+    ``SessionCache``; before the wiring existed the hook was defined but never
+    reached, so any prefill longer than the supervisor's 45 s hang-watchdog
+    window emitted NO events and the healthy runner was SIGKILLed mid-prefill.
+
+    ``FakeTokenizer.encode`` always yields 3 prompt tokens and the engine's
+    prefill chunk size here is 2, so the fence splits into 2 chunks (2 + 1) and
+    the hook runs twice.
+    """
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=8
+    )
+    _drain(engine)
+
+    emitted = [e.chunk for e in cast("list[ChunkGenerated]", events)]
+    progress = [c for c in emitted if isinstance(c, PrefillProgressChunk)]
+    assert progress, "a multi-chunk prefill must emit at least one progress chunk"
+    assert progress[-1].processed_tokens == 3  # 2 + 1 rows over two chunks
+    assert progress[-1].total_tokens == 3
+    assert progress[-1].total_tokens > 0
+
+
+def test_nonzero_rank_prefill_heartbeats():
+    """A non-zero rank heartbeats during prefill but emits no client chunks.
+
+    Only rank 0 emits client-visible prefill chunks (the c>=2 dedup guard); the
+    other ranks must instead call the runner-installed liveness heartbeat or the
+    supervisor's hang watchdog SIGKILLs them while they are healthy and busy.
+    """
+    engine, _model, _tokenizer, events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=8, device_rank=1
+    )
+    hits: list[int] = []
+    engine.heartbeat = lambda: hits.append(1)
+    _drain(engine)
+
+    assert len(hits) >= 1, "rank!=0 must heartbeat during prefill"
+    emitted = [e.chunk for e in cast("list[ChunkGenerated]", events)]
+    assert not any(isinstance(c, PrefillProgressChunk) for c in emitted), (
+        "rank!=0 must not emit client-visible prefill progress chunks"
+    )
