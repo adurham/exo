@@ -671,7 +671,10 @@ class Dsv41Engine(Engine):
         """
         now = time.monotonic()
         last = self._last_fence_heartbeat_monotonic
-        if last and (now - last) > FENCE_HEARTBEAT_MAX_SPACING_SECONDS:
+        # ``last == 0.0`` means no fence has fired yet in THIS request (reset at
+        # turn start), so a stale timestamp from a previous request's last fence
+        # cannot masquerade as a long gap here.
+        if last > 0.0 and (now - last) > FENCE_HEARTBEAT_MAX_SPACING_SECONDS:
             logger.warning(  # pyright: ignore[reportUnknownMemberType]
                 f"[DSV41] fence heartbeat spacing {now - last:.1f}s exceeds "
                 f"{FENCE_HEARTBEAT_MAX_SPACING_SECONDS:.0f}s (rank="
@@ -936,6 +939,13 @@ class Dsv41Engine(Engine):
         """
         total = len(tokens)
         plan = _first_chunk_covers(total, self._chunk, image_span_end) if embeddings is not None else None
+        # A stale fence timestamp from the PREVIOUS request's last fence must not
+        # make this request's FIRST fence look like a >30 s gap (observed live:
+        # a spurious "spacing 429.8s exceeds 30s" on the first fence after an
+        # idle gap between requests). Reset it here, right before the prefill;
+        # ``_session_fence_heartbeat`` treats 0.0 as "no previous call this
+        # request" and skips the spacing warning entirely.
+        self._last_fence_heartbeat_monotonic = 0.0
         if embeddings is None:
             turn = session.prefill(tokens, chunk_plan=plan)
         else:
@@ -943,8 +953,18 @@ class Dsv41Engine(Engine):
                 self.loaded.model, embeddings, 0, image_span_end, token_types
             ):
                 turn = session.prefill(tokens, chunk_plan=plan)
-        if turn.reused_tokens:
+        if turn.reused_tokens:  # pyright: ignore[reportAny]
             logger.info(f"[DSV41] turn reuse: {turn}")
+            if turn.prefill_tokens > 256:  # pyright: ignore[reportAny]
+                # A reuse that still re-fed more than a small chunk means the
+                # prefix collapsed to a much older checkpoint (the 1-2 row
+                # undershoot below the newest boundary used to rewind all the
+                # way to 0). Make it loud: the "delta" claims were once wrong
+                # and went undetected.
+                logger.warning(  # pyright: ignore[reportUnknownMemberType]
+                    f"[DSV41] reuse undershoot: refed={turn.prefill_tokens} rows "  # pyright: ignore[reportAny]
+                    f"(reused={turn.reused_tokens})"  # pyright: ignore[reportAny]
+                )
         anchor = int(mx.argmax(turn.anchor_logits.reshape(-1), axis=-1).item())
         return turn, anchor
 
@@ -990,6 +1010,12 @@ class Dsv41Engine(Engine):
             batch = [int(t) for t in committed]
             n += len(batch)
             token = batch[-1]
+            # Decode-side ladder: the draft window is in step with the cache at
+            # a round boundary (``_one_round`` appends exactly the accepted
+            # rows), so the same cadence guard applies. Without this, an
+            # assistant-turn seam undershoot rewinds to the previous turn start
+            # = unbounded refeed.
+            session.maybe_checkpoint()  # pyright: ignore[reportAny]
             yield batch, lps
             if session.eos_id in batch:
                 return
