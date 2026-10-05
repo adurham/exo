@@ -182,6 +182,7 @@ def engine_prefill(
     return_taps: bool = False,
     taps_out: Any = None,
     progress: Any = None,
+    fence_hook: Callable[[], None] | None = None,
     **rest: Any,
 ) -> Any:
     """The engine's prefill loop, as a driver for ``SessionCache``.
@@ -216,6 +217,14 @@ def engine_prefill(
     ``taps_out`` collects the per-chunk DSpark taps (the draft window's context
     feed); ``progress`` is ``fn(chunks, rows_done, elapsed_s)`` and doubles as
     the engine's cancellation point.
+
+    ``fence_hook`` is the fence-point liveness callback: it is installed on the
+    model as ``model._fence_hook`` for the duration of the loop (the sibling
+    mlx-lm change calls it after each model-level ``mx.eval`` fence), so each
+    multi-row chunk re-emits the runner's status at a point backed by K layers
+    of actually-committed compute. The previous value is restored in a
+    ``finally``, exactly like the fence spacing. It only reaches the model
+    thread; this driver never calls it directly.
     """
     del rest  # tolerated, unused driver keywords (forward compatibility)
     if isinstance(ids, mx.array):
@@ -246,11 +255,21 @@ def engine_prefill(
     # deployed values were invisible. One line per call is noise-free and makes
     # the live config checkable from the runner log.
     _fence_eff = _resolve_fence_every(fence_every)
+    hook_on = bool(_fence_eff > 0 and fence_hook is not None)
     logger.info(
         f"[DSV41] prefill controls: fence_every={_fence_eff} "
         f"transient_budget_mb={budget_bytes // _MBYTES_PER_MB} "
+        f"fence_hook={'on' if hook_on else 'off'} "
         f"(rows={total}, base={base})"
     )
+    if fence_hook is not None and _fence_eff == 0:
+        # The hook rides the model-level eval fence; with no fence it is never
+        # called, so a long prefill emits nothing and the supervisor's hang
+        # watchdog may SIGKILL a healthy runner. Loud once per prefill.
+        logger.warning(  # pyright: ignore[reportUnknownMemberType]
+            "[DSV41] liveness hook unavailable: fence_every=0 "
+            "(EXO_PREFILL_FENCE_EVERY resolved to 0), so no fence point fires"
+        )
 
     t0 = time.perf_counter()
     out = None
@@ -258,7 +277,9 @@ def engine_prefill(
     nchunks = 0
     last_taps = None
     fence_prev = getattr(model, "_fence_every", None)
+    hook_prev = getattr(model, "_fence_hook", None)  # pyright: ignore[reportAny]
     model._fence_every = _fence_eff
+    model._fence_hook = fence_hook
     try:
         while done < total:
             offset: int = int(cache.offset)
@@ -289,6 +310,18 @@ def engine_prefill(
                 progress(nchunks, done, time.perf_counter() - t0)
     finally:
         model._fence_every = fence_prev if fence_prev is not None else 0
+        model._fence_hook = hook_prev
+    if getattr(model, "_fence_hook_failed", False):  # pyright: ignore[reportAny]
+        # The model-side wrapper latches this after a hook bug (it disables the
+        # hook and logs once at WARNING). Surface it at CRITICAL: from here on
+        # the runner is silent during this prefill even though it is healthy,
+        # which is exactly the false-hang class this hook exists to prevent.
+        logger.critical(  # pyright: ignore[reportUnknownMemberType]
+            "[DSV41] prefill fence liveness hook FAILED and was disabled for "
+            "subsequent forwards; a long prefill may now go silent (see the "
+            "model-side warning) and a healthy runner may be killed"
+        )
+        model._fence_hook_failed = False
     if return_taps:
         return out, (last_taps if last_taps is not None else {})
     return out
@@ -356,6 +389,7 @@ class Conversation:
         max_snapshots: int = 8,
         eos_id: int = 1,
         progress: Any = None,
+        fence_hook: Callable[[], None] | None = None,
     ) -> None:
         from mlx_lm.models.deepseek_v41 import session_cache as _sc
 
@@ -365,14 +399,22 @@ class Conversation:
         self.eos_id = int(eos_id)
         # Transient bound: run the prefill driver under an eval fence, and pass
         # the per-chunk byte budget the driver's chunk-size policy honours.
-        # Both are driver-only keywords SessionCache does not forward, so they
-        # ride ``prefill_fn`` via ``functools.partial``; ``inspect.signature``
+        # All three are driver-only keywords SessionCache does not forward, so
+        # they ride ``prefill_fn`` via ``functools.partial``; ``inspect.signature``
         # on a partial keeps the underlying ``**rest``, so SessionCache still
         # sees the ``chunk``/``long_chunk``/``long_threshold`` capabilities.
+        # ``fence_hook`` (the fence-point liveness callback) rides the same
+        # partial: it is the ONLY path by which it reaches ``engine_prefill``,
+        # since the mlx-lm-side SessionCache is untouched by this change (see
+        # the design's exo driver contract). Both the conv/general
+        # (``SessionCache._prefill_call``) and the planned
+        # (``SessionCache._prefill_planned``) feed paths call this partial, so
+        # the hook is installed on both.
         prefill_fn = functools.partial(
             engine_prefill,
             fence_every=None,  # None => the driver reads EXO_PREFILL_FENCE_EVERY
             transient_budget_bytes=_resolve_transient_budget_bytes(transient_budget_mb),
+            fence_hook=fence_hook,
         )
         try:
             self.cache = _sc.SessionCache(
@@ -642,6 +684,7 @@ class Dsv41Sessions:
         eos_id: int = 1,
         use_draft: bool = True,
         progress: Callable[[int, int, float], None] | None = None,
+        fence_heartbeat: Callable[[], None] | None = None,
         park_store: Any = None,
     ) -> None:
         self.model = model
@@ -662,6 +705,12 @@ class Dsv41Sessions:
         #: and a prefill longer than the supervisor's hang-watchdog window emits
         #: no events, so a healthy runner is SIGKILLed mid-prefill.
         self._progress: Callable[[int, int, float], None] | None = progress
+        #: Forwarded to Conversation -> SessionCache -> engine_prefill as the
+        #: fence-point liveness hook (``model._fence_hook``). Kept OUT of
+        #: ``self.kw`` for the same type-reason as ``_progress``: it is a
+        #: callable, not a construction scalar, and must not reach the parked
+        #: store's ``conv_kw`` (a restored conversation takes a fresh hook).
+        self._fence_heartbeat: Callable[[], None] | None = fence_heartbeat
         self._entries: "collections.OrderedDict[str, _Entry]" = collections.OrderedDict()
         self.stats = collections.Counter()
         #: An injected park store (the tests pass one rooted at ``tmp_path``);
@@ -734,7 +783,14 @@ class Dsv41Sessions:
 
             self._park = ParkedStore(
                 self.model, self.head,
-                conv_kw=self.kw, progress=self._progress,
+                # ``fence_hook`` must ride the store's own conversation-build
+                # path (like ``progress``): a restored parked conversation gets
+                # a FRESH liveness hook, and without it a long delta prefill on
+                # a restored conversation would emit no fence events and could
+                # be SIGKILLed as hung. It is carried here, NOT in ``conv_kw``
+                # (which is the bare construction-scalar dict).
+                conv_kw=dict(self.kw, fence_hook=self._fence_heartbeat),
+                progress=self._progress,
             )
             return self._park
         except Exception as exc:  # noqa: BLE001 - parking is best-effort
@@ -777,6 +833,7 @@ class Dsv41Sessions:
             self.head,
             max_seq_len=self.max_seq_len,
             progress=self._progress,
+            fence_hook=self._fence_heartbeat,
             **self.kw,
         )
         self._entries[key] = _Entry(session)
