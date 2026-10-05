@@ -10239,3 +10239,27 @@ row + ladder), READY (2/2), env verified (`DSV41_INDEXER_ROW_BF16=0`, fence cont
 **The 350K cross-build exactness gate is running** (T1 cold build, T2/T3 ladder refeed,
 compare vs `A2_prev` captured on the pre-ladder build with a full refeed — token-exact
 equality across builds is the ship gate for the ladder).
+
+## 2026-10-05 — 350K ladder exactness gate: BOTH GATES PASSED (ship gate cleared)
+
+The cross-build exactness gate ran on deploy/next2 (ladder build, fp32 arm) against
+`A2_prev` captured on the pre-ladder build via a FULL refeed. Results:
+
+- **GATE-1 (same-build, A2==A3): True.** Two different cache histories at temp 0 →
+  byte-identical generation (content '8492').
+- **GATE-2 (cross-build, A2==A2_prev): True.** The ladder-build generation is
+  token-identical to the pre-ladder full-refeed generation at 350K. The ladder is exact.
+- **GATE-3 (cost):** T2 (the near-miss follow-up, 350149-token prompt with LCP 350123 —
+  the 1-row seam) refed **537 rows** (rewound to the end-anchored margin rung at 349612
+  = 350124−512) in 46.4s wall vs a ~2,500s full feed. T3 exact-hit: 10.2s. The engine
+  log confirms the mechanism: `turn reuse: prompt=350149 prefill=537 reuse=349612`,
+  `reuse undershoot: refed=537 rows`.
+- **Bonus observed:** T1 itself (the cold-ish 350K build) matched a residual conversation
+  at 14996 rows and rewound to a GRID rung at 14336 (14×1024) — refed 335,788 rows instead
+  of 350,124. The ladder helps large feeds too, not just near-total matches.
+- The battery's fp32A build then landed on the same conversation and served via the ladder
+  (no cold re-prefill) — probe cost for the whole battery is now seconds-to-a-minute each
+  instead of ~42 min each.
+
+This clears the ladder's ship gate. Next: battery fp32A aggregate → arm-flip relaunch
+(DSV41_INDEXER_ROW_BF16=1) → bf16B → compare.py → P0 decision.
