@@ -10320,3 +10320,36 @@ the r500 rung follows a throughput sanity feed confirming the wedge cleared.
 multiple restart cycles, check GPU power symmetry (`sudo powermetrics --samplers
 gpu_power -i 1500 -n 6` on both nodes; ~20W symmetric while prefilling = healthy,
 sagging/asymmetric = suspect). If suspected, reboot BOTH nodes before debugging code.
+
+## 2026-10-05 (deploy/next3) — wedge RECURS under sustained load, not just restart churn
+
+**New finding (supersedes the "repeated restarts cause it" framing):** the RDMA/TB
+driver-state wedge recurred ~90 minutes AFTER a clean reboot, in the middle of a
+single long soak feed — no restarts in between. Sequence:
+
+- 17:35 reboot both nodes -> 17:53 relaunch READY -> 17:58 wedge-check 268.7 tok/s
+  (50K feed, healthy) -> 18:02 r160-resume launch (110,843-row delta).
+- By 18:30 the same feed was crawling: ~56 tok/s effective (110K rows in ~28 min vs
+  the ~8 min the same shape took at 204 tok/s pre-wedge).
+- **Wedge signature present again:** GPU power pinned at 30-32W on BOTH nodes
+  (healthy prefill = ~20W) with utilization 92-97% and runner CPU ~169% — i.e. the
+  machines burn MORE power for LESS throughput. Compressor/swap were healthy this
+  time (25-40K pages, ~16-24 MB swap) — so it is NOT memory pressure.
+- Stall-profile during the slow window: eval_impl + jaccl/drain counters dominate;
+  the Python stack sits in the prefill driver (`_prefill_call` -> `Model.__call__` ->
+  `_forward`) — productive work, just at ~1/4 rate.
+
+**Conclusion:** the failure mode is sustained-load-induced degradation of the
+Thunderbolt/jaccl transport path (or a related OS/driver state), reachable both by
+restart churn AND by a single deep prefill run of enough duration. The practical
+consequence from the 12:45-17:35 history: a long soak can silently degrade mid-run
+and produce false "slow build" conclusions — the numbers must be power-canary-checked
+mid-run (sustained >25W/node during prefill = degraded), not just at the start.
+
+**Next actions queued:** (1) after the deploy/next3 relaunch, re-run the wedge check
+and confirm healthy power; (2) instrument the canary into the soak script (sample
+GPU power every rung, flag >25W sustained); (3) investigate whether the per-rung
+checkpoint ladder's sustained all-gather traffic at depth is a trigger (correlate
+degradation onset with rung depth), and whether the jaccl REliable path's retransmit
+counters move during degradation — that would give a driver-side root cause instead
+of a reboot ritual.
