@@ -84,3 +84,45 @@ rewind-to-0 path — this is a pure compute-saving change, no numerics.
 
 The mlx-lm `SessionStore` path (non-exo) has the same collapse; leave as-is unless
 trivial — the exo engine owns the production path.
+
+
+## REVIEW (Fable, 2026-10-05) — corrections folded into the spec below
+
+Verdict: design approved with corrections. The spec AS AMENDED:
+
+1. **Spacing: 1024 rows (default)**, not 4096 and not `max()` adaptive (adaptive
+   widens exactly where refeed is most expensive). Snapshot cost is retention-bound,
+   not spacing-bound (~17MB per snapshot x 32 retained ~= 540MB, spacing-independent).
+   Env: `EXO_DSV41_CHECKPOINT_SPACING_ROWS` (1024; 0=off).
+2. **End-anchored margin rung** (the confirmed defect site): the delta end offset is
+   known up-front; place a rung within `EXO_DSV41_CHECKPOINT_MARGIN_ROWS` (default 512)
+   of the delta end so a 1-3-row BPE seam undershoot at the seam costs ~margin rows,
+   not a full context. (Grid rungs alone would miss the seam.)
+3. **Decode-side ladder**: fire the same cadence at decode-round boundaries
+   (`draft_ctx == offset` holds there); otherwise an assistant-turn seam undershoot
+   rewinds to the previous turn start = unbounded refeed. Guard: only checkpoint when
+   the lockstep invariant holds; skip + warn-once otherwise (never checkpoint an
+   inconsistent pair).
+4. **Retention policy**: never prune offset-0 (mlx-lm `snapshot()` change: keep
+   position 0, prune oldest middles); cap via `EXO_DSV41_CHECKPOINT_KEEP` (default 32).
+   Rationale: pure-newest-32 silently degrades old-prefix rewinds to rewind-to-0 /
+   RollbackError at depth.
+5. **Hazards to close (assertions, not hopes)**: taps for a chunk fed BEFORE the
+   checkpoint at that boundary; the OLD post-delta batch feed must be REMOVED in the
+   per-chunk path (no double-apply); cancel() prunes body+draft snapshot lists in
+   lockstep (no orphan rows > rewind target); refeed re-crossing a rung dedupes by
+   offset (dict-keyed, verify); park codec: check for a baked-in snapshot cap and that
+   body+draft pairs serialize transactionally; cadence inputs must be rank-identical
+   (cache.boundaries derive from the same tokens — verify, don't assume).
+6. **Exactness gate (ship gate for this change)**: head-to-head ladder-vs-full-feed
+   test: (a) determinism control (ladder twice, bitwise equal); (b) synthetic
+   undershoot at (rung+1), rewinding and refeeding, vs a full feed of the identical
+   final prompt: N-token greedy decode EXACT, next-token logits bitwise (else
+   max|delta| with pre-registered epsilon), carry checksums; (c) odd-offset refeeds.
+   If it passes bitwise, hard-assert in CI. `same class` is NOT acceptable here.
+7. **Instrumentation**: every plan() decision logged (lcp, boundary, refeed rows,
+   refeed wall) + a LOUD log when a reuse discards > 256 rows; soak gate fails on
+   per-rung wall-time budget. (The "delta" claims were once wrong and undetected.)
+8. **Complements (noted, not in this change)**: token-level append for pure
+   continuations (root-cause complement for production traffic); ladder for the
+   standalone mlx-lm SessionStore (non-exo) path.
