@@ -10216,3 +10216,26 @@ alignment guard green.
 **Next:** A2_prev capture (pre-ladder reference for the cross-build exactness gate) is
 in flight on the still-running pre-ladder cluster; then relaunch onto deploy/next2 and
 run the ladder exactness gate (A2==A3 + A2 vs A2_prev), then the quality battery.
+
+## 2026-10-05 — deploy 4 live: checkpoint ladder works (30K proof) + exactness A2==A3
+
+Deployed `deploy/next2` (exo `3cdd803c3` + mlx-lm `d219882` = keep-0 + fence hook + bf16
+row + ladder), READY (2/2), env verified (`DSV41_INDEXER_ROW_BF16=0`, fence controls on).
+
+**Ladder smoke (30K conversation, the exact shape that collapsed before):**
+- Before (pre-ladder): follow-up with LCP 30007 vs checkpoint 30008 refed ALL 30033 rows
+  (~112 s).
+- After: same follow-up rewound to the spacing-grid rung at 28672 and refed **1,361 rows**
+  (`turn reuse: prompt=30033 prefill=1361 reuse=28672`), with the new
+  `reuse undershoot: refed=1361 rows` WARNING firing as designed. The identical repeat
+  then served `prefill=0` in 1.3 s.
+- **Exactness: A2==A3 True** (same generation through two different cache histories at
+  temp 0), correct answer ('8492') both times.
+- Open curiosity (non-blocking): S2 wall 68.5 s vs 111.8 s full-feed — less wall saved
+  than rows saved (1,361/30,033 = 4.5%); deep-row cost + checkpoint eval syncs likely
+  dominate at 30K scale. The 350K gate's numbers will tell whether per-refeed overhead
+  is meaningful at depth.
+
+**The 350K cross-build exactness gate is running** (T1 cold build, T2/T3 ladder refeed,
+compare vs `A2_prev` captured on the pre-ladder build with a full refeed — token-exact
+equality across builds is the ship gate for the ladder).
