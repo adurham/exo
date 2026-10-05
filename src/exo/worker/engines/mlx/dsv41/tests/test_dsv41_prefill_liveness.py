@@ -427,6 +427,44 @@ def test_fence_heartbeat_constant_is_thirty_seconds() -> None:
     assert eng_mod.FENCE_HEARTBEAT_MAX_SPACING_SECONDS == 30.0
 
 
+def test_start_turn_resets_a_stale_cross_request_fence_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale fence timestamp from a PREVIOUS request must not warn on the next
+    request's first fence.
+
+    Observed live: an idle gap between requests left the previous request's last
+    fence timestamp in place, and the next request's first fence logged a
+    spurious ``spacing 429.8s exceeds 30s``. ``_start_turn`` resets the
+    timestamp so the first fence of a request never measures against a stale
+    one -- while a real >30 s gap WITHIN a request still warns.
+    """
+    engine = _make_engine()
+    engine.heartbeat = _noop_hook
+    clock = {"t": 5000.0}
+    monkeypatch.setattr(eng_mod.time, "monotonic", lambda: clock["t"])
+
+    # A previous request's last fence, 500 s in the past.
+    engine._last_fence_heartbeat_monotonic = 4500.0
+
+    conv = engine._sessions.get([1, 2, 3], "k")
+    engine._start_turn(conv, [1, 2, 3], embeddings=None, image_span_end=0)
+    assert engine._last_fence_heartbeat_monotonic == 0.0, (
+        "turn start must clear a stale fence timestamp"
+    )
+
+    with _capture(eng_mod) as cap:
+        engine._session_fence_heartbeat()          # first fence of the request
+    assert not cap.of("WARNING"), cap.messages
+
+    # A real mid-request gap over the bound still warns.
+    clock["t"] = 5100.0
+    with _capture(eng_mod) as cap2:
+        engine._session_fence_heartbeat()
+    assert cap2.of("WARNING"), cap2.messages
+
+
+
 # --------------------------------------------------------------------------
 # the engine wires the hook into its session store
 # --------------------------------------------------------------------------

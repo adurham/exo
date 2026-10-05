@@ -2676,6 +2676,15 @@ for NODE in "${NODES[@]}"; do
   # Unset => code defaults (2048 MB / every 2 layers).
   [ -n "${EXO_PREFILL_TRANSIENT_BUDGET_MB:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_TRANSIENT_BUDGET_MB=$EXO_PREFILL_TRANSIENT_BUDGET_MB"
   [ -n "${EXO_PREFILL_FENCE_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_FENCE_EVERY=$EXO_PREFILL_FENCE_EVERY"
+  # DSv4.1 session checkpoint ladder (dsv41/session.py Conversation): periodic
+  # checkpoints every SPACING rows during a delta prefill bound a follow-up's
+  # re-feed when its prefix undershoots the newest checkpoint (a 1-row undershoot
+  # formerly rewound to 0 and re-fed the whole context). MARGIN forces one rung
+  # within that many rows of the delta end (the BPE-seam site); KEEP caps the
+  # retained snapshots per conversation. Unset => code defaults (1024 / 512 / 32).
+  [ -n "${EXO_DSV41_CHECKPOINT_SPACING_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_SPACING_ROWS=$EXO_DSV41_CHECKPOINT_SPACING_ROWS"
+  [ -n "${EXO_DSV41_CHECKPOINT_MARGIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_MARGIN_ROWS=$EXO_DSV41_CHECKPOINT_MARGIN_ROWS"
+  [ -n "${EXO_DSV41_CHECKPOINT_KEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_KEEP=$EXO_DSV41_CHECKPOINT_KEEP"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).

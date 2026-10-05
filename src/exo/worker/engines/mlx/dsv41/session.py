@@ -101,6 +101,32 @@ DEFAULT_PREFILL_TRANSIENT_BUDGET_MB = 2048
 #: Bytes per decimal MB (the budget env is named in MB, sizes are bytes).
 _MBYTES_PER_MB = 1_000_000
 
+#: Periodic checkpoint ladder during a turn's delta prefill. ``SessionCache.plan``
+#: rewinds to the newest checkpoint at or below the prompt's longest common
+#: prefix, so with checkpoints only at offset 0 and turn ends a ONE-row
+#: undershoot below the newest turn end rewinds to 0 and re-feeds the whole
+#: context (measured live: a 30033-row follow-up re-fed all 30007 rows, 112.5 s
+#: instead of seconds). A ladder checkpoint every ``spacing`` rows bounds that
+#: re-feed to ~``spacing`` rows. ``0`` disables the ladder. Explicit
+#: ``checkpoint_spacing`` on :class:`Conversation` overrides the env.
+CHECKPOINT_SPACING_ENV = "EXO_DSV41_CHECKPOINT_SPACING_ROWS"
+DEFAULT_CHECKPOINT_SPACING_ROWS = 1024
+
+#: End-anchored margin rung: force one checkpoint within ``margin`` rows of a
+#: turn's delta END, so the confirmed 1-3-row BPE-seam undershoot at the seam
+#: costs ~``margin`` rows of refeed instead of a full context. Grid rungs alone
+#: would miss the seam. ``0`` disables it; a call no longer than ``margin`` is
+#: skipped (its prompt-end checkpoint already anchors it).
+CHECKPOINT_MARGIN_ENV = "EXO_DSV41_CHECKPOINT_MARGIN_ROWS"
+DEFAULT_CHECKPOINT_MARGIN_ROWS = 512
+
+#: Retained checkpoints per conversation (body rings + carries + draft window).
+#: Retention bounds the ladder's memory; the ladder (spacing) bounds worst-case
+#: re-feed. Never prune offset 0 (the sibling mlx-lm ``snapshot()`` change keeps
+#: it): pure-newest-N silently degrades an old-prefix rewind to rewind-to-0.
+CHECKPOINT_KEEP_ENV = "EXO_DSV41_CHECKPOINT_KEEP"
+DEFAULT_CHECKPOINT_KEEP = 32
+
 
 def _read_int_env(name: str, default: int) -> int:
     """Integer env override, falling back to ``default`` on a bad value.
@@ -182,6 +208,7 @@ def engine_prefill(
     return_taps: bool = False,
     taps_out: Any = None,
     progress: Any = None,
+    taps_cb: Any = None,  # pyright: ignore[reportAny]
     fence_hook: Callable[[], None] | None = None,
     **rest: Any,
 ) -> Any:
@@ -216,7 +243,14 @@ def engine_prefill(
 
     ``taps_out`` collects the per-chunk DSpark taps (the draft window's context
     feed); ``progress`` is ``fn(chunks, rows_done, elapsed_s)`` and doubles as
-    the engine's cancellation point.
+    the engine's cancellation point. ``taps_cb`` -- optional -- is
+    ``fn(chunk_taps_dict)`` called at each chunk END, right after that chunk's
+    taps are committed (``mx.eval``), so a caller can feed them into the draft
+    window immediately and keep ``draft_ctx == offset`` at every chunk boundary
+    (which is what makes a mid-prefill checkpoint a consistent pair). Taps are
+    still collected into ``taps_out`` for compatibility; the two are
+    independent and a caller that feeds per chunk must NOT also batch-feed
+    ``taps_out`` (double-apply).
 
     ``fence_hook`` is the fence-point liveness callback: it is installed on the
     model as ``model._fence_hook`` for the duration of the loop (the sibling
@@ -302,6 +336,11 @@ def engine_prefill(
                 taps_out.append(taps)
                 last_taps = taps
             mx.eval(handle, *(taps.values() if taps else []))
+            if taps_cb is not None and taps is not None:
+                # Per-chunk draft feed: BEFORE the caller's progress point (and
+                # therefore before any checkpoint it drives), so the draft window
+                # sits at the same row as the body cache at that boundary.
+                taps_cb(taps)
             if last:
                 out = handle
             done = stop
@@ -368,6 +407,20 @@ def _ids_of(ids: Any) -> np.ndarray:
     return np.ascontiguousarray(arr, dtype=np.int64)
 
 
+def _newest_boundary(cache: Any) -> int:  # pyright: ignore[reportAny]
+    """Newest checkpoint position of a ``SessionCache`` (>= 0; offset 0 exists).
+
+    The mlx-lm cache is dynamic, so strict pyright sees ``boundaries`` as
+    ``list[Unknown]``; this local helper keeps that noise out of the call sites.
+    """
+    return int(max(cache.boundaries))  # pyright: ignore[reportAny]
+
+
+def _has_boundary(cache: Any, pos: int) -> bool:  # pyright: ignore[reportAny]
+    """Whether ``pos`` is already a checkpoint of ``cache`` (dedupe test)."""
+    return bool(pos in cache.boundaries)  # pyright: ignore[reportAny]
+
+
 class Conversation:
     """One conversation's live cache, draft window and token history.
 
@@ -386,7 +439,9 @@ class Conversation:
         long_chunk: int | None = None,
         long_threshold: int | None = None,
         transient_budget_mb: int | None = None,
-        max_snapshots: int = 8,
+        max_snapshots: int | None = None,
+        checkpoint_spacing: int | None = None,
+        checkpoint_margin: int | None = None,
         eos_id: int = 1,
         progress: Any = None,
         fence_hook: Callable[[], None] | None = None,
@@ -397,6 +452,28 @@ class Conversation:
         self.head = head
         self.uses_draft = head is not None
         self.eos_id = int(eos_id)
+        # Checkpoint-ladder cadence. Explicit values win (tests); otherwise the
+        # env, else the documented defaults. ``spacing`` 0 disables the grid
+        # ladder and ``margin`` 0 disables the end-anchored rung; ``keep`` is the
+        # retained-snapshot cap handed to the SessionCache (which also keeps
+        # offset 0 -- see the sibling snapshot() change).
+        self._spacing = max(0, _read_int_env(CHECKPOINT_SPACING_ENV,
+                                             DEFAULT_CHECKPOINT_SPACING_ROWS)
+                            if checkpoint_spacing is None else int(checkpoint_spacing))
+        self._margin = max(0, _read_int_env(CHECKPOINT_MARGIN_ENV,
+                                            DEFAULT_CHECKPOINT_MARGIN_ROWS)
+                           if checkpoint_margin is None else int(checkpoint_margin))
+        keep = (_read_int_env(CHECKPOINT_KEEP_ENV, DEFAULT_CHECKPOINT_KEEP)
+                if max_snapshots is None else int(max_snapshots))
+        #: One warning per conversation when the draft window is out of lockstep
+        #: at a cadence point; we then SKIP the checkpoint rather than snapshot
+        #: an inconsistent pair.
+        self._lockstep_warned = False
+        #: ``total`` of the prefill call in flight (the end-anchored rung's
+        #: reference); set/cleared around ``cache.append_turn``.
+        self._prefill_total: int | None = None
+        #: The end-anchored margin rung fires once per prefill call.
+        self._margin_rung_done = False
         # Transient bound: run the prefill driver under an eval fence, and pass
         # the per-chunk byte budget the driver's chunk-size policy honours.
         # All three are driver-only keywords SessionCache does not forward, so
@@ -415,12 +492,17 @@ class Conversation:
             fence_every=None,  # None => the driver reads EXO_PREFILL_FENCE_EVERY
             transient_budget_bytes=_resolve_transient_budget_bytes(transient_budget_mb),
             fence_hook=fence_hook,
+            # Feed each chunk's taps into the draft window as that chunk
+            # completes -- the precondition for a mid-prefill checkpoint being a
+            # CONSISTENT (body, draft) pair. The old post-delta batch feed is
+            # therefore skipped in prefill().
+            taps_cb=self._on_chunk_taps,
         )
         try:
             self.cache = _sc.SessionCache(
                 model,
                 max_seq_len=int(max_seq_len),
-                max_snapshots=max_snapshots,
+                max_snapshots=keep,
                 prefill_fn=prefill_fn,
                 chunk=chunk,
                 long_chunk=long_chunk,
@@ -490,7 +572,20 @@ class Conversation:
             raise ValueError("session turn: empty prompt")
         taps: list = []
         t0 = time.perf_counter()
+        # The end-anchored margin rung's reference and its once-per-call latch;
+        # cleared in the finally so a failed append cannot leave them stale.
+        self._prefill_total = int(ids.shape[0])
+        self._margin_rung_done = False
         try:
+            # Rewind the draft window to the row the body cache will rewind to
+            # BEFORE the delta is fed. The per-chunk callback advances the draft
+            # as each chunk lands, so it must start from the same base the body
+            # starts from -- otherwise feeding inside ``append_turn`` and
+            # restoring after it would fight (the restore would wipe the feed,
+            # or leave the draft a whole delta behind).
+            _, draft_base, _ = self.cache.plan(ids)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            if self.draft_state is not None and self.draft_ctx() not in (-1, draft_base):
+                self._restore_draft(draft_base)  # pyright: ignore[reportUnknownArgumentType]
             res = self.cache.append_turn(
                 ids,
                 argmax=False,
@@ -505,6 +600,9 @@ class Conversation:
             ) from e
         except _sc.RollbackError as e:
             raise Dsv41UnsupportedFeature(f"DSV4.1 session rewind failed: {e}") from e
+        finally:
+            self._prefill_total = None
+            self._margin_rung_done = False
         pre_s = time.perf_counter() - t0
         logits = res.logits
         if logits is None and int(res.tokens_prefilled) == 0:
@@ -516,9 +614,13 @@ class Conversation:
                 "new user text (or the previous reply) and retry."
             )
         self._base = self.offset - int(res.tokens_prefilled)
-        if self.draft_ctx() not in (-1, self._base):
-            self._restore_draft(self._base)
-        self._feed_taps(taps)
+        # The delta's taps were fed PER CHUNK (``taps_cb``, before any ladder
+        # checkpoint), so the draft window already sits at ``offset``. The
+        # collected ``taps`` list is retained for compatibility but MUST NOT be
+        # batch-fed again (double-apply). Only a driver that did NOT run the
+        # per-chunk callback leaves ``draft_ctx`` behind and needs the fallback.
+        if self.draft_ctx() not in (-1, self.offset):
+            self._feed_taps(taps)  # pyright: ignore[reportUnknownMemberType]
         if self.draft_state is not None and self.draft_ctx() != self.offset:
             raise RuntimeError(
                 f"DSV4.1 session: the draft window holds {self.draft_ctx()} rows "
@@ -540,8 +642,12 @@ class Conversation:
             rewound_from=res.rolled_back_from,
         )
 
-    def _feed_taps(self, taps: list) -> None:
-        """Push the prefill's per-chunk DSpark taps into the draft window."""
+    def _feed_taps(self, taps: list) -> None:  # pyright: ignore[reportMissingTypeArgument]
+        """Push the prefill's per-chunk DSpark taps into the draft window.
+
+        ``taps`` is a list of per-chunk tap dicts (the batch path); the
+        per-chunk cadence path feeds one chunk at a time through here too.
+        """
         if self.head is None or not taps:
             return
         ids = list(self.model.args.dspark_target_layer_ids)
@@ -550,6 +656,76 @@ class Conversation:
         for chunk_taps in taps:
             cat = mx.concatenate([chunk_taps[layer] for layer in ids], axis=-1)
             self.head.append_ctx(cat, self.draft_state)
+
+    def _feed_chunk_taps(self, chunk_taps: Any) -> None:  # pyright: ignore[reportAny]
+        """Feed ONE chunk's taps into the draft window immediately."""
+        self._feed_taps([chunk_taps])  # pyright: ignore[reportUnknownMemberType]
+
+    def _on_chunk_taps(self, chunk_taps: Any) -> None:  # pyright: ignore[reportAny]
+        """Per-chunk callback from ``engine_prefill``: draft feed + cadence.
+
+        ORDER IS LOAD-BEARING. The chunk's taps are fed FIRST (this chunk's
+        rows), so ``draft_ctx == offset`` holds when the margin and grid checks
+        below decide to checkpoint; a checkpoint at this boundary therefore
+        snapshots a CONSISTENT (body, draft) pair. ``engine_prefill`` calls this
+        at each chunk end, after that chunk's taps are evaluated.
+        """
+        self._feed_chunk_taps(chunk_taps)
+        self._margin_rung()
+        self.maybe_checkpoint()
+
+    def _margin_rung(self) -> None:
+        """Force ONE checkpoint within ``margin`` rows of the prefill's end.
+
+        Grid rungs land on multiples of ``spacing`` and can leave the delta end
+        up to ``spacing`` rows past the newest rung -- exactly where the
+        confirmed 1-3-row BPE-seam undershoot bites. This rung puts a checkpoint
+        at the first chunk boundary at/after ``total - margin``, so the seam
+        undershoot costs ~``margin`` rows of refeed. Skipped for calls no longer
+        than ``margin`` (their prompt-end checkpoint already anchors them), and
+        fires at most once per prefill call.
+        """
+        if self._margin <= 0 or self._margin_rung_done:
+            return
+        total = self._prefill_total
+        if total is None or total <= self._margin:
+            return
+        if self.offset < total - self._margin:
+            return
+        self._margin_rung_done = True
+        self.maybe_checkpoint(force=True)
+
+    def maybe_checkpoint(self, *, force: bool = False) -> bool:
+        """Take a ladder checkpoint when the cadence says so (or ``force``).
+
+        Returns whether a snapshot was taken. The grid cadence fires when the
+        newest existing boundary is at least ``spacing`` rows behind the cache
+        offset (``spacing == 0`` disables it). Never snapshots when a boundary
+        already equals ``self.offset`` (dedupe -- a refeed re-crossing a rung
+        must not add a duplicate). Verifies the draft/body lockstep invariant
+        first: with a draft window present, ``draft_ctx`` must equal ``offset``,
+        else the checkpoint is SKIPPED with a one-time warning rather than
+        snapshotting an inconsistent pair.
+        """
+        if not force:
+            if self._spacing <= 0:
+                return False
+            newest = _newest_boundary(self.cache)
+            if self.offset - newest < self._spacing:
+                return False
+        if _has_boundary(self.cache, self.offset):
+            return False
+        if self.draft_state is not None and self.draft_ctx() != self.offset:
+            if not self._lockstep_warned:
+                self._lockstep_warned = True
+                logger.warning(  # pyright: ignore[reportUnknownMemberType]
+                    "[DSV41] checkpoint cadence skipped: the draft window holds "
+                    f"{self.draft_ctx()} rows but the cache is at {self.offset}; "
+                    "refusing to checkpoint an inconsistent (body, draft) pair"
+                )
+            return False
+        self._checkpoint()
+        return True
 
     def mark_rows(self, ids: Any) -> None:
         """Book-keeping append for rows the engine's decode loop fed itself."""
@@ -575,7 +751,17 @@ class Conversation:
             saved = [(w.win_kv + 0, int(w.n_ctx)) for w in self.draft_state]
             mx.eval([kv for kv, _ in saved])
             self._draft_snaps[self.offset] = saved
-        keep = set(self.cache.boundaries)
+        self._prune_stale_snaps()
+
+    def _prune_stale_snaps(self) -> None:
+        """Drop draft/anchor checkpoints with no body boundary (kept in lockstep).
+
+        ``SessionCache`` prunes the body snapshots itself (retention + rewind);
+        the draft-window and anchor dicts must follow, or a rewind to a dropped
+        boundary leaves orphan keys behind. Called after every checkpoint and
+        after a cancel/rewind.
+        """
+        keep = set(self.cache.boundaries)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
         for pos in [p for p in self._draft_snaps if p not in keep]:
             del self._draft_snaps[pos]
         for pos in [p for p in self._anchor_at if p not in keep]:
@@ -633,12 +819,15 @@ class Conversation:
         if not self._inflight:
             return 0
         # Back to the turn START (the prompt-end checkpoint is newer than it).
-        if self._base in self.cache.boundaries:
+        if self._base in self.cache.boundaries:  # pyright: ignore[reportUnknownMemberType]
             dropped = int(self.cache.rewind(self._base))
         else:
             dropped = int(self.cache.cancel())
         if self.draft_ctx() != -1:
             self._restore_draft(self.offset)
+        # The rewind dropped every body snapshot above the target; the draft and
+        # anchor dicts must drop the same keys (no orphans > the rewind target).
+        self._prune_stale_snaps()
         keep = max(0, self.offset - self._base)
         if len(self._gen) > keep:
             del self._gen[keep:]
@@ -680,7 +869,9 @@ class Dsv41Sessions:
         long_threshold: int | None = None,
         transient_budget_mb: int | None = None,
         max_sessions: int = 2,
-        max_snapshots: int = 8,
+        max_snapshots: int | None = None,
+        checkpoint_spacing: int | None = None,
+        checkpoint_margin: int | None = None,
         eos_id: int = 1,
         use_draft: bool = True,
         progress: Callable[[int, int, float], None] | None = None,
@@ -697,6 +888,8 @@ class Dsv41Sessions:
             long_threshold=long_threshold,
             transient_budget_mb=transient_budget_mb,
             max_snapshots=max_snapshots,
+            checkpoint_spacing=checkpoint_spacing,
+            checkpoint_margin=checkpoint_margin,
             eos_id=eos_id,
         )
         #: Forwarded to Conversation -> SessionCache (kept OUT of ``self.kw`` so
