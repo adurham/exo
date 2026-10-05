@@ -10192,3 +10192,27 @@ steered as a polish item (reset the timestamp at turn start).
 **Reuse-collapse confirmed on the new build too:** the same 350K probe logged
 "matches a resident conversation on 14996 rows" and refed 350124 rows (ladder fix in
 flight; see the correction entry above and docs/dsv41-reuse-ladder-design-2026-10-05.md).
+
+## 2026-10-05 — reuse-collapse fix (checkpoint ladder) MERGED; deploy2 branch assembled
+
+**Merged to exo main `7615ff348`:** `fix/reuse-checkpoint-ladder` @ `614a40bbe` — session
+checkpoint ladder (spacing `EXO_DSV41_CHECKPOINT_SPACING_ROWS`=1024, end-anchored margin
+rung `_MARGIN_ROWS`=512, retention `_KEEP`=32, per-chunk DSpark tap feeding for
+body/draft lockstep at every rung, decode-side cadence, reuse-undershoot WARNING when
+refed>256, stale fence-timestamp reset at turn start). Independent reviewer verdict:
+MERGE (12/12 items VERIFIED, sabotage-proved lockstep guard, 173/173 scoped tests).
+
+**Merged to mlx-lm main `e26137b`:** `fix/snapshot-keep-zero` @ `ea4eff2` — the prune
+loop never evicts the offset-0 snapshot (oldest non-zero evicted instead), so a rewind
+near the origin stays a reuse instead of RollbackError once the ladder pushes many
+higher checkpoints through the cap. 22/22 tests; park-codec audit: exo's park codec
+serializes all snapshots per-position with no baked-in count cap.
+
+**Deploy2 branches assembled:** exo `deploy/next2` @ `3cdd803c3` (= main + gitlink +
+uv.lock pinned to mlx-lm `d219882`); mlx-lm `deploy/next2` @ `d219882` (= main[keep-0 +
+fence hook] + bf16 score row). Combined mlx-lm suite 60 passed in an isolated worktree;
+alignment guard green.
+
+**Next:** A2_prev capture (pre-ladder reference for the cross-build exactness gate) is
+in flight on the still-running pre-ladder cluster; then relaunch onto deploy/next2 and
+run the ladder exactness gate (A2==A3 + A2 vs A2_prev), then the quality battery.
