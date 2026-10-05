@@ -10293,3 +10293,30 @@ to advisory (it flagged 'beginner'/'against'); REASONING_ONLY verdict class. One
 operational hiccup: a client-side socket stall wedged the bf16B 'all' run mid-prose
 (server finished the request at 12:45:53; the client blocked in recv) — resumed
 per-phase; server-side healthy throughout.
+
+## 2026-10-05 (post-deploy-4) — r500 prefill collapse: RDMA/TB driver-state wedge (reboot fix)
+
+**Symptom:** on the SAME deploy/next2 build, prefill throughput collapsed mid-soak:
+- r160 (160K cold): 782.8s = **204 tok/s** at 13:04.
+- T1 ladder gate (350K feed): 3524s = **99 tok/s** at 11:31.
+- r500 (340,237-row feed): client capped at the 3h max-time (10,800s) and the server
+  was STILL prefilling 4h10m+ later (~**22 tok/s**) — a 4.5-9x collapse vs the same
+  build hours earlier. GPU power sagged 20W -> 15-17W on both nodes during the run.
+
+**Diagnosis:** matches the documented 2026-08-20 wedge class: repeated rapid
+start_cluster.sh restart cycles (this session: 4 relaunches + heavy teardown churn in
+under 6h) degrade the Thunderbolt RDMA/OS driver state; throughput collapses while the
+code/config is correct; ONLY a full reboot of both Studios clears it (kill/restart of
+exo does not). Stall-sampler main-thread stacks during the slow window were dense with
+JACCL collective frames + MetalAllocator::malloc churn; no Python-side hot loop was
+implicated.
+
+**Fix applied:** `reboot-node.sh macstudio-m4-1 macstudio-m4-2` (FileVault authrestart,
+unattended, creds from 1Password). Both nodes returned ssh-able+unlocked in ~6 min, no
+stale exo processes. Cluster relaunched on deploy/next2 (bf16 arm). Soak re-run from
+the r500 rung follows a throughput sanity feed confirming the wedge cleared.
+
+**Standing protocol (reaffirmed):** before trusting any benchmark after a session with
+multiple restart cycles, check GPU power symmetry (`sudo powermetrics --samplers
+gpu_power -i 1500 -n 6` on both nodes; ~20W symmetric while prefilling = healthy,
+sagging/asymmetric = suspect). If suspected, reboot BOTH nodes before debugging code.
