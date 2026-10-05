@@ -2652,6 +2652,14 @@ for NODE in "${NODES[@]}"; do
   # per-model quality battery. Unset = the module default (bf16 since the
   # perf/dsv41-bf16-score-row merge); =0 forces the fp32 row for A/B.
   [ -n "${DSV41_INDEXER_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_ROW_BF16=$DSV41_INDEXER_ROW_BF16"
+  # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
+  # launcher previously forwarded NEITHER, so any value set in the shell was
+  # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
+  # caps the indexer's per-layer score-row transient (bytes = step*offset*4 for
+  # the fp32 row); fence_every sets the multi-row eval fence spacing (0 off).
+  # Unset => code defaults (2048 MB / every 2 layers).
+  [ -n "${EXO_PREFILL_TRANSIENT_BUDGET_MB:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_TRANSIENT_BUDGET_MB=$EXO_PREFILL_TRANSIENT_BUDGET_MB"
+  [ -n "${EXO_PREFILL_FENCE_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_PREFILL_FENCE_EVERY=$EXO_PREFILL_FENCE_EVERY"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).

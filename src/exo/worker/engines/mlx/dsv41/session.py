@@ -241,13 +241,24 @@ def engine_prefill(
     )
     want_taps = bool(return_taps or taps_out is not None)
 
+    # Log the EFFECTIVE transient controls once per prefill call: both knobs
+    # were previously read from env but never forwarded by the launcher, so the
+    # deployed values were invisible. One line per call is noise-free and makes
+    # the live config checkable from the runner log.
+    _fence_eff = _resolve_fence_every(fence_every)
+    logger.info(
+        f"[DSV41] prefill controls: fence_every={_fence_eff} "
+        f"transient_budget_mb={budget_bytes // _MBYTES_PER_MB} "
+        f"(rows={total}, base={base})"
+    )
+
     t0 = time.perf_counter()
     out = None
     done = 0
     nchunks = 0
     last_taps = None
     fence_prev = getattr(model, "_fence_every", None)
-    model._fence_every = _resolve_fence_every(fence_every)
+    model._fence_every = _fence_eff
     try:
         while done < total:
             offset: int = int(cache.offset)
