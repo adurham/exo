@@ -193,16 +193,13 @@ _NATIVE_BLOCKED_SYMBOLS = (
 )
 
 
-def _sample_is_blocked_in_native_setup(pid: int, duration_s: int = 2) -> bool:
-    """True if `pid`'s main thread is parked in native network/collective
-    SETUP (JACCL side-channel / TCP all-gather), i.e. waiting on a peer.
+def _run_sample(pid: int, duration_s: int) -> str | None:
+    """Run `/usr/bin/sample <pid> <duration_s>` and return its stdout as text.
 
-    This is the discriminator the footprint probe lacks. Such a task is NOT
-    doing compute, so its footprint is flat by definition, and it is NOT
-    wedged either -- it proceeds as soon as the peer responds.
-
-    Returns False on any failure, matching the footprint probe's contract:
-    absence of evidence is never treated as evidence of a hang.
+    `sample` is a statistical profiler (microstackshots via task_for_pid); it
+    does NOT SIGSTOP the target, so it is safe on a live busy process. Returns
+    None on any failure (missing binary, timeout, empty output) so callers
+    treat it as "no evidence".
     """
     try:
         result = subprocess.run(
@@ -213,32 +210,27 @@ def _sample_is_blocked_in_native_setup(pid: int, duration_s: int = 2) -> bool:
             text=True,
         )
     except (subprocess.SubprocessError, OSError):
-        return False
-    # FAIL-SAFE: this function must never suppress a legitimate kill. Any
-    # unparseable output returns False ("no evidence"), matching the
-    # footprint probe's contract.
-    #
-    # The bytes guard below is NOT dead code, though basedpyright says so:
-    # the call site passes text=True, so the checker infers result.stdout as
-    # str, but this repo's own test helpers construct
-    # subprocess.CompletedProcess(..., stdout=b"...") -- bytes -- and the first
-    # draft of this function crashed on exactly that (TypeError: a bytes-like
-    # object is required, not 'str'), caught by the suite. So the runtime type
-    # genuinely varies and the guard is what keeps the function fail-safe.
-    # Suppressed rather than deleted; deleting it re-introduces the crash.
+        return None
+    # The bytes guard is NOT dead code despite text=True: this repo's own test
+    # helpers build CompletedProcess(stdout=b"...") -- bytes. Keep it
+    # fail-safe (a first draft crashed on exactly that).
     raw_stdout = result.stdout
     if not isinstance(raw_stdout, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         if not isinstance(raw_stdout, bytes):  # pyright: ignore[reportUnnecessaryIsInstance]
-            return False
+            return None
         try:
             raw_stdout = raw_stdout.decode("utf-8", errors="replace")
         except Exception:
-            return False
+            return None
     if not raw_stdout:
-        return False
-    raw: str = raw_stdout
-    # Only inspect the main thread, so a parked background thread cannot
-    # mask or replace the signal.
+        return None
+    return raw_stdout
+
+
+def _main_thread_blob(raw: str) -> str:
+    """The main-thread section of a `sample` dump (whole dump if no thread
+    header is found), so a parked background thread cannot mask or replace
+    the signal."""
     main: list[str] = []
     in_main = False
     for line in raw.splitlines():
@@ -246,8 +238,36 @@ def _sample_is_blocked_in_native_setup(pid: int, duration_s: int = 2) -> bool:
             in_main = "main-thread" in line
         if in_main:
             main.append(line)
-    blob = "\n".join(main) if main else raw
-    hits = [s for s in _NATIVE_BLOCKED_SYMBOLS if s in blob]
+    return "\n".join(main) if main else raw
+
+
+def _native_setup_hits(raw: str) -> list[str]:
+    """Distinct native-setup symbols present in `raw`'s main-thread blob."""
+    blob = _main_thread_blob(raw)
+    return [s for s in _NATIVE_BLOCKED_SYMBOLS if s in blob]
+
+
+# Retained as the documented, directly-tested entry point for the narrow
+# native-setup check (see tests/unittests/test_runner/
+# test_runner_supervisor_hang_probe.py). The stack-class guard reuses the same
+# primitives; this wrapper stays for that public contract and its test suite.
+def _sample_is_blocked_in_native_setup(  # pyright: ignore[reportUnusedFunction]
+    pid: int, duration_s: int = 2
+) -> bool:
+    """True if `pid`'s main thread is parked in native network/collective
+    SETUP (JACCL side-channel / TCP all-gather), i.e. waiting on a peer.
+
+    This is the discriminator the footprint probe lacks. Such a task is NOT
+    doing compute, so its footprint is flat by definition, and it is NOT
+    wedged either -- it proceeds as soon as the peer responds.
+
+    Returns False on any failure, matching the footprint probe's contract:
+    absence of evidence is never treated as evidence of a hang.
+    """
+    raw = _run_sample(pid, duration_s)
+    if raw is None:
+        return False
+    hits = _native_setup_hits(raw)
     if len(hits) >= 2:
         # Require >=2 distinct setup symbols so an incidental single mention
         # elsewhere in the dump cannot arm this.
@@ -258,6 +278,225 @@ def _sample_is_blocked_in_native_setup(pid: int, duration_s: int = 2) -> bool:
         )
         return True
     return False
+
+
+# ── Stack-class hang guard (2026-10-05, design doc "Fix B") ───────────────
+#
+# The growth probe above cannot discriminate at the hardware ceiling: a
+# healthy deep-context prefill pinned at ~physical size shows a "flat"
+# footprint and was SIGKILLed as hung (2026-10-04 soak-2 postmortem). "Flat"
+# is not evidence of a wedge. This layer classifies the paused runner's stack
+# AND its CPU burn before a flat-footprint tick is allowed to kill:
+#
+#   growth                                   -> extend (unchanged)
+#   flat + SPIN                              -> kill fast (jaccl 100%-CPU wedge)
+#   flat + blocked + gpu + at-ceiling        -> extend (bounded)
+#   flat + blocked + native-setup (narrow)   -> extend (unchanged path)
+#   flat + blocked + unknown                 -> kill
+#   classifier/sample failure                -> extend once + alert, then kill
+#
+# SHADOW is the default: the classifier runs on plateau ticks and logs the
+# verdict + every input field, but the kill decision is left EXACTLY as it is
+# today. Arm only after a soak's shadow logs validate the classifier.
+#
+# The SPIN metric separates the two incident classes on one axis: healthy
+# at-ceiling prefill is BLOCKED (main thread in Scheduler::wait_for_one,
+# workers in __psynch_cvwait) with a near-zero CPU-time delta, while the wedge
+# burns ~100% of a core. All extensions draw from the ONE shared monotonic
+# budget (HANG_PROBE_MAX_EXTENSIONS); reclassification never resets it, and a
+# real event still resets everything (existing behavior).
+_stack_mode_raw = os.environ.get("EXO_RUNNER_HANG_STACK_MODE", "shadow").strip().lower()
+if _stack_mode_raw not in ("off", "shadow", "arm"):
+    logger.warning(
+        f"EXO_RUNNER_HANG_STACK_MODE={_stack_mode_raw!r} is not one of "
+        "off|shadow|arm — defaulting to 'shadow'."
+    )
+HANG_STACK_MODE = (
+    _stack_mode_raw if _stack_mode_raw in ("off", "shadow", "arm") else "shadow"
+)
+HANG_SPIN_FRACTION = _env_seconds("EXO_RUNNER_HANG_SPIN_FRACTION", 0.5)
+HANG_CEILING_MARGIN_GB = _env_seconds("EXO_RUNNER_HANG_CEILING_MARGIN_GB", 2.0)
+
+# Symbols/images that identify a runner BLOCKED IN LIVE GPU COMPUTE (mlx eval
+# + Metal scheduler frames; AGXMetal*/IOGPU are the Metal driver images,
+# libmlx the mlx dylib). A process parked here is doing real work that simply
+# has not emitted its own progress event yet — NOT a wedge. This must NOT
+# overlap the narrow native-setup signature above: the jaccl collective wedge
+# stays on the fast-kill path precisely because it matches neither set.
+_GPU_STACK_SYMBOLS = (
+    "mlx::core::eval",
+    "mlx::core::eval_impl",
+    "Scheduler::wait_for_one",
+    "MetalAllocator",
+    "metal::allocator",
+)
+_GPU_STACK_IMAGES = ("AGXMetal", "IOGPU", "libmlx")
+
+
+def _parse_cputime_seconds(text: str) -> float | None:
+    """Parse a `ps -o cputime=` value into seconds.
+
+    macOS formats are ``mm:ss[.ss]``, ``hh:mm:ss[.ss]`` and
+    ``dd-hh:mm:ss[.ss]``. Returns None on anything unexpected so the caller
+    falls back to "no evidence" rather than a wrong number.
+    """
+    if not text:
+        return None
+    days = 0
+    if "-" in text:
+        day_str, _, text = text.partition("-")
+        try:
+            days = int(day_str)
+        except ValueError:
+            return None
+    try:
+        nums = [float(part) for part in text.split(":")]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+        return days * 86400.0 + hours * 3600.0 + minutes * 60.0 + seconds
+    if len(nums) == 2:
+        minutes, seconds = nums
+        return days * 86400.0 + minutes * 60.0 + seconds
+    if len(nums) == 1:
+        return days * 86400.0 + nums[0]
+    return None
+
+
+def _read_ps_cputime_seconds(pid: int) -> float | None:
+    """Cumulative CPU time (seconds) for `pid` via `ps -o cputime=`.
+
+    Drives the SPIN metric: the delta between two probe ticks divided by the
+    wall interval estimates the fraction of a core the runner is burning. A
+    wedged jaccl collective spins at ~1.0; a healthily-blocked runner at the
+    memory ceiling sits near 0.
+
+    Returns None on any failure (missing binary, non-zero exit, unparseable
+    output) — callers treat None as "no spin evidence" and must NOT
+    spin-classify on it.
+    """
+    try:
+        proc = subprocess.run(
+            ["/bin/ps", "-o", "cputime=", "-p", str(pid)],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    text = proc.stdout.decode("utf-8", errors="replace").strip()
+    return _parse_cputime_seconds(text)
+
+
+@dataclass
+class _MemsizeCache:
+    probe_done: bool = False
+    bytes_total: int | None = None
+
+
+_MEMSIZE_CACHE = _MemsizeCache()
+
+
+def _host_memsize_bytes() -> int | None:
+    """Total physical memory in bytes via `sysctl -n hw.memsize`, cached.
+
+    Returns None on failure, which callers treat as "not at ceiling" (never as
+    "at ceiling") — a missing ceiling reading must not arm an extension.
+    """
+    if _MEMSIZE_CACHE.probe_done:
+        return _MEMSIZE_CACHE.bytes_total
+    _MEMSIZE_CACHE.probe_done = True
+    try:
+        proc = subprocess.run(
+            ["/usr/sbin/sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            timeout=2,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    try:
+        value = int(proc.stdout.decode("utf-8", errors="replace").strip())
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    _MEMSIZE_CACHE.bytes_total = value
+    return value
+
+
+def _sample_stack_class(pid: int, duration_s: int = 2) -> str | None:
+    """Classify `pid`'s stack from a short `sample`.
+
+    Returns:
+      "native-setup" — main thread parked in the narrow JACCL/TCP setup chain
+                       (reuses ``_NATIVE_BLOCKED_SYMBOLS`` UNCHANGED).
+      "gpu"          — mlx eval / Metal scheduler / Metal-driver frames
+                       (libmlx, AGXMetal*, IOGPU).
+      "unknown"      — sampled successfully but matched no known signature.
+      None           — the sample itself failed (no evidence). Callers must
+                       treat this as a classifier FAILURE, not as "unknown".
+    """
+    raw = _run_sample(pid, duration_s)
+    if raw is None:
+        return None
+    # Native-setup is a MAIN-THREAD signature (same blob rule as the existing
+    # classifier), so an incidental mention elsewhere cannot arm it.
+    if len(_native_setup_hits(raw)) >= 2:
+        return "native-setup"
+    # GPU frames are matched across the WHOLE dump (symbols and image names):
+    # a working runner's workers also touch libmlx/AGXMetal, and the driver
+    # image names are the robust, version-independent signal.
+    if any(s in raw for s in _GPU_STACK_SYMBOLS) or any(
+        i in raw for i in _GPU_STACK_IMAGES
+    ):
+        return "gpu"
+    return "unknown"
+
+
+def _decide_plateau_verdict(
+    *,
+    growth_gb: float,
+    spin: bool | None,
+    stack_class: str | None,
+    at_ceiling: bool,
+    sample_failed_once: bool,
+) -> str:
+    """Pure decision for a plateau probe tick.
+
+    Returns one of "extend", "kill", or "failure-extend" (a classifier/sample
+    failure earns exactly ONE extension; a repeat failure kills). The caller
+    owns the shared extension budget and the failure-once latch.
+    """
+    if growth_gb >= HANG_PROBE_GROWTH_THRESHOLD_GB:
+        return "extend"
+    # Flat footprint from here on.
+    if spin is True:
+        # 100%-CPU wedge class — kill fast, regardless of stack or ceiling.
+        return "kill"
+    if stack_class is None:
+        # Classifier/sample failure: extend once + alert, then kill on repeat.
+        return "kill" if sample_failed_once else "failure-extend"
+    if stack_class == "native-setup":
+        return "extend"
+    if stack_class == "gpu" and at_ceiling:
+        return "extend"
+    # gpu-not-at-ceiling and unknown both kill.
+    return "kill"
+
+
+@dataclass(frozen=True)
+class _PlateauEvidence:
+    """Sampled inputs for one plateau-tick verdict (logged in every mode)."""
+
+    stack_class: str | None
+    spin: bool | None
+    cpu_delta_seconds: float | None
+    wall_interval_seconds: float | None
+    at_ceiling: bool
 
 
 def _process_is_stopped_or_traced(pid: int) -> bool:
@@ -467,6 +706,14 @@ class RunnerSupervisor:
     # the kill fired anyway on the very next tick. 0.0 means "no extension
     # currently in effect" (initial state and post-reset state).
     _hang_probe_deadline_monotonic: float = field(default=0.0, init=False)
+    # Stack-class guard state (design doc "Fix B"). The CPU-time reading from
+    # the previous probe tick, used for the SPIN delta; the once-latch for a
+    # classifier/sample failure (one extension, then kill on repeat); and the
+    # wall-clock of the previous probe tick that anchors the CPU delta. All
+    # three reset with the rest of the probe state on any real event.
+    _hang_probe_last_cputime_seconds: float | None = field(default=None, init=False)
+    _hang_probe_wall_last_monotonic: float = field(default=0.0, init=False)
+    _hang_probe_sample_failed_once: bool = field(default=False, init=False)
     # Worker-injected predicate: True while a SIBLING runner on this node is
     # loading a model. A co-host JIT load saturates the GPU/memory bus and can
     # starve a mid-generation runner of progress for minutes (observed
@@ -607,6 +854,9 @@ class RunnerSupervisor:
                     self._hang_probe_last_footprint_gb = None
                     self._hang_probe_extensions_used = 0
                     self._hang_probe_deadline_monotonic = 0.0
+                    self._hang_probe_last_cputime_seconds = None
+                    self._hang_probe_wall_last_monotonic = 0.0
+                    self._hang_probe_sample_failed_once = False
                     if isinstance(event, RunnerTerminationError):
                         # try to get exception if possible
                         await self._check_runner(event)
@@ -650,6 +900,60 @@ class RunnerSupervisor:
                     return
                 await self._check_hang()
                 self._check_stuck_init()
+
+    async def _sample_plateau_evidence(
+        self, pid: int, now: float, footprint_gb: float
+    ) -> _PlateauEvidence:
+        """Collect the classifier inputs for one plateau tick.
+
+        Only called in shadow/arm modes (off mode skips sampling entirely):
+          - stack class via ``_sample_stack_class`` (None = sample failed),
+          - SPIN = CPU-time delta between the previous probe tick and this one
+            divided by the wall interval, vs HANG_SPIN_FRACTION. ps failure or
+            a missing baseline yields None (no spin evidence) and must never
+            produce a True verdict,
+          - at-ceiling = footprint within HANG_CEILING_MARGIN_GB of hw.memsize
+            (memsize failure => False, i.e. never arm on a missing reading).
+        """
+        cpu_now = await to_thread.run_sync(_read_ps_cputime_seconds, pid)
+        wall_interval: float | None = None
+        cpu_delta: float | None = None
+        if (
+            cpu_now is not None
+            and self._hang_probe_last_cputime_seconds is not None
+            and now > self._hang_probe_wall_last_monotonic
+        ):
+            wall_interval = now - self._hang_probe_wall_last_monotonic
+            cpu_delta = cpu_now - self._hang_probe_last_cputime_seconds
+        if cpu_now is not None:
+            self._hang_probe_last_cputime_seconds = cpu_now
+        # Advance the wall anchor on every probe so the next delta uses a real
+        # interval even if this tick had no usable CPU reading.
+        self._hang_probe_wall_last_monotonic = now
+
+        spin: bool | None = None
+        if (
+            cpu_delta is not None
+            and wall_interval is not None
+            and wall_interval > 0
+            and cpu_delta >= 0
+        ):
+            spin = (cpu_delta / wall_interval) >= HANG_SPIN_FRACTION
+
+        stack_class = await to_thread.run_sync(_sample_stack_class, pid, 2)
+
+        memsize = await to_thread.run_sync(_host_memsize_bytes)
+        at_ceiling = (
+            memsize is not None
+            and footprint_gb >= (memsize / (1024.0**3)) - HANG_CEILING_MARGIN_GB
+        )
+        return _PlateauEvidence(
+            stack_class=stack_class,
+            spin=spin,
+            cpu_delta_seconds=cpu_delta,
+            wall_interval_seconds=wall_interval,
+            at_ceiling=at_ceiling,
+        )
 
     async def _check_hang(self) -> None:
         """SIGKILL a runner that has in-progress work but has gone silent AND
@@ -764,6 +1068,17 @@ class RunnerSupervisor:
                 self._hang_probe_last_footprint_gb = footprint_gb
                 self._hang_probe_extensions_used += 1
                 self._hang_probe_deadline_monotonic = now + HANG_PROBE_INTERVAL_SECONDS
+                # Anchor the SPIN metric here too, so the very next plateau
+                # tick can compute a CPU delta over a real probe interval
+                # (matching the incident timeline: baseline t=46, plateau
+                # t=66). Skipped entirely in off mode (no sampling overhead).
+                if HANG_STACK_MODE != "off":
+                    cpu0 = await to_thread.run_sync(
+                        _read_ps_cputime_seconds, self.runner_process.pid
+                    )
+                    if cpu0 is not None:
+                        self._hang_probe_last_cputime_seconds = cpu0
+                    self._hang_probe_wall_last_monotonic = now
                 logger.warning(
                     f"Runner {self.bound_instance.bound_runner_id} silent for "
                     f"{silent_for:.0f}s; liveness probe baseline footprint="
@@ -775,36 +1090,7 @@ class RunnerSupervisor:
             else:
                 growth_gb = footprint_gb - self._hang_probe_last_footprint_gb
                 self._hang_probe_last_footprint_gb = footprint_gb
-                # NATIVE-SETUP CHECK (2026-09-23, third false-positive class).
-                # Flat footprint is NOT sufficient evidence of a hang: a
-                # runner blocked in JACCL side-channel / TCP all-gather setup
-                # is genuinely waiting on its PEER and consumes no memory
-                # while blocked, so this probe's growth test misreads it as
-                # dead. Inspect the stack before killing. Evaluated here --
-                # unconditionally on every plateau tick, before the kill
-                # decision -- rather than behind a separate gate, per the
-                # documented v1 bug where an extension armed on one tick was
-                # ignored on the next.
-                if (
-                    growth_gb < HANG_PROBE_GROWTH_THRESHOLD_GB
-                    and self._hang_probe_extensions_used < HANG_PROBE_MAX_EXTENSIONS
-                    and _sample_is_blocked_in_native_setup(
-                        self.runner_process.pid, 2
-                    )
-                ):
-                    self._hang_probe_extensions_used += 1
-                    self._hang_probe_deadline_monotonic = (
-                        now + HANG_PROBE_INTERVAL_SECONDS
-                    )
-                    logger.warning(
-                        f"Runner {self.bound_instance.bound_runner_id} silent for "
-                        f"{silent_for:.0f}s, footprint flat ({growth_gb:+.2f}GB) "
-                        f"BUT stack shows native network/collective setup -- "
-                        f"waiting on peer, not hung. Extending "
-                        f"{HANG_PROBE_INTERVAL_SECONDS:.0f}s "
-                        f"({self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS})."
-                    )
-                    return
+                # GROWTH: real forward progress (unchanged path, all modes).
                 if (
                     growth_gb >= HANG_PROBE_GROWTH_THRESHOLD_GB
                     and self._hang_probe_extensions_used < HANG_PROBE_MAX_EXTENSIONS
@@ -822,21 +1108,126 @@ class RunnerSupervisor:
                         f"({self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS})."
                     )
                     return
-                plateau_or_budget = (
-                    "plateaued"
-                    if growth_gb < HANG_PROBE_GROWTH_THRESHOLD_GB
-                    else "extension budget exhausted"
+
+                # FLAT footprint, or growth with a spent budget: consult the
+                # stack-class guard. A spent budget kills first (pre-existing
+                # behavior — a slow leak or an endless load must not stall the
+                # watchdog forever), in every mode.
+                budget_exhausted = (
+                    self._hang_probe_extensions_used >= HANG_PROBE_MAX_EXTENSIONS
+                )
+                if budget_exhausted:
+                    logger.warning(
+                        f"Runner {self.bound_instance.bound_runner_id} silent for "
+                        f"{silent_for:.0f}s; extension budget exhausted "
+                        f"({self._hang_probe_extensions_used}"
+                        f"/{HANG_PROBE_MAX_EXTENSIONS}) — proceeding to kill."
+                    )
+                    self._hang_killed = True
+                    self._do_hang_kill(silent_for)
+                    return
+                if HANG_STACK_MODE == "off":
+                    # Guard disabled: ZERO classifier/sample overhead. A flat
+                    # footprint kills (the pre-guard behavior). NOTE: because
+                    # no stack is inspected, `off` also does not extend on the
+                    # pre-existing native-setup signature — `off` is the most
+                    # kill-aggressive mode. Shadow (the default) DOES preserve
+                    # that extension, so the shipped default is unchanged.
+                    logger.warning(
+                        f"Runner {self.bound_instance.bound_runner_id} silent for "
+                        f"{silent_for:.0f}s; liveness probe shows footprint "
+                        f"plateaued (growth={growth_gb:+.2f}GB, extensions used="
+                        f"{self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS}) "
+                        "— proceeding to kill."
+                    )
+                    self._hang_killed = True
+                    self._do_hang_kill(silent_for)
+                    return
+
+                evidence = await self._sample_plateau_evidence(
+                    self.runner_process.pid, now, footprint_gb
+                )
+                verdict = _decide_plateau_verdict(
+                    growth_gb=growth_gb,
+                    spin=evidence.spin,
+                    stack_class=evidence.stack_class,
+                    at_ceiling=evidence.at_ceiling,
+                    sample_failed_once=self._hang_probe_sample_failed_once,
                 )
                 logger.warning(
-                    f"Runner {self.bound_instance.bound_runner_id} silent for "
-                    f"{silent_for:.0f}s; liveness probe shows footprint "
-                    f"{plateau_or_budget} "
-                    f"(growth={growth_gb:+.2f}GB, extensions used="
-                    f"{self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS}) "
-                    "— proceeding to kill."
+                    f"[HANG_STACK] mode={HANG_STACK_MODE} runner "
+                    f"{self.bound_instance.bound_runner_id} silent for "
+                    f"{silent_for:.0f}s verdict={verdict} "
+                    f"stack_class={evidence.stack_class} spin={evidence.spin} "
+                    f"footprint_gb={footprint_gb:.2f} growth_gb={growth_gb:+.2f} "
+                    f"cpu_delta_s={evidence.cpu_delta_seconds} "
+                    f"wall_s={evidence.wall_interval_seconds} "
+                    f"spin_fraction={HANG_SPIN_FRACTION} "
+                    f"at_ceiling={evidence.at_ceiling} "
+                    f"extensions_used={self._hang_probe_extensions_used}"
+                    f"/{HANG_PROBE_MAX_EXTENSIONS}"
                 )
+                if HANG_STACK_MODE == "shadow":
+                    # Kill path UNCHANGED. Today's flat-footprint behavior is
+                    # exactly "extend iff the stack shows native setup, else
+                    # kill" (the classifier's native-setup class is the same
+                    # main-thread signature as the incumbent check). Every NEW
+                    # verdict above — spin, gpu+ceiling, unknown — is logged
+                    # only and does not alter this decision.
+                    if evidence.stack_class == "native-setup":
+                        self._hang_probe_extensions_used += 1
+                        self._hang_probe_deadline_monotonic = (
+                            now + HANG_PROBE_INTERVAL_SECONDS
+                        )
+                        logger.warning(
+                            f"Runner {self.bound_instance.bound_runner_id} silent for "
+                            f"{silent_for:.0f}s, footprint flat ({growth_gb:+.2f}GB) "
+                            "BUT stack shows native network/collective setup — "
+                            "waiting on peer, not hung. Extending "
+                            f"{HANG_PROBE_INTERVAL_SECONDS:.0f}s "
+                            f"({self._hang_probe_extensions_used}/"
+                            f"{HANG_PROBE_MAX_EXTENSIONS})."
+                        )
+                        return
+                    self._hang_killed = True
+                    self._do_hang_kill(silent_for)
+                    return
+                # ARM: enforce the decision table, drawing every extend from
+                # the SAME monotonic budget (never reset on reclassification;
+                # the budget-exhausted check above already killed when spent).
+                if verdict == "kill":
+                    self._hang_killed = True
+                    self._do_hang_kill(silent_for)
+                    return
+                if verdict == "failure-extend":
+                    # ONE failure extension; the latch makes a repeat failure
+                    # return "kill" above, so this can never loop unboundedly.
+                    self._hang_probe_sample_failed_once = True
+                self._hang_probe_extensions_used += 1
+                self._hang_probe_deadline_monotonic = now + HANG_PROBE_INTERVAL_SECONDS
+                logger.warning(
+                    f"Runner {self.bound_instance.bound_runner_id} silent for "
+                    f"{silent_for:.0f}s; stack-class guard verdict={verdict} "
+                    f"(stack_class={evidence.stack_class}, spin={evidence.spin}, "
+                    f"at_ceiling={evidence.at_ceiling}) — extending "
+                    f"{HANG_PROBE_INTERVAL_SECONDS:.0f}s "
+                    f"({self._hang_probe_extensions_used}/{HANG_PROBE_MAX_EXTENSIONS})."
+                )
+                return
 
+        # Fall-through kill, matching the pre-change behavior for the cases
+        # that reach here: the footprint sample failed (no evidence either
+        # way), or HANG_PROBE_MAX_EXTENSIONS is disabled (<=0, so the probe
+        # block above was skipped entirely).
         self._hang_killed = True
+        self._do_hang_kill(silent_for)
+
+    def _do_hang_kill(self, silent_for: float) -> None:
+        """SIGKILL the runner and capture a post-mortem thread dump first.
+
+        Extracted unchanged from the tail of the original ``_check_hang`` so
+        both the legacy and the stack-class kill paths share exactly one kill.
+        """
         logger.critical(
             f"Runner {self.bound_instance.bound_runner_id} hung: "
             f"{len(self.in_progress)} task(s) in progress, no event for "
