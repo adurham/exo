@@ -127,6 +127,16 @@ DEFAULT_WARMUP_TOKENS = 8
 
 #: Prompt used for warmup; deliberately a plain chat turn.
 _WARMUP_PROMPT = "Reply with the single word: ready"
+
+#: Max tolerated gap between fence-point liveness callbacks. The hook fires at
+#: every model-level eval fence (``fence_every`` layers of committed compute),
+#: and ``prefill_heartbeat`` re-emits the runner status at most every 15 s, so
+#: the runner's silence clock is bounded by ~15 s + the longest between-fence
+#: region. A spacing above this is the failure PREDICTOR (a fence gap growing
+#: toward the supervisor's 45 s window): it is measured and warned, never
+#: asserted (see the design doc's corrected invariant).
+FENCE_HEARTBEAT_MAX_SPACING_SECONDS = 30.0
+
 #: Exhaustion marker for step()'s parser pull (the parser also yields None).
 _END = object()
 
@@ -311,6 +321,10 @@ class Dsv41Engine(Engine):
     _spec_rounds: int = field(default=0, init=False)
     _spec_accepted: int = field(default=0, init=False)
     _spec_drafted: int = field(default=0, init=False)
+    #: Monotonic timestamp of the previous ``_session_fence_heartbeat`` call,
+    #: for the >30 s spacing watchdog. ``0.0`` (never called) is treated as
+    #: "first call" and never warns.
+    _last_fence_heartbeat_monotonic: float = field(default=0.0, init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -340,6 +354,12 @@ class Dsv41Engine(Engine):
             # a long prefill. Unwired, a prefill longer than the supervisor's
             # hang-watchdog window emits no events and kills a healthy runner.
             progress=self._session_progress,
+            # Fence-point liveness: a hook keyed to the model's eval fence, so
+            # an event is re-emitted at every K layers of committed compute even
+            # when no prefill chunk boundary (the coarser ``progress`` signal)
+            # is reached for minutes. Forwarded Dsv41Sessions -> Conversation ->
+            # (the prefill_fn partial) -> engine_prefill; active on ALL ranks.
+            fence_heartbeat=self._session_fence_heartbeat,
         )
 
     def warmup(self) -> None:
@@ -632,6 +652,34 @@ class Dsv41Engine(Engine):
             )
         else:
             self.prefill_heartbeat()
+
+    def _session_fence_heartbeat(self) -> None:
+        """Fence-point liveness hook installed as ``model._fence_hook``.
+
+        The mlx-lm body calls this after each model-level ``mx.eval`` fence
+        (every ``_fence_every`` layers of a multi-row forward), so it re-emits
+        the runner status at a point backed by actually-committed compute --
+        granularity far finer than the per-CHUNK ``_session_progress`` (a chunk
+        at deep context takes minutes, which is what let a healthy prefill go
+        silent past the supervisor's window). Runs on the model thread: no
+        locks, no model-state mutation, and the delegate is the same 15 s
+        throttled ``prefill_heartbeat`` the progress path uses.
+
+        The spacing watchdog only measures: it warns when the gap since the
+        previous invocation exceeds ``FENCE_HEARTBEAT_MAX_SPACING_SECONDS``,
+        the predictor of a fence gap growing toward the hang window.
+        """
+        now = time.monotonic()
+        last = self._last_fence_heartbeat_monotonic
+        if last and (now - last) > FENCE_HEARTBEAT_MAX_SPACING_SECONDS:
+            logger.warning(  # pyright: ignore[reportUnknownMemberType]
+                f"[DSV41] fence heartbeat spacing {now - last:.1f}s exceeds "
+                f"{FENCE_HEARTBEAT_MAX_SPACING_SECONDS:.0f}s (rank="
+                f"{self.device_rank}): a between-fence region is running long; "
+                "supervisor silence may be approaching its window"
+            )
+        self._last_fence_heartbeat_monotonic = now
+        self.prefill_heartbeat()
 
     # ------------------------------------------------------------------ generate
 
