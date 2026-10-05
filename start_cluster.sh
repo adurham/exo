@@ -1956,6 +1956,22 @@ for NODE in "${NODES[@]}"; do
     EXO_RUNNER_HANG_TIMEOUT_SECONDS=1800
   fi
   [ -n "${EXO_RUNNER_HANG_TIMEOUT_SECONDS:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_TIMEOUT_SECONDS=$EXO_RUNNER_HANG_TIMEOUT_SECONDS"
+  # Stack-class hang guard (design doc "Fix B", 2026-10-05; supervisor.py).
+  # EXO_RUNNER_HANG_STACK_MODE=off|shadow|arm, read at runner-module import;
+  # default shadow (classifier runs on plateau ticks and logs verdict+inputs,
+  # kill path unchanged). Arm only after a soak's shadow logs validate the
+  # classifier. Audited before adding: no stale value exists anywhere, these
+  # are new. Threaded here because the runner env is an ALLOWLIST — without
+  # these lines the mode silently stays at its in-code default (same rule as
+  # EXO_PHASE_MARKS / EXO_WORKER_PLAN_EVENT_WAKE).
+  [ -n "${EXO_RUNNER_HANG_STACK_MODE:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_STACK_MODE=$EXO_RUNNER_HANG_STACK_MODE"
+  # EXO_RUNNER_HANG_SPIN_FRACTION: CPU-time delta between probe ticks / wall
+  # interval vs this fraction (default 0.5) — separates the 100%-CPU
+  # jaccl-spin wedge (kill fast) from healthy at-ceiling prefill (blocked).
+  [ -n "${EXO_RUNNER_HANG_SPIN_FRACTION:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_SPIN_FRACTION=$EXO_RUNNER_HANG_SPIN_FRACTION"
+  # EXO_RUNNER_HANG_CEILING_MARGIN_GB: "at ceiling" = footprint within this
+  # many GB of hw.memsize (default 2.0). gpu-class extension requires it.
+  [ -n "${EXO_RUNNER_HANG_CEILING_MARGIN_GB:-}" ] && EXO_ENV="$EXO_ENV EXO_RUNNER_HANG_CEILING_MARGIN_GB=$EXO_RUNNER_HANG_CEILING_MARGIN_GB"
   # MLX_JACCL_RELIABLE_INFLIGHT: reliable-path pipeline depth. Depth 8 is
   # validated for sz<=2 chunks (<=16KB concurrent UC sends are clean; the old
   # MUST-be-1 note predates the 2026-07-06 pipelining patch, mlx 452fbebf).
