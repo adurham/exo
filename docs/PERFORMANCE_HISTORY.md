@@ -10263,3 +10263,33 @@ The cross-build exactness gate ran on deploy/next2 (ladder build, fp32 arm) agai
 
 This clears the ladder's ship gate. Next: battery fp32A aggregate → arm-flip relaunch
 (DSV41_INDEXER_ROW_BF16=1) → bf16B → compare.py → P0 decision.
+
+## 2026-10-05 — P0 (bf16 indexer score row) SHIP GATE: PASSED (battery A/B at 350K)
+
+The two-phase live quality battery ran on deploy/next2 (ladder build): arm A = fp32 row
+(`DSV41_INDEXER_ROW_BF16=0`), arm B = bf16 row (=1), both at 350K depth, temp 0, final
+battery tooling. Result (**compare.py: PASS**):
+
+- **Needles: A 6/6, B 6/6** — exact/paraphrase/negation/distractor/control/multihop all pass in both arms.
+- **Tools: A 9/10, B 9/10** — the single fail in BOTH arms is `t6_forecast_madrid_3`, the
+  known DSML-leak serving quirk (tool call emitted as DSML text in content) — present
+  equally in both arms, NOT a bf16 regression (classified `dsml_leak_in_content`).
+- **Free prose detectors: A DIRTY=0 REVIEW=0, B DIRTY=0 REVIEW=0**; no new high-confidence
+  hits (no cross-script glue / U+FFFD / repetition). 14/20 prose outputs BYTE-IDENTICAL
+  between arms; the 6 that changed are the expected temp-0 free-form divergence (the
+  compare treats text change as a note, not a gate). B had 1 REASONING_ONLY vs A's 2
+  (paperclip: B produced content where A reasoned only) — direction favorable.
+- **Parked-restore: recall=True in both arms** (A 26s, B 27s restore turns).
+
+Ship decision: **P0 bf16 indexer score row SHIPPED ENABLED** (bf16 is the branch default;
+the current live cluster runs arm B). The deep-prefill perf gain is measured next by the
+r1M soak re-proof on this exact config.
+
+Battery tooling notes (all fixes landed this session, tooling persisted to
+bench/dsv41_quality_battery/ on main): reasoning-channel fallback for needle/park checks;
+city-string containment in the tool arg compare; `dsml_leak_in_content` classification;
+prose budget >=4096 with reasoning_effort=low; noisy same-script glue heuristic demoted
+to advisory (it flagged 'beginner'/'against'); REASONING_ONLY verdict class. One
+operational hiccup: a client-side socket stall wedged the bf16B 'all' run mid-prose
+(server finished the request at 12:45:53; the client blocked in recv) — resumed
+per-phase; server-side healthy throughout.
