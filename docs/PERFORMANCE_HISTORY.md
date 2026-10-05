@@ -10173,3 +10173,22 @@ Correction to the soak-2 postmortem above and to the 2026-10-04 deploy-2 soak en
 - **Corrected soak-2 costs** (verified against cold-build timing + the missing turn-reuse lines): r500 = full 499,981-row prefill in 4,557 s → **110 tok/s at 500K**; r750 = full 749,983-row prefill in 9,960 s → **75 tok/s at 750K**. (The earlier "~25 tok/s delta" figure assumed delta feeds that did not happen.) Soak-1 rungs (r160/r450) are suspect by the same mechanism; re-read those as full-context prefill costs. r1m's 5h07m kill window over ~1.04M rows ≈ 56 tok/s at 1M — consistent with the same depth curve.
 - **What is NOT broken:** a normal chat follow-up (user → assistant reply → user) renders C + sep + reply + sep + q, whose LCP ≥ the prompt-end checkpoint, so it rewinds to that checkpoint and pays only the reply+question tail (tens of rows). The prompt-end checkpoint exists for exactly that case. Degenerate shapes (append-to-content probes, client text drift, our own probe scripts) pay full context.
 - **Queued:** (a) battery/soak probe shapes switched to multiturn; (b) candidate engine fix: periodic checkpoint ladder during prefill (e.g. every ~32K rows, retention raised from 8) so a short LCP lands on a nearby checkpoint — design + review pending, deploy N+1.
+
+## 2026-10-05 — deploy 3 live: fence-hook liveness proven on the exact kill scenario
+
+Deployed `b5eb293f5`/mlx-lm `54cebb7` (P0 bf16 score row fp32-arm + fence-hook liveness
+Fix A + supervisor stack-guard Fix B shadow). READY (2/2); runner env verified on both
+nodes (`DSV41_INDEXER_ROW_BF16=0`, fence controls on).
+
+**Live proof of Fix A (the r1m kill scenario, reproduced):** a 350K-token cold prefill
+ran 11+ minutes (client later abandoned; server kept going). The supervisor logged
+**zero "silent for" warnings on either node** during the entire window — previously this
+is exactly the shape that went quiet for 45s+ and got SIGKILLed. The new fence heartbeat
+fires from inside the forward (model-level eval fence) and the spacing watchdog measured
+normal cadence. One benign artifact: the first fence of a request warns "spacing ~430s
+exceeds 30s" because the timestamp is stale across the idle gap between requests —
+steered as a polish item (reset the timestamp at turn start).
+
+**Reuse-collapse confirmed on the new build too:** the same 350K probe logged
+"matches a resident conversation on 14996 rows" and refed 350124 rows (ladder fix in
+flight; see the correction entry above and docs/dsv41-reuse-ladder-design-2026-10-05.md).
