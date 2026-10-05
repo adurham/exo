@@ -250,6 +250,31 @@ def test_choose_prefill_step_base_is_the_ceiling():
     assert s_.choose_prefill_step(0, 10**9, 2, 10**30) == 2
 
 
+def test_choose_prefill_step_bf16_row_doubles_the_viable_chunk():
+    """With the bf16 score row (2 B/elem) the same byte budget affords 2x the chunk."""
+    budget = 2_048_000_000
+    offset, total, base = 1_000_000, 2_000_000, 2048
+    fp32 = s_.choose_prefill_step(offset, total, base, budget, row_bytes=4)
+    bf16 = s_.choose_prefill_step(offset, total, base, budget, row_bytes=2)
+    assert fp32 == budget // (4 * offset)
+    # bf16: worst_row = 2 * offset -> twice the rows, still <= budget.
+    assert bf16 == budget // (2 * offset)
+    assert bf16 == 2 * fp32
+    assert bf16 * offset * 2 <= budget
+
+
+def test_choose_prefill_step_row_bytes_defaults_to_fp32():
+    """The default keeps the pre-existing fp32 behavior bit-for-bit."""
+    budget, offset = 1_200_000, 1000
+    assert s_.choose_prefill_step(offset, 10**9, 2048, budget) == 300
+    assert s_.choose_prefill_step(offset, 10**9, 2048, budget, row_bytes=4) == 300
+
+
+def test_indexer_row_bytes_follows_the_deployed_module():
+    """The import-time probe reads the ACTUAL mlx-lm row dtype (2/4), never crashes."""
+    assert s_._INDEXER_ROW_BYTES in (2, 4)
+
+
 def test_choose_prefill_step_boundary_is_exact():
     """step * offset * 4 == budget is accepted (<=, not <)."""
     budget, offset = 1_200_000, 1000

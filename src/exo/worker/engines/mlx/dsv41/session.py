@@ -146,12 +146,36 @@ def _read_int_env(name: str, default: int) -> int:
         return int(default)
 
 
+def _indexer_row_bytes() -> int:
+    """Bytes per element of the indexer score row, probed ONCE at module import.
+
+    The row is fp32 (4 B) in the classic build and bf16 (2 B) when the deployed
+    mlx-lm has the bf16 score row active (``DSV41_INDEXER_ROW_BF16``, read at
+    mlx-lm import; process-lifetime constant). The chunk policy must follow the
+    ACTUAL dtype so it never over-counts: at depth a hard-coded 4-B charge
+    halves the chunk under the same byte budget, doubling the per-chunk
+    drain/collective overhead per row. Falls back to fp32's 4 on import trouble.
+    """
+    import importlib
+
+    try:
+        indexer = importlib.import_module("mlx_lm.models.deepseek_v41.indexer")
+        dtype = getattr(indexer, "_ROW_DTYPE")  # noqa: B009 - set at mlx-lm import
+        return int(dtype.size)  # pyright: ignore[reportAny] - mlx dtype is untyped
+    except Exception:  # noqa: BLE001 - a dtype probe must never crash the worker
+        return 4
+
+
+_INDEXER_ROW_BYTES = _indexer_row_bytes()
+
+
 def choose_prefill_step(
     offset: int,
     total: int,
     base: int,
     budget_bytes: int,
     floor: int = 128,
+    row_bytes: int = 4,
 ) -> int:
     """Rows for the next prefill chunk under a transient-memory budget.
 
@@ -159,8 +183,9 @@ def choose_prefill_step(
     ``offset`` is the absolute cache position the chunk starts at and ``total``
     the absolute row this feed ends at (so ``total - offset`` rows remain). The
     indexer's worst-case score row for a chunk grows with ``step * offset`` (its
-    logical length ``nb`` is the END position, which is ~offset here); with fp32
-    that is ``step * offset * 4`` bytes. We therefore keep the full ``base``
+    logical length ``nb`` is the END position, which is ~offset here); that row
+    costs ``step * offset * row_bytes`` bytes (``row_bytes`` = the deployed
+    score-row element size: 4 fp32, 2 bf16). We therefore keep the full ``base``
     chunk while that row fits in ``budget_bytes`` and shrink as the context
     grows. ``base`` is also the ceiling (only shrinking, never growing), and
     ``floor`` is the smallest chunk ever chosen (throughput does not profit from
@@ -171,7 +196,7 @@ def choose_prefill_step(
     remaining = int(total) - offset
     if remaining <= 0:
         return 1
-    worst_row = 4 * max(offset, 1)  # bytes per row of the [1, n, nb] fp32 score
+    worst_row = max(1, int(row_bytes)) * max(offset, 1)  # bytes per row of the score row
     rows = min(int(base), max(int(floor), int(budget_bytes) // worst_row))
     return max(1, min(rows, remaining))
 
@@ -293,6 +318,7 @@ def engine_prefill(
     logger.info(
         f"[DSV41] prefill controls: fence_every={_fence_eff} "
         f"transient_budget_mb={budget_bytes // _MBYTES_PER_MB} "
+        f"score_row_bytes={_indexer_row_bytes()} "
         f"fence_hook={'on' if hook_on else 'off'} "
         f"(rows={total}, base={base})"
     )
@@ -320,7 +346,9 @@ def engine_prefill(
             if threshold is not None:
                 step = long_step if offset >= threshold else base
             else:
-                step = choose_prefill_step(offset, total, base, budget_bytes)
+                step = choose_prefill_step(
+                    offset, total, base, budget_bytes, row_bytes=_indexer_row_bytes()
+                )
             stop = min(done + step, total)
             piece = ids_mx[:, done:stop]
             last = stop == total
