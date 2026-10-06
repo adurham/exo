@@ -10580,3 +10580,19 @@ drain/collective boundaries per row at the deepest rungs). After the fix (exo ma
 This closes the last budget-compensation item from the P1/P2/P5 plan: fence/budget
 compensations that existed to bound the materialized row are now either proven
 neutral (fence spacing) or re-billed to the deployed shape (this change).
+
+## 2026-10-06 — FINAL BATTERY CLEAN on the deployed final candidate (a2b6fc96b) => 1M ship-gate soak next
+
+The exact deployed artifact (exo `a2b6fc96b` = M2 default-ON + framefix + re-bill +
+ladder + fences + spans; mlx-lm `05285c4`), battery at 350K:
+**needles 6/6** (exact/paraphrase/negation/distractor/control/multihop) |
+**tools 10/10** | **prose 0 DIRTY / 0 REVIEW** (20 prompts; hits advisory-only) |
+**park recall True in 8 s** | build 350,124 tok in 2,058.9 s (170 rows/s).
+
+This is the third consecutive CLEAN battery for a precision-relevant build
+(bf16 row, M2, final) — the campaign's gate discipline held end-to-end.
+
+Next: the 1M ship-gate soak on this build (r500 delta -> r750 -> r1m -> over-cap),
+with two live proof points to capture: (a) the re-bill's deep chunk behavior
+(controls should show base-sized chunks through 1M), (b) end-to-end 200/finish on
+a 1M-token feed with the M2 win at the deepest rung.
