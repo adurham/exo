@@ -2668,6 +2668,10 @@ for NODE in "${NODES[@]}"; do
   # per-model quality battery. Unset = the module default (bf16 since the
   # perf/dsv41-bf16-score-row merge); =0 forces the fp32 row for A/B.
   [ -n "${DSV41_INDEXER_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_ROW_BF16=$DSV41_INDEXER_ROW_BF16"
+  # DSV41_INDEXER_HIER: hierarchical/streamed indexer exact pass (M2, default
+  # OFF in the engine). Forwarded so the promotion A/B can flip it.
+  # Audited: no stale value.
+  [ -n "${DSV41_INDEXER_HIER:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER=$DSV41_INDEXER_HIER"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
