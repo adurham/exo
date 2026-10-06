@@ -2672,6 +2672,10 @@ for NODE in "${NODES[@]}"; do
   # OFF in the engine). Forwarded so the promotion A/B can flip it.
   # Audited: no stale value.
   [ -n "${DSV41_INDEXER_HIER:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER=$DSV41_INDEXER_HIER"
+  # DSV41_ASYNC_EVAL: mlx-lm's mx.async_eval pipelining in the v41 forward
+  # (read at import; default 1). Forwarded for the prefill-bubble A/B.
+  # Audited: no stale value.
+  [ -n "${DSV41_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV DSV41_ASYNC_EVAL=$DSV41_ASYNC_EVAL"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
