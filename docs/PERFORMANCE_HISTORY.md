@@ -10710,3 +10710,25 @@ All arms on `a7b62acdc` (deploy/next6, mlx-lm 67026d0), same shapes
   ran at qt=64. C1's effect is therefore isolated cleanly. A REAL C2 test needs
   `DSV41_SPARSE_QTILE=256` + `DSV41_SPARSE_BUDGET_MB=256` (raises the tile cap):
   **Arm 4 = C1 + real C2 launched** to answer whether bigger tiles help on top.
+
+## 2026-10-06 — sparse-attn winner SHIPPED: defaults QTILE/BUDGET/CHUNK = 256, COLSPLIT ON (battery CLEAN)
+
+4-arm A/B on deploy/next6 (fresh 100K / delta 100K->200K; pre-M2-era delta baseline 338.8):
+
+| arm | config | fresh | delta | verdict |
+|---|---|---|---|---|
+| Arm 1 | CHUNK=256 only (QTILE clamp = qt64) | 243.9 | 391.1 | neutral (isolates C1) |
+| Arm 2 | + C3 async fence | 230.9 | 361.5 | **REGRESSION -6/-8%; C3 stays OFF forever** |
+| Arm 3 | + C1 colsplit | 248.9 | 398.5 | +2% (C1 clean effect) |
+| **Arm 4** | **C1 + real QTILE/BUDGET/CHUNK=256** | **252.5** | **401.7** | **+3.0% fresh / +2.9% delta vs the M2 build; WINNER** |
+
+Battery on the exact Arm-4 config: **CLEAN** (needles 6/6, tools 10/10, prose 0 DIRTY /
+0 REVIEW, park True in 8s). Promoted: mlx-lm main carries the defaults (QTILE 64->256,
+BUDGET_MB 64->256, PREFILL_CHUNK 64->256, COLSPLIT default-ON); C3 gate remains as a
+dormant OFF-switch for reference.
+
+Mechanism (verified in source): C1 removes the two-source double-gather + where-select
+(~2.7 GB/call at chunk 64) by routing each column range to its own source with an
+executed boundary check + fallback; C2 (real qt=256) quarters the per-tile fence count
+(32->8 per call) and quadruples in-tile GEMM M. C3's async fence let the queue/allocator
+pressure grow -> -6/-8% (the blocking per-tile eval is load-bearing at prefill).
