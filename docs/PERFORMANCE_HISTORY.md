@@ -10612,3 +10612,27 @@ The M2 win scales with the indexer share vs depth exactly as the attribution pre
 peaks 115-117 GB mid-rung, steady 113 GB, no kills. The r1m delta (290K rows to
 1.04M) is running — that rung also proves the re-bill (base chunks through the
 deepest offset) and the end-to-end 1M context.
+
+## 2026-10-06 — 1M SHIP-GATE SOAK COMPLETE on the final build (a2b6fc96b): 1M served end-to-end, all rungs green
+
+The full ladder on the exact final artifact (M2 default-ON + framefix + re-bill + ladder +
+fences + spans; mlx-lm 05285c4):
+
+| rung | refed | result | vs prior build |
+|---|---|---|---|
+| r160 (cold 160K) | 159,995 fresh | 200, 720.5 s / 222.1 tok/s | depth-invariant fresh rate |
+| r500 (340K delta) | 340,237 | 200, **2,622.7 s / 129.7 rows/s** | 3,285.5 s -> **+25.3%** |
+| r750 (250K delta) | 250,271 | 200, **2,681.1 s / 93.3 rows/s** | 3,912.0 s -> **+45.9%** |
+| **r1m (290K delta)** | 290,395 | **200, 3,996.8 s / 72.7 rows/s** | **never completed pre-fix** (killed at 5h07m; pre-M2 extrapolation ~60 rows/s) |
+| over (1.1M) | — | 500 in 1.7 s, clean capacity refusal | same as before |
+
+**THE 1M CONTEXT IS PROVEN END-TO-END ON THE FINAL BUILD**: `prompt_tokens: 1,039,963`,
+finish=stop, 750K->1.04M depth at 72.7 rows/s, memory envelope 113-120 GB peaks with zero
+kills. The re-bill's effect is visible in the schedule: base=2048 chunks carried through
+the deepest offsets (the controls line), vs the old shrink to 1024 at 1M.
+
+Full campaign depth curve on the final build (rows/s of refed rows):
+fresh 222-245 | @~150K avg 172->198 | @~330K avg 130 | @~625K avg 93 | @~900K avg 73.
+Monotonic, no collapse, no kills — the pre-fix curve was 16-56 rows/s with multi-hour
+stalls. The remaining gap to the 400 tok/s target lives in the attributed non-indexer
+terms (sdpa 31%, ffn 19%, allsum 6-9%) + depth-scaled SDPA — next levers, not this build's.
