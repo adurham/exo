@@ -10732,3 +10732,105 @@ Mechanism (verified in source): C1 removes the two-source double-gather + where-
 executed boundary check + fallback; C2 (real qt=256) quarters the per-tile fence count
 (32->8 per call) and quadruples in-tile GEMM M. C3's async fence let the queue/allocator
 pressure grow -> -6/-8% (the blocking per-tile eval is load-bearing at prefill).
+
+## 2026-10-06 — FINAL SHIP-GATE SOAK COMPLETE on next7 (all levers baked as defaults)
+
+Deploy `929dcaff4` (deploy/next7) / mlx-lm `2e4b828` — framefix + M2 default-ON +
+re-bill + sparse winner (C1+C2 defaults) — **no env knobs**. Full ladder green:
+
+| rung | next7 | prev build | gain | rate |
+|---|---|---|---|---|
+| r160 (cold 160K) | 688.7 s | 720.5 | **+4.6%** | 232.3 tok/s |
+| r500 (340K delta) | 2,530.0 s | 2,622.7 | **+3.7%** | 134.5 rows/s |
+| r750 (250K delta) | 2,665.5 s | 2,681.1 | +0.6% | 93.9 rows/s |
+| r1m (290K delta) | 3,959.7 s | 3,996.8 | +0.9% | **73.3 rows/s** |
+| over-cap | 500 in 4.7 s | — | clean refusal | — |
+
+1M context served end-to-end again (1,039,963 tokens, `turn reuse` clean: prefill=290395
+reuse=749568). Memory 111-120 GB peaks, zero kills.
+
+**Cumulative journey (fresh feeds):** 222 (pre-framefix, when nothing collapsed oddly)
+→ 245 (framefix) → 252.5 (sparse winner, A/B shape) — and deep deltas went from
+16-56 rows/s crawls/stalls (pre-framefix) to 73-134 rows/s monotonic with the
+M2 + re-bill + sparse stack.
+
+Note the gain pattern: the sparse winner's fresh-feed win (+3-4.6%) shows at every depth,
+while the deepest rung's delta gain (+0.9%) is bounded by the remaining sdpa/ffn
+terms — consistent with the attribution (the indexer term is gone at the margin;
+what's left is flat-cost sdpa and MoE at the physics floor).
+
+## 2026-10-06 — sparse-attn microbench decomposition (next-tier attack, part 1)
+
+Isolated benches on the studio at production shapes (m=2048 rows/call, h=64, d=512, k=640
+(128 window + 512 topk), qt=256) — the first ground-truth per-component numbers
+(the sync-span 78 ms included ~40 ms drain/dispatch artifact):
+
+| component | ms/tile | ×8 tiles |
+|---|---|---|
+| gather (colsplit path, both sources) | ~0.6-0.8 | ~5-6 |
+| QK^T | 0.98 | 7.8 |
+| softmax chain | 0.50 | 4.0 |
+| PV (bf16 in `kvc` dtype; fp32 weights) | 0.89-2.2 | 7.1-17.3 |
+| **measured full call** | | **38.6** |
+| dispatch/compile/alloc overhead (residual) | | ~8-15 |
+
+**Verified dead ends (each measured):** concat-vs-slice-assign (0.887 vs 1.651 — slice
+assign slower); QK-split+concat-logits (bit-exact for QK, saves 5 ms isolated but the
+concat overlaps in-pipeline); PV column-split (NOT bit-exact, max|d| 4.6e-5 fp32);
+`mx.gather_mm` (batch-level gather semantics, cannot express per-query top-k);
+tile qt sweep 64→2048 (42.9→37.9 — ~1% for >4× memory); fence variants (all equal);
+C1 colsplit saves 11.5% of the body (5.1 ms/call) — the shipped win, now measured.
+Gather is efficient: 245 GB/s sustained on the comp source (my earlier 58 GB/s figure
+conflated body time with gather time — corrected here).
+
+**Consequence:** sparse-attn micro-levers are exhausted. The remaining targets are
+(i) the chunk-size/M-per-expert question — July's 4096 regression was measured under
+the OLD stack (materialized indexer row, old fences, old chunk policy) and 3 of those
+conditions no longer exist; retest in flight; (ii) the "non-compute gap" (dispatch/eval/
+alloc ~50% of per-chunk wall at 100K) — diffusely spread; (iii) MoE tail re-span
+(attribution-only, being built).
+
+## 2026-10-06 — chunk=4096 retest on the NEW stack: +1.5% fresh, battery CLEAN — old verdict falsified
+
+The July 2026 verdict ("4096 slower at every level; breaks quality") was measured on the
+v4-era stack: materialized indexer row, 2-layer fences, the old chunk policy, no M2,
+no sparse tiles, no re-bill. Every one of those conditions has changed. Retest on next7
+(929dcaff4, all levers default):
+
+| shape | shipped 2048 | chunk=4096 | delta |
+|---|---|---|---|
+| fresh 100K | 252.5 | **256.4** | **+1.5%** |
+| delta 100K->200K | 401.7 | **403.8** | **+0.5%** |
+| battery (350K, all phases) | — | **CLEAN** | needles 6/6, tools 10/10, prose 0 DIRTY/0 REVIEW, park True 15s |
+
+The "breaks quality" component of the old verdict is FALSIFIED (battery clean at 350K
+with the full detector set). The performance component is inverted. Note the historical
+context: the original 4096 warning ALSO had a cold-start false-positive history
+("4096 earlier appeared to break quality but was a COLD-START transient" per the July
+notes) -- the modern evidence is unambiguous.
+
+Promotion decision: keep 4096 as the documented override for now; promote to default
+with the next deploy that gets a depth-soak validation (r500/r750/r1m), since the
+deep end is where the old crossover logic lived.
+
+## 2026-10-06 — PV32=0 + chunk=4096: fresh 263.6 (+4.4% over shipped), delta 413.3 (+2.9%); battery gating
+
+Isolated bench first (idle GPUs): the sparse body drops 38.7 -> 29.4 ms/call (24%) when
+`DSV41_SPARSE_PV32=0` (bf16 softmax weights instead of the fp32-promoted PV). On the wire
+(fresh 100K / delta, on top of chunk=4096):
+
+| config | fresh | delta |
+|---|---|---|
+| shipped (next7 defaults) | 252.5 | 401.7 |
+| + chunk=4096 | 256.4 | 403.8 |
+| + chunk=4096 + PV32=0 | **263.6** | **413.3** |
+
+The PV32=0 gain (+2.8% over the 4096 arm) exceeds the sparse share arithmetic (~31% of
+wall x 24% of body = ~7% of prefill in the sparse term alone) -- the per-tile PV savings
+also shrink the inter-tile drain, compounding.
+
+QUALITY RISK: PV32=0 is the knob the module docstring calls "the single largest precision
+loss in the tiled path" (bf16 carries 8 mantissa bits; ~0.4%/weight error compounding
+across layers). It shipped ON for safety and was NEVER A/B'd against the battery --
+this run is that missing test. Decision: promote ONLY on a CLEAN battery at 350K
+(the needle/detector set is the instrument for exactly this error class).
