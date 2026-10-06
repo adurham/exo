@@ -2668,6 +2668,10 @@ for NODE in "${NODES[@]}"; do
   # per-model quality battery. Unset = the module default (bf16 since the
   # perf/dsv41-bf16-score-row merge); =0 forces the fp32 row for A/B.
   [ -n "${DSV41_INDEXER_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_ROW_BF16=$DSV41_INDEXER_ROW_BF16"
+  # DSV41_ASYNC_EVAL: mlx-lm's mx.async_eval pipelining in the v41 forward
+  # (read at import; default 1). Forwarded for the prefill-bubble A/B.
+  # Audited: no stale value.
+  [ -n "${DSV41_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV DSV41_ASYNC_EVAL=$DSV41_ASYNC_EVAL"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
