@@ -351,10 +351,15 @@ def test_engine_prefill_fence_env_four(monkeypatch: pytest.MonkeyPatch):
 
 
 def _schedule(total: int, base: int, budget: int, floor: int = 128) -> list[int]:
-    """Independent re-derivation of the budget schedule (for the loop test)."""
+    """Independent re-derivation of the budget schedule (for the loop test).
+
+    Bills the indexer score row at its DEPLOYED dtype via ``s_._INDEXER_ROW_BYTES``
+    (2 under the shipped bf16 row; 4 for fp32) -- a hard-coded 4 was the stale
+    expectation that broke once the bf16-aware budget shipped.
+    """
     off, out = 0, []
     while off < total:
-        rows = min(base, max(floor, budget // (4 * max(off, 1))))
+        rows = min(base, max(floor, budget // (s_._INDEXER_ROW_BYTES * max(off, 1))))
         step = max(1, min(rows, total - off))
         out.append(step)
         off += step
@@ -425,8 +430,9 @@ def test_engine_prefill_chunk_schedule_follows_the_budget(monkeypatch: pytest.Mo
     off = 0
     for step in model.rows:
         # Above the floor the transient score row must fit the budget; at the
-        # floor the policy accepts the (possibly over-budget) minimum.
-        assert step * max(off, 1) * 4 <= budget or step == 128
+        # floor the policy accepts the (possibly over-budget) minimum. Billed
+        # at the DEPLOYED row dtype (bf16 = 2 shipped).
+        assert step * max(off, 1) * s_._INDEXER_ROW_BYTES <= budget or step == 128
         off += step
 
 
