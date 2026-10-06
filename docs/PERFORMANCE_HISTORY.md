@@ -10732,3 +10732,29 @@ Mechanism (verified in source): C1 removes the two-source double-gather + where-
 executed boundary check + fallback; C2 (real qt=256) quarters the per-tile fence count
 (32->8 per call) and quadruples in-tile GEMM M. C3's async fence let the queue/allocator
 pressure grow -> -6/-8% (the blocking per-tile eval is load-bearing at prefill).
+
+## 2026-10-06 — FINAL SHIP-GATE SOAK COMPLETE on next7 (all levers baked as defaults)
+
+Deploy `929dcaff4` (deploy/next7) / mlx-lm `2e4b828` — framefix + M2 default-ON +
+re-bill + sparse winner (C1+C2 defaults) — **no env knobs**. Full ladder green:
+
+| rung | next7 | prev build | gain | rate |
+|---|---|---|---|---|
+| r160 (cold 160K) | 688.7 s | 720.5 | **+4.6%** | 232.3 tok/s |
+| r500 (340K delta) | 2,530.0 s | 2,622.7 | **+3.7%** | 134.5 rows/s |
+| r750 (250K delta) | 2,665.5 s | 2,681.1 | +0.6% | 93.9 rows/s |
+| r1m (290K delta) | 3,959.7 s | 3,996.8 | +0.9% | **73.3 rows/s** |
+| over-cap | 500 in 4.7 s | — | clean refusal | — |
+
+1M context served end-to-end again (1,039,963 tokens, `turn reuse` clean: prefill=290395
+reuse=749568). Memory 111-120 GB peaks, zero kills.
+
+**Cumulative journey (fresh feeds):** 222 (pre-framefix, when nothing collapsed oddly)
+→ 245 (framefix) → 252.5 (sparse winner, A/B shape) — and deep deltas went from
+16-56 rows/s crawls/stalls (pre-framefix) to 73-134 rows/s monotonic with the
+M2 + re-bill + sparse stack.
+
+Note the gain pattern: the sparse winner's fresh-feed win (+3-4.6%) shows at every depth,
+while the deepest rung's delta gain (+0.9%) is bounded by the remaining sdpa/ffn
+terms — consistent with the attribution (the indexer term is gone at the margin;
+what's left is flat-cost sdpa and MoE at the physics floor).
