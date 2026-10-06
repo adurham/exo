@@ -10789,3 +10789,26 @@ the OLD stack (materialized indexer row, old fences, old chunk policy) and 3 of 
 conditions no longer exist; retest in flight; (ii) the "non-compute gap" (dispatch/eval/
 alloc ~50% of per-chunk wall at 100K) — diffusely spread; (iii) MoE tail re-span
 (attribution-only, being built).
+
+## 2026-10-06 — chunk=4096 retest on the NEW stack: +1.5% fresh, battery CLEAN — old verdict falsified
+
+The July 2026 verdict ("4096 slower at every level; breaks quality") was measured on the
+v4-era stack: materialized indexer row, 2-layer fences, the old chunk policy, no M2,
+no sparse tiles, no re-bill. Every one of those conditions has changed. Retest on next7
+(929dcaff4, all levers default):
+
+| shape | shipped 2048 | chunk=4096 | delta |
+|---|---|---|---|
+| fresh 100K | 252.5 | **256.4** | **+1.5%** |
+| delta 100K->200K | 401.7 | **403.8** | **+0.5%** |
+| battery (350K, all phases) | — | **CLEAN** | needles 6/6, tools 10/10, prose 0 DIRTY/0 REVIEW, park True 15s |
+
+The "breaks quality" component of the old verdict is FALSIFIED (battery clean at 350K
+with the full detector set). The performance component is inverted. Note the historical
+context: the original 4096 warning ALSO had a cold-start false-positive history
+("4096 earlier appeared to break quality but was a COLD-START transient" per the July
+notes) -- the modern evidence is unambiguous.
+
+Promotion decision: keep 4096 as the documented override for now; promote to default
+with the next deploy that gets a depth-soak validation (r500/r750/r1m), since the
+deep end is where the old crossover logic lived.
