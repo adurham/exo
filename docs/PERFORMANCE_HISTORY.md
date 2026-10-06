@@ -10812,3 +10812,25 @@ notes) -- the modern evidence is unambiguous.
 Promotion decision: keep 4096 as the documented override for now; promote to default
 with the next deploy that gets a depth-soak validation (r500/r750/r1m), since the
 deep end is where the old crossover logic lived.
+
+## 2026-10-06 — PV32=0 + chunk=4096: fresh 263.6 (+4.4% over shipped), delta 413.3 (+2.9%); battery gating
+
+Isolated bench first (idle GPUs): the sparse body drops 38.7 -> 29.4 ms/call (24%) when
+`DSV41_SPARSE_PV32=0` (bf16 softmax weights instead of the fp32-promoted PV). On the wire
+(fresh 100K / delta, on top of chunk=4096):
+
+| config | fresh | delta |
+|---|---|---|
+| shipped (next7 defaults) | 252.5 | 401.7 |
+| + chunk=4096 | 256.4 | 403.8 |
+| + chunk=4096 + PV32=0 | **263.6** | **413.3** |
+
+The PV32=0 gain (+2.8% over the 4096 arm) exceeds the sparse share arithmetic (~31% of
+wall x 24% of body = ~7% of prefill in the sparse term alone) -- the per-tile PV savings
+also shrink the inter-tile drain, compounding.
+
+QUALITY RISK: PV32=0 is the knob the module docstring calls "the single largest precision
+loss in the tiled path" (bf16 carries 8 mantissa bits; ~0.4%/weight error compounding
+across layers). It shipped ON for safety and was NEVER A/B'd against the battery --
+this run is that missing test. Decision: promote ONLY on a CLEAN battery at 350K
+(the needle/detector set is the instrument for exactly this error class).
