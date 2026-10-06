@@ -10687,3 +10687,48 @@ relaunch A/B (established shapes: fresh 100K / delta 100K->200K; baselines 243/3
 Arm1 C2=256; Arm2 C2=256+C3; Arm3 C2+C3+C1. Winner -> live battery -> promote.
 Estimated combined ~5-10% e2e; the load-bearing lever to 400 remains the streamed
 indexer pass (42.9% of span).
+
+## 2026-10-06 — sparse-attn A/B arms on deploy/next6: C3 regression, C1 +2%, C2 real-test in flight
+
+All arms on `a7b62acdc` (deploy/next6, mlx-lm 67026d0), same shapes
+(fresh 100K / delta 100K->200K), established baselines fresh 245.3 / delta 390.2:
+
+| arm | knobs | fresh | delta |
+|---|---|---|---|
+| **Arm 1** | CHUNK=256 | 243.9 (-0.6%) | 391.1 (+0.2%) |
+| **Arm 2** | CHUNK=256 + ASYNC_FENCE=1 | **230.9 (-5.9%)** | **361.5 (-7.6%)** |
+| **Arm 3** | CHUNK=256 + COLSPLIT=1 | **248.9 (+2.0% vs Arm1)** | **398.5 (+1.9% vs Arm1)** |
+
+**Findings:**
+- **C3 (async per-tile fence): REGRESSION (-6 to -8%).** The blocking per-tile
+  `mx.eval` is load-bearing at prefill — likely bounds allocator pressure/queue depth.
+  C3 stays default-OFF permanently; the gate remains for reference.
+- **C1 (column-split gather): REAL +2%.** Arm1 vs Arm3 differ ONLY by COLSPLIT=1, so
+  this is cleanly C1 (the double-gather removal ~1.35 GB/call at chunk 64).
+- **C2 caveat discovered post-measurement:** `plan_tiles` does `qt = min(chunk, _QTILE)`
+  where `_QTILE` defaults 64 — so CHUNK=256 alone was clamped to 64 and Arms 1-3 all
+  ran at qt=64. C1's effect is therefore isolated cleanly. A REAL C2 test needs
+  `DSV41_SPARSE_QTILE=256` + `DSV41_SPARSE_BUDGET_MB=256` (raises the tile cap):
+  **Arm 4 = C1 + real C2 launched** to answer whether bigger tiles help on top.
+
+## 2026-10-06 — sparse-attn winner SHIPPED: defaults QTILE/BUDGET/CHUNK = 256, COLSPLIT ON (battery CLEAN)
+
+4-arm A/B on deploy/next6 (fresh 100K / delta 100K->200K; pre-M2-era delta baseline 338.8):
+
+| arm | config | fresh | delta | verdict |
+|---|---|---|---|---|
+| Arm 1 | CHUNK=256 only (QTILE clamp = qt64) | 243.9 | 391.1 | neutral (isolates C1) |
+| Arm 2 | + C3 async fence | 230.9 | 361.5 | **REGRESSION -6/-8%; C3 stays OFF forever** |
+| Arm 3 | + C1 colsplit | 248.9 | 398.5 | +2% (C1 clean effect) |
+| **Arm 4** | **C1 + real QTILE/BUDGET/CHUNK=256** | **252.5** | **401.7** | **+3.0% fresh / +2.9% delta vs the M2 build; WINNER** |
+
+Battery on the exact Arm-4 config: **CLEAN** (needles 6/6, tools 10/10, prose 0 DIRTY /
+0 REVIEW, park True in 8s). Promoted: mlx-lm main carries the defaults (QTILE 64->256,
+BUDGET_MB 64->256, PREFILL_CHUNK 64->256, COLSPLIT default-ON); C3 gate remains as a
+dormant OFF-switch for reference.
+
+Mechanism (verified in source): C1 removes the two-source double-gather + where-select
+(~2.7 GB/call at chunk 64) by routing each column range to its own source with an
+executed boundary check + fallback; C2 (real qt=256) quarters the per-tile fence count
+(32->8 per call) and quadruples in-tile GEMM M. C3's async fence let the queue/allocator
+pressure grow -> -6/-8% (the blocking per-tile eval is load-bearing at prefill).
