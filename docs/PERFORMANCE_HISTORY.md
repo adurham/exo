@@ -10636,3 +10636,54 @@ fresh 222-245 | @~150K avg 172->198 | @~330K avg 130 | @~625K avg 93 | @~900K av
 Monotonic, no collapse, no kills — the pre-fix curve was 16-56 rows/s with multi-hour
 stalls. The remaining gap to the 400 tok/s target lives in the attributed non-indexer
 terms (sdpa 31%, ffn 19%, allsum 6-9%) + depth-scaled SDPA — next levers, not this build's.
+
+## 2026-10-06 — 400 tok/s attack: three-reader deep dive + plan (Fable-reviewed)
+
+**Measured baseline (final build `a2b6fc96b`/`05285c4`; sync spans @350K, both nodes):**
+attn 81.0% total; attn.indexer.score 42.9% (BEING REMOVED by the shipped streamed pass
+-- not a target), attn.sdpa 31.0% (78 ms/call), ffn 19.0% (48 ms/call), attn.all_sum 6.9%.
+Rates: 245 rows/s fresh, ~130 @330K, ~73 @900K+.
+
+**Three parallel READ-ONLY deep reads (each file:line-verified):**
+
+1. **sdpa path**: a hand-tiled loop (`sparse_attention.py`), NOT fused SDPA/steel.
+qt=64 rows/tile, kt=640 cols (window 128 + top-512) in ONE key tile; 32 tiles/call,
+each ending in a BLOCKING `mx.eval` fence; per tile: 2 batched matmuls + fp32 logits
+materialization (~10 MB) + ~6 elementwise passes; two-source gather `_gather_split`
+gathers BOTH sources for every row then where-selects (~80 MB/tile, ~2.7 GB/call).
+Effective ~2.2 TFLOPS in-body = memory/launch-bound, NOT GEMM-bound (Fable's arithmetic:
+GEMM share ~19.5 ms of the 78; the rest is gather traffic + elementwise + 32 host syncs).
+NOTHING grows with depth per-call => cuts pay at every depth.
+
+2. **ffn 19%**: REAL `switch_mlp` compute at the small-M physics floor (roofline
+40-55 ms/call vs 48 measured); the child spans under-report 20-60x due to MLX
+command-buffer commit granularity + sync-span drain (same artifact class documented
+twice in repo). No cuttable compute; free win = re-span the MoE tail in v41
+(v4 had moe.post_combine + moe.all_sum; v41 dropped them) -- attribution-only.
+
+3. **attn.all_sum 6.9%**: span OVER-states; transport floor for its 20.97 MB bf16
+payload ~1.4-3.5 ms/call vs 17.5 measured (sync/launch/drain inflation). True
+addressable ~2-3%, only via pipelining (high effort). moe.all_sum ships fp32
+(41.9 MB; 2x cut exists, <1% wall at prefill -- deferred).
+
+**Fable go/no-go: GO** with reorder: (i) merge C2 enabler first; (ii) hold C1 until the
+fused-SDPA question is answered; (iii) C1 last (only real correctness risk -- boundary
+invariant must be an executed assertion + fallback).
+
+**Fused-SDPA spike (answered same session):** the fork's `MLX_SDPA_D512_FUSED` path
+(bq=8/bk=8 min-tile kernel, opt-in env) exists BUT cannot serve this path: fused SDPA
+operates on a SHARED key set per query block, while the sparse path's gathered tile
+carries a PER-QUERY-ROW key set (each row has its own top-512). The KV tile [Tq, Tk, d]
+is not a [H, Tk, d] attention input at all -- the gather IS the sparsity. Window-block
+subcase (shared 128-col prefix) too small to matter (20% of columns). **Conclusion:
+fused SDPA stays inapplicable; the levers are C1/C2/C3 in the tiled body.** (Fable's
+fallback suggestions, `mx.compile` on the tile body = already ON (`DSV41_SPARSE_COMPILE`
+default 1), and pre-scaling Q = negligible at these sizes -- noted, no action.)
+
+**Build/verify plan:** C2 enabler MERGED (`7ff65a3`, parity-proven bit-identical across
+chunk 64/256/2048). C1+C3 dispatched as one gated branch (`perf/dsv41-sparse-gather-gate`,
+both default-OFF, invariant-fallback test required). Next: assemble deploy/next6; 3-arm
+relaunch A/B (established shapes: fresh 100K / delta 100K->200K; baselines 243/390):
+Arm1 C2=256; Arm2 C2=256+C3; Arm3 C2+C3+C1. Winner -> live battery -> promote.
+Estimated combined ~5-10% e2e; the load-bearing lever to 400 remains the streamed
+indexer pass (42.9% of span).
