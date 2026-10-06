@@ -10411,3 +10411,21 @@ forward) launched 19:24; verification battery:
 cost is still real and is exactly what M2 (hierarchical indexer) targets. The soak
 (r500/r750/r1m) on this build is the first true depth curve; expect it to replace the
 soak2-artifact numbers (110/75/56 tok/s were 1-row-collapse artifacts).
+
+## 2026-10-05 (night) — soak3-framefix r500: deep delta completes at 103.6 rows/s (pre-fix: 2h+ stall)
+
+On the framefix deploy `019b590ed` (fresh 100K = 245 rows/s, delta +100K @100->200K = 172 rows/s):
+
+- **r160 rung:** full 160K prompt served as a **251-row refeed in 4.1 s** (ladder rung on the
+  resident verify conversation: `turn reuse: prompt=159995 prefill=251 reuse=159744`).
+- **r500 rung:** HTTP 200, 499,981 tokens; delta = **340,237 rows refed** on 159,987 resident;
+  **3,285.5 s = 103.6 rows/s** at 160K->500K depth. Pre-framefix, this exact shape (1-row chunk
+  collapse) was killed after 2h+ without completing (~16 rows/s effective). For scale: soak2's
+  r500 (500K FULL cold on the pre-ladder build) = 109.7 rows/s — the framefix removed the
+  collapse; the residual depth scaling (~245 -> 172 -> ~104 rows/s) is the intrinsic cost M2 targets.
+- **Memory during the deep delta:** peak phys_footprint **133 GB** both nodes (m4-2 oscillated
+  to 128 GB mid-rung), swap 10.5/11 GB used, compressor absorbed; NO watchdog kill, NO OOM;
+  settled 104-105 GB after. Deep deltas at 500K depth push the transient stack ~20 GB over steady.
+- **Honest notes:** r500 completion content came back empty (32-token budget spent in the
+  reasoning channel) — it is a throughput rung; quality coverage at depth remains the 350K
+  battery. r750/r1m/over rungs run after.
