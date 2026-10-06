@@ -10353,3 +10353,38 @@ checkpoint ladder's sustained all-gather traffic at depth is a trigger (correlat
 degradation onset with rung depth), and whether the jaccl REliable path's retransmit
 counters move during degradation — that would give a driver-side root cause instead
 of a reboot ritual.
+
+## 2026-10-05 (correction, evening) — "wedge" was WRONG: prefill chunk policy mixed frames; delta feeds pinned to 1-row chunks
+
+**The real root cause of every "slow" number today** (and soak-2's r750/r1m):
+
+`engine_prefill` passed the DELTA's row count as `choose_prefill_step`'s ``total`` while
+``offset`` is the ABSOLUTE cache position (fed by the session cache). For a delta of D
+rows on top of O resident rows, ``remaining = D - offset`` goes negative as soon as
+``offset > D`` — pinning the policy to its **1-row floor for the whole tail**: every
+remaining row fed as its own single-row forward. Consequences, all re-explained:
+
+- soak2 r750: O=500K resident, D=250K delta -> the ENTIRE feed at 1-row chunks (the
+  166-minute "166 min for 250K rows = 25 tok/s" figure; the r500 number was ~110
+  because its delta 340K > offsets crossed later).
+- r1m: 5h07m crawl + the watchdog SIGKILL (the "hang" was a 1-row-chunk grind).
+- Today: r160-resume (O=50K, D=110K -> ~50K rows at 1-row), r500 (O=160K, D=340K),
+  the 150K feed (O=50K, D=100K), S2's 1361-row refeed = 68.5s, T3's 537-row = 10.2s.
+- **The "RDMA/TB wedge" narrative was a MISREAD**: 1-row chunks mean per-chunk
+  overhead dominates -> GPU util ~93% with only ~60 tok/s useful and ~30W draw (vs
+  ~20W at full chunk size). The reboots "fixing" it were coincidence: after every
+  reboot the first (fresh, offset-0) feed ran at full speed; the next DELTA feed
+  crawled again. Fresh feeds coincidentally have O=0 where the frames agree.
+- Counter-check that confirmed it: every fast number today (268/271 tok/s) was a
+  FRESH feed; every slow number was a delta with O > D at some point in the loop.
+
+**Fix (exo main `a6b4c93b7`):** pass same-frame inputs — ``offset, offset + (total - done)``
+— so a resumed session's delta follows the same budget schedule as a fresh feed.
+Unit regression (RED on the old code, GREEN on the fix) added to
+`test_dsv41_session.py::test_engine_prefill_delta_feed_keeps_the_budget_schedule`.
+227 tests green; ruff clean; basedpyright zero-new (127 <= 128 before).
+
+**Implication for soak-2's corrected curve:** the earlier "correction" entry said
+r500/r750 were "full re-prefills" (reuse-collapse). With BOTH bugs now fixed
+(LCP collapse AND the delta 1-row tail), the true depth curve must be re-measured:
+the old 110/75/56 tok/s numbers are artifacts of these two bugs, not physics.
