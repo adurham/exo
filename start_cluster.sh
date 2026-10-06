@@ -2672,6 +2672,19 @@ for NODE in "${NODES[@]}"; do
   # OFF in the engine). Forwarded so the promotion A/B can flip it.
   # Audited: no stale value.
   [ -n "${DSV41_INDEXER_HIER:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER=$DSV41_INDEXER_HIER"
+  # DSV41_SPARSE_QTILE/KTILE/FENCE/WDTYPE/PV32/BUDGET_MB: the tiled sparse-attn
+  # knobs (mlx-lm deepseek_v41/sparse_attention.py, read at import). Forwarded
+  # for the sdpa-depth A/B. Audited: no stale values anywhere in the repo/shell.
+  [ -n "${DSV41_SPARSE_QTILE:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_QTILE=$DSV41_SPARSE_QTILE"
+  [ -n "${DSV41_SPARSE_KTILE:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_KTILE=$DSV41_SPARSE_KTILE"
+  [ -n "${DSV41_SPARSE_FENCE:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE=$DSV41_SPARSE_FENCE"
+  [ -n "${DSV41_SPARSE_WDTYPE:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_WDTYPE=$DSV41_SPARSE_WDTYPE"
+  [ -n "${DSV41_SPARSE_PV32:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_PV32=$DSV41_SPARSE_PV32"
+  [ -n "${DSV41_SPARSE_BUDGET_MB:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_BUDGET_MB=$DSV41_SPARSE_BUDGET_MB"
+  [ -n "${DSV41_SPARSE_IMPL:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_IMPL=$DSV41_SPARSE_IMPL"
+  [ -n "${DSV41_SPARSE_PREFILL_CHUNK:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_PREFILL_CHUNK=$DSV41_SPARSE_PREFILL_CHUNK"
+  [ -n "${DSV41_SPARSE_COLSPLIT:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_COLSPLIT=$DSV41_SPARSE_COLSPLIT"
+  [ -n "${DSV41_SPARSE_ASYNC_FENCE:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_ASYNC_FENCE=$DSV41_SPARSE_ASYNC_FENCE"
   # DSV41_ASYNC_EVAL: mlx-lm's mx.async_eval pipelining in the v41 forward
   # (read at import; default 1). Forwarded for the prefill-bubble A/B.
   # Audited: no stale value.

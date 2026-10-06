@@ -10556,3 +10556,134 @@ Both within +-0.3% (run-to-run noise). Conclusions:
   (under M2 the score-row transient the 2 GB budget billed no longer exists; the policy
   can re-bill the hierarchical transients so deep chunks stay at base instead of
   shrinking above ~524K offset — candidate M3 item, to be built + validated).
+
+## 2026-10-06 — M3-lite: chunk policy re-billed to the DEPLOYED (M2) transient; deep chunks stay at base to 1M
+
+Follow-on to the M2 ship: the transient-budget chunk policy still charged
+``step * offset * row_bytes`` for the materialized indexer score row — but under the
+shipped M2 default that row does not exist. The real offset-scaling transient is the
+fp32 block-maxima buffer ``[b, n, nb/block]`` plus its negated argpartition twin =
+``2 * 4 / block`` bytes/element = **1 B** at block=8 (vs the billed 2 B bf16 row).
+
+Consequence before the fix: chunks shrank from ~524K offset onward for a buffer that
+no longer exists — at 1M it chose **1024**-row chunks where **2048** is safe (2x the
+drain/collective boundaries per row at the deepest rungs). After the fix (exo main
+`cba5b953e`): chunk stays at base 2048 through 1M; shrinks again only past ~2M.
+
+- The probe now follows the deployed gates (``_HIER``/``_HIER_BLOCK`` read at mlx-lm
+  import, process-lifetime constants) — same discipline as the bf16-row re-bill.
+- Live check on the deploy: ``prefill controls: ... fence_every=2 ...
+  score_row_bytes=1`` — the deployed charge is verifiable from the runner log.
+- Sabotage-proven regression test; 230 scoped tests green; basedpyright 178 -> 177 errors.
+- No change below ~524K offset (previous behavior was already at base there).
+
+This closes the last budget-compensation item from the P1/P2/P5 plan: fence/budget
+compensations that existed to bound the materialized row are now either proven
+neutral (fence spacing) or re-billed to the deployed shape (this change).
+
+## 2026-10-06 — FINAL BATTERY CLEAN on the deployed final candidate (a2b6fc96b) => 1M ship-gate soak next
+
+The exact deployed artifact (exo `a2b6fc96b` = M2 default-ON + framefix + re-bill +
+ladder + fences + spans; mlx-lm `05285c4`), battery at 350K:
+**needles 6/6** (exact/paraphrase/negation/distractor/control/multihop) |
+**tools 10/10** | **prose 0 DIRTY / 0 REVIEW** (20 prompts; hits advisory-only) |
+**park recall True in 8 s** | build 350,124 tok in 2,058.9 s (170 rows/s).
+
+This is the third consecutive CLEAN battery for a precision-relevant build
+(bf16 row, M2, final) — the campaign's gate discipline held end-to-end.
+
+Next: the 1M ship-gate soak on this build (r500 delta -> r750 -> r1m -> over-cap),
+with two live proof points to capture: (a) the re-bill's deep chunk behavior
+(controls should show base-sized chunks through 1M), (b) end-to-end 200/finish on
+a 1M-token feed with the M2 win at the deepest rung.
+
+## 2026-10-06 — 1M ship-gate soak on the final build: r160/r500/r750 land; M2 deep win grows to +46%
+
+Final build `a2b6fc96b` (M2 default-ON + framefix + re-bill + ladder), soak rungs:
+
+| rung | refed | this build | pre-M2 comparator | delta |
+|---|---|---|---|---|
+| r160 (cold 160K) | 159,995 fresh | 720.5 s / 222.1 tok/s | (fresh, depth-invariant) | — |
+| r500 (340K delta) | 340,237 rows | **2,622.7 s / 129.7 rows/s** | 3,285.5 s / 103.6 | **+25.3%** |
+| r750 (250K delta) | 250,271 rows | **2,681.1 s / 93.3 rows/s** | 3,912.0 s / 64.0 | **+45.9%** |
+
+The M2 win scales with the indexer share vs depth exactly as the attribution predicted
+(14.6% -> 42.9% share => +15% -> +25% -> +46% at increasing depths). Memory envelope:
+peaks 115-117 GB mid-rung, steady 113 GB, no kills. The r1m delta (290K rows to
+1.04M) is running — that rung also proves the re-bill (base chunks through the
+deepest offset) and the end-to-end 1M context.
+
+## 2026-10-06 — 1M SHIP-GATE SOAK COMPLETE on the final build (a2b6fc96b): 1M served end-to-end, all rungs green
+
+The full ladder on the exact final artifact (M2 default-ON + framefix + re-bill + ladder +
+fences + spans; mlx-lm 05285c4):
+
+| rung | refed | result | vs prior build |
+|---|---|---|---|
+| r160 (cold 160K) | 159,995 fresh | 200, 720.5 s / 222.1 tok/s | depth-invariant fresh rate |
+| r500 (340K delta) | 340,237 | 200, **2,622.7 s / 129.7 rows/s** | 3,285.5 s -> **+25.3%** |
+| r750 (250K delta) | 250,271 | 200, **2,681.1 s / 93.3 rows/s** | 3,912.0 s -> **+45.9%** |
+| **r1m (290K delta)** | 290,395 | **200, 3,996.8 s / 72.7 rows/s** | **never completed pre-fix** (killed at 5h07m; pre-M2 extrapolation ~60 rows/s) |
+| over (1.1M) | — | 500 in 1.7 s, clean capacity refusal | same as before |
+
+**THE 1M CONTEXT IS PROVEN END-TO-END ON THE FINAL BUILD**: `prompt_tokens: 1,039,963`,
+finish=stop, 750K->1.04M depth at 72.7 rows/s, memory envelope 113-120 GB peaks with zero
+kills. The re-bill's effect is visible in the schedule: base=2048 chunks carried through
+the deepest offsets (the controls line), vs the old shrink to 1024 at 1M.
+
+Full campaign depth curve on the final build (rows/s of refed rows):
+fresh 222-245 | @~150K avg 172->198 | @~330K avg 130 | @~625K avg 93 | @~900K avg 73.
+Monotonic, no collapse, no kills — the pre-fix curve was 16-56 rows/s with multi-hour
+stalls. The remaining gap to the 400 tok/s target lives in the attributed non-indexer
+terms (sdpa 31%, ffn 19%, allsum 6-9%) + depth-scaled SDPA — next levers, not this build's.
+
+## 2026-10-06 — 400 tok/s attack: three-reader deep dive + plan (Fable-reviewed)
+
+**Measured baseline (final build `a2b6fc96b`/`05285c4`; sync spans @350K, both nodes):**
+attn 81.0% total; attn.indexer.score 42.9% (BEING REMOVED by the shipped streamed pass
+-- not a target), attn.sdpa 31.0% (78 ms/call), ffn 19.0% (48 ms/call), attn.all_sum 6.9%.
+Rates: 245 rows/s fresh, ~130 @330K, ~73 @900K+.
+
+**Three parallel READ-ONLY deep reads (each file:line-verified):**
+
+1. **sdpa path**: a hand-tiled loop (`sparse_attention.py`), NOT fused SDPA/steel.
+qt=64 rows/tile, kt=640 cols (window 128 + top-512) in ONE key tile; 32 tiles/call,
+each ending in a BLOCKING `mx.eval` fence; per tile: 2 batched matmuls + fp32 logits
+materialization (~10 MB) + ~6 elementwise passes; two-source gather `_gather_split`
+gathers BOTH sources for every row then where-selects (~80 MB/tile, ~2.7 GB/call).
+Effective ~2.2 TFLOPS in-body = memory/launch-bound, NOT GEMM-bound (Fable's arithmetic:
+GEMM share ~19.5 ms of the 78; the rest is gather traffic + elementwise + 32 host syncs).
+NOTHING grows with depth per-call => cuts pay at every depth.
+
+2. **ffn 19%**: REAL `switch_mlp` compute at the small-M physics floor (roofline
+40-55 ms/call vs 48 measured); the child spans under-report 20-60x due to MLX
+command-buffer commit granularity + sync-span drain (same artifact class documented
+twice in repo). No cuttable compute; free win = re-span the MoE tail in v41
+(v4 had moe.post_combine + moe.all_sum; v41 dropped them) -- attribution-only.
+
+3. **attn.all_sum 6.9%**: span OVER-states; transport floor for its 20.97 MB bf16
+payload ~1.4-3.5 ms/call vs 17.5 measured (sync/launch/drain inflation). True
+addressable ~2-3%, only via pipelining (high effort). moe.all_sum ships fp32
+(41.9 MB; 2x cut exists, <1% wall at prefill -- deferred).
+
+**Fable go/no-go: GO** with reorder: (i) merge C2 enabler first; (ii) hold C1 until the
+fused-SDPA question is answered; (iii) C1 last (only real correctness risk -- boundary
+invariant must be an executed assertion + fallback).
+
+**Fused-SDPA spike (answered same session):** the fork's `MLX_SDPA_D512_FUSED` path
+(bq=8/bk=8 min-tile kernel, opt-in env) exists BUT cannot serve this path: fused SDPA
+operates on a SHARED key set per query block, while the sparse path's gathered tile
+carries a PER-QUERY-ROW key set (each row has its own top-512). The KV tile [Tq, Tk, d]
+is not a [H, Tk, d] attention input at all -- the gather IS the sparsity. Window-block
+subcase (shared 128-col prefix) too small to matter (20% of columns). **Conclusion:
+fused SDPA stays inapplicable; the levers are C1/C2/C3 in the tiled body.** (Fable's
+fallback suggestions, `mx.compile` on the tile body = already ON (`DSV41_SPARSE_COMPILE`
+default 1), and pre-scaling Q = negligible at these sizes -- noted, no action.)
+
+**Build/verify plan:** C2 enabler MERGED (`7ff65a3`, parity-proven bit-identical across
+chunk 64/256/2048). C1+C3 dispatched as one gated branch (`perf/dsv41-sparse-gather-gate`,
+both default-OFF, invariant-fallback test required). Next: assemble deploy/next6; 3-arm
+relaunch A/B (established shapes: fresh 100K / delta 100K->200K; baselines 243/390):
+Arm1 C2=256; Arm2 C2=256+C3; Arm3 C2+C3+C1. Winner -> live battery -> promote.
+Estimated combined ~5-10% e2e; the load-bearing lever to 400 remains the streamed
+indexer pass (42.9% of span).
