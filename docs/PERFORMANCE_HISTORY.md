@@ -10510,3 +10510,26 @@ _HIER=False (they exercise the tiled/untiled paths). 170/170 mlx-lm suite green.
 
 This banks the second precision-changing ship of the campaign after the bf16 row:
 both went through the same live-battery gate and both passed.
+
+## 2026-10-06 — M2 deep-delta comparator: +26.7% at 160K->500K (win grows with depth)
+
+Same shape, same build (0207d7c0f/05285c4), M2 arm default-ON vs the HIER=0 soak3-framefix
+comparator. Verified like-for-like: both runs refed **340,237 rows** on **159,744 reuse**
+(`turn reuse: prompt=499981 prefill=340237 reuse=159744`).
+
+| depth band | HIER=0 | HIER=1 (M2) | speedup |
+|---|---|---|---|
+| Fresh 100K | 245.3 rows/s | 243.0 (neutral) | -0.9% |
+| Delta 100K->200K | 338.8 tok/s | 390.2 | **+15.2%** |
+| Delta 160K->500K | 3,285.5 s / 103.6 rows/s | **2,593.8 s / 131.2 rows/s** | **+26.7%** |
+
+The win scales with the indexer's share of prefill (attribution: 14.6% -> 42.9% over
+0->350K depth) — removing the materialized `[b,n,nb]` row helps most where that row is
+biggest. Also note the base 160K build on the M2 arm was 714.9 s (223.8 tok/s) — the
+fresh-feed rate is depth-independent and unchanged, as expected.
+
+Updated post-fix depth curve WITH M2 (rows/s of refed rows): 245 fresh / 172->~198
+@150K avg (HIER +15%) / 104->131 @330K avg (HIER +27%).
+Remaining known levers (from attribution): sdpa 31%, ffn 19%, all_sum 6-9%, and the
+chunk-schedule/eval-boundary overhead the sync spans can't see (M3 territory: fence +
+budget compensations now removable since the row they existed for is gone).
