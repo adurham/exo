@@ -10411,3 +10411,148 @@ forward) launched 19:24; verification battery:
 cost is still real and is exactly what M2 (hierarchical indexer) targets. The soak
 (r500/r750/r1m) on this build is the first true depth curve; expect it to replace the
 soak2-artifact numbers (110/75/56 tok/s were 1-row-collapse artifacts).
+
+## 2026-10-05 (night) — soak3-framefix r500: deep delta completes at 103.6 rows/s (pre-fix: 2h+ stall)
+
+On the framefix deploy `019b590ed` (fresh 100K = 245 rows/s, delta +100K @100->200K = 172 rows/s):
+
+- **r160 rung:** full 160K prompt served as a **251-row refeed in 4.1 s** (ladder rung on the
+  resident verify conversation: `turn reuse: prompt=159995 prefill=251 reuse=159744`).
+- **r500 rung:** HTTP 200, 499,981 tokens; delta = **340,237 rows refed** on 159,987 resident;
+  **3,285.5 s = 103.6 rows/s** at 160K->500K depth. Pre-framefix, this exact shape (1-row chunk
+  collapse) was killed after 2h+ without completing (~16 rows/s effective). For scale: soak2's
+  r500 (500K FULL cold on the pre-ladder build) = 109.7 rows/s — the framefix removed the
+  collapse; the residual depth scaling (~245 -> 172 -> ~104 rows/s) is the intrinsic cost M2 targets.
+- **Memory during the deep delta:** peak phys_footprint **133 GB** both nodes (m4-2 oscillated
+  to 128 GB mid-rung), swap 10.5/11 GB used, compressor absorbed; NO watchdog kill, NO OOM;
+  settled 104-105 GB after. Deep deltas at 500K depth push the transient stack ~20 GB over steady.
+- **Honest notes:** r500 completion content came back empty (32-token budget spent in the
+  reasoning channel) — it is a throughput rung; quality coverage at depth remains the 350K
+  battery. r750/r1m/over rungs run after.
+
+## 2026-10-05 (night) — soak3-framefix r750 (final rung; soak CUT here by decision) + why
+
+- **r750:** HTTP 200, 749,983 tokens; delta refed **250,271 rows in 3,911.96 s = 64.0 rows/s**
+  at 500K->750K depth (`turn reuse: prompt=749983 prefill=250271 reuse=499712`). Pre-framefix
+  this shape was the soak-2 r750 story: ~25 rows/s and near-stall. No watchdog kill; peak
+  footprints ~118 GB then settled 105 GB.
+- **The full post-fix depth curve (rows/s of actually-refed rows):**
+  fresh 100K = 245 | delta 100K->200K = 172 | delta 160K->500K = 103.6 | delta 500K->750K = 64.0.
+  Monotonic depth decay with NO collapse; the pre-fix equivalents were 16-56 rows/s crawls or
+  multi-hour stalls. This is the intrinsic (uncollapsed) curve M2 now targets.
+- **Decision (user):** do NOT soak to 1M on this build. The pending improvements (attribution ->
+  M2 promotion gate -> bubble A/B) are independent of the 1M number, and the far-end 1M proof
+  belongs at the FINAL improved build's ship gate, not on an intermediate build. Soak chain was
+  cut after r750 (soak script killed; in-flight rung finished cleanly; r1m/over never launched).
+
+## 2026-10-06 — ATTRIBUTION MEASURED (sync spans, next4 0207d7c0f/66e7344): indexer exact pass = 42.9-44.2% of deep prefill; M2 GATE PASSED
+
+Method: fresh 350K feed (350,003 tokens, 2,359 s under sync-span serialization —
+shares only, not a throughput number), `EXO_PROFILER=spans EXO_PROFILER_SYNC_SPANS=1`,
+SIGUSR1 dumps every ~7 min, 6 windows. Per-window m4-1 indexer share:
+14.6% → 29.5% → 34.8% → 37.2% → 39.2% → **42.9%** (m4-2 final: **44.2%**), monotone with
+context — the O(context) exact top-k pass, exactly as the M2 design predicted.
+
+Final deep window, both nodes (m4-1 / m4-2):
+- **attn.indexer.score: 42.9% / 44.2%** (avg 539-551 ms per call at ~340K; THE consumer)
+- attn.sdpa: 31.0% / 31.1% (sparse attn over window+compressed set)
+- ffn (moe.switch_mlp + gate): 19.0% / 19.1%
+- attn.all_sum: 6.9% / 5.5%
+- attn.kv_cache, proj_qkv, o_proj, compressor: each ~0.1-0.3%
+
+This settles the 2026-09-23 "indexer is negligible at decode" result for the PREFILL
+path: at decode it is ~0.0%, but on deep incremental prefill it is now the single
+largest term. The two measurements are not in conflict — different regimes.
+
+**M2 promotion gate: PASSED** (required ≥~40% at 300-450K). Next: M2 A/B —
+relaunch `EXO_TARGET_BRANCH=deploy/next4 DSV41_INDEXER_HIER=1` (profiler off),
+re-run the clean shapes (fresh 100K = 245.3 rows/s; delta 100K→200K = 172.3;
+delta 160K→500K = 103.6 as the deep comparators), then the live quality battery
+on the HIER arm if throughput gains hold.
+
+Note: sync-span mode serializes the pipeline (this run's 148 rows/s is NOT a
+production throughput number — same caveat as every sync-mode profile).
+
+## 2026-10-06 — M2 (HIER) A/B on next4: delta +15.2%, fresh neutral; quality battery running
+
+Same shapes as the framefix comparators, same build (`0207d7c0f`/`66e7344`), profiler off,
+arm flip only (`DSV41_INDEXER_HIER=1`):
+
+| shape | HIER=0 | HIER=1 | delta |
+|---|---|---|---|
+| Fresh 100K | 245.3 rows/s (407.7 s) | 243.0 (411.5 s) | **-0.9%** (neutral) |
+| Delta 100K->200K | 338.8 wire tok/s (590.3 s) | **390.2 (512.5 s)** | **+15.2%** |
+
+Consistent with the attribution: the hierarchical exact pass removes the materialized
+`[b,n,nb]` row + its per-chunk overhead, whose share grows with depth (14.6% -> 42.9%
+over a 350K feed). At 100K depth the indexer share is ~15% and the win washes out
+against noise; on the delta (depth 100-200K) it converts to +15.2% wall.
+
+Ship status: HIER is a numerics-changing path (bf16 coarse + streamed fp32 rescore).
+The live quality battery on the HIER=1 arm (350K, all phases) is RUNNING — M2 promotes
+to default-ON only if that battery is CLEAN (same gate class as the bf16 row).
+NOT yet measured: the deep delta comparator (160K->500K, HIER=0 was 3,285 s / 103.6
+rows/s) and the soak-class depths; expect the HIER win to GROW with depth.
+
+## 2026-10-06 — M2 (HIER) battery CLEAN => M2 promoted to default-ON (mlx-lm main)
+
+Live quality battery on the HIER=1 arm (350K depth, deploy 0207d7c0f/66e7344):
+**needles 6/6** (exact/paraphrase/negation/distractor/control/multihop), **tools 10/10**
+(t6 passes on this arm), **prose 0 DIRTY / 0 REVIEW** (20 prompts, all languages; every
+hit was the advisory same_script_glue detector), **park recall True in 8 s**.
+Build phase: 350,124-token fresh = 2,091.8 s = 167 rows/s (ladder-era, consistent with
+the depth curve).
+
+Promotion: `perf/dsv41-hier-default-on` @ 2119209 merged to mlx-lm main — `DSV41_INDEXER_HIER`
+default **1 (ON)**; `=0` forces the old row-materializing path for A/B. Test-contract
+updates: default-gate test asserts ON (with provenance); bf16-row integration tests pin
+_HIER=False (they exercise the tiled/untiled paths). 170/170 mlx-lm suite green.
+
+This banks the second precision-changing ship of the campaign after the bf16 row:
+both went through the same live-battery gate and both passed.
+
+## 2026-10-06 — M2 deep-delta comparator: +26.7% at 160K->500K (win grows with depth)
+
+Same shape, same build (0207d7c0f/05285c4), M2 arm default-ON vs the HIER=0 soak3-framefix
+comparator. Verified like-for-like: both runs refed **340,237 rows** on **159,744 reuse**
+(`turn reuse: prompt=499981 prefill=340237 reuse=159744`).
+
+| depth band | HIER=0 | HIER=1 (M2) | speedup |
+|---|---|---|---|
+| Fresh 100K | 245.3 rows/s | 243.0 (neutral) | -0.9% |
+| Delta 100K->200K | 338.8 tok/s | 390.2 | **+15.2%** |
+| Delta 160K->500K | 3,285.5 s / 103.6 rows/s | **2,593.8 s / 131.2 rows/s** | **+26.7%** |
+
+The win scales with the indexer's share of prefill (attribution: 14.6% -> 42.9% over
+0->350K depth) — removing the materialized `[b,n,nb]` row helps most where that row is
+biggest. Also note the base 160K build on the M2 arm was 714.9 s (223.8 tok/s) — the
+fresh-feed rate is depth-independent and unchanged, as expected.
+
+Updated post-fix depth curve WITH M2 (rows/s of refed rows): 245 fresh / 172->~198
+@150K avg (HIER +15%) / 104->131 @330K avg (HIER +27%).
+Remaining known levers (from attribution): sdpa 31%, ffn 19%, all_sum 6-9%, and the
+chunk-schedule/eval-boundary overhead the sync spans can't see (M3 territory: fence +
+budget compensations now removable since the row they existed for is gone).
+
+## 2026-10-06 — fence-spacing A/B (fence=8 vs 2) on the M2 build: NEUTRAL at 100-200K depth
+
+Arm: deploy/next5 (M2 default-ON) + `EXO_PREFILL_FENCE_EVERY=8` vs the same build at the
+shipped fence=2. Same shapes:
+
+| shape | fence=2 | fence=8 |
+|---|---|---|
+| Fresh 100K | 243.0 tok/s (411.5 s) | 243.2 (411.1 s) |
+| Delta 100K->200K | 390.2 tok/s (512.5 s) | 391.2 (511.3 s) |
+
+Both within +-0.3% (run-to-run noise). Conclusions:
+- The per-layer eval drains (21 per 42-layer chunk at fence=2, ~6 at fence=8) are NOT a
+  material bubble source at these depths — consistent with Fable's "do NOT tune fences
+  upward" guidance. The fence stays at 2 (shipped), which also keeps the liveness
+  heartbeat cadence (the fence_hook fires per fence; spacing out fences further would
+  weaken the hang-watchdog signal for no gain).
+- The queued "bubble A/B" (DSV41_ASYNC_EVAL=0 class) is deprioritized: if 15 fewer
+  blocking drains per chunk move nothing, the eval-boundary class is closed at this depth.
+- Note: the fence/budget compensations themselves stay pending the budget re-bill question
+  (under M2 the score-row transient the 2 GB budget billed no longer exists; the policy
+  can re-bill the hierarchical transients so deep chunks stay at base instead of
+  shrinking above ~524K offset — candidate M3 item, to be built + validated).

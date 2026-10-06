@@ -272,7 +272,7 @@ def test_choose_prefill_step_row_bytes_defaults_to_fp32():
 
 def test_indexer_row_bytes_follows_the_deployed_module():
     """The import-time probe reads the ACTUAL mlx-lm row dtype (2/4), never crashes."""
-    assert s_._INDEXER_ROW_BYTES in (2, 4)
+    assert s_._INDEXER_ROW_BYTES in (1, 2, 4)  # 1 = M2 block-maxima pair (block=8)
 
 
 def test_choose_prefill_step_boundary_is_exact():
@@ -348,6 +348,41 @@ def test_engine_prefill_fence_env_four(monkeypatch: pytest.MonkeyPatch):
     model = _FenceModel()
     s_.engine_prefill(model, np.arange(10), _OffsetCache(), chunk=4)
     assert set(model.fences) == {4}
+
+
+def test_indexer_row_bytes_follows_the_deployed_m2_shape():
+    """The chunk-policy charge must bill the DEPLOYED transient, not the old row.
+
+    Under the shipped M2 default (DSV41_INDEXER_HIER=1, block=8) the [b, n, nb]
+    score row is never materialized; the offset-scaling transient is the fp32
+    block-maxima buffer [b, n, nb/block] plus its negated argpartition twin --
+    2 * 4 / block bytes per element = 1 at block=8. Billing the vanished row (2)
+    would shrink deep chunks for a buffer that no longer exists.
+    """
+    import importlib
+
+    ix = importlib.import_module("mlx_lm.models.deepseek_v41.indexer")
+    saved = (getattr(ix, "_HIER", None), getattr(ix, "_HIER_BLOCK", None))
+    try:
+        ix._HIER = True
+        ix._HIER_BLOCK = 8
+        assert s_._indexer_row_bytes() == 1, "M2 charge must be 1 at block=8"
+        ix._HIER_BLOCK = 4
+        assert s_._indexer_row_bytes() == 2, "M2 charge must be 2 at block=4"
+        ix._HIER_BLOCK = 16
+        assert s_._indexer_row_bytes() == 1, "M2 charge floors at 1"
+        ix._HIER = True
+        ix._HIER_BLOCK = 8
+        # Deep schedule check: at 1M offset under the shipped 2 GB budget the
+        # chunk must stay at base (2048), not shrink to the old 1024.
+        budget, base = 2_048_000_000, 2048
+        rows = min(base, max(128, budget // (s_._indexer_row_bytes() * 1_000_000)))
+        assert rows == base, f"chunk shrank at 1M under M2: {rows}"
+    finally:
+        if saved[0] is not None:
+            ix._HIER = saved[0]
+        if saved[1] is not None:
+            ix._HIER_BLOCK = saved[1]
 
 
 def _schedule(total: int, base: int, budget: int, floor: int = 128) -> list[int]:
