@@ -10556,3 +10556,27 @@ Both within +-0.3% (run-to-run noise). Conclusions:
   (under M2 the score-row transient the 2 GB budget billed no longer exists; the policy
   can re-bill the hierarchical transients so deep chunks stay at base instead of
   shrinking above ~524K offset — candidate M3 item, to be built + validated).
+
+## 2026-10-06 — M3-lite: chunk policy re-billed to the DEPLOYED (M2) transient; deep chunks stay at base to 1M
+
+Follow-on to the M2 ship: the transient-budget chunk policy still charged
+``step * offset * row_bytes`` for the materialized indexer score row — but under the
+shipped M2 default that row does not exist. The real offset-scaling transient is the
+fp32 block-maxima buffer ``[b, n, nb/block]`` plus its negated argpartition twin =
+``2 * 4 / block`` bytes/element = **1 B** at block=8 (vs the billed 2 B bf16 row).
+
+Consequence before the fix: chunks shrank from ~524K offset onward for a buffer that
+no longer exists — at 1M it chose **1024**-row chunks where **2048** is safe (2x the
+drain/collective boundaries per row at the deepest rungs). After the fix (exo main
+`cba5b953e`): chunk stays at base 2048 through 1M; shrinks again only past ~2M.
+
+- The probe now follows the deployed gates (``_HIER``/``_HIER_BLOCK`` read at mlx-lm
+  import, process-lifetime constants) — same discipline as the bf16-row re-bill.
+- Live check on the deploy: ``prefill controls: ... fence_every=2 ...
+  score_row_bytes=1`` — the deployed charge is verifiable from the runner log.
+- Sabotage-proven regression test; 230 scoped tests green; basedpyright 178 -> 177 errors.
+- No change below ~524K offset (previous behavior was already at base there).
+
+This closes the last budget-compensation item from the P1/P2/P5 plan: fence/budget
+compensations that existed to bound the materialized row are now either proven
+neutral (fence spacing) or re-billed to the deployed shape (this change).
