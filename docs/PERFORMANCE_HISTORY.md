@@ -10444,3 +10444,31 @@ On the framefix deploy `019b590ed` (fresh 100K = 245 rows/s, delta +100K @100->2
   M2 promotion gate -> bubble A/B) are independent of the 1M number, and the far-end 1M proof
   belongs at the FINAL improved build's ship gate, not on an intermediate build. Soak chain was
   cut after r750 (soak script killed; in-flight rung finished cleanly; r1m/over never launched).
+
+## 2026-10-06 — ATTRIBUTION MEASURED (sync spans, next4 0207d7c0f/66e7344): indexer exact pass = 42.9-44.2% of deep prefill; M2 GATE PASSED
+
+Method: fresh 350K feed (350,003 tokens, 2,359 s under sync-span serialization —
+shares only, not a throughput number), `EXO_PROFILER=spans EXO_PROFILER_SYNC_SPANS=1`,
+SIGUSR1 dumps every ~7 min, 6 windows. Per-window m4-1 indexer share:
+14.6% → 29.5% → 34.8% → 37.2% → 39.2% → **42.9%** (m4-2 final: **44.2%**), monotone with
+context — the O(context) exact top-k pass, exactly as the M2 design predicted.
+
+Final deep window, both nodes (m4-1 / m4-2):
+- **attn.indexer.score: 42.9% / 44.2%** (avg 539-551 ms per call at ~340K; THE consumer)
+- attn.sdpa: 31.0% / 31.1% (sparse attn over window+compressed set)
+- ffn (moe.switch_mlp + gate): 19.0% / 19.1%
+- attn.all_sum: 6.9% / 5.5%
+- attn.kv_cache, proj_qkv, o_proj, compressor: each ~0.1-0.3%
+
+This settles the 2026-09-23 "indexer is negligible at decode" result for the PREFILL
+path: at decode it is ~0.0%, but on deep incremental prefill it is now the single
+largest term. The two measurements are not in conflict — different regimes.
+
+**M2 promotion gate: PASSED** (required ≥~40% at 300-450K). Next: M2 A/B —
+relaunch `EXO_TARGET_BRANCH=deploy/next4 DSV41_INDEXER_HIER=1` (profiler off),
+re-run the clean shapes (fresh 100K = 245.3 rows/s; delta 100K→200K = 172.3;
+delta 160K→500K = 103.6 as the deep comparators), then the live quality battery
+on the HIER arm if throughput gains hold.
+
+Note: sync-span mode serializes the pipeline (this run's 148 rows/s is NOT a
+production throughput number — same caveat as every sync-mode profile).
