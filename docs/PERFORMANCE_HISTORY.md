@@ -10472,3 +10472,24 @@ on the HIER arm if throughput gains hold.
 
 Note: sync-span mode serializes the pipeline (this run's 148 rows/s is NOT a
 production throughput number — same caveat as every sync-mode profile).
+
+## 2026-10-06 — M2 (HIER) A/B on next4: delta +15.2%, fresh neutral; quality battery running
+
+Same shapes as the framefix comparators, same build (`0207d7c0f`/`66e7344`), profiler off,
+arm flip only (`DSV41_INDEXER_HIER=1`):
+
+| shape | HIER=0 | HIER=1 | delta |
+|---|---|---|---|
+| Fresh 100K | 245.3 rows/s (407.7 s) | 243.0 (411.5 s) | **-0.9%** (neutral) |
+| Delta 100K->200K | 338.8 wire tok/s (590.3 s) | **390.2 (512.5 s)** | **+15.2%** |
+
+Consistent with the attribution: the hierarchical exact pass removes the materialized
+`[b,n,nb]` row + its per-chunk overhead, whose share grows with depth (14.6% -> 42.9%
+over a 350K feed). At 100K depth the indexer share is ~15% and the win washes out
+against noise; on the delta (depth 100-200K) it converts to +15.2% wall.
+
+Ship status: HIER is a numerics-changing path (bf16 coarse + streamed fp32 rescore).
+The live quality battery on the HIER=1 arm (350K, all phases) is RUNNING — M2 promotes
+to default-ON only if that battery is CLEAN (same gate class as the bf16 row).
+NOT yet measured: the deep delta comparator (160K->500K, HIER=0 was 3,285 s / 103.6
+rows/s) and the soak-class depths; expect the HIER win to GROW with depth.
