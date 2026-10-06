@@ -10388,3 +10388,26 @@ Unit regression (RED on the old code, GREEN on the fix) added to
 r500/r750 were "full re-prefills" (reuse-collapse). With BOTH bugs now fixed
 (LCP collapse AND the delta 1-row tail), the true depth curve must be re-measured:
 the old 110/75/56 tok/s numbers are artifacts of these two bugs, not physics.
+
+## 2026-10-05 (night) — framefix LIVE-VERIFIED: delta feeds restored to full schedule
+
+Deploy `019b590ed` (deploy/next3: frame fix + bf16 chunk budget + M2 OFF + async-eval
+forward) launched 19:24; verification battery:
+
+**Fresh vs delta on the same boot (the exact collapse case):**
+- Fresh 100K: **100,001 tok in 407.7 s = 245.3 rows/s** (offset 0)
+- Delta +100K on the same conversation (depth 100K→200K): **101,688 computed rows in
+  590.3 s = 172.3 rows/s** — 0.70x of fresh, i.e. the residual gap is the intrinsic
+  depth cost, not the policy collapse. Pre-fix this shape ran at ~20-60 rows/s.
+- Log evidence: `session reuse: matches ... on 99992 rows` + `prefill controls ...
+  (rows=101688, base=2048)` — delta scheduled at base chunks (the fix), not the floor.
+
+**Ladder rung on the fixed build (soak3-framefix, r160):**
+- Delta refed **251 rows in 4.1 s total request** (34-token decode included):
+  `turn reuse: prompt=159995 prefill=251 reuse=159744`. Pre-ladder this was a
+  full 30,033-row re-prefill (~112 s).
+
+**Remaining honesty note:** delta/fresh ratio 0.70 at ~150K avg depth — the depth-scaling
+cost is still real and is exactly what M2 (hierarchical indexer) targets. The soak
+(r500/r750/r1m) on this build is the first true depth curve; expect it to replace the
+soak2-artifact numbers (110/75/56 tok/s were 1-row-collapse artifacts).
