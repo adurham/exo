@@ -10758,3 +10758,34 @@ Note the gain pattern: the sparse winner's fresh-feed win (+3-4.6%) shows at eve
 while the deepest rung's delta gain (+0.9%) is bounded by the remaining sdpa/ffn
 terms — consistent with the attribution (the indexer term is gone at the margin;
 what's left is flat-cost sdpa and MoE at the physics floor).
+
+## 2026-10-06 — sparse-attn microbench decomposition (next-tier attack, part 1)
+
+Isolated benches on the studio at production shapes (m=2048 rows/call, h=64, d=512, k=640
+(128 window + 512 topk), qt=256) — the first ground-truth per-component numbers
+(the sync-span 78 ms included ~40 ms drain/dispatch artifact):
+
+| component | ms/tile | ×8 tiles |
+|---|---|---|
+| gather (colsplit path, both sources) | ~0.6-0.8 | ~5-6 |
+| QK^T | 0.98 | 7.8 |
+| softmax chain | 0.50 | 4.0 |
+| PV (bf16 in `kvc` dtype; fp32 weights) | 0.89-2.2 | 7.1-17.3 |
+| **measured full call** | | **38.6** |
+| dispatch/compile/alloc overhead (residual) | | ~8-15 |
+
+**Verified dead ends (each measured):** concat-vs-slice-assign (0.887 vs 1.651 — slice
+assign slower); QK-split+concat-logits (bit-exact for QK, saves 5 ms isolated but the
+concat overlaps in-pipeline); PV column-split (NOT bit-exact, max|d| 4.6e-5 fp32);
+`mx.gather_mm` (batch-level gather semantics, cannot express per-query top-k);
+tile qt sweep 64→2048 (42.9→37.9 — ~1% for >4× memory); fence variants (all equal);
+C1 colsplit saves 11.5% of the body (5.1 ms/call) — the shipped win, now measured.
+Gather is efficient: 245 GB/s sustained on the comp source (my earlier 58 GB/s figure
+conflated body time with gather time — corrected here).
+
+**Consequence:** sparse-attn micro-levers are exhausted. The remaining targets are
+(i) the chunk-size/M-per-expert question — July's 4096 regression was measured under
+the OLD stack (materialized indexer row, old fences, old chunk policy) and 3 of those
+conditions no longer exist; retest in flight; (ii) the "non-compute gap" (dispatch/eval/
+alloc ~50% of per-chunk wall at 100K) — diffusely spread; (iii) MoE tail re-span
+(attribution-only, being built).
