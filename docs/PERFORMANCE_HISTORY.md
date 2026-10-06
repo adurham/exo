@@ -10429,3 +10429,18 @@ On the framefix deploy `019b590ed` (fresh 100K = 245 rows/s, delta +100K @100->2
 - **Honest notes:** r500 completion content came back empty (32-token budget spent in the
   reasoning channel) — it is a throughput rung; quality coverage at depth remains the 350K
   battery. r750/r1m/over rungs run after.
+
+## 2026-10-05 (night) — soak3-framefix r750 (final rung; soak CUT here by decision) + why
+
+- **r750:** HTTP 200, 749,983 tokens; delta refed **250,271 rows in 3,911.96 s = 64.0 rows/s**
+  at 500K->750K depth (`turn reuse: prompt=749983 prefill=250271 reuse=499712`). Pre-framefix
+  this shape was the soak-2 r750 story: ~25 rows/s and near-stall. No watchdog kill; peak
+  footprints ~118 GB then settled 105 GB.
+- **The full post-fix depth curve (rows/s of actually-refed rows):**
+  fresh 100K = 245 | delta 100K->200K = 172 | delta 160K->500K = 103.6 | delta 500K->750K = 64.0.
+  Monotonic depth decay with NO collapse; the pre-fix equivalents were 16-56 rows/s crawls or
+  multi-hour stalls. This is the intrinsic (uncollapsed) curve M2 now targets.
+- **Decision (user):** do NOT soak to 1M on this build. The pending improvements (attribution ->
+  M2 promotion gate -> bubble A/B) are independent of the 1M number, and the far-end 1M proof
+  belongs at the FINAL improved build's ship gate, not on an intermediate build. Soak chain was
+  cut after r750 (soak script killed; in-flight rung finished cleanly; r1m/over never launched).
