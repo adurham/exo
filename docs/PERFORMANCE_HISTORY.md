@@ -10596,3 +10596,19 @@ Next: the 1M ship-gate soak on this build (r500 delta -> r750 -> r1m -> over-cap
 with two live proof points to capture: (a) the re-bill's deep chunk behavior
 (controls should show base-sized chunks through 1M), (b) end-to-end 200/finish on
 a 1M-token feed with the M2 win at the deepest rung.
+
+## 2026-10-06 — 1M ship-gate soak on the final build: r160/r500/r750 land; M2 deep win grows to +46%
+
+Final build `a2b6fc96b` (M2 default-ON + framefix + re-bill + ladder), soak rungs:
+
+| rung | refed | this build | pre-M2 comparator | delta |
+|---|---|---|---|---|
+| r160 (cold 160K) | 159,995 fresh | 720.5 s / 222.1 tok/s | (fresh, depth-invariant) | — |
+| r500 (340K delta) | 340,237 rows | **2,622.7 s / 129.7 rows/s** | 3,285.5 s / 103.6 | **+25.3%** |
+| r750 (250K delta) | 250,271 rows | **2,681.1 s / 93.3 rows/s** | 3,912.0 s / 64.0 | **+45.9%** |
+
+The M2 win scales with the indexer share vs depth exactly as the attribution predicted
+(14.6% -> 42.9% share => +15% -> +25% -> +46% at increasing depths). Memory envelope:
+peaks 115-117 GB mid-rung, steady 113 GB, no kills. The r1m delta (290K rows to
+1.04M) is running — that rung also proves the re-bill (base chunks through the
+deepest offset) and the end-to-end 1M context.
