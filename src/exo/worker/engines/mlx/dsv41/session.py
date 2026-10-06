@@ -147,19 +147,31 @@ def _read_int_env(name: str, default: int) -> int:
 
 
 def _indexer_row_bytes() -> int:
-    """Bytes per element of the indexer score row, probed ONCE at module import.
+    """Bytes per element of the indexer's offset-scaling transient, probed at import.
 
-    The row is fp32 (4 B) in the classic build and bf16 (2 B) when the deployed
-    mlx-lm has the bf16 score row active (``DSV41_INDEXER_ROW_BF16``, read at
-    mlx-lm import; process-lifetime constant). The chunk policy must follow the
-    ACTUAL dtype so it never over-counts: at depth a hard-coded 4-B charge
-    halves the chunk under the same byte budget, doubling the per-chunk
-    drain/collective overhead per row. Falls back to fp32's 4 on import trouble.
+    The chunk policy charges ``step * offset * <this>`` bytes for the indexer's
+    per-chunk transient; this function reports the charge of the DEPLOYED shape.
+
+    * Classic path (``DSV41_INDEXER_HIER`` off): the materialized ``[b, n, nb]``
+      score row, fp32 (4 B) or bf16 (2 B, the shipped row) per element.
+    * M2 hierarchical path (``DSV41_INDEXER_HIER`` on, the shipped default): the
+      row is never materialized. The offset-scaling transient is the block-maxima
+      buffer ``[b, n, nb/block]`` fp32 plus its negated ``argpartition`` twin --
+      ``2 * 4 / block`` bytes per element = 1 B at the default ``block=8``. Billing
+      the vanished row here would shrink chunks from ~524K offset onward for a
+      buffer that no longer exists (the M2 deep-chunk reclaim).
+
+    Both gates are read by ``mlx_lm`` at ITS import, so the deployed value is a
+    process-lifetime constant. Falls back to fp32's 4 on import trouble.
     """
     import importlib
 
     try:
         indexer = importlib.import_module("mlx_lm.models.deepseek_v41.indexer")
+        if bool(getattr(indexer, "_HIER", False)):  # noqa: B009 - set at mlx-lm import
+            block = max(1, int(getattr(indexer, "_HIER_BLOCK", 8)))  # noqa: B009
+            # ceil(2 * 4 / block) as an int: 1 at block=8, 2 at block=4.
+            return max(1, -(-8 // block))
         dtype = getattr(indexer, "_ROW_DTYPE")  # noqa: B009 - set at mlx-lm import
         return int(dtype.size)  # pyright: ignore[reportAny] - mlx dtype is untyped
     except Exception:  # noqa: BLE001 - a dtype probe must never crash the worker
@@ -182,10 +194,12 @@ def choose_prefill_step(
     Pure policy (no model, no MLX), so the schedule is unit-testable on the CPU.
     ``offset`` is the absolute cache position the chunk starts at and ``total``
     the absolute row this feed ends at (so ``total - offset`` rows remain). The
-    indexer's worst-case score row for a chunk grows with ``step * offset`` (its
-    logical length ``nb`` is the END position, which is ~offset here); that row
-    costs ``step * offset * row_bytes`` bytes (``row_bytes`` = the deployed
-    score-row element size: 4 fp32, 2 bf16). We therefore keep the full ``base``
+    indexer's per-chunk transient grows with ``step * offset`` (its logical
+    length ``nb`` is the END position, which is ~offset here); it costs
+    ``step * offset * row_bytes`` bytes (``row_bytes`` = the DEPLOYED charge:
+    the score-row element size under the classic path -- 4 fp32, 2 bf16 -- or
+    the block-maxima pair under M2 -- 1 at block=8; see
+    :func:`_indexer_row_bytes`). We therefore keep the full ``base``
     chunk while that row fits in ``budget_bytes`` and shrink as the context
     grows. ``base`` is also the ceiling (only shrinking, never growing), and
     ``floor`` is the smallest chunk ever chosen (throughput does not profit from
@@ -260,8 +274,9 @@ def engine_prefill(
     * **transient-budget chunking** -- unless the caller pins ``long_threshold``
       (legacy fixed-crossover behaviour, kept for compatibility and for
       ``SessionCache._prefill_planned``), the chunk size comes from
-      :func:`choose_prefill_step`: the indexer's worst-case score row for a
-      chunk is ``step * offset * 4`` bytes, so the chunk stays at ``chunk`` while
+      :func:`choose_prefill_step`: the indexer's per-chunk transient for a
+      chunk is ``step * offset * row_bytes`` (``row_bytes`` follows the deployed
+      shape -- see :func:`_indexer_row_bytes`), so the chunk stays at ``chunk`` while
       that row fits ``transient_budget_bytes`` (else
       ``EXO_PREFILL_TRANSIENT_BUDGET_MB``, default 2048 MB) and shrinks to a
       128-row floor as the context grows.
