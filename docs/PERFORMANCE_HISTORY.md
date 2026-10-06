@@ -10493,3 +10493,20 @@ The live quality battery on the HIER=1 arm (350K, all phases) is RUNNING — M2 
 to default-ON only if that battery is CLEAN (same gate class as the bf16 row).
 NOT yet measured: the deep delta comparator (160K->500K, HIER=0 was 3,285 s / 103.6
 rows/s) and the soak-class depths; expect the HIER win to GROW with depth.
+
+## 2026-10-06 — M2 (HIER) battery CLEAN => M2 promoted to default-ON (mlx-lm main)
+
+Live quality battery on the HIER=1 arm (350K depth, deploy 0207d7c0f/66e7344):
+**needles 6/6** (exact/paraphrase/negation/distractor/control/multihop), **tools 10/10**
+(t6 passes on this arm), **prose 0 DIRTY / 0 REVIEW** (20 prompts, all languages; every
+hit was the advisory same_script_glue detector), **park recall True in 8 s**.
+Build phase: 350,124-token fresh = 2,091.8 s = 167 rows/s (ladder-era, consistent with
+the depth curve).
+
+Promotion: `perf/dsv41-hier-default-on` @ 2119209 merged to mlx-lm main — `DSV41_INDEXER_HIER`
+default **1 (ON)**; `=0` forces the old row-materializing path for A/B. Test-contract
+updates: default-gate test asserts ON (with provenance); bf16-row integration tests pin
+_HIER=False (they exercise the tiled/untiled paths). 170/170 mlx-lm suite green.
+
+This banks the second precision-changing ship of the campaign after the bf16 row:
+both went through the same live-battery gate and both passed.
