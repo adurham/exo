@@ -346,8 +346,20 @@ def engine_prefill(
             if threshold is not None:
                 step = long_step if offset >= threshold else base
             else:
+                # The chunk policy measures the future context length, so it
+                # must receive the ABSOLUTE end position (offset + rows still
+                # to feed), never the delta's row count: a resumed session's
+                # delta starts at offset > 0, and `total - offset` would go
+                # negative partway through, pinning the policy to the 1-row
+                # floor for the whole tail (each remaining row as its own
+                # single-row forward). Same-frame inputs keep fresh and delta
+                # feeds on one schedule.
                 step = choose_prefill_step(
-                    offset, total, base, budget_bytes, row_bytes=_indexer_row_bytes()
+                    offset,
+                    offset + (total - done),
+                    base,
+                    budget_bytes,
+                    row_bytes=_indexer_row_bytes(),
                 )
             stop = min(done + step, total)
             piece = ids_mx[:, done:stop]

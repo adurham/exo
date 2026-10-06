@@ -361,6 +361,46 @@ def _schedule(total: int, base: int, budget: int, floor: int = 128) -> list[int]
     return out
 
 
+def test_engine_prefill_delta_feed_keeps_the_budget_schedule(monkeypatch: pytest.MonkeyPatch):
+    """A RESUMED session's delta must not collapse to 1-row chunks.
+
+    Regression (2026-10-05): the driver passed the DELTA's row count as the
+    policy's ``total`` while ``offset`` is the ABSOLUTE cache position. For a
+    delta of L rows on top of O resident rows, ``total - offset`` went negative
+    after L-O rows, pinning the policy to the 1-row floor for the remaining ~O
+    rows -- every tail row as its own forward (S2's 1361-row refeed took 68.5s,
+    r500's 350K feed crawled for 4h). The schedule must use one frame.
+    """
+    monkeypatch.delenv("EXO_PREFILL_FENCE_EVERY", raising=False)
+    cache = _OffsetCache()
+    cache.offset = 1_000_000          # resident conversation at 1M rows
+    base, budget = 2048, 2_048_000_000
+    delta = 4_000                      # 4K-row delta on top of 1M resident
+    model = _FenceModel()
+    s_.engine_prefill(model, np.arange(delta), cache, chunk=base,
+                      transient_budget_bytes=budget)
+    # Absolute frame: absolute end = 1_004_000, so the score row allows
+    # min(base, budget // (2 * 1M)) = 1024 rows per chunk. Every chunk except
+    # the final remainder must be ~1024, never the 1-row floor.
+    assert all(r >= 128 for r in model.rows[:-1]), f"floor-pinned: {model.rows[:6]}"
+    assert max(model.rows) > 128, "delta feed collapsed to tiny chunks"
+    assert sum(model.rows) == delta
+    # Independent re-derivation in the ABSOLUTE frame.
+    assert model.rows == _schedule_abs(1_000_000, delta, base, budget)
+
+
+def _schedule_abs(offset0: int, total: int, base: int, budget: int, floor: int = 128) -> list[int]:
+    """Re-derivation of the delta schedule with absolute-frame inputs."""
+    off, done, out = offset0, 0, []
+    while done < total:
+        rows = min(base, max(floor, budget // (s_._INDEXER_ROW_BYTES * max(off, 1))))
+        step = max(1, min(rows, total - done))
+        out.append(step)
+        done += step
+        off += step
+    return out
+
+
 def test_engine_prefill_chunk_schedule_follows_the_budget(monkeypatch: pytest.MonkeyPatch):
     """The observed per-chunk rows match the budget schedule and never blow it.
 
