@@ -10533,3 +10533,26 @@ Updated post-fix depth curve WITH M2 (rows/s of refed rows): 245 fresh / 172->~1
 Remaining known levers (from attribution): sdpa 31%, ffn 19%, all_sum 6-9%, and the
 chunk-schedule/eval-boundary overhead the sync spans can't see (M3 territory: fence +
 budget compensations now removable since the row they existed for is gone).
+
+## 2026-10-06 — fence-spacing A/B (fence=8 vs 2) on the M2 build: NEUTRAL at 100-200K depth
+
+Arm: deploy/next5 (M2 default-ON) + `EXO_PREFILL_FENCE_EVERY=8` vs the same build at the
+shipped fence=2. Same shapes:
+
+| shape | fence=2 | fence=8 |
+|---|---|---|
+| Fresh 100K | 243.0 tok/s (411.5 s) | 243.2 (411.1 s) |
+| Delta 100K->200K | 390.2 tok/s (512.5 s) | 391.2 (511.3 s) |
+
+Both within +-0.3% (run-to-run noise). Conclusions:
+- The per-layer eval drains (21 per 42-layer chunk at fence=2, ~6 at fence=8) are NOT a
+  material bubble source at these depths — consistent with Fable's "do NOT tune fences
+  upward" guidance. The fence stays at 2 (shipped), which also keeps the liveness
+  heartbeat cadence (the fence_hook fires per fence; spacing out fences further would
+  weaken the hang-watchdog signal for no gain).
+- The queued "bubble A/B" (DSV41_ASYNC_EVAL=0 class) is deprioritized: if 15 fewer
+  blocking drains per chunk move nothing, the eval-boundary class is closed at this depth.
+- Note: the fence/budget compensations themselves stay pending the budget re-bill question
+  (under M2 the score-row transient the 2 GB budget billed no longer exists; the policy
+  can re-bill the hierarchical transients so deep chunks stay at base instead of
+  shrinking above ~524K offset — candidate M3 item, to be built + validated).
