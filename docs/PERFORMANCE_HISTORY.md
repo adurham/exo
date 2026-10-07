@@ -10886,3 +10886,26 @@ best-shallow AND best-deep configuration of everything tested.
 defaults (chunk 2048 + PV32=0 + M2 + C1 colsplit + QTILE/BUDGET 256 + re-bill + ladder +
 fences + spans + MoE tail spans). Zero env knobs needed besides the bf16-row and
 KV-bits launch flags.
+
+## 2026-10-06 — CORRECTION: "delta 418 tok/s" is a wire number, not a row rate; the real floor is shared
+
+Recon for tonight's plan turned up an arithmetic artifact worth recording because it changes how
+the scoreboard reads: `sdpa_tile_ab.py` computes wire tok/s as prompt_tokens / wall. For the
+delta arm the prompt is 199,992 tokens but the engine REFED only 101,688 rows (the log's
+`turn reuse: ... prefill=101688 reuse=98304`). Correct refed-row rates:
+
+| feed | refed rows | wall | rows/s | s per 2048-chunk | avg depth |
+|---|---|---|---|---|---|
+| fresh 100K | 100,001 | 379.8 | 263.3 | 7.78 | ~50K |
+| delta 100K->200K | 101,688 | 478.3 | 212.6 | 9.63 | ~150K |
+| r500 rung (soak) | 340,237 | 2,495.9 | 136.3 | 15.0 | ~330K |
+
+The fresh feed is FASTER per refed row; there is no "delta is faster" existence proof. The
+depth slope (~1.8-1.9 s/chunk per +100K avg depth, roughly) accounts for the whole fresh-vs-
+delta gap. At shallow depth the DEPTH-INDEPENDENT floor (~6.5-7 s/chunk = ~165-175 ms per
+layer-chunk over 40 layers) is ~85% of the cost. The 400 tok/s target needs ~5.12 s/chunk =
+128 ms/layer-chunk, i.e. the FLOOR itself must come down ~30% — that is the campaign target,
+and it is a shallow problem, not a fresh-vs-delta artifact.
+
+Corollary for future A/Bs: report refed rows AND wall; a delta arm's wire number overstates
+its rate by the reuse factor. The `turn reuse:` line is the divisor that matters.
