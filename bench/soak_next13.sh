@@ -45,11 +45,11 @@ print(f"payload written: {out} (~{len(rungs[rung])//5.111} tok)")
 PY
   t0=$(date +%s)
   curl -s --max-time 14400 -X POST "$API/v1/chat/completions" -H "Content-Type: application/json" \
-    --data @"$SCRATCH/soak13_$RUNG_payload.json" -o "$SCRATCH/soak13_$RUNG.resp.json"
+    --data @"$SCRATCH/soak13_${RUNG}_payload.json" -o "$SCRATCH/soak13_${RUNG}.resp.json"
   rc=$?
   t1=$(date +%s)
   echo "HTTP curl exit $rc total $((t1-t0))s" | tee -a "$REC"
-  python3 - "$SCRATCH/soak13_$RUNG.resp.json" <<'PY' | tee -a "$REC"
+  python3 - "$SCRATCH/soak13_${RUNG}.resp.json" <<'PY' | tee -a "$REC"
 import json, sys
 try:
     d = json.load(open(sys.argv[1]))
