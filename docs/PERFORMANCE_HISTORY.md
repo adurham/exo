@@ -11009,3 +11009,151 @@ Follow-on: strip-widening (EXACT_MB 128->384: 424->~191 evals/chunk incl. coarse
 expected to buy <0.5% by the same mechanism; deprecated as a standalone target (env values
 remain for memory tuning). The MoE all_sum bf16 payload halving (39.5% attributed span,
 41.94MB/call x40) is the next measured target — arm in flight on next11.
+
+## 2026-10-07 — MoE all_sum bf16: +4.1% fresh, battery CLEAN -> PROMOTED default-ON (the night's biggest lever)
+
+Arm (next11, DSV41_MOE_ALLSUM_BF16=1, salted like-for-like fresh feeds):
+| feed | wall | tokens | tok/s |
+|---|---|---|---|
+| cold (discard) | 363.8 s | 100,012 | 274.9 |
+| f1 | 365.1 s | 100,010 | 273.9 |
+| f2 | 364.9 s | 100,012 | 274.0 |
+**FRESH MEDIAN 274.0** vs merge-only 265.8 = **+3.1%**; vs next9 shipped 263.3 = **+4.1%**.
+
+Context: the 2026-10-06 shallow attribution put `moe.all_sum` at 39.5% of shallow wall
+(with `ffn` == it to 0.2% — the collective + its GPU->CPU->GPU drain IS the measured
+cost, not the expert GEMMs (switch_mp 0.1%)). The payload was fp32 [1,2048,5120] x 4 B =
+41.94 MB x 40 calls/chunk on jaccl's CPU stream; bf16 halves the wire payload. This is
+the Fable-flagged "close the non-compute gap" lever, confirmed at scale: 3.1% of the
+whole chunk wall from halving one 41.94 MB payload per layer.
+
+BATTERY (BF16ALLSUM @350K, the ship gate for any numerics change): **CLEAN** —
+needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park recall True; build 1,892.8 s.
+
+PROMOTION: flip default 0->1 with provenance comment (`a351ae4`), merged to mlx-lm main
+`12bc512` (battery CLEAN), exo main gitlink+lock advanced `e687de9f4`, deploy/next12
+assembled `73ef066ce` (228 tests, alignment green). The combine_argmax token-id path is
+untouched (only the weighted-sum partial rounds).
+
+## 2026-10-07 — NEXT-TIER CLOSE: shipped stack = 274.0 fresh (+23.4% session arc), battery-gated, soak-validated
+
+**Shipped as durable defaults** (deploy/next12 `73ef066ce` / mlx-lm `12bc512`; exo main `e687de9f4`):
+
+| lever | result | gate |
+|---|---|---|
+| indexer exact-pass eval-merge (2/1 per strip, bit-exact) | +0.9% (below resolution) | merged anyway (strictly fewer syncs) |
+| C1 boundary check fusion (2 `.item()` -> 1) | included above | bit-exact |
+| geometry log -> stderr | instrumentation | R2 mechanism evidence live |
+| **MOE_ALLSUM_BF16 default-ON** | **fresh 274.0 vs 265.8 = +3.1%; vs next9 263.3 = +4.1%** | **battery CLEAN** |
+
+**Measured matrix (fresh 100K median):**
+- session start (next7): 252.5
+- next9 (PV32=0 + chunk 2048): 263.3
+- next10 (eval-merge): 265.8
+- **next12 (bf16 allsum): 274.0**
+
+**Session arc: 222 -> 274.0 tok/s fresh = +23.4%.**
+
+**Key mechanisms settled tonight:**
+1. `moe.all_sum` = 39.5% of shallow wall (with `ffn` == it; `switch_mlp` 0.1%) — the fp32
+   41.94 MB/call MoE-tail collective on jaccl's CPU stream (GPU->CPU->GPU drain per call)
+   IS the shallow cost, not expert GEMMs. bf16 payload halving bought the biggest single
+   lever of the night (+3.1% whole-chunk wall from halving one payload per layer).
+2. Eval-count reduction is a near-null (424 evals removed -> +0.9%, ~0.14 ms/sync):
+   drain overlaps queued GPU work. Payload-size levers >> count levers.
+3. The fresh floor is steady-state (no warmup share to hoist): 3 repeat fresh feeds
+   within ±3%.
+4. Arm-probe discipline: unique salt-prefix fillers mandatory (park/restore persists
+   across relaunches; a reused filler matched a parked session -> fake 1914 tok/s).
+
+**Deep validation (soak12, final build):** r160 cold 646 s / 159,995 tok = **247.7 tok/s**
+(+4.5% vs the next9 rung's 236.9). **r500 delta: 340,237 rows in 2,378 s = 143.1 rows/s**
+(+5.0% vs next9's 136.3); `turn reuse: prefill=340237 reuse=159744` confirms the delta
+(not a full re-prefill). The bf16 win holds at depth.
+
+**Remaining to 400 tok/s (documented, measured):** the ~6.5-7.8 s/chunk shallow floor is
+MoE-at-roofline + the (now-halved) collective drain + a diffuse residue. Next candidates,
+in expected-yield order: (a) `attn.all_sum` payload/pipelining (bf16 already; true share
+~2-3% of wall — small); (b) the consumer-index-layer full-nb score (2-5%, needs battery,
+M effort); (c) deeper structural: chunk-parallelism / M-per-expert scheduling at the
+engine level. None are single-candidate 30% moves; 400 needs a structural change, not
+more micro-levers.
+
+## 2026-10-07 — soak E2BIG pitfall (third arm-probe bug, cost one rung retry)
+
+3. **Never put a 500K-token prompt on a shell command line.** The r500 soak rung died
+   with `curl exit 126` / "Argument list too long" (E2BIG) from the `-d "$(python3 -c ...)"`
+   substitution. Fix: dump the payload to a file, `curl --data @payload.json`. Applied to
+   the persisted `bench/soak_next12.sh`.
+
+## FINAL STATE MATRIX (2026-10-07) — every config measured on the wire
+
+Fresh 100K / delta shapes, all directly measured (salted like-for-like feeds):
+
+| build | lever added | fresh tok/s | note |
+|---|---|---|---|
+| next7 (session start) | — | 252.5 | PV32=1, chunk 2048 |
+| next8 | chunk=4096 | 256.4 | +1.5% shallow, -0.9% @750K -> reverted |
+| next9 (2nd ship) | PV32=0 (bf16 softmax w) | 263.3 | best-deep config |
+| next10 | indexer eval-merge + C1 fusion | 265.8 | +0.9%, below resolution |
+| **next12 (SHIPPED)** | **MOE_ALLSUM_BF16** | **274.0** | **+3.1% over merge; battery CLEAN** |
+
+Deep rungs on the final build: r160 cold **247.7 tok/s** (+4.5% vs next9 rung); r500 delta
+**143.1 rows/s** (+5.0% vs next9's 136.3; `turn reuse: prefill=340237 reuse=159744` = true delta).
+
+Session arc: **222 -> 274.0 = +23.4%**. 1M ship-gate still green from the next5 proof
+(1,039,963 tok end-to-end); next12 re-validated at 500K depth with the bf16 lever.
+
+## 2026-10-07 — Loop 2 kickoff: Fable plan — the MoE expert GEMM is the unmeasured third of the wall
+
+STATE: 274.0 fresh shipped (next12). Fable's review of the night found the load-bearing
+unverified claim: "MoE compute at roofline". The spans prove it was never measured —
+`ffn` 39.7% == `moe.all_sum` 39.5% (to 0.2%) and `switch_mlp` child span 0.1%: the expert
+GEMM is async-dispatched and drains INSIDE the collective span, invisible to accounting.
+A third of the chunk wall has had zero direct optimization; tonight's win was the
+transport around the GEMM, not the GEMM.
+
+PLAN (Fable, hardened):
+- Task A (parallel, m4-2, ~75-90 min): MoE expert-path microbench. Step 0 ceiling
+  calibration (peak dense bf16 TFLOP/s + achievable GB/s) — without it "roofline" is
+  unfalsifiable. Real weights (subset 32-64 experts; NEVER run the quantizer in-box).
+  Traps: missing-drain dispatch-time artifact (the July "82 TFLOP/s @ M=48" is suspect),
+  L2 residency (sweep many distinct experts), dequant must be INSIDE the timed region
+  (production cannot cache bf16 weights), launch-gap overhead (~384 dispatches/layer),
+  pad-waste (use production M-mixture), M∈{64,128}, interleaved arms, ≥5 reps, MX cache
+  limit ~4-6GB (only ~13GB free beside the resident 115GB runner).
+  THREE-WAY verdict: (i) alt ≥1.15x block-level → POSITIVE; (ii) current ≥70-80% of
+  calibrated ceiling at its intensity → roofline CONFIRMED; (iii) neither → INCONCLUSIVE
+  (headroom exists, unharvested) — never label iii as confirmed.
+  Decision-grade number = full-block mock (192 experts, production M-mix, one layer,
+  drained, x61).
+- Task B (parallel, read-only, ~45 min): consumer-index-layer sizing + correctness audit
+  (candidate-set restriction must be proven exact vs post-hoc masking). Savings =
+  coarse-fraction x FLOP-reduction, pessimistic bound, weight 750K depth.
+- Sequence: A+B parallel → gate → A-positive: impl behind env knob (2.5h hard park) →
+  relaunch + interleaved arms + battery → chunk-4096 once on the FINAL stack → soak +
+  2nd battery → memo. A-negative: chunk-4096 arm + battery → wall-decomposition rebuild
+  (instrumented drains around the expert block) → consumer impl only if B-go + ≥2.5h.
+- STOP items: sub-3% levers on single arms (use means + span/geometry logs); rebuild the
+  wall decomposition post-next12 (the 2.66s/3.9s bookkeeping is stale); verify knob
+  activation on EVERY entry point (battery/soak/deep runners) before trusting any arm.
+
+## 2026-10-07 — Loop-2 measurements: MoE kernel INCONCLUSIVE (not roofline, not cheaply harvestable); consumer-index-skip GO (up to ~15% of wall, provably exact)
+
+**Task A — MoE expert-path microbench (m4-2, calibrated ceiling; report: loop2/moe_bench_report.md, md5 19323092…):**
+
+- Calibrated ceilings on the node: **15.14 TFLOPS** dense bf16 matmul (plateaus M>=4096); ~450 GB/s triad.
+- Production geometry confirmed from the real loader (world=2): D=5120, H=1152, E=384, gu/dn tiles 72/320, k=3 on layer 0 (2-bit on layers 18-22), 6.64 MB/expert -> 2.55 GB/layer; N=12288 pairs/rank/layer at chunk 2048 x top-6.
+- **Block-level (E=192 real experts): uniform 48.99 ms/layer = 8.88 TF = 60% of ceiling, x40 = 1960 ms/chunk; skewed 57.58 ms = 7.55 TF = 51%, x40 = 2303 ms/chunk.** Kernel is 85-94% of `_prefill` (glue minor).
+- Roofline: AI 201-341 FLOP/B >> ridge 33.6 -> compute-bound regime, but kernel reaches only 51-60% of it. NOT bandwidth-bound (6-9% of 450 GB/s).
+- **VERDICT: (iii) INCONCLUSIVE — headroom exists, unharvested.** Not (ii) ROOFLINE-CONFIRMED (needs >=70-80%).
+- **Dequant->fp16 + dense matmul arm: 1.8-2.1x SLOWER at block level (0.47-0.55x)** — killed. Arm (c) skipped: the path is ALREADY a single-launch segmented GEMM (`inner_mm_seg_mlx`), no per-expert loop to batch. gather_mm geometrically impossible at this shape.
+- **The July "82 TFLOP/s" claim is RETIRED**: max measured anywhere 9.58 TF; 82 TF is 5.4x the 15.14 TF silicon ceiling — physically impossible (was the missing-drain/L2 artifact class, now definitively dead).
+- Consequence: the skill's "ffn = switch_mlp at the small-M physics floor, don't chase" line is CORRECTED — the kernel is at 51-60% of a calibrated ceiling; headroom is real but the tested alternatives don't harvest it (kernel-engineering territory; park unless a concrete kernel change appears).
+
+**Task B — consumer-index-layer sizing (report: loop2/consumer_index_sizing.md):**
+
+- Mechanism (file:line): consumer layers 24/28/32/36 call `coarse_block_scores(..., col_mask=cand_mask)`; the loop bound is `nb` (`indexer_hierarchical.py:241`) — every column scored (`:245`), mask applied AFTER at the `mx.where` (`:247-250`). The `nb-C` non-candidate columns are computed then discarded.
+- Sizing (n=2048, C=16384, 4 consumers): waste 84-98% of consumer coarse FLOPs; **% of wall pessimistic->optimistic: 100K 3.9-13.7%, 350K 12.2-25.2%, 750K 14.8-38.6%** (pessimistic = low span share + extra 50% haircut on the consumer-coarse fraction). Clears the 2% gate at every offset; deep-weighted 14.8%.
+- **Correctness audit: provably EXACT.** Block-constant candidate mask; non-candidate block -> -inf either way; candidate block max = over exactly its candidate+visible columns with the identical `_score_shared_columns` expression; top_blocks picks the same 528 blocks; exact_rescore returns identical (top_v, top_i). One required condition: `HIER_BLOCK == candidate_block_size` (holds today; asserted on the source layer, NOT on consumers — **implementation must add a consumer-side assert**).
+- Impl sketch: seed the coarse pass from candidate block ids via `_gather_rows` + `_score_gathered_columns`; scatter candidate block maxima, rest -inf. ~50-100 LOC behind the existing HIER path, low risk, pure work reduction.
