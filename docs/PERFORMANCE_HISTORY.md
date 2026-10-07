@@ -10965,3 +10965,21 @@ READING (with the known artifact caveats):
 Consequence: tonight's package (indexer strip-sync reduction + boundary-sync fusion,
 both bit-exact) + the MoE all_sum bf16 gate (payload halving of a 39.5%-attributed span)
 are the two measured targets. Both were already identified; the tables price them.
+
+## 2026-10-06 — A/B arm-probe pitfalls (both cost a full arm cycle tonight)
+
+Two probe-script bugs found while measuring next10 (indexer strip-sync package):
+
+1. **Contaminated "fresh" feeds via parked sessions.** The park/restore store
+   persists conversations across cluster RELAUNCHES, so a filler text any earlier
+   probe used can match a restored session: observed `turn reuse: prompt=100037
+   prefill=11973 reuse=88064` -> a fake 1914 tok/s "fresh" reading. Fix: prefix
+   every feed with a unique `SALT<token_hex(8)>` so no session on the node can
+   match; verify EVERY feed with its `turn reuse:` line.
+2. **Salt-mixing changes the token ratio.** v2 prefixed the salt on every filler
+   repeat (`SALT-x <lorem> SALT-x <lorem> ...`), which tokenizes at ~3.97 chars/tok
+   instead of the established SP filler's 5.111 -> a 128.8K-token feed, not
+   comparable to the 100K comparator (read as 255.6 tok/s at 128.8K = actually
+   consistent with ~263 @100K, but the confusion cost a cycle). Fix: ONE salt
+   token-prefix at the head of the prompt + the established filler sized at its
+   own measured chars/tok. Persisted: `bench/phase2_arm.py` (v3) is the corrected form.
