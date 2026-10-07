@@ -11285,3 +11285,20 @@ CUMULATIVE SESSION ARC: fresh 222 -> 281.0 tok/s (+26.6%); r500 delta 103.6 (pre
 era, different shape) era aside, the same-shape comparators run +29% to +65% faster at
 depth. All battery-gated (CONSUMERSKIP CLEAN: needles 6/6, tools 10/10, prose 0 DIRTY /
 0 REVIEW) and soak-validated to 1M.
+
+## 2026-10-07 — chunk-4096 arm on the FINAL stack (post-consumer-skip): a wash => 2048 stays
+
+next13 with EXO_PREFILL_STEP_SIZE=4096 vs the 2048 shipped config (identical shapes,
+true deltas):
+
+| feed | 4096 | 2048 | delta |
+|---|---|---|---|
+| fresh 100K | 283.0 tok/s | 281.0 | +0.7% |
+| r160 cold | 266.4 tok/s | 268.9 | -0.9% |
+| r500 delta | 186.3 rows/s | 184.6 | +0.9% |
+
+All inside the ±3% single-arm resolution band; no resolvable gain. The next8 deep-rung
+regression evidence (-0.9% @750K, -0.3% @1M, measured pre-consumer-skip) still stands:
+the bigger-chunk transient mechanics at depth are unaffected by the indexer change.
+VERDICT: keep 2048 as the default; 4096 remains a documented shallow-workload override.
+This closes Fable's item 3 for the final stack — no relaunch needed.
