@@ -11078,3 +11078,44 @@ in expected-yield order: (a) `attn.all_sum` payload/pipelining (bf16 already; tr
 M effort); (c) deeper structural: chunk-parallelism / M-per-expert scheduling at the
 engine level. None are single-candidate 30% moves; 400 needs a structural change, not
 more micro-levers.
+
+## 2026-10-06 — A/B arm-probe pitfalls (both cost a full arm cycle tonight)
+
+Two probe-script bugs found while measuring next10 (indexer strip-sync package):
+
+1. **Contaminated "fresh" feeds via parked sessions.** The park/restore store
+   persists conversations across cluster RELAUNCHES, so a filler text any earlier
+   probe used can match a restored session: observed `turn reuse: prompt=100037
+   prefill=11973 reuse=88064` -> a fake 1914 tok/s "fresh" reading. Fix: prefix
+   every feed with a unique `SALT<token_hex(8)>` so no session on the node can
+   match; verify EVERY feed with its `turn reuse:` line.
+2. **Salt-mixing changes the token ratio.** v2 prefixed the salt on every filler
+   repeat (`SALT-x <lorem> SALT-x <lorem> ...`), which tokenizes at ~3.97 chars/tok
+   instead of the established SP filler's 5.111 -> a 128.8K-token feed, not
+   comparable to the 100K comparator (read as 255.6 tok/s at 128.8K = actually
+   consistent with ~263 @100K, but the confusion cost a cycle). Fix: ONE salt
+   token-prefix at the head of the prompt + the established filler sized at its
+   own measured chars/tok. Persisted: `bench/phase2_arm.py` (v3) is the corrected form.
+
+3. **Never put a 500K-token prompt on a shell command line.** The r500 soak rung died
+   with `curl exit 126` / "Argument list too long" (E2BIG) from the `-d "$(python3 -c ...)"`
+   substitution. Fix: dump the payload to a file, `curl --data @payload.json`. Applied to
+   the persisted `bench/soak_next12.sh`.
+
+## FINAL STATE MATRIX (2026-10-07) — every config measured on the wire
+
+Fresh 100K / delta shapes, all directly measured (salted like-for-like feeds):
+
+| build | lever added | fresh tok/s | note |
+|---|---|---|---|
+| next7 (session start) | — | 252.5 | PV32=1, chunk 2048 |
+| next8 | chunk=4096 | 256.4 | +1.5% shallow, -0.9% @750K -> reverted |
+| next9 (2nd ship) | PV32=0 (bf16 softmax w) | 263.3 | best-deep config |
+| next10 | indexer eval-merge + C1 fusion | 265.8 | +0.9%, below resolution |
+| **next12 (SHIPPED)** | **MOE_ALLSUM_BF16** | **274.0** | **+3.1% over merge; battery CLEAN** |
+
+Deep rungs on the final build: r160 cold **247.7 tok/s** (+4.5% vs next9 rung); r500 delta
+**143.1 rows/s** (+5.0% vs next9's 136.3; `turn reuse: prefill=340237 reuse=159744` = true delta).
+
+Session arc: **222 -> 274.0 = +23.4%**. 1M ship-gate still green from the next5 proof
+(1,039,963 tok end-to-end); next12 re-validated at 500K depth with the bf16 lever.
