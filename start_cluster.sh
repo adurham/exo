@@ -2672,6 +2672,17 @@ for NODE in "${NODES[@]}"; do
   # OFF in the engine). Forwarded so the promotion A/B can flip it.
   # Audited: no stale value.
   [ -n "${DSV41_INDEXER_HIER:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER=$DSV41_INDEXER_HIER"
+  # DSV41_INDEXER_HIER_EXACT_MB / _EXACT_STRIP / _STRIP / _OVERFETCH /
+  # _HIER_BLOCK: the M2 exact-pass strip geometry (mlx_lm .../indexer.py +
+  # indexer_hierarchical.py, read at import). The exact pass runs 2 blocking
+  # mx.eval per strip (~53 strips/indexer layer at the 128 MB default), so the
+  # strip width is the dominant host-sync count per chunk. Forwarded so the
+  # exact-pass A/B can flip it. Audited: no stale values in repo/shell.
+  [ -n "${DSV41_INDEXER_HIER_EXACT_MB:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_EXACT_MB=$DSV41_INDEXER_HIER_EXACT_MB"
+  [ -n "${DSV41_INDEXER_HIER_EXACT_STRIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_EXACT_STRIP=$DSV41_INDEXER_HIER_EXACT_STRIP"
+  [ -n "${DSV41_INDEXER_HIER_STRIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_STRIP=$DSV41_INDEXER_HIER_STRIP"
+  [ -n "${DSV41_INDEXER_HIER_OVERFETCH:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_OVERFETCH=$DSV41_INDEXER_HIER_OVERFETCH"
+  [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
   # DSV41_SPARSE_QTILE/KTILE/FENCE/WDTYPE/PV32/BUDGET_MB: the tiled sparse-attn
   # knobs (mlx-lm deepseek_v41/sparse_attention.py, read at import). Forwarded
   # for the sdpa-depth A/B. Audited: no stale values anywhere in the repo/shell.

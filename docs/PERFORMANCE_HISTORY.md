@@ -10862,3 +10862,106 @@ is next7's proven deep + PV32's shallow gain; PV32=0 was already on for this soa
 deep rungs and they were within noise of next7's).
 
 Memory envelope: peaks 118-120 GB, zero kills, 1M served end-to-end again.
+
+## 2026-10-06 — FINAL config matrix + shipped state (next9 8d4fbdb60 / mlx-lm 872e0e4)
+
+Every cell directly measured (fresh 100K / delta 100K->200K):
+
+| config | fresh | delta | battery | note |
+|---|---|---|---|---|
+| next7 (session start) | 252.5 (-) | 401.7 (-) | CLEAN | chunk 2048, PV32=1 |
+| 4096 arm | 256.4 (+1.5%) | 403.8 (+0.5%) | CLEAN | shallow win |
+| 4096 + PV32=0 | 263.6 (+4.4%) | 413.3 (+2.9%) | CLEAN | but -0.9% at 750K, -0.3% at 1M (soak) |
+| **next9 = SHIPPED (2048 + PV32=0)** | **263.3 (+4.3%)** | **418.1 (+4.1%)** | (PV32 battery CLEAN; chunk 2048 = the proven deep config) | **best delta, keeps deep end** |
+
+The revert was free: at shallow depth 2048+PV32=0 == 4096+PV32=0 (263.3 vs 263.6, noise),
+and at depth it's the next7-proven 2048 behavior. So the shipped state is the
+best-shallow AND best-deep configuration of everything tested.
+
+**Session arc for the fresh-feed number:** 222 (pre-framefix) -> 245.3 (framefix) ->
+252.5 (sparse winner) -> 263.3 (PV32=0) = **+18.6%**, with the deep deltas at
+73-136 rows/s monotonic vs the pre-session crawls/stalls.
+
+**Deployed state:** deploy/next9 `8d4fbdb60`; mlx-lm `872e0e4`; both baked as code
+defaults (chunk 2048 + PV32=0 + M2 + C1 colsplit + QTILE/BUDGET 256 + re-bill + ladder +
+fences + spans + MoE tail spans). Zero env knobs needed besides the bf16-row and
+KV-bits launch flags.
+
+## 2026-10-06 — CORRECTION: "delta 418 tok/s" is a wire number, not a row rate; the real floor is shared
+
+Recon for tonight's plan turned up an arithmetic artifact worth recording because it changes how
+the scoreboard reads: `sdpa_tile_ab.py` computes wire tok/s as prompt_tokens / wall. For the
+delta arm the prompt is 199,992 tokens but the engine REFED only 101,688 rows (the log's
+`turn reuse: ... prefill=101688 reuse=98304`). Correct refed-row rates:
+
+| feed | refed rows | wall | rows/s | s per 2048-chunk | avg depth |
+|---|---|---|---|---|---|
+| fresh 100K | 100,001 | 379.8 | 263.3 | 7.78 | ~50K |
+| delta 100K->200K | 101,688 | 478.3 | 212.6 | 9.63 | ~150K |
+| r500 rung (soak) | 340,237 | 2,495.9 | 136.3 | 15.0 | ~330K |
+
+The fresh feed is FASTER per refed row; there is no "delta is faster" existence proof. The
+depth slope (~1.8-1.9 s/chunk per +100K avg depth, roughly) accounts for the whole fresh-vs-
+delta gap. At shallow depth the DEPTH-INDEPENDENT floor (~6.5-7 s/chunk = ~165-175 ms per
+layer-chunk over 40 layers) is ~85% of the cost. The 400 tok/s target needs ~5.12 s/chunk =
+128 ms/layer-chunk, i.e. the FLOOR itself must come down ~30% — that is the campaign target,
+and it is a shallow problem, not a fresh-vs-delta artifact.
+
+Corollary for future A/Bs: report refed rows AND wall; a delta arm's wire number overstates
+its rate by the reuse factor. The `turn reuse:` line is the divisor that matters.
+
+## 2026-10-06 — P0 verdict: fresh-feed floor is STEADY-STATE (no front-loaded warmup share to hoist)
+
+Three distinct ~88-96K-token fresh feeds (never-seen filler each, so reuse=0) back-to-back on
+one running process (the process had already served 100K feeds at 22:00/22:06, so all shapes
+were JIT-warm from feed A onward):
+
+| feed | prompt tok | wall | tok/s |
+|---|---|---|---|
+| A | 88,463 | 331.5 s | 266.8 |
+| B | 95,825 | 371.8 s | 257.8 (-3.4%) |
+| C | 96,852 | 368.7 s | 262.7 (+1.9%) |
+
+All within a ±3% band; no warm-up penalty visible on repeat. So the "fresh vs delta" gap is NOT
+one-time JIT/first-touch/allocator growth — the shallow per-chunk floor (~6.5-7.8 s = ~165-195
+ms/layer-chunk over 40 layers) is the steady-state cost of the current per-chunk schedule. The
+400 tok/s target (5.12 s/chunk = 128 ms/layer-chunk) requires cutting the floor itself by ~30%.
+
+Probe artifact note: the never-seen filler tokenizes at ~5.78 chars/tok (vs 5.111 for the
+standard SP filler), so absolute numbers are self-consistent within this probe; compare
+ratios, not absolute levels. Script: `~/.hermes/cache/scratch/warm_fresh.py` (persist to
+`bench/` on next tooling window).
+
+## 2026-10-06 — shallow-feed span attribution (fresh 100K, sync spans, next9) — R1 GATE PASS
+
+Fresh 100K feed on next9 (8d4fbdb60) with EXO_PROFILER=spans EXO_PROFILER_SYNC_SPANS=1;
+USR1 dumps mid-feed (23:02) and late (23:06), feed completed 263.9 tok/s (378.9s/100,001 rows).
+
+| span | mid-feed % | late-feed % | avg_us (late) | n (late) |
+|---|---|---|---|---|
+| ffn | 53.2 | 39.7 | 44,290 | 946 |
+| moe.all_sum | 53.0 | 39.5 | 43,983 | 946 |
+| attn | 46.8 | ~52 | — | — |
+| attn.indexer (+.score) | 16.9 | **29.5** | 163,901 | 190 |
+| attn.sdpa | 20.2 | 21.0 | 23,374 | 946 |
+| attn.all_sum | 9.6 | 9.4 | 10,534 | 946 |
+| moe.switch_mlp | 0.0 | 0.1 | 70 | 946 |
+| attn.proj_qkv | 0.1 | 0.1 | 78 | 945 |
+
+READING (with the known artifact caveats):
+- ffn ~= moe.all_sum to within 0.2%: the MoE's measured time IS overwhelmingly the
+  fp32 all_sum collective + its GPU->CPU->GPU drain (jaccl runs collectives on a CPU
+  stream; the pipeline must fully empty for each of 40 calls/chunk). NOT the expert GEMMs
+  (switch_mlp child span: 0.1%). This is the Fable "bubble A/B" mechanism, re-confirmed
+  at shallow depth with the new tail spans.
+- attn.indexer.score at 16.9% -> 29.5% ACROSS the shallow arc (mid vs late window) —
+  the O(offset) term; well above the 5% R1 gate. The exact-pass sync reduction
+  (branch perf/dsv41-hier-strip-sync) targets exactly this.
+- attn.all_sum 9.4% is the sync-span artifact number (true ~2-3% per the 2026-08-20
+  correction); do not build against it.
+- attn.proj_qkv 0.1% at 78 us/call: the projections are NOT a shallow lever (child-span
+  under-reporting caveat applies, but not at 78us scale).
+
+Consequence: tonight's package (indexer strip-sync reduction + boundary-sync fusion,
+both bit-exact) + the MoE all_sum bf16 gate (payload halving of a 39.5%-attributed span)
+are the two measured targets. Both were already identified; the tables price them.
