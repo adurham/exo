@@ -11258,3 +11258,30 @@ saved work grows linearly with depth while the rest of the chunk shrinks. This i
 strongest depth-scaling lever the campaign has measured (vs M2's +15/+25/+46%).
 
 r1m in flight.
+
+## 2026-10-07 — SOAK13 COMPLETE: consumer-skip depth ladder +6.3% / +29.0% / +57.3% / +65.5% — the campaign's strongest depth-scaling lever, fully shipped
+
+Full ladder on the shipped next13 (`f0840af1c` / mlx-lm `6cc9c1e`), one salted conversation,
+every rung a TRUE delta (verified via `turn reuse:` lines):
+
+| rung | refed | wall | rate | next12 | delta |
+|---|---|---|---|---|---|
+| r160 cold | 160,006 tok | 608 s | 263.2 tok/s | 247.7 | **+6.3%** |
+| r500 delta | 340,248 rows | 1,843 s | 184.6 rows/s | 143.1 | **+29.0%** |
+| r750 delta | 250,282 rows | 1,710 s | 146.4 rows/s | 93.1 | **+57.3%** |
+| r1m delta | 290,406 rows | 2,400 s | **121.0 rows/s** | 73.1 | **+65.5%** |
+
+1,039,974 tokens served end-to-end (up from 1,039,963 on the prior build); r1m `turn reuse:
+prompt=1039974 prefill=290406 reuse=749568`. Memory stayed 113 GB both nodes through the
+deep delta (well under the wired limit). Zero kills, zero refusals.
+
+The win GROWS with depth monotonically (6.3 -> 29.0 -> 57.3 -> 65.5%) — exact match to the
+mechanism: the consumer layers' coarse pass is O(offset), so the eliminated work grows
+linearly with depth while every other per-chunk term shrinks. This is the strongest
+depth-scaling lever measured in the campaign (vs M2's +15/+25/+46%) and the first shipped
+this session on top of it.
+
+CUMULATIVE SESSION ARC: fresh 222 -> 281.0 tok/s (+26.6%); r500 delta 103.6 (pre-framefix
+era, different shape) era aside, the same-shape comparators run +29% to +65% faster at
+depth. All battery-gated (CONSUMERSKIP CLEAN: needles 6/6, tools 10/10, prose 0 DIRTY /
+0 REVIEW) and soak-validated to 1M.
