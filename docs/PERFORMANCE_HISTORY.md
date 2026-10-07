@@ -11324,3 +11324,49 @@ consumer coarse-pass win? — is settled by the code without a probe:
 
 Conclusion: item (b) closed with data — no implementation, no probe. The consumer-skip win
 is a strict superset of everything available on the exact side.
+
+## 2026-10-07 — LOOP-2 NIGHT MEMO: consumer-skip shipped (+65.5% at depth); MoE kernel priced; exact-pass sibling closed
+
+### The night's arc (all battery-gated, soak-validated, recorded)
+
+**Shipped**: deploy/next13 (`f0840af1c` / mlx-lm `6cc9c1e`; exo main `c673336c4`) — adds the
+consumer coarse-pass restriction to the prior shipped stack (framefix, M2, re-bill, ladder,
+fences, spans, bf16 score row, eval-merge, geometry log, MOE_ALLSUM_BF16, PV32=0, chunk 2048).
+
+**Numbers (fresh 100K / same-shape deep deltas):**
+- fresh: 222 (session start) -> 263.3 -> 265.8 -> 274.0 -> **281.0** = **+26.6%**
+- r500 delta: 143.1 -> **184.6 rows/s** (+29.0%)
+- r750 delta: 93.1 -> **146.4 rows/s** (+57.3%)
+- r1m delta: 73.1 -> **121.0 rows/s** (+65.5%); 1,039,974 tokens served, 113 GB peaks, zero kills
+- 350K build: 1,892.8 -> 1,617.6 s (+17.0%)
+
+**The mechanism**: consumer index layers (24/28/32/36) were scoring ALL nb coarse columns
+then masking 84-98% away. Now they score only candidate blocks. Provably bit-exact
+(block-constant mask -> identical block maxima -> identical top-k). The win grows with
+depth O(offset): +6.3% @160K -> +29% @500K -> +65.5% @1M.
+
+### Bench verdicts (Fable's three-way rule)
+
+- **MoE expert GEMM: INCONCLUSIVE** — 51-60% of a calibrated 15.14 TF ceiling (uniform 8.88
+  TF / skewed 7.55 TF at block level). NOT roofline, NOT cheaply harvestable: dequant->fp16
+  is 2x slower (killed); already single-launch segmented; the July "82 TF" artifact retired
+  (5.4x above silicon). The calibration table is the deliverable; the harvest would be a
+  Metal-kernel project (shape-aware partitioning), parked.
+- **Exact-pass sibling: CLOSED (no waste exists)** — the exact pass consumes the coarse
+  pass's own top-(k+overfetch) output; consumers inherited the restriction for free inside
+  the +30.1%, and it is bounded by 528 blocks (O(1) in offset) for every layer. The
+  remaining O(offset) term is the non-consumer layers' semantic hot-set sweep — restricting
+  it would change outputs.
+- **chunk-4096 on the final stack: WASH** (fresh +0.7%, r160 -0.9%, r500 +0.9%, all within
+  ±3%). 2048 stays.
+
+### Discipline notes for the next session
+- A/B arms MUST salt every feed (park/restore survives relaunches — a reused filler faked
+  1914 tok/s once). Fresh deltas <3% need >=2-3 feed means.
+- The `turn reuse:` line is the only proof of a true delta; every rung above was verified.
+- Payload-to-file for any long prompt (E2BIG killed a curl at 500K tokens).
+- Knob forwarding must be audited per-knob before any A/B (two knobs were silently absent).
+- The wall decomposition is now post-next13: the MoE block is a third of the chunk with
+  40-50% unharvested kernel headroom, indexer's consumer waste eliminated, collectives
+  halved (bf16). The sub-400 gap is now: MoE kernel efficiency (parked, Metal-project),
+  sdpa 21% (micro-levers exhausted), and the diffuse residue.
