@@ -11157,3 +11157,31 @@ PLAN (Fable, hardened):
 - Sizing (n=2048, C=16384, 4 consumers): waste 84-98% of consumer coarse FLOPs; **% of wall pessimistic->optimistic: 100K 3.9-13.7%, 350K 12.2-25.2%, 750K 14.8-38.6%** (pessimistic = low span share + extra 50% haircut on the consumer-coarse fraction). Clears the 2% gate at every offset; deep-weighted 14.8%.
 - **Correctness audit: provably EXACT.** Block-constant candidate mask; non-candidate block -> -inf either way; candidate block max = over exactly its candidate+visible columns with the identical `_score_shared_columns` expression; top_blocks picks the same 528 blocks; exact_rescore returns identical (top_v, top_i). One required condition: `HIER_BLOCK == candidate_block_size` (holds today; asserted on the source layer, NOT on consumers — **implementation must add a consumer-side assert**).
 - Impl sketch: seed the coarse pass from candidate block ids via `_gather_rows` + `_score_gathered_columns`; scatter candidate block maxima, rest -inf. ~50-100 LOC behind the existing HIER path, low risk, pure work reduction.
+
+## 2026-10-07 — consumer coarse-pass restriction IMPLEMENTED (bit-exact, RED-proven) -> deploy/next13, arm in flight
+
+Branch `perf/dsv41-consumer-skip` @ `5a986da`, merged to mlx-lm main `6cc9c1e`; exo main
+`55298d66b`; deploy/next13 `f0840af1c` (228 tests + alignment green).
+
+Implementation (mlx-lm, child-verified + re-verified by me):
+- `indexer_hierarchical.py`: new `_block_any` / `coarse_gather_strip` /
+  `coarse_block_scores_candidates` — computes which blocks hold a candidate per row,
+  scores only those blocks' columns via the existing `_gather_rows` +
+  `_score_gathered_columns`, scatters per-block maxima (non-candidate blocks stay -inf).
+  `hierarchical_topk_prod` gains `consumer_skip=True`; `exact_rescore_streaming` unchanged.
+- `indexer.py`: `DSV41_INDEXER_CONSUMER_SKIP` default ON (inside the existing HIER gate);
+  **consumer-side assert** `candidate_block_size == HIER_BLOCK` (raises on mismatch —
+  the audit's required condition); passes the switch through.
+- `tests/test_dsv41_consumer_skip.py` (11 tests): the mandated probe, zero-candidate rows,
+  partial-window blocks, partial tail block, unaligned mask, b=2, production shape,
+  the real `Indexer.__call__` on-vs-off, and the mismatch assert. **RED**: sabotaging the
+  mask-ignore made 9 fail (maxima differed in 1,024-92,672 cells); **GREEN**: 11/11.
+  Scoped suites: 49 passed. ruff clean.
+- Local function-level timing (laptop, whole hierarchical_topk_prod): 0.99x @32K,
+  **2.3x @131K, 3.7x @262K**, bit-exact at all three.
+- Two safety refinements beyond the brief: candidate ids computed in row chunks (a
+  one-go sort would build a ~0.75 GiB temp at deep offsets); gather strip sized to keep
+  peak memory ~equal to the old pass (4096 coarse cols -> 1360 gathered cols at h=32,d=128).
+- NOT verified (child's own list, correct): no live cluster measurement; nothing above
+  262K locally; peak memory on paper only; one extra blocking `.item()` per consumer
+  layer per chunk (unmeasured on cluster); break-even at nb <= 32K.
