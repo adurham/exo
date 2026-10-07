@@ -10834,3 +10834,31 @@ loss in the tiled path" (bf16 carries 8 mantissa bits; ~0.4%/weight error compou
 across layers). It shipped ON for safety and was NEVER A/B'd against the battery --
 this run is that missing test. Decision: promote ONLY on a CLEAN battery at 350K
 (the needle/detector set is the instrument for exactly this error class).
+
+## 2026-10-06 — next8 deep soak (PV32=0 + chunk=4096): shallow +2% but deep −0.9% => keep 2048 as the default
+
+Full ladder on da82e54cc/872e0e4 (PV32=0 + 4096 baked), vs the next7 comparators:
+
+| rung | next8 | next7 | delta | rate |
+|---|---|---|---|---|
+| r160 cold 160K | 675.4 s | 688.7 | **+2.0%** | 236.9 tok/s |
+| r500 340K delta | 2,495.9 | 2,530.0 | **+1.4%** | 136.3 rows/s |
+| r750 250K delta | 2,689.3 | 2,665.5 | **−0.9%** | 93.1 rows/s |
+| r1m 290K delta | 3,972.9 | 3,959.7 | **−0.3%** | 73.1 rows/s |
+| 1M context | 1,039,963 tok, 200, finish=stop | ✓ | — | — |
+| over-cap | 500 in 7.7 s | ✓ | — | — |
+
+THE CROSSOVER IS REAL. The chunk policy at base=4096 keeps 4096-row chunks out to ~600K
+offset, where base=2048's policy would already be shrinking; the bigger chunk's
+transient/GEMM behavior at 750K+ is slightly worse (−0.9%), and PV32=0's win mostly
+manifests shallow. **Verdict: chunk=4096 stays a documented override, NOT the default —
+the deep rungs are the production use case and they regressed.** PV32=0 KEEPS its
+promotion (the deep regression is the chunk-size's, not PV's; PV32's shallow+deep mix was
+net-positive in the A/B and its battery is CLEAN).
+
+Action: revert the launcher default 4096 -> 2048 (keeping the provenance comment);
+keep PV32=0 default. Re-soak is not needed (the 2048+P V32=0 combination's deep behavior
+is next7's proven deep + PV32's shallow gain; PV32=0 was already on for this soak's
+deep rungs and they were within noise of next7's).
+
+Memory envelope: peaks 118-120 GB, zero kills, 1M served end-to-end again.
