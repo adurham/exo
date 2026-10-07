@@ -10862,3 +10862,27 @@ is next7's proven deep + PV32's shallow gain; PV32=0 was already on for this soa
 deep rungs and they were within noise of next7's).
 
 Memory envelope: peaks 118-120 GB, zero kills, 1M served end-to-end again.
+
+## 2026-10-06 — FINAL config matrix + shipped state (next9 8d4fbdb60 / mlx-lm 872e0e4)
+
+Every cell directly measured (fresh 100K / delta 100K->200K):
+
+| config | fresh | delta | battery | note |
+|---|---|---|---|---|
+| next7 (session start) | 252.5 (-) | 401.7 (-) | CLEAN | chunk 2048, PV32=1 |
+| 4096 arm | 256.4 (+1.5%) | 403.8 (+0.5%) | CLEAN | shallow win |
+| 4096 + PV32=0 | 263.6 (+4.4%) | 413.3 (+2.9%) | CLEAN | but -0.9% at 750K, -0.3% at 1M (soak) |
+| **next9 = SHIPPED (2048 + PV32=0)** | **263.3 (+4.3%)** | **418.1 (+4.1%)** | (PV32 battery CLEAN; chunk 2048 = the proven deep config) | **best delta, keeps deep end** |
+
+The revert was free: at shallow depth 2048+PV32=0 == 4096+PV32=0 (263.3 vs 263.6, noise),
+and at depth it's the next7-proven 2048 behavior. So the shipped state is the
+best-shallow AND best-deep configuration of everything tested.
+
+**Session arc for the fresh-feed number:** 222 (pre-framefix) -> 245.3 (framefix) ->
+252.5 (sparse winner) -> 263.3 (PV32=0) = **+18.6%**, with the deep deltas at
+73-136 rows/s monotonic vs the pre-session crawls/stalls.
+
+**Deployed state:** deploy/next9 `8d4fbdb60`; mlx-lm `872e0e4`; both baked as code
+defaults (chunk 2048 + PV32=0 + M2 + C1 colsplit + QTILE/BUDGET 256 + re-bill + ladder +
+fences + spans + MoE tail spans). Zero env knobs needed besides the bf16-row and
+KV-bits launch flags.
