@@ -11208,3 +11208,22 @@ the restricted path avoids the alloc+write, so the saving exceeds the raw FLOP r
 Cumulative shipped-state numbers on next13: fresh **281.0** (session start 222 = +26.6%),
 r160 268.9, r500 delta 186.2 rows/s. Quality battery fired on next13 (CONSUMERSKIP label)
 as the selection-stage ship gate.
+
+## 2026-10-07 — CONSUMERSKIP battery CLEAN => consumer-skip is fully shipped (the deepest win of the campaign)
+
+Battery on next13 (consumer-skip ON), CONSUMERSKIP @350K: **CLEAN** — needles 6/6,
+tools 10/10, prose 0 DIRTY / 0 REVIEW, park recall True. Build prefill: 1,617.6 s vs the
+prior build's 1,892.8 s = **+17.0% at 350K** (consistent with the depth-scaling win).
+
+Full evidence chain for the consumer-skip lever:
+- Sizing (read-only report): 3.9/12.2/14.8% of wall pessimistic at 100K/350K/750K; exactness
+  provably held (block-constant mask -> identical block maxima -> identical top-k).
+- Implementation: bit-exact, RED-proven (11-test suite), consumer-side block-size assert.
+- Wire A/B (identical shapes): fresh 281.0 (+2.6%), r160 268.9 (+8.6%), r500 delta
+  186.2 rows/s (+30.1%).
+- Quality gate: CLEAN (above).
+- 350K build: +17.0%.
+
+Cumulative session arc: **222 -> 281.0 tok/s fresh = +26.6%**; r500 delta 143.1 -> 186.2
+rows/s = +30.1% vs the prior build. Deep soak (r160->r1m ladder on next13) firing as the
+final validation.
