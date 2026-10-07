@@ -194,6 +194,13 @@ class GenerationStats(BaseModel):
     # care about MTP can ignore these.
     mtp_cycles_cumulative: int = 0
     mtp_accepted_drafts_cumulative: int = 0
+    #: Per-position acceptance histogram -- index ``k`` counts rounds (cumulative
+    #: since the worker process started) that accepted exactly ``k`` drafts,
+    #: ``k = 0..gamma``. Length is always ``>= 7`` so it covers the engine's max
+    #: gamma (6). Deltas across successive requests from the same instance give
+    #: per-round ``p1..pk`` via the survival function ``P(accept >= k)``. ``None``
+    #: for generators that do not collect it.
+    mtp_accepted_histogram_cumulative: list[int] | None = None
     # Round-11 phase-boundary instrumentation (EXO_PHASE_MARKS-gated). Maps
     # mark name -> milliseconds since the previous mark, ALL same-process
     # perf_counter deltas (see exo.worker.engines.mlx.phase_marks). None
@@ -304,6 +311,12 @@ class ChatCompletionRequest(BaseModel):
     # its own in-flight request (and so cancel it) mid-prefill. Not
     # interpreted by exo and not required to be unique.
     correlation_id: str | None = None
+    # Optional per-request DSv4.1 speculative draft length (gamma). Mirrors the
+    # ``service_tier`` style: absent / unset => the engine's own default (gamma
+    # 3), so one warm process can serve interleaved gamma arms without a
+    # relaunch. A supplied value is clamped into the engine's supported [1, 6]
+    # by the validator below.
+    spec_gamma: int | None = None
 
     @field_validator("reasoning_effort", mode="before")
     @classmethod
@@ -318,6 +331,21 @@ class ChatCompletionRequest(BaseModel):
         if not isinstance(v, str):
             return v
         return clamp_reasoning_effort(v)
+
+    @field_validator("spec_gamma", mode="before")
+    @classmethod
+    def clamp_spec_gamma(cls, v: object) -> int | None:
+        """Clamp a requested draft length into the engine's supported [1, 6].
+
+        Absent / non-int values -- including a JSON ``true``, which is an
+        ``int`` subclass in Python -- resolve to ``None``, i.e. the engine
+        default, so a malformed or misspelled value degrades to the
+        pre-existing behavior (gamma 3) instead of selecting an out-of-range
+        arm or 422-ing the request.
+        """
+        if isinstance(v, bool) or not isinstance(v, int):
+            return None
+        return max(1, min(6, v))
 
 
 class BenchChatCompletionRequest(ChatCompletionRequest):

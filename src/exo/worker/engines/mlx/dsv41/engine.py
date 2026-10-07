@@ -321,6 +321,14 @@ class Dsv41Engine(Engine):
     _spec_rounds: int = field(default=0, init=False)
     _spec_accepted: int = field(default=0, init=False)
     _spec_drafted: int = field(default=0, init=False)
+    #: Per-position acceptance histogram since process start: index ``k`` (0..6)
+    #: counts rounds that accepted exactly ``k`` drafts. Deltas across requests
+    #: give the live per-round p1..pk via the survival function P(accept >= k),
+    #: which is what a per-request gamma study needs (the scalar counters above
+    #: only give the mean acceptance rate). Always length 7 (covers gamma <= 6).
+    _spec_accept_hist: list[int] = field(
+        default_factory=lambda: [0] * 7, init=False
+    )
     #: Monotonic timestamp of the previous ``_session_fence_heartbeat`` call,
     #: for the >30 s spacing watchdog. ``0.0`` (never called) is treated as
     #: "first call" and never warns.
@@ -792,7 +800,10 @@ class Dsv41Engine(Engine):
 
         def committed_tokens() -> Iterator[tuple[int, Any]]:
             yield anchor, (anchor_lp[0] if anchor_lp else None)
-            for batch, lps in self._rounds(session, anchor, max_tokens - 1, logprobs=lp_k):
+            for batch, lps in self._rounds(
+                session, anchor, max_tokens - 1, logprobs=lp_k,
+                spec_gamma=params.spec_gamma,
+            ):
                 produced.extend(batch)
                 for i, t in enumerate(batch):
                     yield t, (lps[i] if i < len(lps) else None)
@@ -851,6 +862,7 @@ class Dsv41Engine(Engine):
                         logprob=as_logprob(lp_entry),
                         mtp_cycles=self._spec_drafted,
                         mtp_accepted=self._spec_accepted,
+                        mtp_accept_hist=self._spec_accept_hist,
                     )
                     return
                 yield _mid_response(tid, text, task_id, as_logprob(lp_entry))
@@ -873,6 +885,7 @@ class Dsv41Engine(Engine):
             reused_tokens=turn.reused_tokens,
             mtp_cycles=self._spec_drafted,
             mtp_accepted=self._spec_accepted,
+            mtp_accept_hist=self._spec_accept_hist,
         )
 
     def _end_turn(
@@ -969,7 +982,13 @@ class Dsv41Engine(Engine):
         return turn, anchor
 
     def _rounds(
-        self, session: Any, anchor: int, max_tokens: int, *, logprobs: int = 0
+        self,
+        session: Any,
+        anchor: int,
+        max_tokens: int,
+        *,
+        logprobs: int = 0,
+        spec_gamma: int | None = None,
     ) -> Iterator[tuple[list[int], list[Any]]]:
         """Decode rounds from the anchor; yields each round's committed tokens
         and (when ``logprobs`` > 0) their log-prob entries.
@@ -977,10 +996,14 @@ class Dsv41Engine(Engine):
         Stops once ``max_tokens`` tokens after the anchor are committed or a
         round commits EOS. A round's whole batch is yielded: the cache already
         holds its rows (the emitter applies EOS / stop / the cap).
+
+        ``spec_gamma`` is the request's optional draft length; ``None`` => the
+        engine default (``self.gamma``), byte-identical to the pre-existing path.
         """
         head = self.loaded.head if self.speculative else None
+        gamma_for_request = spec_gamma if spec_gamma is not None else self.gamma
         policy = (
-            _spec_policy(self.gamma)
+            _spec_policy(gamma_for_request)
             if (head is not None and self.adaptive_gamma)
             else None
         )
@@ -1007,6 +1030,9 @@ class Dsv41Engine(Engine):
                 self._spec_rounds += 1
                 self._spec_accepted += int(_accepted)
                 self._spec_drafted += int(_gamma)
+                self._spec_accept_hist[
+                    min(int(_accepted), len(self._spec_accept_hist) - 1)
+                ] += 1
             batch = [int(t) for t in committed]
             n += len(batch)
             token = batch[-1]

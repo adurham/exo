@@ -176,6 +176,8 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     tools: list[dict[str, Any]] | None = None
     bench: bool = False
     use_prefix_cache: bool = False
+    # Per-request dsv41 speculative draft length; None => engine default (3).
+    spec_gamma: int | None = None
     # Best-effort background request: its prefix-cache leaf is evicted before
     # interactive sessions when the cache is over its session cap. Set by the
     # chat-completions adapter from a non-default OpenAI ``service_tier``
