@@ -61,6 +61,7 @@ __all__ = [
     "TurnOutcome",
     "choose_prefill_step",
     "engine_prefill",
+    "plan_image_prefill_pieces",
 ]
 
 #: Rows of shared prefix required before a resident conversation is reused for a
@@ -223,6 +224,56 @@ def _resolve_transient_budget_bytes(transient_budget_mb: int | None) -> int:
         else int(transient_budget_mb)
     )
     return max(1, mb) * _MBYTES_PER_MB
+
+
+def plan_image_prefill_pieces(
+    total: int,
+    chunk: int,
+    span_end: int,
+    *,
+    budget_mb: int | None = None,
+    row_bytes: int | None = None,
+) -> list[int]:
+    """Piece sizes for one image-carrying turn's prefill.
+
+    The FIRST piece covers every image span -- ``max(chunk, span_end, 1)``.
+    DeepSeek-V4 merges image embeddings only in the forward whose cache offset
+    is 0 (``vision._InjectedEmbed``), so the whole span must sit in one piece:
+    span atomicity takes precedence over the transient budget, because a
+    boundary inside a span is a hard error rather than a slow path.
+
+    Every LATER piece is sized by :func:`choose_prefill_step` -- the SAME policy
+    ``engine_prefill`` runs when no ``chunk_plan`` is given -- so the transient
+    budget (``EXO_PREFILL_TRANSIENT_BUDGET_MB``) is honoured on the image path
+    exactly as it is on the text path. A request whose image span already fits
+    inside one ``chunk`` (``span_end <= chunk``) is therefore fed precisely the
+    schedule a text turn of the same length would get.
+
+    The pieces are handed to ``SessionCache._prefill_planned``, which feeds each
+    one as a single forced-chunk driver call (it must not be resized by the
+    driver). They sum to ``total`` so the driver's "plan ran out" fallback stays
+    dead, and the plan is a pure function of its arguments -- no resident-cache
+    state -- so a cold and a reused run of the same request still see the same
+    boundaries (the cold==reused bitwise contract).
+    """
+    total = int(total)
+    if total <= 0:
+        return []
+    chunk = max(int(chunk), 1)
+    first = max(chunk, int(span_end), 1)
+    if first >= total:
+        return [total]
+    budget_bytes = _resolve_transient_budget_bytes(budget_mb)
+    rb = max(1, int(row_bytes)) if row_bytes is not None else _indexer_row_bytes()
+    pieces = [first]
+    done = first
+    while done < total:
+        # Same frame as ``engine_prefill``: ``done`` is the absolute start, and
+        # ``total`` the absolute end, of the rows still to feed.
+        step = choose_prefill_step(done, total, chunk, budget_bytes, row_bytes=rb)
+        pieces.append(step)
+        done += step
+    return pieces
 
 
 def _resolve_fence_every(fence_every: int | None) -> int:

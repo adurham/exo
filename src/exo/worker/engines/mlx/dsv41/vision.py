@@ -256,7 +256,8 @@ class _InjectedEmbed:
     span split across pieces would be unreadable by the time the later piece runs.
     This stand-in therefore tracks the rows consumed so far and serves the merged
     tensor for the FIRST piece, which the engine guarantees is large enough to
-    cover every image span (``engine._first_chunk_covers``); later pieces get the
+    cover every image span (``engine._image_prefill_plan`` / ``session.plan_image_prefill_pieces``);
+    later pieces get the
     ordinary table lookup, which is exactly what the merged tensor holds outside
     the span.
 

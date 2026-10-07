@@ -99,7 +99,11 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _stop_index,
     _stop_sequences,
 )
-from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
+from exo.worker.engines.mlx.dsv41.session import (
+    Dsv41Sessions,
+    TurnOutcome,
+    plan_image_prefill_pieces,
+)
 from exo.worker.engines.mlx.dsv41.vision import (
     Dsv41Vision,
     build_embeddings,
@@ -186,19 +190,18 @@ def _image_span_end(image_inputs: Any) -> int:
     return max((end for _start, end in image_spans(image_inputs)), default=0)
 
 
-def _first_chunk_covers(total: int, chunk: int, span_end: int) -> list[int]:
-    """A prefill chunk plan whose FIRST piece covers every image span.
+def _image_prefill_plan(
+    total: int, chunk: int, span_end: int, budget_mb: int | None
+) -> list[int] | None:
+    """The image-turn ``chunk_plan``, or ``None`` for a text turn.
 
-    The DSv4 vision path's ``plan_prefill_chunks`` makes the same point: an
-    image span is only valid inside the forward whose cache offset is 0, so a
-    boundary that lands inside a span is a hard error rather than a slow path.
-    Returns the piece sizes for ``SessionCache.append_turn(chunk_plan=...)``.
+    Thin wrapper over :func:`dsv41.session.plan_image_prefill_pieces` so the
+    budget policy lives in one place (next to :func:`choose_prefill_step`); the
+    engine only decides when a plan is needed at all (images present).
     """
-    first = max(int(chunk), int(span_end), 1)
-    if first >= total:
-        return [total]
-    rest = total - first
-    return [first] + [int(chunk)] * ((rest + int(chunk) - 1) // int(chunk))
+    if span_end <= 0:
+        return None
+    return plan_image_prefill_pieces(total, chunk, span_end, budget_mb=budget_mb)
 
 
 def _warmup_messages() -> list[InputMessage]:
@@ -951,7 +954,17 @@ class Dsv41Engine(Engine):
         as the reference does; the mask is installed for this prefill only.
         """
         total = len(tokens)
-        plan = _first_chunk_covers(total, self._chunk, image_span_end) if embeddings is not None else None
+        # The image path needs an explicit piece plan (its spans must sit in the
+        # first forward), and that plan is now budget-shaped so
+        # EXO_PREFILL_TRANSIENT_BUDGET_MB is honoured here exactly as on the text
+        # path; None for a text turn (no images -> the driver's own policy).
+        plan = (
+            _image_prefill_plan(
+                total, self._chunk, image_span_end, self.prefill_transient_budget_mb
+            )
+            if embeddings is not None
+            else None
+        )
         # A stale fence timestamp from the PREVIOUS request's last fence must not
         # make this request's FIRST fence look like a >30 s gap (observed live:
         # a spurious "spacing 429.8s exceeds 30s" on the first fence after an

@@ -529,3 +529,227 @@ def test_conversation_prefill_runs_fenced_end_to_end(monkeypatch: pytest.MonkeyP
     assert body.fences, "prefill ran no forward"
     assert all(f == s_.DEFAULT_PREFILL_FENCE_EVERY for f in body.fences)
     assert body.fence() == 0  # restored after the turn's prefill
+
+
+# ----------------------------------- image-path plan honors the transient budget
+#
+# Phase-2 Finding 1: the image / ``chunk_plan`` entry point (SessionCache
+# ``_prefill_planned``) pins ``long_threshold=10**9``, which selects the legacy
+# fixed-crossover branch in ``engine_prefill`` and SKIPS ``choose_prefill_step``
+# -- so ``EXO_PREFILL_TRANSIENT_BUDGET_MB`` was inert on any image request. The
+# fix keeps the fork's pin/contract untouched and instead makes the PLAN the
+# engine passes in budget-shaped (``plan_image_prefill_pieces``). These tests
+# pin the invariant that closes the gap: the plan is the budget policy's
+# cold-run boundary sequence, except the FIRST piece is extended to cover the
+# whole image span (span atomicity takes precedence over the budget).
+
+
+def _plan_ref(total: int, chunk: int, span_end: int, budget: int,
+              row_bytes: int = 1) -> list[int]:
+    """Independent re-derivation of the budget-shaped image plan (no MLX)."""
+    first = max(int(chunk), int(span_end), 1)
+    if first >= total:
+        return [total]
+    out, done = [first], first
+    while done < total:
+        rows = min(chunk, max(128, budget // (row_bytes * max(done, 1))))
+        step = max(1, min(rows, total - done))
+        out.append(step)
+        done += step
+    return out
+
+
+def test_plan_image_default_budget_is_the_pre_fix_uniform_tail(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Under the shipped budget the plan is byte-identical to the old behaviour.
+
+    The old ``_first_chunk_covers`` emitted ``[first] + [chunk] * ceil(rest/chunk)``;
+    with the default 2048 MB budget and row_bytes=1 the policy returns ``chunk``
+    at every offset here, so the tail is the same uniform run -- the fix cannot
+    regress the deployed schedule.
+    """
+    monkeypatch.delenv("EXO_PREFILL_TRANSIENT_BUDGET_MB", raising=False)
+    total, chunk, span_end = 10_000, 2048, 100  # span fits inside one chunk
+    # The OLD ``_first_chunk_covers`` emitted ``[first] + [chunk] * ceil(rest/chunk)``
+    # (a final piece may over-run total); ``_prefill_planned`` clamps each piece to
+    # the rows remaining, so the old FED schedule is the old list clamped. Under
+    # the default budget the policy returns ``chunk`` at every offset, so the new
+    # plan feeds exactly those same rows.
+    old_pieces = [max(chunk, span_end)] + [chunk] * ((total - chunk + chunk - 1) // chunk)
+    old_fed, done = [], 0
+    for s in old_pieces:
+        stop = min(done + s, total)
+        old_fed.append(stop - done)
+        done = stop
+        if done >= total:
+            break
+    got = s_.plan_image_prefill_pieces(total, chunk, span_end, row_bytes=1)
+    assert got == old_fed, got
+    assert got == [2048, 2048, 2048, 2048, 1808]
+    assert sum(got) == total
+
+
+def test_plan_image_span_extends_the_first_piece():
+    """The whole span stays in piece 0; the tail is unaffected by the span."""
+    total, chunk, span_end = 6000, 1024, 2484
+    got = s_.plan_image_prefill_pieces(total, chunk, span_end, budget_mb=10**9,
+                                       row_bytes=1)
+    assert got[0] == span_end, got  # first piece stretched to cover the span
+    assert got[0] >= span_end
+    assert sum(got) == total
+    # Span inside piece 0 already -> first piece unchanged.
+    assert s_.plan_image_prefill_pieces(6000, 1024, 900, budget_mb=10**9,
+                                        row_bytes=1)[0] == 1024
+
+
+def test_plan_image_tight_budget_shrinks_the_tail_but_not_piece_zero():
+    """THE GAP: a tight budget must shrink the tail pieces (was: inert)."""
+    total, chunk, span_end = 10_000, 2048, 100
+    default = s_.plan_image_prefill_pieces(total, chunk, span_end, row_bytes=1)
+    tight = s_.plan_image_prefill_pieces(total, chunk, span_end, budget_mb=1,
+                                         row_bytes=1)
+    # The knob now bites on the image path: the tail shrinks below the base.
+    assert tight != default
+    assert tight[0] == default[0] == 2048, "piece 0 (span cover) must not shrink"
+    assert any(p < chunk for p in tight[1:]), tight
+    assert max(tight[1:]) < chunk
+    assert sum(tight) == total
+    # ...and is exactly the budget schedule, not something ad hoc.
+    assert tight == _plan_ref(total, chunk, span_end, 1_000_000)
+
+
+def test_plan_image_budget_schedule_is_exact_and_never_under_flows():
+    """Every tail piece is the policy's choice; the plan always sums to total."""
+    for total, chunk, span_end, budget in [
+        (30_000, 2048, 50, 20_000_000),
+        (5_000, 512, 400, 1_000_000),
+        (1, 2048, 1, 1_000_000),
+        (2048, 2048, 100, 1_000_000),          # first piece == total
+        (4096, 2048, 4096, 1_000_000),        # span == total
+        (100_000, 4096, 3_000, 50_000_000),
+    ]:
+        got = s_.plan_image_prefill_pieces(total, chunk, span_end,
+                                            budget_mb=budget // 1_000_000,
+                                            row_bytes=1)
+        assert sum(got) == total, (total, chunk, span_end, got)
+        assert all(p >= 1 for p in got)
+        assert got == _plan_ref(total, chunk, span_end, budget)
+
+
+def test_plan_image_seeds_the_policy_at_the_absolute_first_boundary():
+    """The tail schedule matches what ``engine_prefill`` would pick with no plan.
+
+    Same frame as the driver: the policy is seeded at the FIRST piece's end (its
+    absolute offset) and run to ``total``. A naive re-seed at 0 would over-size
+    the first tail piece.
+    """
+    total, chunk, span_end, budget = 30_000, 2048, 100, 5_000_000
+    got = s_.plan_image_prefill_pieces(total, chunk, span_end, budget_mb=5,
+                                       row_bytes=1)
+    # Recompute the driver's own schedule over the tail, seeded at chunk.
+    assert got == _plan_ref(total, chunk, span_end, budget)
+
+
+class _RowRecordingBody(StubBody):
+    """StubBody that records the row count of every forward it is handed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[int] = []
+        self.fences: list[int] = []
+
+    def __call__(self, ids, cache, last_logit_only=False, return_taps=False,
+                 argmax=False):
+        arr = np.asarray(ids)
+        self.rows.append(int(arr.shape[-1]))
+        self.fences.append(int(getattr(self, "_fence_every", 0)))
+        return super().__call__(ids, cache, last_logit_only, return_taps, argmax)
+
+
+def _image_engine(body: Any, *, chunk: int, budget_mb: int | None):
+    from exo.shared.types.common import ModelId
+    from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
+    from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
+
+    loaded = Dsv41Loaded(
+        model=body, tokenizer=None, args=body.args, model_path=None,  # type: ignore[arg-type]
+        built_layers=[0], full_stack=False, rank=0, world=1, load_seconds=0.0,
+        head=None,
+    )
+
+    class Sender:
+        def send(self, item: Any) -> None:
+            del item
+
+    class Receiver:
+        def collect(self) -> list[Any]:
+            return []
+
+    return Dsv41Engine(
+        loaded=loaded, model_id=ModelId("x/y"), group=None,
+        cancel_receiver=Receiver(),  # type: ignore[arg-type]
+        event_sender=Sender(),  # type: ignore[arg-type]
+        device_rank=0, speculative=False, prefill_chunk_size=chunk,
+        max_kv_tokens=65536, prefill_transient_budget_mb=budget_mb,
+    )
+
+
+def _drive_image_turn(engine: Any, tokens: list[int], span_end: int) -> Any:
+    body = engine.loaded.model
+    body.rows = []
+    body.fences = []
+    conv = engine._sessions.get(tokens, "k")
+    emb = mx.zeros((1, len(tokens), 4))
+    return engine._start_turn(conv, tokens, embeddings=emb, image_span_end=span_end,
+                              token_types=None)
+
+
+def test_start_turn_image_request_feeds_the_budget_shaped_plan(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """End-to-end: an image request's fed rows equal the budget-shaped plan.
+
+    Before the fix every row fed on this path was ``chunk`` (2048) regardless of
+    the budget; now a tight budget shrinks the tail exactly as the text path.
+    """
+    monkeypatch.delenv("EXO_PREFILL_FENCE_EVERY", raising=False)
+    total, chunk, span_end = 10_000, 2048, 100
+    tokens = list(range(4, 4 + total))
+
+    tight = _image_engine(_RowRecordingBody(), chunk=chunk, budget_mb=1)
+    _drive_image_turn(tight, tokens, span_end)
+    expected_tight = s_.plan_image_prefill_pieces(total, chunk, span_end,
+                                                  budget_mb=1, row_bytes=1)
+    body: Any = tight.loaded.model
+    # Each plan piece is fed as one forced-chunk forward, so the fed rows ARE
+    # the plan (the driver is not allowed to resize a planned piece).
+    assert body.rows == expected_tight, body.rows
+    assert body.rows[0] == chunk, body.rows
+    assert any(r < chunk for r in body.rows[1:]), body.rows
+    assert sum(body.rows) == total
+
+    default = _image_engine(_RowRecordingBody(), chunk=chunk, budget_mb=None)
+    _drive_image_turn(default, tokens, span_end)
+    body_d: Any = default.loaded.model
+    assert body_d.rows == [2048, 2048, 2048, 2048, 1808], body_d.rows
+
+
+def test_start_turn_image_span_still_lands_in_the_first_forward():
+    """Span atomicity survives the budget fix: the image rows are in forward 0.
+
+    Drives the real ``_start_turn`` image branch (``splice_embeddings`` installed
+    around the prefill) with a tight budget and asserts the first forward still
+    covers the whole span -- the invariant ``_InjectedEmbed`` raises on if
+    violated.
+    """
+    total, chunk, span_end = 6_000, 1024, 1_500
+    tokens = list(range(4, 4 + total))
+    engine = _image_engine(_RowRecordingBody(), chunk=chunk, budget_mb=1)
+    body: Any = engine.loaded.model
+
+    turn, _anchor = _drive_image_turn(engine, tokens, span_end)
+
+    assert turn.prefill_tokens == total
+    assert body.rows[0] >= span_end, f"span not covered by forward 0: {body.rows}"
+    assert any(r < chunk for r in body.rows[1:]), body.rows  # budget bit on image path
