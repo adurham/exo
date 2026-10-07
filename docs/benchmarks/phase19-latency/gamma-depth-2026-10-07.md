@@ -1,21 +1,129 @@
 # Phase 19 follow-up — is gamma=3 near-optimal on the LIVE dsv41 engine at real context depth?
 
-Date: 2026-10-07 (afternoon). Owner: Hermes PM subagent (`sa-0-1a117dc2`, root session
-`20261007_093547_82d809`, delegation `deleg_ca4018cb`).
+Date: 2026-10-07 (afternoon, LIVE run 14:00–15:0x CDT). Owner: Hermes PM subagent
+(`sa-0-d17acd3f`, root session `20261007_093547_82d809`). The earlier Phase-A-only pass
+(§3–§9) was completed by `sa-0-1a117dc2` under this same delegation; that agent stood down
+in error (mistook its own registry entry for a peer). **This pass is the live half — sole
+owner, no peer.**
 Cluster: 2× Mac Studio M4 Max, TP2 over jaccl RDMA.
-Baseline deploy: `deploy/next13` @ `f0840af1c` (both nodes verified, PID 32941 / 42712 since 09:01:54/56).
+Baseline deploy: `deploy/next13` @ `f0840af1c` (restored at the end).
+Instrumented branch deployed for the matrix: `deploy/next14-gamma` @ `67eac5127`
+(engine commit 295ec50bc + the bench driver commit).
 Model: `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (engine `dsv41`, greedy-only).
-Instrumented branch: `deploy/next14-gamma` (off `deploy/next13-latency`) @ `01c416b1`.
 
-> **STATUS: PARTIAL — Phase A (read-only) COMPLETE; the live gamma matrix (Phase B/C) was
-> NOT RUN. Reason: a concurrent duplicate agent campaign on the same shared cluster (see
-> §5). No relaunch was performed; the cluster is byte-identical to the pre-campaign state.**
+> **STATUS: COMPLETE (live). The interleaved gamma matrix RAN, on both workloads, in one
+> process via the per-request `spec_gamma` field. Relaunches used: 2 of 2 (1 deploy, 1
+> restore — both completed). Cluster restored to `deploy/next13` @ `f0840af1c` at 15:0x.**
+> See §10 for the results; §1–§9 below are the earlier Phase-A pass and are kept verbatim.
 
 ---
 
-## 1. Headline
+## 10. LIVE RESULTS — gamma 3 vs 4 vs 5 (the half that was stood down)
+
+Run 2026-10-07 14:14–14:42 CDT, one warm `67eac5127` process, interleaved `ABAB…`
+(γ3,γ4,γ5 round-robin per rep) so thermal drift spreads across arms, ≥3 warm reps/arm,
+`max_tokens=1000`, `temperature=0`, prefix-cache-warm (ttft ~0.3 s). Raw:
+`raw/gamma-matrix.json` (+ `raw/gamma-matrix.json.jsonl` checkpoint). 0 guard failures.
+
+### 10a. The verdict — workload-dependent, and the winner is γ5 on benign
+
+| workload | arm | decode t/s (median) | IQR | ms/round | mean acc | rounds | Δ vs γ3 |
+|---|---|---:|---|---:|---:|---:|---:|
+| **benign** 100K | γ3 | 24.756 | [24.750, 24.782] | 154.3 | 2.827 | 254 | — |
+| benign | γ4 | 24.489 | [24.485, 24.503] | 174.3 | 3.278 | 234 | **−1.1 %** |
+| benign | **γ5** | **28.070** | **[27.985, 28.087]** | 185.4 | 4.203 | 192 | **+13.4 %** |
+| **agentic** (real 9a2ed7) | γ3 | 20.692 | [19.766, 20.701] | 153.8 | 2.188 | 314 | — |
+| agentic | γ4 | 19.519 | [19.501, 19.547] | 173.5 | 2.390 | 295 | −5.7 % |
+| agentic | γ5 | 20.116 | [20.076, 20.119] | 183.9 | 2.711 | 270 | −2.8 % |
+
+- **benign: γ5 wins, IQRs fully disjoint** (27.98–28.09 vs 24.75–24.78) — ≥3 % bar cleared,
+  quality gate run (§10c) and PASSES. γ4 is ~flat/worse (it pays one extra verify row for
+  almost no extra acceptance — benign per-position p4=0.76 vs p3=0.91, so the 4th slot
+  rarely commits).
+- **agentic (real content): γ3 is best.** γ4 −5.7 %, γ5 −2.8 %, both IQRs disjoint from γ3.
+  On real agentic content the acceptance tail decays hard (p4=0.38, p5=0.26), so the extra
+  verify rows cost more than they commit. **These arms are NOT interchangeable — the
+  winner is workload-dependent.**
+
+### 10b. Drift classification (A3) — SETTLED: host/thermal, NOT process-state
+
+The first benign rep of the fresh `67eac5127` process (~14 min old) measured
+**ms/round = 156.17 (cold) / 154.34 (warm)**, mean accepted 2.827 — i.e. the *afternoon*
+level (154.1), **not** the morning 135.6. A brand-new process does not recover the fast
+wall ⇒ the same-day +13.7 % rise is **host/thermal class, not long-lived-process
+degradation**. A periodic restart is therefore *not* a lever. (Process age cannot explain
+it: the wall was already at the slow level within 14 min of boot.)
+
+### 10c. Quality gate on the benign γ5 winner (vs γ3)
+
+`bench/dsv41_quality_battery` @ depth 40000, `--skip-park`, fixed prompt set. Baseline
+`results/g3` (no field) vs candidate `results/g5` (`--spec-gamma 5`):
+
+| battery | γ3 (baseline) | γ5 (candidate) |
+|---|---|---|
+| needles | 6 / 6 PASS | 6 / 6 PASS |
+| tool calls | 10 / 10 PASS | 10 / 10 PASS |
+| free prose | 0 DIRTY, 0 REVIEW (20) | 0 DIRTY, 0 REVIEW (20) |
+| glued cross-lingual fragments | none | none |
+
+`compare.py --a g3 --b g5` verdict: **PASS** ("B >= A on needles/tools/detectors, no new
+glued fragments"). All 20 prose outputs differ in text between arms — expected at temp=0
+(chunk-verify divergence by design), non-gating. Artifacts:
+`bench/dsv41_quality_battery/results/{g3,g5}/` + `results/g5/compare.json`.
+
+### 10d. Honest reading of the verdict
+
+- **The user's question ("is gamma=3 near the max?")** has a two-part answer: on the
+  benign / near-saturated regime it is **not** — γ5 is +13 % and quality-clean, so the
+  phase-19 "no ≥3 % lever" conclusion is wrong there. On **real agentic traffic** γ3 *is*
+  the best of the three — the phase-19 conclusion holds for the workload the user actually
+  cares about.
+- **Why benign misleads:** benign filler (12 canned sentences) has p1≈0.98 flat-ish tail,
+  so extra gamma slots keep committing; real agentic content has a fast-decaying tail.
+- **Recommendation:** do **not** ship a default gamma change. γ5 is a real, quality-clean
+  lever for high-acceptance/synthetic-ish content, but it *regresses* real agentic traffic,
+  and the field is per-request so a caller can opt in. Any default policy would need an
+  acceptance-regime heuristic first.
+- **The prediction in §4 (γ4 wins +12 %) is falsified:** γ4 lost on both workloads. The
+  §4 model's error was the shape of the per-position tail — it assumed a flat/gentle tail,
+  but on real agentic content p4/p5 collapse to 0.38/0.26, so the 4th–5th slots don't pay
+  for their verify rows.
+
+### 10e. Field-honored proof
+
+`raw/gamma-fieldcheck.json` (run 14:10): one request WITH `"spec_gamma":4` gave histogram
+Δ `[16,7,5,8,25,0,0]` (25 rounds accepted exactly 4 drafts); one WITHOUT gave
+`[10,10,9,36,0,0,0]` (`hist[4]=0` — structurally impossible under γ3). The top non-empty
+bin is the gamma actually used ⇒ **γ4 honoured, absent-field = γ3 honoured.**
+
+### 10f. Raw per-rep numbers
+
+| workload:γ | rep | decode t/s | ms/round | mean acc | total_rounds |
+|---|---|---:|---:|---:|---:|
+| benign:3 | 1,2,3 | 24.744, 24.807, 24.756 | 154.34, 153.94, 154.26 | 2.827 | 254 |
+| benign:4 | 1,2,3 | 24.489, 24.480, 24.517 | 174.34, 174.40, 174.14 | 3.278 | 234 |
+| benign:5 | 1,2,3 | 27.899, 28.104, 28.070 | 186.50, 185.14, 185.36 | 4.203 | 192 |
+| agentic:3 | 1,2,3 | 20.710, 20.692, 18.839 | 153.63, 153.76, 168.88 | 2.188 | 314 |
+| agentic:4 | 1,2,3 | 19.482, 19.574, 19.519 | 173.82, 173.01, 173.49 | 2.390 | 295 |
+| agentic:5 | 1,2,3 | 20.036, 20.121, 20.116 | 184.67, 183.89, 183.94 | 2.711 | 270 |
+
+Per-position acceptance (survival P(accept ≥ k)), median over 3 reps:
+
+| arm | p1 | p2 | p3 | p4 | p5 |
+|---|---:|---:|---:|---:|---:|
+| benign γ3 | 0.9764 | 0.9449 | 0.9055 | — | — |
+| benign γ4 | 0.8974 | 0.8419 | 0.7778 | 0.7607 | — |
+| benign γ5 | 0.9219 | 0.8594 | 0.8281 | 0.8073 | 0.7865 |
+| agentic γ3 | 0.8790 | 0.7293 | 0.5796 | — | — |
+| agentic γ4 | 0.8542 | 0.6509 | 0.5051 | 0.3797 | — |
+| agentic γ5 | 0.8518 | 0.6556 | 0.5482 | 0.3926 | 0.2630 |
+
+---
+
+## 1. Headline (earlier Phase-A pass — kept for context)
 
 Two results, one of which overturns the assumption this follow-up was sent to test.
+**Both are superseded by §10 for the live answers; §4's model prediction is falsified.**
 
 1. **The live gamma matrix was not run** — not for lack of instrument (it is built, tested
    and pushed), but because a second live agent (`sa-0-1a117dc2`, root session

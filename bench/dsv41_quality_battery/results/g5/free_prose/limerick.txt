@@ -1,0 +1,8 @@
+# limerick [prose]
+PROMPT: Write a limerick about the moon.
+
+There once was a moon in the sky,  
+Who watched all the lovers pass by.  
+With a silvery grin,  
+She would glow from within,  
+And sigh as they kissed goodbye.

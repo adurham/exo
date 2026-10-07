@@ -1,0 +1,2 @@
+GUARD {"tag": "warmup", "now_local": "2026-10-07T15:21:46.683905", "last_custom_call_local": "2026-10-07T09:50:35.491013", "db_age_s": 19871.2, "last_foreign_cluster_post_line": "[ 2026-10-07 15:20:44.204 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions", "last_foreign_cluster_post_local": "2026-10-07T15:20:44", "foreign_age_s": 62.7, "excluded_own_requests": [1791400232.2347279, 1791400236.7252731, 1791400253.0908], "ok": false}
+ABORT_GUARD warmup

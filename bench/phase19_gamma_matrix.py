@@ -29,8 +29,8 @@ real Hermes session 20261007_092009_9a2ed7 replayed from state.db) is measured
 over several gamma arms.  Arms are interleaved round-robin
 (``for r in range(reps): for g in gammas: one rep``) instead of run in blocks, so
 slow thermal / contention drift on the shared cluster spreads across arms rather
-than loading onto whichever arm ran last.  Each workload opens with ONE cold rep
-(fresh random salt) to bring the engine/caches up; every later rep reuses that
+than loading onto whichever arm ran last.  Each workload opens with ONE cold rep (the workload's fixed-salt prompt, uncached
+the first time) to bring the engine/caches up; every later rep reuses that
 workload's FIXED salt and is a prefix-cache hit.  Cold reps are valid data but are
 excluded from arm statistics.
 
@@ -49,7 +49,8 @@ HOW TO READ A REP RECORD (checkpoint JSONL, one object per line)
   hist_delta    7 ints: this request's rounds grouped by accepted-k
   per_position  p1..pg (g = gamma): p_k = sum(hist_delta[k:]) / total_rounds,
                 the survival curve P(a round accepts >= k drafts)
-  drift_probe   true on the single first WARM benign rep (thermal/contention probe)
+  drift_probe   true on the first benign rep (the young-process 100 K round-wall
+                probe used to classify process-state vs host/thermal drift)
   guard_ok      idle-guard verdict captured immediately before the request
 
 MODES
@@ -169,9 +170,10 @@ def build_schedule(workloads, gammas, reps):
     return sched
 
 
-def first_warm_benign_index(schedule):
-    return next((i for i, s in enumerate(schedule)
-                 if (not s["is_cold"]) and s["workload"] == "benign"), None)
+def first_benign_index(schedule):
+    """The benign cold rep is the first benign entry: the young-process 100 K
+    round-wall measurement used for drift classification (process vs host)."""
+    return next((i for i, s in enumerate(schedule) if s["workload"] == "benign"), None)
 
 
 # ------------------------------------------------------------------ derivation
@@ -346,19 +348,26 @@ def run_fieldcheck(args, checkpoint_path, guards, mine, prev):
     _track_mine(rec_absent, mine, checkpoint_path)
     d_absent = derive_rep(rec_absent or {}, prev_cyc, prev_acc, prev_hist, 3)
 
-    def idx4(hist_delta):
-        return hist_delta[4] if (hist_delta and len(hist_delta) > 4) else 0
+    def hist_gamma(hist_delta):
+        """Highest populated histogram bin = the gamma actually used.
 
-    with4 = {"hist_delta": d_with4["hist_delta"], "hist_index4": idx4(d_with4["hist_delta"]),
+        A round can accept exactly k drafts only when gamma >= k, so the top
+        non-empty bin of a request's histogram delta IS its gamma.  This is the
+        robust discriminator; gamma_implied is unreliable at short generations
+        (an incomplete trailing round inflates rounds_est) and is a note only.
+        """
+        if not hist_delta:
+            return None
+        nz = [i for i, v in enumerate(hist_delta) if v and v > 0]
+        return max(nz) if nz else None
+
+    with4 = {"hist_delta": d_with4["hist_delta"],
+             "hist_gamma": hist_gamma(d_with4["hist_delta"]),
              "gamma_implied": d_with4["gamma_implied"], "rounds": d_with4["rounds"]}
-    absent = {"hist_delta": d_absent["hist_delta"], "hist_index4": idx4(d_absent["hist_delta"]),
+    absent = {"hist_delta": d_absent["hist_delta"],
+              "hist_gamma": hist_gamma(d_absent["hist_delta"]),
               "gamma_implied": d_absent["gamma_implied"], "rounds": d_absent["rounds"]}
-    honored = (with4["hist_index4"] > 0
-               and absent["hist_index4"] == 0
-               and with4["gamma_implied"] is not None
-               and abs(with4["gamma_implied"] - 4) <= 0.35
-               and absent["gamma_implied"] is not None
-               and abs(absent["gamma_implied"] - 3) <= 0.35)
+    honored = (with4["hist_gamma"] == 4 and absent["hist_gamma"] == 3)
     print("FIELDCHECK " + json.dumps({"with4": with4, "absent": absent,
                                       "field_honored": honored, "guards": guards}), flush=True)
     return 0 if honored else 1
@@ -367,11 +376,12 @@ def run_fieldcheck(args, checkpoint_path, guards, mine, prev):
 # --------------------------------------------------------------------- full
 def run_matrix(args, gammas, workloads, warm_prompts, warm_metas, checkpoint_path,
                guards, mine, prev):
-    cold_prompts = {}
-    for wl in workloads:
-        cold_prompts[wl], _ = build_one(wl, os.urandom(4).hex(), args.depth, args.char_budget)
+    # deploy/next14-gamma: the cold rep uses the SAME fixed-salt prompt as the
+    # warm reps, so it warms exactly the prefix they reuse.  (A fresh cold salt
+    # would waste a second cold prefill and make the cold rep non-comparable to
+    # the warm ones; is_cold still marks it as the first, uncached rep.)
     schedule = build_schedule(workloads, gammas, args.reps)
-    drift_idx = first_warm_benign_index(schedule)
+    drift_idx = first_benign_index(schedule)
     print("SCHEDULE " + json.dumps(schedule), flush=True)
 
     cp = Checkpoint(checkpoint_path)
@@ -389,8 +399,8 @@ def run_matrix(args, gammas, workloads, warm_prompts, warm_metas, checkpoint_pat
             print(f"ABORT_GUARD {json.dumps({'key': key, 'guard': guards[-1]})}", flush=True)
             return 4, reps_out
 
-        salt = os.urandom(4).hex() if s["is_cold"] else SALTS[wl]
-        prompt = cold_prompts[wl] if s["is_cold"] else warm_prompts[wl]
+        salt = SALTS[wl]
+        prompt = warm_prompts[wl]
         rec = None
         try:
             rec = M.stream_once(prompt, args.max_tokens, None, spec_gamma=g)
@@ -498,8 +508,8 @@ def run_plan(args, gammas, workloads):
     print("OFFLINE PLAN (no network; no api, no ssh)")
     print("MODEL " + M.MODEL + "   SESSION " + M.SESSION_ID)
     print("PROMPTS " + json.dumps({wl: warm[wl][1] for wl in workloads}))
-    print("COLD_SALT fresh random per workload (warms engine + caches); "
-          "warm arms reuse salts " + json.dumps(SALTS))
+    print("COLD_SALT: each workload's cold rep uses its fixed salt (warms the "
+          "prefix the warm arms reuse); arms reuse salts " + json.dumps(SALTS))
     print("SCHEDULE " + json.dumps(schedule))
     n_cold = sum(1 for s in schedule if s["is_cold"])
     per_wl = {wl: sum(1 for s in schedule if s["workload"] == wl) for wl in workloads}

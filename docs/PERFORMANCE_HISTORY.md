@@ -11246,3 +11246,34 @@ cluster (`sa-0-1a117dc2`/root `20261007_093547_82d809` and this one). The peer c
 race. **A shared live cluster must have exactly one owner per campaign** — double
 delegation of a destructive task risks N x the relaunch budget, mutual runner kills, and
 an instrumented branch left live. Escalated to the user.
+
+## Phase 19 follow-up — LIVE gamma 3/4/5 matrix: γ5 wins benign (+13%), γ3 wins agentic; drift = host/thermal (2026-10-07)
+
+**Branch `deploy/next14-gamma` @ `67eac5127` (engine `295ec50bc` + bench driver). Relaunches: 2 of 2 (1 deploy, 1 restore — both completed). Cluster restored to `deploy/next13` @ `f0840af1c`.** One warm process, per-request `spec_gamma` field (no relaunch between arms), interleaved γ3/γ4/γ5 round-robin, ≥3 warm reps/arm, 2 workloads, 0 guard failures. Raw: `docs/benchmarks/phase19-latency/raw/gamma-matrix.json`.
+
+| workload | γ3 t/s | γ4 t/s | γ5 t/s | winner |
+|---|---:|---:|---:|---|
+| benign 100K | 24.756 | 24.489 (−1.1%) | **28.070 (+13.4%)** | γ5, IQRs disjoint |
+| agentic (real 9a2ed7) | **20.692** | 19.519 (−5.7%) | 20.116 (−2.8%) | γ3, IQRs disjoint |
+
+- **Winner is workload-dependent — do NOT ship a default gamma change.** Benign filler has a
+  flat acceptance tail (p1≈0.98) so γ5's extra draft slots keep committing (+13%); real
+  agentic content decays hard (p4=0.38, p5=0.26 median) so γ3 is best. The field is
+  per-request, so a caller can opt in; a default needs an acceptance-regime heuristic.
+- **The §4 offline prediction (γ4 +12%) is FALSIFIED** — γ4 lost on both workloads. The model
+  assumed a gentle per-position tail; the real agentic tail collapses, so the 4th/5th verify
+  rows don't pay for themselves. Lesson: per-position acceptance, not the *mean*, decides the
+  optimal gamma.
+- **Drift (same-day +13.7% round-wall) SETTLED: host/thermal, NOT process-state.** The first
+  benign rep of the fresh process measured 154.3 ms/round (afternoon level), not the morning
+  135.6 ⇒ a young process is already slow ⇒ no long-lived-process degradation ⇒ **periodic
+  restart is not a lever**.
+- **Quality gate PASS** on the benign γ5 winner vs γ3 (`dsv41_quality_battery` d40k): needles
+  6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, no glued cross-lingual fragments; `compare.py`
+  verdict PASS. γ5 is quality-clean but regresses real agentic traffic.
+- **Field-honored proof:** with `spec_gamma=4` the histogram Δ showed rounds with 4 accepted
+  (`hist[4]=25`); absent, `hist[4]=0` (structurally impossible at γ3). The top non-empty
+  histogram bin == the gamma actually used.
+- **Process note (resolved):** the earlier "duplicate agent" stand-down was a self-mistake
+  (the agent read its own live-registry entry as a peer). There was no peer; this pass ran the
+  live half the earlier one wrongly skipped.

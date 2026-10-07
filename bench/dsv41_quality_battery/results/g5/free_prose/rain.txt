@@ -1,0 +1,4 @@
+# rain [prose]
+PROMPT: Write a short paragraph about the sound of rain on a metal roof.
+
+The first drops land like scattered applause, each one a sharp, bright ping against the tin. Then the sky opens and the rhythm tightens into a steady drumroll, a thousand tiny hammers striking in wild, overlapping time. The sound fills the whole house—a roaring lullaby that drowns out thought, turns the windows to silver, and wraps the rooms in a strange, thrilling hush. Under that clatter, the world feels smaller, safer, and impossibly far away.

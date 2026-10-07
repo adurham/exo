@@ -1,0 +1,6 @@
+# fr_river [multilingual]
+PROMPT: Translate this to French, then add one short comment in English: 'The river runs cold in November.'
+
+La rivière coule froide en novembre.
+
+Comment: “L’eau de la rivière est froide” might sound more natural in French, but the translation keeps the original image.

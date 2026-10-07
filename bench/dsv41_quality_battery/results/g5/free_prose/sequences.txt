@@ -1,0 +1,11 @@
+# sequences [continuation]
+PROMPT: Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].
+
+1. \([2,4,8,16,\ldots] \rightarrow 32,64,128\)  
+Reasoning: each number is multiplied by 2, so the sequence is powers of 2.
+
+2. \([a,c,e,g,\ldots] \rightarrow i,k,m\)  
+Reasoning: these are every other letter of the alphabet, starting at \(a\): \(a, c, e, g, i, k, m,\ldots\)
+
+3. \([1,1,2,3,5,\ldots] \rightarrow 8,13,21\)  
+Reasoning: this is the Fibonacci sequence. After the first two terms, each term is the sum of the two previous terms, e.g. \(1+1=2\), \(1+2=3\), \(2+3=5\), and so on.

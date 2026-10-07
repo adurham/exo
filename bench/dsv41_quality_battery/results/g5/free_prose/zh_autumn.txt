@@ -1,0 +1,6 @@
+# zh_autumn [multilingual]
+PROMPT: 先用一句中文描写秋雨的声音，然后用英文解释这句话的意思。(Write one Chinese sentence describing the sound of autumn rain, then explain it in English.)
+
+中文：秋雨淅淅沥沥，像无数冰凉的指尖轻点窗棂，沙沙作响。
+
+English explanation: This sentence describes the sound of autumn rain as a soft, steady pitter-patter, like countless cool fingertips gently tapping the window lattice and making a rustling sound. “淅淅沥沥” is an onomatopoeia for light, continuous rain, while “沙沙作响” suggests a quiet rustling effect that feels gentle, soft, and slightly melancholic.

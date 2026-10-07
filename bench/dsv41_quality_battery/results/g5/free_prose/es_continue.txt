@@ -1,0 +1,4 @@
+# es_continue [multilingual]
+PROMPT: Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'
+
+El viento soplaba fuerte sobre las colinas, y las hierbas se doblaban en oleadas plateadas bajo un cielo de plomo. Las nubes corrían bajas, deshilachadas, como si huyeran de algo que aún no tenía nombre. En la distancia, una figura avanzaba contra la corriente, el abrigo pegado al cuerpo, los pasos firmes sobre la tierra húmeda. No miraba atrás; solo el viento, obstinado, parecía querer devolverla al lugar del que venía. Y, sin embargo, ella seguía adelante, mientras el aire olía a lluvia y a tiempo viejo.

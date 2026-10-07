@@ -1,0 +1,29 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Imagine a giant wall of numbered lockers. You want to store stuff by name: `"Maya"`, `"Jay"`, `"cat"`, etc. Instead of searching every locker when you need something, you use a rule that turns a name into a locker number.
+For example: mix up its letters, do some math, and get a number like 317. That rule is called a **hash function**.
+
+So:
+- To store Maya’s stuff, you run the rule: `"Maya"` → locker 317. Put it there.
+- To find Maya’s stuff later, run the same rule: `"Maya"` → locker 317. Go straight there.
+
+That’s the whole point: no scanning the entire wall.
+
+But there’s a catch. Two different names can get the same locker number. That’s called a **collision**. It’s normal — there are way more possible names than lockers. To handle it, each locker can hold a small list of entries. If `"Maya"` and `"Jay"` both map to 317, locker 317 just has both. When you look up `"Maya"`, you go to 317 and check the labels until you find `"Maya"`.
+
+So a hash table is basically:
+- A big array of buckets.
+- A hash function that picks a bucket.
+- A way to handle collisions, usually by storing multiple entries together.
+
+Operations:
+- **Insert:** hash it, go there, add the key-value pair.
+- **Lookup:** hash it, go there, search the small bucket.
+- **Delete:** hash it, go there, remove the matching key.
+
+To keep buckets short, it resizes when it gets too full. If 70% of lockers are used, it builds a bigger wall and moves everything over. That’s expensive, but rare.
+
+Why is it fast? On average, each bucket has only a few items, so lookup is roughly constant time — almost instant, even with lots of data. Worst case, if the hash function is terrible and everything lands in one bucket, it becomes a slow list search.
+
+Real examples: Python dictionaries, JavaScript `Map`, database indexes, phone contacts, caches. It’s not encryption — it’s just a fast way to turn a key into a location.
