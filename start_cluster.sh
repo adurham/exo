@@ -2683,6 +2683,12 @@ for NODE in "${NODES[@]}"; do
   [ -n "${DSV41_INDEXER_HIER_STRIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_STRIP=$DSV41_INDEXER_HIER_STRIP"
   [ -n "${DSV41_INDEXER_HIER_OVERFETCH:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_OVERFETCH=$DSV41_INDEXER_HIER_OVERFETCH"
   [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
+  # DSV41_MOE_ALLSUM_BF16: MoE-tail collective payload dtype (mlx_lm
+  # deepseek_v41/moe.py, read at import; default 0 = fp32 exact). Halves the
+  # 41.94MB/call tail payload; numerics-changing (per-rank partial rounds to
+  # bf16 before the cross-rank sum) -> promotion gated on the live quality
+  # battery. Forwarded so the A/B can flip it. Audited: no stale values.
+  [ -n "${DSV41_MOE_ALLSUM_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_MOE_ALLSUM_BF16=$DSV41_MOE_ALLSUM_BF16"
   # DSV41_SPARSE_QTILE/KTILE/FENCE/WDTYPE/PV32/BUDGET_MB: the tiled sparse-attn
   # knobs (mlx-lm deepseek_v41/sparse_attention.py, read at import). Forwarded
   # for the sdpa-depth A/B. Audited: no stale values anywhere in the repo/shell.
