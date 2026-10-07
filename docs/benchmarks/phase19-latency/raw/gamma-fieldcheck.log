@@ -1,2 +1,51 @@
-GUARD {"tag": "warmup", "now_local": "2026-10-07T15:21:46.683905", "last_custom_call_local": "2026-10-07T09:50:35.491013", "db_age_s": 19871.2, "last_foreign_cluster_post_line": "[ 2026-10-07 15:20:44.204 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions", "last_foreign_cluster_post_local": "2026-10-07T15:20:44", "foreign_age_s": 62.7, "excluded_own_requests": [1791400232.2347279, 1791400236.7252731, 1791400253.0908], "ok": false}
-ABORT_GUARD warmup
+# gamma-fieldcheck — is the per-request spec_gamma field honoured? (2026-10-07)
+#
+# TWO runs are recorded. The FIRST (14:10) is the real field-honoured proof.
+# The SECOND (15:21) aborted on the idle-guard and measured nothing.
+#
+# ============================================================================
+# RUN 1 — 14:10 CDT, deployed 67eac5127, cluster warm.
+#   Method: one short request WITH {"spec_gamma":4}, one WITHOUT the field,
+#   compare their per-request histogram deltas (mtp_accepted_histogram_cumulative
+#   differenced against the previous request's cumulative value).
+#
+# GUARD {"tag": "warmup", ... "ok": true}
+# WARMUP {"salt": "15fce100", "cycles_cum": 9, "accepted_cum": 7,
+#         "hist_cum": [0, 1, 0, 2, 0, 0, 0], "prompt_tokens": 1024,
+#         "completion_tokens": 8, "decode_s": 0.33}
+# GUARD {"tag": "fieldcheck_with4", ... "ok": true}
+# GUARD {"tag": "fieldcheck_absent", ... "ok": true}
+# FIELDCHECK {"with4": {"hist_delta": [16, 7, 5, 8, 25, 0, 0], "hist_index4": 25,
+#                       "gamma_implied": 1.924, "rounds": 61.0},
+#             "absent": {"hist_delta": [10, 10, 9, 36, 0, 0, 0], "hist_index4": 0,
+#                        "gamma_implied": 1.655, "rounds": 65.0},
+#             "field_honored": false}
+#
+# INTERPRETATION (the driver's own `field_honored` bool was WRONG here; its
+# gamma_implied sub-check is unreliable at short generations — an incomplete
+# trailing round inflates rounds_est):
+#
+#   A round can accept exactly k drafts ONLY when gamma >= k, so the TOP
+#   NON-EMPTY BIN of a request's histogram delta IS the gamma actually used.
+#
+#   with4  top non-empty bin = 4  (hist[4] = 25 rounds accepted exactly 4 drafts)
+#          -> gamma 4 honoured.  hist[0..3] non-zero too (a round may accept
+#             fewer than gamma); hist[3]=8, hist[4]=25.
+#   absent top non-empty bin = 3  (hist[4] = 0 — structurally IMPOSSIBLE at
+#          gamma=3, which cannot accept a 4th draft)
+#          -> gamma 3, i.e. the absent field leaves the engine at its default.
+#
+#   => FIELD HONOURED, both directions.  Exit code 1 on this run was the stale
+#      verdict logic, not a field failure; the driver was patched afterwards to
+#      use the top-bin discriminator (bench/phase19_gamma_matrix.py, hist_gamma()).
+#
+# ============================================================================
+# RUN 2 — 15:21 CDT, same deployed process, --no-warmup.
+#   It aborted on the idle-guard: the PREVIOUS run's own POST (the g5 quality
+#   battery's last request, 15:20:44) was only 62 s old and was not in this
+#   run's own-requests set (different checkpoint path).  It is OUR traffic, not
+#   foreign — no foreign POST appears in the cluster log.  Nothing was measured.
+#
+# GUARD {"tag": "warmup", "last_foreign_cluster_post_local": "2026-10-07T15:20:44",
+#        "foreign_age_s": 62.7, "ok": false}
+# ABORT_GUARD warmup
