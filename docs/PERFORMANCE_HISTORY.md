@@ -11204,3 +11204,45 @@ API already exposes per-request acceptance via cumulative counters).
 **Traps reproduced:** the `: generation_stats` SSE frame is a comment line, not a `data:` line
 (a `data:`-only parser misses it); a short "reply DONE" task EOS'd at 21 tokens; at 60 K the model
 burned the entire `max_tokens` budget inside `reasoning_content` (`finish=length`, empty content).
+
+## Phase 19 follow-up — gamma optimality: the offline model is arithmetically inconsistent (2026-10-07)
+
+**Branch `deploy/next14-gamma` @ `01c416b1` off `deploy/next13-latency`. Live gamma matrix NOT RUN (concurrent duplicate agent on the same cluster); cluster left on production `deploy/next13` @ `f0840af1c`, verified untouched.**
+
+- **The phase-19 "no >=3% gamma lever / gamma=3 optimal" conclusion does not survive
+  re-derivation.** `gamma-optimality.md` prints gamma=4 at "-12%", but its own stated
+  inputs (`round_ms = 8.5+0.9(g-1)+VERIFY_MS[g+1]+4.0`, `E(g)=1+q+...+q^g`) compute to
+  **+8.7%** for gamma=4 at the measured 2.827/3. The printed t/s column in that doc does
+  not follow from its own round_ms/E columns.
+- **Calibrated to the LIVE round wall it is worse for gamma=3.** The live dsv41 round wall
+  is 135.6 ms (morning) / 154.1 ms (afternoon), i.e. +23.6 / +42.1 ms/round above the
+  table's gamma=3 row (112.0 ms). Treating that as a fixed per-round cost: gamma=3 = 24.83
+  t/s (matches the measured benign-afternoon 24.78 to 0.2%), gamma=4 = 27.89 (**+12.3%**),
+  gamma=5 = 31.27 (**+25.9%**). The sign is robust across per-position tails (uniform
+  +12.3%, fast-decay +7.1%, heavy-decay +4.3%); only a marginal-verify-row cost much
+  larger than `VERIFY_MS` implies would reverse it.
+- **=> the live interleaved gamma matrix is genuinely worth a relaunch** (it may be a
+  positive lever, not a settled negative). A pre-registered prediction is recorded:
+  gamma=4 should win >=3% on the benign arm, smaller on the agentic arm.
+- **Instrumented, default-safe branch shipped:** per-request `spec_gamma` field (int,
+  clamped to [1,6], absent => today's gamma=3, byte-identical) threaded
+  chat-completions -> TextGenerationTaskParams -> dsv41 `_rounds`; plus a per-position
+  acceptance histogram (`mtp_accepted_histogram_cumulative`) on the existing
+  `: generation_stats` frame. 23 new tests (178->201 in the dsv41 dir), zero new
+  basedpyright errors, ruff clean. NOT hardware-verified.
+- **A1 real-turn forensics (read-only):** the user's session `20261007_092009_9a2ed7` is
+  42 calls (not 13); 41/42 joined to `[DSV41] turn reuse:` lines (0 mismatch on
+  `cache_read_tokens == reuse`). 32/42 calls are delta-prefill-dominated (worst 43x at
+  c6); 39/42 fired the reuse-undershoot warning. Raw table:
+  `docs/benchmarks/phase19-latency/raw/A1-real-turn-split.md`.
+- **Drift (13.7% same-day round-wall rise): UNRESOLVED.** No thermal/perf warning on
+  either node at 13:2x, GPU idle; the clean discriminator (fresh-process benign-100K) needs
+  the relaunch that was stood down.
+
+### Process note (do not repeat)
+Two root sessions were delegated the SAME destructive campaign on the SAME shared
+cluster (`sa-0-1a117dc2`/root `20261007_093547_82d809` and this one). The peer claimed
+`~/CAMPAIGN_ACTIVE.json`; the second agent stood down from all relaunches rather than
+race. **A shared live cluster must have exactly one owner per campaign** — double
+delegation of a destructive task risks N x the relaunch budget, mutual runner kills, and
+an instrumented branch left live. Escalated to the user.
