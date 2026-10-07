@@ -1,0 +1,115 @@
+[
+ {
+  "wall_s": 134.994,
+  "ttft_s": 111.6932,
+  "decode_s": 23.3006,
+  "content_chars": 1179,
+  "usage": {
+   "prompt_tokens": 30118,
+   "completion_tokens": 700,
+   "total_tokens": 30818,
+   "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 56,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+   }
+  },
+  "stats": {
+   "prompt_tps": 283.4059264330429,
+   "generation_tps": 0.0,
+   "prompt_tokens": 30118,
+   "generation_tokens": 700,
+   "peak_memory_usage": {
+    "in_bytes": 125223301819
+   },
+   "prefix_cache_hit": "none",
+   "mtp_cycles_cumulative": 24573,
+   "mtp_accepted_drafts_cumulative": 17508,
+   "phase_marks_ms": null,
+   "api_phase_marks_ms": null
+  },
+  "prompt_tokens": 30118,
+  "completion_tokens": 700,
+  "reasoning_tokens": 56,
+  "cycles_cum": 24573,
+  "accepted_cum": 17508,
+  "prefix_hit": "none",
+  "prompt_tps": 283.4,
+  "decode_tps": 29.999,
+  "rounds": null,
+  "mean_accepted": null,
+  "ms_per_round": null,
+  "gamma_implied": null,
+  "rep": 0
+ },
+ {
+  "wall_s": 27.169,
+  "ttft_s": 3.8231,
+  "decode_s": 23.3453,
+  "content_chars": 1179,
+  "usage": {
+   "prompt_tokens": 30118,
+   "completion_tokens": 700,
+   "total_tokens": 30818,
+   "prompt_tokens_details": {
+    "cached_tokens": 30118,
+    "audio_tokens": 0
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 56,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+   }
+  },
+  "stats": {
+   "prompt_tps": 0.0,
+   "generation_tps": 0.0,
+   "prompt_tokens": 30118,
+   "generation_tokens": 700,
+   "peak_memory_usage": {
+    "in_bytes": 125223301819
+   },
+   "prefix_cache_hit": "partial",
+   "mtp_cycles_cumulative": 25125,
+   "mtp_accepted_drafts_cumulative": 18024,
+   "phase_marks_ms": null,
+   "api_phase_marks_ms": null
+  },
+  "prompt_tokens": 30118,
+  "completion_tokens": 700,
+  "reasoning_tokens": 56,
+  "cycles_cum": 25125,
+  "accepted_cum": 18024,
+  "prefix_hit": "partial",
+  "prompt_tps": 0,
+  "decode_tps": 29.942,
+  "rounds": 184.0,
+  "mean_accepted": 2.8043,
+  "ms_per_round": 126.88,
+  "gamma_implied": 1.526,
+  "rounds_est": 361.8,
+  "rep": 1
+ },
+ {
+  "__summary__": {
+   "label": "phase19-r30k",
+   "depth_target": 30000,
+   "reps": 2,
+   "prompt_tokens": 30118,
+   "decode_tps_median": 29.971,
+   "decode_tps_all": [
+    29.999,
+    29.942
+   ],
+   "mean_accepted_median": 2.8043,
+   "ms_per_round_median": 126.88,
+   "gamma_implied_median": 1.526
+  }
+ }
+]
