@@ -2682,6 +2682,11 @@ for NODE in "${NODES[@]}"; do
   [ -n "${DSV41_INDEXER_HIER_EXACT_STRIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_EXACT_STRIP=$DSV41_INDEXER_HIER_EXACT_STRIP"
   [ -n "${DSV41_INDEXER_HIER_STRIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_STRIP=$DSV41_INDEXER_HIER_STRIP"
   [ -n "${DSV41_INDEXER_HIER_OVERFETCH:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_HIER_OVERFETCH=$DSV41_INDEXER_HIER_OVERFETCH"
+  # DSV41_INDEXER_CONSUMER_SKIP: consumer index layers (24/28/32/36) score only
+  # their candidate blocks in the M2 coarse pass (mlx_lm .../indexer.py,
+  # default ON, bit-exact: block maxima provably identical; local function
+  # 2.3x @131K / 3.7x @262K). =0 restores the full-width coarse pass for A/B.
+  [ -n "${DSV41_INDEXER_CONSUMER_SKIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_CONSUMER_SKIP=$DSV41_INDEXER_CONSUMER_SKIP"
   [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
   # DSV41_MOE_ALLSUM_BF16: MoE-tail collective payload dtype (mlx_lm
   # deepseek_v41/moe.py, read at import; default 0 = fp32 exact). Halves the
