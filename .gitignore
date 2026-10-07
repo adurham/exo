@@ -50,3 +50,4 @@ skills-lock.json
 
 # research artifacts: raw node-log copies contain HF tokens; keep local only
 research-v1v2v3-20260901/**/raw/
+out/

@@ -1,0 +1,1076 @@
+{
+ "campaign": "phase19-agentic-replay",
+ "date": "2026-10-07",
+ "harness": "bench/phase19_agentic_measure.py + bench/run_campaign.py (worktree /tmp/phase19-agentic @ deploy/next13-latency)",
+ "cluster": "2x Mac Studio M4 Max, TP2 over jaccl RDMA (zero-relaunch)",
+ "model": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+ "engine": "dsv41 (greedy-only)",
+ "temperature": 0,
+ "gamma": 3,
+ "max_tokens": 1000,
+ "replayed_session": "20261007_092009_9a2ed7",
+ "replay_prompt": {
+  "source": "state.db messages(session) + system_prompts[hash=13466837...] preamble",
+  "n_messages_total": 98,
+  "n_messages_used": 98,
+  "preamble_chars": 22770,
+  "prompt_chars": 308979,
+  "pred_tokens_3p48_charsperchar": 88812,
+  "actual_prompt_tokens": 91046,
+  "note": "one flattened user message (same request SHAPE as the synthetic harness); content is REAL agentic session text. Full real session = system prompt + all content + ~25K tok of Hermes tool-schema block (not recoverable from state.db), so this replay = 91,046 tok vs the session's real 104,880 tok max."
+ },
+ "benign_arm": {
+  "summary": {
+   "arm": "benign",
+   "meta": {
+    "prompt_chars": 559094,
+    "pred_tokens_3p48": 160705,
+    "depth_target": 100000,
+    "task": "count",
+    "salt": "b1a2c3d4"
+   },
+   "n_reps": 4,
+   "cold_rep": {
+    "prompt_tokens": 100042,
+    "ttft_s": 369.653,
+    "prompt_tps": 271.1,
+    "decode_tps": 24.599,
+    "wall_s": 409.249,
+    "prefix_hit": "none"
+   },
+   "timed_reps": 3,
+   "decode_tps_all": [
+    24.777,
+    24.714,
+    24.775
+   ],
+   "decode_tps_median": 24.775,
+   "mean_accepted_all": [
+    2.8268,
+    2.8268,
+    2.8268
+   ],
+   "mean_accepted_median": 2.8268,
+   "ms_per_round_all": [
+    154.13,
+    154.52,
+    154.14
+   ],
+   "ms_per_round_median": 154.14,
+   "rounds_all": [
+    254.0,
+    254.0,
+    254.0
+   ],
+   "gamma_implied_all": [
+    1.524,
+    1.524,
+    1.524
+   ],
+   "reasoning_tokens_all": [
+    71,
+    71,
+    71
+   ],
+   "completion_tokens_all": [
+    971,
+    971,
+    971
+   ],
+   "prefix_hit_all": [
+    "partial",
+    "partial",
+    "partial"
+   ]
+  },
+  "reps": [
+   {
+    "wall_s": 409.249,
+    "request_created_epoch": 1791393947,
+    "request_send_epoch": 1791393578.030118,
+    "ttft_s": 369.653,
+    "decode_s": 39.432,
+    "reasoning_chars": 261,
+    "content_chars": 1691,
+    "reason_first_s": 369.653,
+    "content_first_s": 374.2551,
+    "content_last_s": 409.085,
+    "finish_reason": "stop",
+    "usage": {
+     "prompt_tokens": 100042,
+     "completion_tokens": 971,
+     "total_tokens": 101013,
+     "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 71,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 271.05200478066644,
+     "generation_tps": 0.0,
+     "prompt_tokens": 100042,
+     "generation_tokens": 971,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "none",
+     "mtp_cycles_cumulative": 28986,
+     "mtp_accepted_drafts_cumulative": 21607,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 100042,
+    "completion_tokens": 971,
+    "reasoning_tokens": 71,
+    "cached_tokens": 0,
+    "cycles_cum": 28986,
+    "accepted_cum": 21607,
+    "prefix_hit": "none",
+    "prompt_tps": 271.1,
+    "decode_tps": 24.599,
+    "rounds": null,
+    "mean_accepted": null,
+    "ms_per_round": null,
+    "gamma_implied": null,
+    "rep": 0,
+    "arm": "benign"
+   },
+   {
+    "wall_s": 39.734,
+    "request_created_epoch": 1791393990,
+    "request_send_epoch": 1791393989.7227101,
+    "ttft_s": 0.3634,
+    "decode_s": 39.1485,
+    "reasoning_chars": 261,
+    "content_chars": 1691,
+    "reason_first_s": 0.3634,
+    "content_first_s": 4.8554,
+    "content_last_s": 39.5119,
+    "finish_reason": "stop",
+    "usage": {
+     "prompt_tokens": 100042,
+     "completion_tokens": 971,
+     "total_tokens": 101013,
+     "prompt_tokens_details": {
+      "cached_tokens": 100042,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 71,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 100042,
+     "generation_tokens": 971,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 29748,
+     "mtp_accepted_drafts_cumulative": 22325,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 100042,
+    "completion_tokens": 971,
+    "reasoning_tokens": 71,
+    "cached_tokens": 100042,
+    "cycles_cum": 29748,
+    "accepted_cum": 22325,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 24.777,
+    "rounds": 254.0,
+    "mean_accepted": 2.8268,
+    "ms_per_round": 154.13,
+    "gamma_implied": 1.524,
+    "rounds_est": 499.9,
+    "rep": 1,
+    "arm": "benign"
+   },
+   {
+    "wall_s": 39.718,
+    "request_created_epoch": 1791394032,
+    "request_send_epoch": 1791394031.839436,
+    "ttft_s": 0.2489,
+    "decode_s": 39.2491,
+    "reasoning_chars": 261,
+    "content_chars": 1691,
+    "reason_first_s": 0.2489,
+    "content_first_s": 4.7438,
+    "content_last_s": 39.4981,
+    "finish_reason": "stop",
+    "usage": {
+     "prompt_tokens": 100042,
+     "completion_tokens": 971,
+     "total_tokens": 101013,
+     "prompt_tokens_details": {
+      "cached_tokens": 100042,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 71,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 100042,
+     "generation_tokens": 971,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 30510,
+     "mtp_accepted_drafts_cumulative": 23043,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 100042,
+    "completion_tokens": 971,
+    "reasoning_tokens": 71,
+    "cached_tokens": 100042,
+    "cycles_cum": 30510,
+    "accepted_cum": 23043,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 24.714,
+    "rounds": 254.0,
+    "mean_accepted": 2.8268,
+    "ms_per_round": 154.52,
+    "gamma_implied": 1.524,
+    "rounds_est": 499.9,
+    "rep": 2,
+    "arm": "benign"
+   },
+   {
+    "wall_s": 39.667,
+    "request_created_epoch": 1791394074,
+    "request_send_epoch": 1791394073.991863,
+    "ttft_s": 0.2955,
+    "decode_s": 39.1519,
+    "reasoning_chars": 261,
+    "content_chars": 1691,
+    "reason_first_s": 0.2955,
+    "content_first_s": 4.7792,
+    "content_last_s": 39.4474,
+    "finish_reason": "stop",
+    "usage": {
+     "prompt_tokens": 100042,
+     "completion_tokens": 971,
+     "total_tokens": 101013,
+     "prompt_tokens_details": {
+      "cached_tokens": 100042,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 71,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 100042,
+     "generation_tokens": 971,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 31272,
+     "mtp_accepted_drafts_cumulative": 23761,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 100042,
+    "completion_tokens": 971,
+    "reasoning_tokens": 71,
+    "cached_tokens": 100042,
+    "cycles_cum": 31272,
+    "accepted_cum": 23761,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 24.775,
+    "rounds": 254.0,
+    "mean_accepted": 2.8268,
+    "ms_per_round": 154.14,
+    "gamma_implied": 1.524,
+    "rounds_est": 499.9,
+    "rep": 3,
+    "arm": "benign"
+   }
+  ],
+  "cold_rep": {
+   "wall_s": 409.249,
+   "request_created_epoch": 1791393947,
+   "request_send_epoch": 1791393578.030118,
+   "ttft_s": 369.653,
+   "decode_s": 39.432,
+   "reasoning_chars": 261,
+   "content_chars": 1691,
+   "reason_first_s": 369.653,
+   "content_first_s": 374.2551,
+   "content_last_s": 409.085,
+   "finish_reason": "stop",
+   "usage": {
+    "prompt_tokens": 100042,
+    "completion_tokens": 971,
+    "total_tokens": 101013,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 71,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 271.05200478066644,
+    "generation_tps": 0.0,
+    "prompt_tokens": 100042,
+    "generation_tokens": 971,
+    "peak_memory_usage": {
+     "in_bytes": 127244387981
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 28986,
+    "mtp_accepted_drafts_cumulative": 21607,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "prompt_tokens": 100042,
+   "completion_tokens": 971,
+   "reasoning_tokens": 71,
+   "cached_tokens": 0,
+   "cycles_cum": 28986,
+   "accepted_cum": 21607,
+   "prefix_hit": "none",
+   "prompt_tps": 271.1,
+   "decode_tps": 24.599,
+   "rounds": null,
+   "mean_accepted": null,
+   "ms_per_round": null,
+   "gamma_implied": null,
+   "rep": 0,
+   "arm": "benign"
+  }
+ },
+ "agentic_arm": {
+  "summary": {
+   "arm": "agentic",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308979,
+    "pred_tokens_3p48": 88812,
+    "salt": "e5f6a7b8"
+   },
+   "n_reps": 4,
+   "cold_rep": {
+    "prompt_tokens": 91046,
+    "ttft_s": 0.2496,
+    "prompt_tps": 0,
+    "decode_tps": 20.654,
+    "wall_s": 48.618,
+    "prefix_hit": "partial"
+   },
+   "timed_reps": 3,
+   "decode_tps_all": [
+    20.671,
+    20.655,
+    20.642
+   ],
+   "decode_tps_median": 20.655,
+   "mean_accepted_all": [
+    2.1879,
+    2.1879,
+    2.1879
+   ],
+   "mean_accepted_median": 2.1879,
+   "ms_per_round_all": [
+    153.92,
+    154.03,
+    154.13
+   ],
+   "ms_per_round_median": 154.03,
+   "rounds_all": [
+    314.0,
+    314.0,
+    314.0
+   ],
+   "gamma_implied_all": [
+    1.629,
+    1.629,
+    1.629
+   ],
+   "reasoning_tokens_all": [
+    1000,
+    1000,
+    1000
+   ],
+   "completion_tokens_all": [
+    1000,
+    1000,
+    1000
+   ],
+   "prefix_hit_all": [
+    "partial",
+    "partial",
+    "partial"
+   ]
+  },
+  "reps": [
+   {
+    "wall_s": 48.618,
+    "request_created_epoch": 1791394563,
+    "request_send_epoch": 1791394563.405793,
+    "ttft_s": 0.2496,
+    "decode_s": 48.3678,
+    "reasoning_chars": 3306,
+    "content_chars": 0,
+    "reason_first_s": 0.2496,
+    "content_first_s": null,
+    "content_last_s": null,
+    "finish_reason": "length",
+    "usage": {
+     "prompt_tokens": 91046,
+     "completion_tokens": 1000,
+     "total_tokens": 92046,
+     "prompt_tokens_details": {
+      "cached_tokens": 91046,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 1000,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 91046,
+     "generation_tokens": 1000,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 33156,
+     "mtp_accepted_drafts_cumulative": 25135,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 91046,
+    "completion_tokens": 1000,
+    "reasoning_tokens": 1000,
+    "cached_tokens": 91046,
+    "cycles_cum": 33156,
+    "accepted_cum": 25135,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 20.654,
+    "rounds": null,
+    "mean_accepted": null,
+    "ms_per_round": null,
+    "gamma_implied": null,
+    "rep": 0,
+    "arm": "agentic"
+   },
+   {
+    "wall_s": 48.589,
+    "request_created_epoch": 1791394614,
+    "request_send_epoch": 1791394614.463559,
+    "ttft_s": 0.2597,
+    "decode_s": 48.3294,
+    "reasoning_chars": 3306,
+    "content_chars": 0,
+    "reason_first_s": 0.2597,
+    "content_first_s": null,
+    "content_last_s": null,
+    "finish_reason": "length",
+    "usage": {
+     "prompt_tokens": 91046,
+     "completion_tokens": 1000,
+     "total_tokens": 92046,
+     "prompt_tokens_details": {
+      "cached_tokens": 91046,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 1000,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 91046,
+     "generation_tokens": 1000,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 34098,
+     "mtp_accepted_drafts_cumulative": 25822,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 91046,
+    "completion_tokens": 1000,
+    "reasoning_tokens": 1000,
+    "cached_tokens": 91046,
+    "cycles_cum": 34098,
+    "accepted_cum": 25822,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 20.671,
+    "rounds": 314.0,
+    "mean_accepted": 2.1879,
+    "ms_per_round": 153.92,
+    "gamma_implied": 1.629,
+    "rounds_est": 578.3,
+    "rep": 1,
+    "arm": "agentic"
+   },
+   {
+    "wall_s": 48.633,
+    "request_created_epoch": 1791394665,
+    "request_send_epoch": 1791394665.479712,
+    "ttft_s": 0.2668,
+    "decode_s": 48.3662,
+    "reasoning_chars": 3306,
+    "content_chars": 0,
+    "reason_first_s": 0.2668,
+    "content_first_s": null,
+    "content_last_s": null,
+    "finish_reason": "length",
+    "usage": {
+     "prompt_tokens": 91046,
+     "completion_tokens": 1000,
+     "total_tokens": 92046,
+     "prompt_tokens_details": {
+      "cached_tokens": 91046,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 1000,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 91046,
+     "generation_tokens": 1000,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 35040,
+     "mtp_accepted_drafts_cumulative": 26509,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 91046,
+    "completion_tokens": 1000,
+    "reasoning_tokens": 1000,
+    "cached_tokens": 91046,
+    "cycles_cum": 35040,
+    "accepted_cum": 26509,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 20.655,
+    "rounds": 314.0,
+    "mean_accepted": 2.1879,
+    "ms_per_round": 154.03,
+    "gamma_implied": 1.629,
+    "rounds_est": 578.3,
+    "rep": 2,
+    "arm": "agentic"
+   },
+   {
+    "wall_s": 48.708,
+    "request_created_epoch": 1791394716,
+    "request_send_epoch": 1791394716.573579,
+    "ttft_s": 0.3117,
+    "decode_s": 48.3958,
+    "reasoning_chars": 3306,
+    "content_chars": 0,
+    "reason_first_s": 0.3117,
+    "content_first_s": null,
+    "content_last_s": null,
+    "finish_reason": "length",
+    "usage": {
+     "prompt_tokens": 91046,
+     "completion_tokens": 1000,
+     "total_tokens": 92046,
+     "prompt_tokens_details": {
+      "cached_tokens": 91046,
+      "audio_tokens": 0
+     },
+     "completion_tokens_details": {
+      "reasoning_tokens": 1000,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+     }
+    },
+    "stats": {
+     "prompt_tps": 0.0,
+     "generation_tps": 0.0,
+     "prompt_tokens": 91046,
+     "generation_tokens": 1000,
+     "peak_memory_usage": {
+      "in_bytes": 127244387981
+     },
+     "prefix_cache_hit": "partial",
+     "mtp_cycles_cumulative": 35982,
+     "mtp_accepted_drafts_cumulative": 27196,
+     "phase_marks_ms": null,
+     "api_phase_marks_ms": null
+    },
+    "prompt_tokens": 91046,
+    "completion_tokens": 1000,
+    "reasoning_tokens": 1000,
+    "cached_tokens": 91046,
+    "cycles_cum": 35982,
+    "accepted_cum": 27196,
+    "prefix_hit": "partial",
+    "prompt_tps": 0,
+    "decode_tps": 20.642,
+    "rounds": 314.0,
+    "mean_accepted": 2.1879,
+    "ms_per_round": 154.13,
+    "gamma_implied": 1.629,
+    "rounds_est": 578.3,
+    "rep": 3,
+    "arm": "agentic"
+   }
+  ],
+  "cold_prefill": {
+   "note": "agentic rep0 was warm in this run (prefix cached by the earlier aborted run); the genuine cold prefill was measured once and is reproduced here from the run console:",
+   "prompt_tokens": 91046,
+   "ttft_s": 357.9036,
+   "prompt_tps": 255.0,
+   "decode_tps": 20.335,
+   "wall_s": 407.03,
+   "prefix_hit": "none"
+  }
+ },
+ "agentic_extra_2000tok": {
+  "note": "one extra agentic rep at max_tokens=2000 (warm prefix) - still 100% reasoning",
+  "rec": {
+   "wall_s": 99.187,
+   "request_created_epoch": 1791394781,
+   "request_send_epoch": 1791394780.9619148,
+   "ttft_s": 0.3303,
+   "decode_s": 98.8569,
+   "reasoning_chars": 6588,
+   "content_chars": 0,
+   "reason_first_s": 0.3303,
+   "content_first_s": null,
+   "content_last_s": null,
+   "finish_reason": "length",
+   "usage": {
+    "prompt_tokens": 91046,
+    "completion_tokens": 2000,
+    "total_tokens": 93046,
+    "prompt_tokens_details": {
+     "cached_tokens": 91046,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 2000,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 0.0,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91046,
+    "generation_tokens": 2000,
+    "peak_memory_usage": {
+     "in_bytes": 127244387981
+    },
+    "prefix_cache_hit": "partial",
+    "mtp_cycles_cumulative": 37902,
+    "mtp_accepted_drafts_cumulative": 28555,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "prompt_tokens": 91046,
+   "completion_tokens": 2000,
+   "reasoning_tokens": 2000,
+   "cached_tokens": 91046,
+   "cycles_cum": 37902,
+   "accepted_cum": 28555,
+   "prefix_hit": "partial",
+   "prompt_tps": 0,
+   "decode_tps": 20.221,
+   "rounds": null,
+   "mean_accepted": null,
+   "ms_per_round": null,
+   "gamma_implied": null
+  }
+ },
+ "reference_points": {
+  "recorded_synthetic_100k_2026-10-07_earlier": {
+   "decode_tps": 28.08,
+   "ms_per_round": 135.6,
+   "mean_accepted": 2.813,
+   "prompt_tps": 271.7,
+   "ttft_s": 373.9
+  },
+  "real_session_seq39": {
+   "completion_tokens": 995,
+   "wall_s": 59.54,
+   "effective_tps": 16.7,
+   "reasoning_tokens": 725
+  },
+  "real_session_seq40": {
+   "completion_tokens": 1906,
+   "wall_s": 110.62,
+   "effective_tps": 17.2,
+   "reasoning_tokens": 1411
+  }
+ },
+ "analysis": {
+  "benign_medians": {
+   "decode_tps": 24.775,
+   "ms_per_round": 154.14,
+   "mean_accepted": 2.8268,
+   "rounds": 254.0
+  },
+  "agentic_medians": {
+   "decode_tps": 20.655,
+   "ms_per_round": 154.03,
+   "mean_accepted": 2.1879,
+   "rounds": 314.0
+  },
+  "decode_gap_pct": -16.63,
+  "ms_per_round_gap_pct": -0.07,
+  "today_vs_recorded_baseline_ms_per_round_pct": 13.67,
+  "verdict": "Per-round wall identical (154.03 vs 154.14 ms; -0.07%). All of the decode gap is spec-decode ACCEPTANCE collapse on real agentic content (2.188 vs 2.827 /3), i.e. committed tokens/round 3.19 vs 3.83 = -16.6% t/s. Separately, the whole cluster is ~12% slower today than the recorded 135.6 ms/round baseline (a cluster-state/thermal effect, acceptance unchanged) - so the real session's 16-19 t/s = acceptance drag x same-day cluster-state penalty.",
+  "rounds_from_tps_x_ms_per_round": {
+   "benign": 3.8188,
+   "agentic": 3.1815,
+   "note": "cross-check: decode_tps * ms_per_round/1000 must equal committed/round; matches to <0.2%"
+  },
+  "gamma_verification": {
+   "rounds_measured": {
+    "benign": 254.0,
+    "agentic": 314.0
+   },
+   "gen_over_committed_per_round": {
+    "benign": 253.7,
+    "agentic": 313.7
+   },
+   "note": "971/3.827=253.7 vs 254 measured, 1000/3.188=313.7 vs 314 measured -> gamma=3 confirmed. NOTE: the stock derive()'s internal mc=1+d_acc/d_cyc and gamma_implied fields are off by gamma (1.524/1.629 here); they are NOT used above - rounds/mean_accepted/ms_per_round/decode_tps are correct."
+  },
+  "acceptance_drag": {
+   "mean_accepted_benign": 2.8268,
+   "mean_accepted_agentic": 2.1879,
+   "ratio": 0.774,
+   "note": "acceptance is reproducible to 4 dp across all 3 timed reps per arm (deterministic greedy)."
+  },
+  "committed_per_round_empirical": {
+   "benign": 3.8228,
+   "agentic": 3.1847,
+   "method": "completion_tokens / rounds"
+  },
+  "committed_per_round_from_acceptance": {
+   "benign": 3.8268,
+   "agentic": 3.1879,
+   "method": "1 + mean_accepted"
+  },
+  "committed_ratio_agentic_over_benign": 0.8331,
+  "note_committed": "both methods agree to <0.15% (the final round is truncated at EOS, so gen/rounds is ~1 tok below 1+mean_accepted). The -16.6% decode gap is fully explained by this committed/round ratio."
+ },
+ "guards": {
+  "benign_run": [
+   {
+    "tag": "before_campaign",
+    "now_local": "2026-10-07T12:19:37.261353",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 8941.8,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 1376.3,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0
+    ],
+    "ok": true
+   },
+   {
+    "tag": "benign_rep0",
+    "now_local": "2026-10-07T12:19:37.634976",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 8942.1,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 1376.6,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0
+    ],
+    "ok": true
+   },
+   {
+    "tag": "benign_rep1",
+    "now_local": "2026-10-07T12:26:29.286573",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9353.8,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 1788.3,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118
+    ],
+    "ok": true
+   },
+   {
+    "tag": "benign_rep2",
+    "now_local": "2026-10-07T12:27:11.465630",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9396.0,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 1830.5,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101
+    ],
+    "ok": true
+   },
+   {
+    "tag": "benign_rep3",
+    "now_local": "2026-10-07T12:27:53.564011",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9438.1,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 1872.6,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436
+    ],
+    "ok": true
+   },
+   {
+    "tag": "agentic_rep0",
+    "now_local": "2026-10-07T12:28:35.665655",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9480.2,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 1914.7,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863
+    ],
+    "ok": true
+   },
+   {
+    "tag": "agentic_rep1",
+    "now_local": "2026-10-07T12:35:25.108365",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9889.6,
+    "last_foreign_cluster_post_line": null,
+    "last_foreign_cluster_post_local": null,
+    "foreign_age_s": null,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863,
+     1791394116.07074
+    ],
+    "ok": false
+   }
+  ],
+  "agentic_run": [
+   {
+    "tag": "before_campaign",
+    "now_local": "2026-10-07T12:36:02.578998",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9927.1,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 2361.6,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863,
+     1791394116.07074
+    ],
+    "ok": true
+   },
+   {
+    "tag": "agentic_rep0",
+    "now_local": "2026-10-07T12:36:02.978519",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9927.5,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 2362.0,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863,
+     1791394116.07074
+    ],
+    "ok": true
+   },
+   {
+    "tag": "agentic_rep1",
+    "now_local": "2026-10-07T12:36:54.032826",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 9978.5,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 2413.0,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863,
+     1791394116.07074,
+     1791394563.405793
+    ],
+    "ok": true
+   },
+   {
+    "tag": "agentic_rep2",
+    "now_local": "2026-10-07T12:37:45.060684",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 10029.6,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 2464.1,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863,
+     1791394116.07074,
+     1791394563.405793,
+     1791394614.463559
+    ],
+    "ok": true
+   },
+   {
+    "tag": "agentic_rep3",
+    "now_local": "2026-10-07T12:38:36.120045",
+    "last_custom_call_local": "2026-10-07T09:50:35.491013",
+    "db_age_s": 10080.6,
+    "last_foreign_cluster_post_line": "[ 2026-10-07 11:56:41.242 | DEBUG    | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions",
+    "last_foreign_cluster_post_local": "2026-10-07T11:56:41",
+    "foreign_age_s": 2515.1,
+    "excluded_own_requests": [
+     1791392990.0,
+     1791393035.0,
+     1791393131.0,
+     1791393498.0,
+     1791393578.030118,
+     1791393989.7227101,
+     1791394031.839436,
+     1791394073.991863,
+     1791394116.07074,
+     1791394563.405793,
+     1791394614.463559,
+     1791394665.479712
+    ],
+    "ok": true
+   }
+  ],
+  "own_request_epochs": [
+   1791392990.0,
+   1791393035.0,
+   1791393131.0,
+   1791393498.0,
+   1791393578.030118,
+   1791393989.7227101,
+   1791394031.839436,
+   1791394073.991863,
+   1791394116.07074,
+   1791394563.405793,
+   1791394614.463559,
+   1791394665.479712,
+   1791394716.573579
+  ],
+  "rule": "state.db MAX(ended_at provider=custom) >600s AND no non-own cluster POST >600s old, before EVERY rep"
+ }
+}
