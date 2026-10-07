@@ -10909,3 +10909,25 @@ and it is a shallow problem, not a fresh-vs-delta artifact.
 
 Corollary for future A/Bs: report refed rows AND wall; a delta arm's wire number overstates
 its rate by the reuse factor. The `turn reuse:` line is the divisor that matters.
+
+## 2026-10-06 — P0 verdict: fresh-feed floor is STEADY-STATE (no front-loaded warmup share to hoist)
+
+Three distinct ~88-96K-token fresh feeds (never-seen filler each, so reuse=0) back-to-back on
+one running process (the process had already served 100K feeds at 22:00/22:06, so all shapes
+were JIT-warm from feed A onward):
+
+| feed | prompt tok | wall | tok/s |
+|---|---|---|---|
+| A | 88,463 | 331.5 s | 266.8 |
+| B | 95,825 | 371.8 s | 257.8 (-3.4%) |
+| C | 96,852 | 368.7 s | 262.7 (+1.9%) |
+
+All within a ±3% band; no warm-up penalty visible on repeat. So the "fresh vs delta" gap is NOT
+one-time JIT/first-touch/allocator growth — the shallow per-chunk floor (~6.5-7.8 s = ~165-195
+ms/layer-chunk over 40 layers) is the steady-state cost of the current per-chunk schedule. The
+400 tok/s target (5.12 s/chunk = 128 ms/layer-chunk) requires cutting the floor itself by ~30%.
+
+Probe artifact note: the never-seen filler tokenizes at ~5.78 chars/tok (vs 5.111 for the
+standard SP filler), so absolute numbers are self-consistent within this probe; compare
+ratios, not absolute levels. Script: `~/.hermes/cache/scratch/warm_fresh.py` (persist to
+`bench/` on next tooling window).
