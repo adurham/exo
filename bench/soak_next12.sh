@@ -1,6 +1,6 @@
 #!/bin/bash
 # r500 deep-validation soak on the FINAL next12 build (bf16 default-ON).
-# One rung only: r160 cold (ladder check) -> r500 delta. ~42min rung expected.
+# r160 cold (ladder check) -> r500 delta. ~42min rung expected.
 set -u
 SCRATCH=/Users/adam.durham/.hermes/cache/scratch
 API=http://macstudio-m4-1.tail19c543.ts.net:52415
@@ -23,13 +23,23 @@ PY
 echo "=== SOAK12 START $(date '+%F %T') ===" | tee -a "$REC"
 for RUNG in r160 r500; do
   echo "=== $(date '+%T') RUNG $RUNG launch ===" | tee -a "$REC"
+  # Payload -> file, then curl --data @file. NEVER put a 500K-token prompt on the
+  # command line: the shell substitution dies with E2BIG ("Argument list too
+  # long", curl exit 126) -- measured 2026-10-07 on the r500 rung.
+  python3 - "$SCRATCH/soak12_prompts.json" "$RUNG" "$MODEL" "$SCRATCH" <<'PY'
+import json, sys
+prompts_path, rung, model, scratch = sys.argv[1:5]
+rungs = json.load(open(prompts_path))
+payload = {"model": model,
+           "messages": [{"role": "user", "content": rungs[rung]}],
+           "max_tokens": 32, "reasoning_effort": "low", "stream": False}
+out = f"{scratch}/soak12_{rung}_payload.json"
+json.dump(payload, open(out, "w"))
+print(f"payload written: {out} (~{len(rungs[rung])//5.111} tok)")
+PY
   t0=$(date +%s)
   curl -s --max-time 10800 -X POST "$API/v1/chat/completions" -H "Content-Type: application/json" \
-    -d "$(python3 -c "
-import json
-rungs = json.load(open('$SCRATCH/soak12_prompts.json'))
-print(json.dumps({'model':'$MODEL','messages':[{'role':'user','content':rungs['$RUNG']}],'max_tokens':32,'reasoning_effort':'low','stream':False}))
-")" -o "$SCRATCH/soak12_$RUNG.resp.json"
+    --data @"$SCRATCH/soak12_$RUNG_payload.json" -o "$SCRATCH/soak12_$RUNG.resp.json"
   rc=$?
   t1=$(date +%s)
   echo "HTTP curl exit $rc total $((t1-t0))s" | tee -a "$REC"
