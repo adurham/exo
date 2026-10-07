@@ -11034,3 +11034,47 @@ PROMOTION: flip default 0->1 with provenance comment (`a351ae4`), merged to mlx-
 `12bc512` (battery CLEAN), exo main gitlink+lock advanced `e687de9f4`, deploy/next12
 assembled `73ef066ce` (228 tests, alignment green). The combine_argmax token-id path is
 untouched (only the weighted-sum partial rounds).
+
+## 2026-10-07 — NEXT-TIER CLOSE: shipped stack = 274.0 fresh (+23.4% session arc), battery-gated, soak-validated
+
+**Shipped as durable defaults** (deploy/next12 `73ef066ce` / mlx-lm `12bc512`; exo main `e687de9f4`):
+
+| lever | result | gate |
+|---|---|---|
+| indexer exact-pass eval-merge (2/1 per strip, bit-exact) | +0.9% (below resolution) | merged anyway (strictly fewer syncs) |
+| C1 boundary check fusion (2 `.item()` -> 1) | included above | bit-exact |
+| geometry log -> stderr | instrumentation | R2 mechanism evidence live |
+| **MOE_ALLSUM_BF16 default-ON** | **fresh 274.0 vs 265.8 = +3.1%; vs next9 263.3 = +4.1%** | **battery CLEAN** |
+
+**Measured matrix (fresh 100K median):**
+- session start (next7): 252.5
+- next9 (PV32=0 + chunk 2048): 263.3
+- next10 (eval-merge): 265.8
+- **next12 (bf16 allsum): 274.0**
+
+**Session arc: 222 -> 274.0 tok/s fresh = +23.4%.**
+
+**Key mechanisms settled tonight:**
+1. `moe.all_sum` = 39.5% of shallow wall (with `ffn` == it; `switch_mlp` 0.1%) — the fp32
+   41.94 MB/call MoE-tail collective on jaccl's CPU stream (GPU->CPU->GPU drain per call)
+   IS the shallow cost, not expert GEMMs. bf16 payload halving bought the biggest single
+   lever of the night (+3.1% whole-chunk wall from halving one payload per layer).
+2. Eval-count reduction is a near-null (424 evals removed -> +0.9%, ~0.14 ms/sync):
+   drain overlaps queued GPU work. Payload-size levers >> count levers.
+3. The fresh floor is steady-state (no warmup share to hoist): 3 repeat fresh feeds
+   within ±3%.
+4. Arm-probe discipline: unique salt-prefix fillers mandatory (park/restore persists
+   across relaunches; a reused filler matched a parked session -> fake 1914 tok/s).
+
+**Deep validation (soak12, final build):** r160 cold 646 s / 159,995 tok = **247.7 tok/s**
+(+4.5% vs the next9 rung's 236.9). **r500 delta: 340,237 rows in 2,378 s = 143.1 rows/s**
+(+5.0% vs next9's 136.3); `turn reuse: prefill=340237 reuse=159744` confirms the delta
+(not a full re-prefill). The bf16 win holds at depth.
+
+**Remaining to 400 tok/s (documented, measured):** the ~6.5-7.8 s/chunk shallow floor is
+MoE-at-roofline + the (now-halved) collective drain + a diffuse residue. Next candidates,
+in expected-yield order: (a) `attn.all_sum` payload/pipelining (bf16 already; true share
+~2-3% of wall — small); (b) the consumer-index-layer full-nb score (2-5%, needs battery,
+M effort); (c) deeper structural: chunk-parallelism / M-per-expert scheduling at the
+engine level. None are single-candidate 30% moves; 400 needs a structural change, not
+more micro-levers.
