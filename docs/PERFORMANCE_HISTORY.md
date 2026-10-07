@@ -10931,3 +10931,37 @@ Probe artifact note: the never-seen filler tokenizes at ~5.78 chars/tok (vs 5.11
 standard SP filler), so absolute numbers are self-consistent within this probe; compare
 ratios, not absolute levels. Script: `~/.hermes/cache/scratch/warm_fresh.py` (persist to
 `bench/` on next tooling window).
+
+## 2026-10-06 — shallow-feed span attribution (fresh 100K, sync spans, next9) — R1 GATE PASS
+
+Fresh 100K feed on next9 (8d4fbdb60) with EXO_PROFILER=spans EXO_PROFILER_SYNC_SPANS=1;
+USR1 dumps mid-feed (23:02) and late (23:06), feed completed 263.9 tok/s (378.9s/100,001 rows).
+
+| span | mid-feed % | late-feed % | avg_us (late) | n (late) |
+|---|---|---|---|---|
+| ffn | 53.2 | 39.7 | 44,290 | 946 |
+| moe.all_sum | 53.0 | 39.5 | 43,983 | 946 |
+| attn | 46.8 | ~52 | — | — |
+| attn.indexer (+.score) | 16.9 | **29.5** | 163,901 | 190 |
+| attn.sdpa | 20.2 | 21.0 | 23,374 | 946 |
+| attn.all_sum | 9.6 | 9.4 | 10,534 | 946 |
+| moe.switch_mlp | 0.0 | 0.1 | 70 | 946 |
+| attn.proj_qkv | 0.1 | 0.1 | 78 | 945 |
+
+READING (with the known artifact caveats):
+- ffn ~= moe.all_sum to within 0.2%: the MoE's measured time IS overwhelmingly the
+  fp32 all_sum collective + its GPU->CPU->GPU drain (jaccl runs collectives on a CPU
+  stream; the pipeline must fully empty for each of 40 calls/chunk). NOT the expert GEMMs
+  (switch_mlp child span: 0.1%). This is the Fable "bubble A/B" mechanism, re-confirmed
+  at shallow depth with the new tail spans.
+- attn.indexer.score at 16.9% -> 29.5% ACROSS the shallow arc (mid vs late window) —
+  the O(offset) term; well above the 5% R1 gate. The exact-pass sync reduction
+  (branch perf/dsv41-hier-strip-sync) targets exactly this.
+- attn.all_sum 9.4% is the sync-span artifact number (true ~2-3% per the 2026-08-20
+  correction); do not build against it.
+- attn.proj_qkv 0.1% at 78 us/call: the projections are NOT a shallow lever (child-span
+  under-reporting caveat applies, but not at 78us scale).
+
+Consequence: tonight's package (indexer strip-sync reduction + boundary-sync fusion,
+both bit-exact) + the MoE all_sum bf16 gate (payload halving of a 39.5%-attributed span)
+are the two measured targets. Both were already identified; the tables price them.
