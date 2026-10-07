@@ -11009,3 +11009,28 @@ Follow-on: strip-widening (EXACT_MB 128->384: 424->~191 evals/chunk incl. coarse
 expected to buy <0.5% by the same mechanism; deprecated as a standalone target (env values
 remain for memory tuning). The MoE all_sum bf16 payload halving (39.5% attributed span,
 41.94MB/call x40) is the next measured target — arm in flight on next11.
+
+## 2026-10-07 — MoE all_sum bf16: +4.1% fresh, battery CLEAN -> PROMOTED default-ON (the night's biggest lever)
+
+Arm (next11, DSV41_MOE_ALLSUM_BF16=1, salted like-for-like fresh feeds):
+| feed | wall | tokens | tok/s |
+|---|---|---|---|
+| cold (discard) | 363.8 s | 100,012 | 274.9 |
+| f1 | 365.1 s | 100,010 | 273.9 |
+| f2 | 364.9 s | 100,012 | 274.0 |
+**FRESH MEDIAN 274.0** vs merge-only 265.8 = **+3.1%**; vs next9 shipped 263.3 = **+4.1%**.
+
+Context: the 2026-10-06 shallow attribution put `moe.all_sum` at 39.5% of shallow wall
+(with `ffn` == it to 0.2% — the collective + its GPU->CPU->GPU drain IS the measured
+cost, not the expert GEMMs (switch_mp 0.1%)). The payload was fp32 [1,2048,5120] x 4 B =
+41.94 MB x 40 calls/chunk on jaccl's CPU stream; bf16 halves the wire payload. This is
+the Fable-flagged "close the non-compute gap" lever, confirmed at scale: 3.1% of the
+whole chunk wall from halving one 41.94 MB payload per layer.
+
+BATTERY (BF16ALLSUM @350K, the ship gate for any numerics change): **CLEAN** —
+needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park recall True; build 1,892.8 s.
+
+PROMOTION: flip default 0->1 with provenance comment (`a351ae4`), merged to mlx-lm main
+`12bc512` (battery CLEAN), exo main gitlink+lock advanced `e687de9f4`, deploy/next12
+assembled `73ef066ce` (228 tests, alignment green). The combine_argmax token-id path is
+untouched (only the weighted-sum partial rounds).
