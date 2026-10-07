@@ -11302,3 +11302,25 @@ regression evidence (-0.9% @750K, -0.3% @1M, measured pre-consumer-skip) still s
 the bigger-chunk transient mechanics at depth are unaffected by the indexer change.
 VERDICT: keep 2048 as the default; 4096 remains a documented shallow-workload override.
 This closes Fable's item 3 for the final stack — no relaunch needed.
+
+## 2026-10-07 — Exact-pass "sibling" question CLOSED by code read: no sibling waste exists (the cascade is structural)
+
+Fable's probe-gated question — does the exact-rescore side have equivalent waste to the
+consumer coarse-pass win? — is settled by the code without a probe:
+
+1. `hierarchical_topk_prod` calls `blocks = top_blocks(bm, kk + overfetch)` and feeds THAT
+   to `exact_rescore_streaming` (indexer_hierarchical.py ~:614-621). The exact pass consumes
+   the coarse pass's OWN top-(k+overfetch) output — it never enumerates candidates
+   independently. For a consumer layer `bm` was already restricted to candidate blocks, so
+   the exact pass inherited the restriction FOR FREE; its share of the win sits inside the
+   measured +30.1% r500 delta. Fable's condition 1 => sibling = empty set.
+2. Independently, the exact pass's work is bounded by `kb = k+overfetch = 528` blocks
+   (strips = ceil(528 / (estrip/block)) ~= 44-53 per layer, depth-INDEPENDENT) — there is no
+   O(offset) term on the exact side for ANY layer, consumer or not.
+3. The remaining O(offset) indexer term is the NON-consumer layers' full-width coarse sweep
+   (L2/8/14/20). Those layers either predate candidate publication (2/8/14: no candidates
+   exist to restrict to) or define them (L20: candidate source) — that sweep is semantic
+   hot-set computation, not waste. Restricting it would change outputs.
+
+Conclusion: item (b) closed with data — no implementation, no probe. The consumer-skip win
+is a strict superset of everything available on the exact side.
