@@ -27,7 +27,16 @@ Usage:
 """
 from __future__ import annotations
 
-import argparse, json, os, random, sqlite3, statistics, sys, time, urllib.request
+import argparse
+import contextlib
+import json
+import os
+import random
+import sqlite3
+import statistics
+import sys
+import time
+import urllib.request
 
 API = os.environ.get("PHASE19_API", "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions")
 MODEL = "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw"
@@ -131,36 +140,45 @@ def build_benign_prompt(target_tokens: int, salt: str, task: str) -> str:
     rng = random.Random(20261007)
     target_chars = int(target_tokens * 5.59)
     head = f"[SESSION-SALT {salt}]\n"
-    parts = [head]; n = len(head)
+    parts = [head]
+    n = len(head)
     while n < target_chars:
         s = _SENTENCES[rng.randrange(len(_SENTENCES))]
-        parts.append(s + " "); n += len(s) + 1
+        parts.append(s + " ")
+        n += len(s) + 1
     parts.append(TASKS[task])
     return "".join(parts)
 
 
 # ---------------------------------------------------------------- measurement
-def stream_once(prompt: str, max_tokens: int, effort: str | None) -> dict:
+def stream_once(prompt: str, max_tokens: int, effort: str | None,
+                spec_gamma: int | None = None) -> dict:
     send_epoch = time.time()
     body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens, "temperature": 0, "stream": True}
     if effort:
         body["reasoning_effort"] = effort
+    # deploy/next14-gamma: per-request speculative draft length, clamped to
+    # [1,6] server-side.  Absent (None) -> engine default gamma 3 and a
+    # byte-identical body, so existing callers are unchanged.
+    if spec_gamma is not None:
+        body["spec_gamma"] = spec_gamma
     req = urllib.request.Request(API, data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     t0 = time.perf_counter()
     ttft = first = last = None
     fr = fc = lc = None                 # first reasoning, first content, last content
     rchars = cchars = 0
-    usage = None; stats = None; finish = None; created = None
+    usage = None
+    stats = None
+    finish = None
+    created = None
     with urllib.request.urlopen(req, timeout=3600) as resp:
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\n")
             if line.startswith(": generation_stats"):
-                try:
+                with contextlib.suppress(Exception):
                     stats = json.loads(line.split(" ", 2)[2])
-                except Exception:
-                    pass
                 continue
             if not line.startswith("data:"):
                 continue
@@ -189,7 +207,8 @@ def stream_once(prompt: str, max_tokens: int, effort: str | None) -> dict:
                 if ctxt:
                     if fc is None:
                         fc = now
-                    cchars += len(ctxt); lc = now
+                    cchars += len(ctxt)
+                    lc = now
                 if rtxt or ctxt:
                     if ttft is None:
                         ttft, first = now - t0, now
@@ -211,13 +230,17 @@ def stream_once(prompt: str, max_tokens: int, effort: str | None) -> dict:
 def derive(rec, prev_cyc, prev_acc, gamma):
     st = rec.get("stats") or {}
     u = rec.get("usage") or {}
-    cyc = st.get("mtp_cycles_cumulative"); acc = st.get("mtp_accepted_drafts_cumulative")
+    cyc = st.get("mtp_cycles_cumulative")
+    acc = st.get("mtp_accepted_drafts_cumulative")
     gen = u.get("completion_tokens")
     det = u.get("completion_tokens_details") or {}
     out = {"prompt_tokens": u.get("prompt_tokens"), "completion_tokens": gen,
            "reasoning_tokens": det.get("reasoning_tokens"),
            "cached_tokens": (u.get("prompt_tokens_details") or {}).get("cached_tokens"),
            "cycles_cum": cyc, "accepted_cum": acc,
+           # raw process-cumulative per-position acceptance histogram ([int]*7,
+           # index k = rounds that accepted exactly k drafts); None if absent.
+           "hist_cum": st.get("mtp_accepted_histogram_cumulative"),
            "prefix_hit": st.get("prefix_cache_hit"),
            "prompt_tps": round(st.get("prompt_tps") or 0, 1),
            "decode_tps": None, "rounds": None, "mean_accepted": None,
@@ -266,10 +289,12 @@ def main():
         meta = {"prompt_chars": len(prompt), "depth_target": a.depth}
         print(f"[{a.label}] BENIGN depth={a.depth} salt={salt} chars={len(prompt)}", flush=True)
 
-    recs = []; prev_cyc = prev_acc = None
+    recs = []
+    prev_cyc = prev_acc = None
     for i in range(a.reps):
         r = stream_once(prompt, a.max_tokens, a.effort)
-        r.update(derive(r, prev_cyc, prev_acc, a.gamma)); r["rep"] = i
+        r.update(derive(r, prev_cyc, prev_acc, a.gamma))
+        r["rep"] = i
         recs.append(r)
         if r.get("cycles_cum") is not None:
             prev_cyc, prev_acc = r["cycles_cum"], r["accepted_cum"]
@@ -298,7 +323,8 @@ def main():
                "timed_reasoning_tokens_median": round(statistics.median(rtk), 1) if rtk else None}
     print("SUMMARY", json.dumps(summary), flush=True)
     if a.out:
-        json.dump({"summary": summary, "reps": recs}, open(a.out, "w"), indent=1)
+        with open(a.out, "w") as f:
+            json.dump({"summary": summary, "reps": recs}, f, indent=1)
     return 0
 
 

@@ -281,9 +281,7 @@ def char_script(ch):
     return "other-nonascii"
 
 
-# small common-word list for the LOW-CONFIDENCE same-script glue heuristic.
-# Best-effort supplementary signal only; see find_glued_fragments().
-_COMMON_WORDS = set("""
+_WORDS_BLOB = """
 the of and to a in is it you that he was for on are as with his they i at be this
 have from or one had by word but not what all were we when your can said there use
 an each which she do how their if will up other about out many then them these so
@@ -303,7 +301,10 @@ until children side feet car mile night walk white sea began grow took river fou
 state once book hear stop without second later miss idea enough eat face watch far real
 almost let above girl sometimes mountain cut young talk soon list song being leave family
 camera angle pattern pavement background grass thigh thigh s thigh
-""".split())
+"""
+# small common-word list for the LOW-CONFIDENCE same-script glue heuristic.
+# Best-effort supplementary signal only; see find_glued_fragments().
+_COMMON_WORDS = set(_WORDS_BLOB.split())
 
 # common English suffixes: a common-word+tail that ends in one of these is a
 # legitimate word (reading, talked, quickly), NOT a glue fragment.
@@ -340,7 +341,8 @@ def find_glued_fragments(text):
         # Legitimate code-switching like "雨声淅沥。The rain ..." has CJK
         # sentence punctuation (。) between the runs, so it does NOT trip this.
         adjacent_switch = False
-        for c1, c2, s1, s2 in zip(tok, tok[1:], scripts, scripts[1:]):
+        for i in range(len(tok) - 1):
+            s1, s2 = scripts[i], scripts[i + 1]
             if {s1, s2} == {"latin", "cyrillic"} or \
                (s1 == "latin" and s2 in _FOREIGN_SCRIPTS) or \
                (s2 == "latin" and s1 in _FOREIGN_SCRIPTS):
@@ -348,9 +350,9 @@ def find_glued_fragments(text):
                 break
         if has_latin and foreign and adjacent_switch:
             # reconstruct the latin run + the adjoining foreign run for context
-            latin_part = "".join(c for c, s in zip(tok, scripts) if s == "latin")
-            foreign_part = "".join(c for c, s in zip(tok, scripts)
-                                   if s in _FOREIGN_SCRIPTS)
+            latin_part = "".join(c for i, c in enumerate(tok) if scripts[i] == "latin")
+            foreign_part = "".join(c for i, c in enumerate(tok)
+                                   if scripts[i] in _FOREIGN_SCRIPTS)
             # context = ~40 chars either side of this token in the text
             pos = text.find(raw)
             ctx = text[max(0, pos - 40):pos + len(raw) + 40] if pos >= 0 else raw
@@ -410,18 +412,18 @@ def find_repetitions(text, min_len=2, max_len=6, min_repeats=3):
     words = re.findall(r"\S+", text.lower())
     n = len(words)
     hits = []
-    for L in range(min_len, max_len + 1):
+    for ng_len in range(min_len, max_len + 1):
         i = 0
-        while i + L <= n:
-            ng = words[i:i + L]
+        while i + ng_len <= n:
+            ng = words[i:i + ng_len]
             cnt = 1
-            j = i + L
-            while j + L <= n and words[j:j + L] == ng:
+            j = i + ng_len
+            while j + ng_len <= n and words[j:j + ng_len] == ng:
                 cnt += 1
-                j += L
+                j += ng_len
             if cnt >= min_repeats:
                 hits.append({"type": "repetition", "confidence": "high",
-                             "ngram_len": L, "ngram": " ".join(ng),
+                             "ngram_len": ng_len, "ngram": " ".join(ng),
                              "count": cnt, "start_word": i})
                 i = j
             else:
@@ -488,10 +490,14 @@ def run_detectors(text):
 # HTTP
 # ==========================================================================
 class Client:
-    def __init__(self, api, model, timeout):
+    def __init__(self, api, model, timeout, spec_gamma=None):
         self.api = api.rstrip("/")
         self.model = model
         self.timeout = timeout
+        # deploy/next14-gamma: per-request speculative draft length, clamped to
+        # [1,6] server-side. None (default) omits the field -> engine default
+        # gamma 3 -> byte-identical request for every existing caller.
+        self.spec_gamma = spec_gamma
 
     def chat(self, messages, max_tokens=256, temperature=0.0,
              tools=None, reasoning_effort=None, extra=None):
@@ -505,6 +511,8 @@ class Client:
             payload["reasoning_effort"] = reasoning_effort
         if extra:
             payload.update(extra)
+        if self.spec_gamma is not None:
+            payload["spec_gamma"] = self.spec_gamma
         return self._post(payload)
 
     def _post(self, payload):
@@ -1135,6 +1143,9 @@ def main(argv=None):
                     help="per-request timeout seconds (deep prefill is slow)")
     ap.add_argument("--force", action="store_true", help="ignore cached results")
     ap.add_argument("--skip-park", action="store_true")
+    ap.add_argument("--spec-gamma", type=int, default=None,
+                    help="per-request speculative draft length 1..6 threaded into "
+                         "every probe body; default omits the field (engine gamma 3)")
     ap.add_argument("--ssh-park-check", action="store_true",
                     help="grep the engine log for a park/restore line (read-only ssh)")
     args = ap.parse_args(argv)
@@ -1160,7 +1171,7 @@ def main(argv=None):
                         "via the LAUNCHED process env (see runbook.md)"}
     save_json(os.path.join(d, "meta.json"), meta)
 
-    client = Client(args.api, args.model, args.timeout)
+    client = Client(args.api, args.model, args.timeout, spec_gamma=args.spec_gamma)
 
     if args.mode in ("build", "all"):
         do_build(client, args, d)
