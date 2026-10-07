@@ -11239,3 +11239,22 @@ Soak13 on the shipped next13 (consumer-skip ON), one salted conversation, ladder
 
 `turn reuse: prompt=499992 prefill=340248 reuse=159744` = true delta. The soak numbers
 confirm the arm (186.2) within noise on this ladder. r750/r1m in flight.
+
+## 2026-10-07 — soak13 r750: 146.4 rows/s (+57.3% vs next12) — the consumer-skip win GROWS with depth
+
+r750 delta on next13: 1,710 s for 250,282 refed rows (`turn reuse: prompt=749994
+prefill=250282 reuse=499712`) = **146.4 rows/s** vs next12's 93.1 = **+57.3%**.
+
+Depth-scaling of the consumer-skip win across the ladder (all same-shape, true deltas):
+
+| rung | next12 rows/s | next13 rows/s | delta |
+|---|---|---|---|
+| r160 (cold tok/s) | 247.7 | 263.2 | +6.3% |
+| r500 delta | 143.1 | 184.6 | +29.0% |
+| r750 delta | 93.1 | 146.4 | **+57.3%** |
+
+Exact match to the mechanism: the consumer layers' coarse pass is O(offset), so the
+saved work grows linearly with depth while the rest of the chunk shrinks. This is the
+strongest depth-scaling lever the campaign has measured (vs M2's +15/+25/+46%).
+
+r1m in flight.
