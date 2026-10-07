@@ -11185,3 +11185,26 @@ Implementation (mlx-lm, child-verified + re-verified by me):
 - NOT verified (child's own list, correct): no live cluster measurement; nothing above
   262K locally; peak memory on paper only; one extra blocking `.item()` per consumer
   layer per chunk (unmeasured on cluster); break-even at nb <= 32K.
+
+## 2026-10-07 — CONSUMER-SKIP ARM: +30.1% r500 delta (186.2 vs 143.1 rows/s), +8.6% r160, +2.6% fresh — the win scales with depth exactly as sized (and then some)
+
+next13 (consumer skip ON, everything else = next12) vs the next12 comparators, IDENTICAL
+shapes (r500 delta refed 340,248 rows vs next12's 340,237; `turn reuse: prompt=499992
+prefill=340248 reuse=159744` = true delta):
+
+| feed | next13 | next12 | delta |
+|---|---|---|---|
+| fresh 100K | 281.0 tok/s (356.0 s) | 274.0 | **+2.6%** |
+| r160 cold | 268.9 tok/s (595.1 s) | 247.7 | **+8.6%** |
+| r500 delta (160K->500K) | **186.2 rows/s** (1,827.3 s) | 143.1 (2,378.0 s) | **+30.1%** |
+
+Scaling vs the sizing report's predicted wall shares (pessimistic->optimistic):
+100K 3.9-13.7% predicted vs 2.6% measured (at/below the pessimistic bound — matches: the
+fresh arc's consumer-index share is smallest); ~350K 12.2-25.2% predicted vs **+30.1%
+measured** — ABOVE the optimistic bound. The old path materialized a full-width masked
+score strip ([b,n,4096] fp32 = 33.5 MB/strip x 4 consumers) plus the where/max passes;
+the restricted path avoids the alloc+write, so the saving exceeds the raw FLOP ratio.
+
+Cumulative shipped-state numbers on next13: fresh **281.0** (session start 222 = +26.6%),
+r160 268.9, r500 delta 186.2 rows/s. Quality battery fired on next13 (CONSUMERSKIP label)
+as the selection-stage ship gate.
