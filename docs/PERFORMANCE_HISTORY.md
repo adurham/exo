@@ -11227,3 +11227,15 @@ Full evidence chain for the consumer-skip lever:
 Cumulative session arc: **222 -> 281.0 tok/s fresh = +26.6%**; r500 delta 143.1 -> 186.2
 rows/s = +30.1% vs the prior build. Deep soak (r160->r1m ladder on next13) firing as the
 final validation.
+
+## 2026-10-07 — next13 deep soak (in progress): r160 +6.3%, r500 delta +29.0% (soak-confirmed)
+
+Soak13 on the shipped next13 (consumer-skip ON), one salted conversation, ladder deltas:
+
+| rung | wall | rows/tokens | rate | vs next12 |
+|---|---|---|---|---|
+| r160 cold | 608 s | 160,006 tok | 263.2 tok/s | +6.3% |
+| r500 delta | 1,843 s | 340,248 refed (reuse=159,744) | **184.6 rows/s** | **+29.0%** |
+
+`turn reuse: prompt=499992 prefill=340248 reuse=159744` = true delta. The soak numbers
+confirm the arm (186.2) within noise on this ladder. r750/r1m in flight.
