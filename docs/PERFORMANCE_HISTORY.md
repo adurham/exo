@@ -11103,3 +11103,37 @@ Deep rungs on the final build: r160 cold **247.7 tok/s** (+4.5% vs next9 rung); 
 
 Session arc: **222 -> 274.0 = +23.4%**. 1M ship-gate still green from the next5 proof
 (1,039,963 tok end-to-end); next12 re-validated at 500K depth with the bf16 lever.
+
+## 2026-10-07 — Loop 2 kickoff: Fable plan — the MoE expert GEMM is the unmeasured third of the wall
+
+STATE: 274.0 fresh shipped (next12). Fable's review of the night found the load-bearing
+unverified claim: "MoE compute at roofline". The spans prove it was never measured —
+`ffn` 39.7% == `moe.all_sum` 39.5% (to 0.2%) and `switch_mlp` child span 0.1%: the expert
+GEMM is async-dispatched and drains INSIDE the collective span, invisible to accounting.
+A third of the chunk wall has had zero direct optimization; tonight's win was the
+transport around the GEMM, not the GEMM.
+
+PLAN (Fable, hardened):
+- Task A (parallel, m4-2, ~75-90 min): MoE expert-path microbench. Step 0 ceiling
+  calibration (peak dense bf16 TFLOP/s + achievable GB/s) — without it "roofline" is
+  unfalsifiable. Real weights (subset 32-64 experts; NEVER run the quantizer in-box).
+  Traps: missing-drain dispatch-time artifact (the July "82 TFLOP/s @ M=48" is suspect),
+  L2 residency (sweep many distinct experts), dequant must be INSIDE the timed region
+  (production cannot cache bf16 weights), launch-gap overhead (~384 dispatches/layer),
+  pad-waste (use production M-mixture), M∈{64,128}, interleaved arms, ≥5 reps, MX cache
+  limit ~4-6GB (only ~13GB free beside the resident 115GB runner).
+  THREE-WAY verdict: (i) alt ≥1.15x block-level → POSITIVE; (ii) current ≥70-80% of
+  calibrated ceiling at its intensity → roofline CONFIRMED; (iii) neither → INCONCLUSIVE
+  (headroom exists, unharvested) — never label iii as confirmed.
+  Decision-grade number = full-block mock (192 experts, production M-mix, one layer,
+  drained, x61).
+- Task B (parallel, read-only, ~45 min): consumer-index-layer sizing + correctness audit
+  (candidate-set restriction must be proven exact vs post-hoc masking). Savings =
+  coarse-fraction x FLOP-reduction, pessimistic bound, weight 750K depth.
+- Sequence: A+B parallel → gate → A-positive: impl behind env knob (2.5h hard park) →
+  relaunch + interleaved arms + battery → chunk-4096 once on the FINAL stack → soak +
+  2nd battery → memo. A-negative: chunk-4096 arm + battery → wall-decomposition rebuild
+  (instrumented drains around the expert block) → consumer impl only if B-go + ≥2.5h.
+- STOP items: sub-3% levers on single arms (use means + span/geometry logs); rebuild the
+  wall decomposition post-next12 (the 2.66s/3.9s bookkeeping is stale); verify knob
+  activation on EVERY entry point (battery/soak/deep runners) before trusting any arm.
