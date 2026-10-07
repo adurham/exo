@@ -11370,3 +11370,53 @@ depth O(offset): +6.3% @160K -> +29% @500K -> +65.5% @1M.
   40-50% unharvested kernel headroom, indexer's consumer waste eliminated, collectives
   halved (bf16). The sub-400 gap is now: MoE kernel efficiency (parked, Metal-project),
   sdpa 21% (micro-levers exhausted), and the diffuse residue.
+
+## 2026-10-07 — Loop-3 consult (Fable): the MoE "kernel headroom" premise is UNVERIFIED — audit gates the project
+
+Fable's review of the campaign state found two soft spots in the MoE-kernel pricing and
+prescribed a gate-first evening before committing to the Metal project:
+
+1. **15.14 TF is a LARGE-shape ceiling; segments have their own roofline.** For a small-M
+   GEMM, ceiling ~= min(dense, BW * FLOPs/byte) where FLOPs/byte = 16M/bits for b-bit
+   weights. bf16 weights at ~550 GB/s, M=16 => ~8.8 TF — SUSPICIOUSLY equal to the measured
+   uniform 8.88 TF. If the uniform test ran mean M~16 on bf16 weights, the "gap" is the
+   shape roofline, not kernel loss, and the Metal project harvests ~nothing. (If experts are
+   4-bit — likely, a dequant step exists — the crossover M drops to ~7 and most segments are
+   compute-bound; then the gap is likely real and in-loop dequant ALU is the prime suspect,
+   NOT partitioning.) ONE division per segment settles which world we're in.
+2. **The +8-12% e2e estimate assumes GEMM is 60-80% of the MoE block — never measured.**
+   The GEMM-vs-drain split inside the block is unmeasured; spans are shipped, this is minutes.
+3. **chunk-4096 being a wash is mild evidence AGAINST bandwidth-bound** (doubling
+   tokens/chunk halves weight re-reads; if the GEMM were BW-bound, fresh should have beaten
+   noise). Leans compute/launch-bound, i.e. the gap IS harvestable. The two diagnostics point
+   opposite directions — hence the audit.
+
+PRESCRIBED FIRST STEP (offline autopsy, no serving, no deploy, one evening):
+- One log line in the segmented GEMM: per-segment M/N/K + cycles for a production chunk.
+- Per-segment roofline + achieved effective bandwidth -> the TRUE ceiling for the mix.
+  Compare 8.88/7.55 against it.
+- Re-run the killed dequant arm with conversion cost EXCLUDED from timing (convert once
+  offline, GEMM from pre-converted weights). If the pre-converted kernel hits ~ceiling,
+  in-loop dequant is the bottleneck and the fix is a persistent hot-expert weight cache
+  (one conversion amortized over ~50 chunks, bounded by a cumulative-M threshold) — a
+  different animal from the per-call conversion already killed — not partitioning.
+- Uniform vs skewed (8.88 -> 7.55, -15%) is the one clearly kernel-attributable signal
+  (load imbalance / tail waves). An hour of synthetic balanced-assignment testing isolates
+  it; if recoverable, an M-major/work-stealing partition patch is the block's shippable,
+  battery-gated outcome (~1.5-2% e2e) while the big decision stays gated.
+
+GATE (written down in advance): aggregate >=85% of mix-roofline -> KILL the Metal project,
+pivot; segments >=15% below shape-roofline (esp. top-decile-time) -> GO, and the histogram
+ranks the lever.
+
+ALSO FLAGGED FOR RE-EXAMINATION:
+- The wall model does not close (~60% accounted; the indexer has no fresh number at all).
+  Close it to ~100% with the shipped spans; if indexer >=15%, note its O(offset) semantic
+  sweep grows per rung — that's the deep-side wall where the ladder metrics live.
+- Unpriced structural angle: expert placement across the two Studios (TP-split vs
+  expert-locality sharding). If TP-split, placement changes both the M-mix and the drain —
+  possibly worth more than kernel polish. Worth a code-read.
+- Unpriced: the drain itself — dual-microbatch comm-hiding (overlap the drain with the other
+  micro-batch's compute) is a standard TP lever absent from the priced list.
+- Reprice the ceiling calibration: what dtype/shape/dequant did 15.14 include? (The 82 TF
+  lesson: verify the calibration's own premises.)
