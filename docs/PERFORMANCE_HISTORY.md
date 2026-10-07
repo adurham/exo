@@ -11079,23 +11079,7 @@ M effort); (c) deeper structural: chunk-parallelism / M-per-expert scheduling at
 engine level. None are single-candidate 30% moves; 400 needs a structural change, not
 more micro-levers.
 
-## 2026-10-06 — A/B arm-probe pitfalls (both cost a full arm cycle tonight)
-
-Two probe-script bugs found while measuring next10 (indexer strip-sync package):
-
-1. **Contaminated "fresh" feeds via parked sessions.** The park/restore store
-   persists conversations across cluster RELAUNCHES, so a filler text any earlier
-   probe used can match a restored session: observed `turn reuse: prompt=100037
-   prefill=11973 reuse=88064` -> a fake 1914 tok/s "fresh" reading. Fix: prefix
-   every feed with a unique `SALT<token_hex(8)>` so no session on the node can
-   match; verify EVERY feed with its `turn reuse:` line.
-2. **Salt-mixing changes the token ratio.** v2 prefixed the salt on every filler
-   repeat (`SALT-x <lorem> SALT-x <lorem> ...`), which tokenizes at ~3.97 chars/tok
-   instead of the established SP filler's 5.111 -> a 128.8K-token feed, not
-   comparable to the 100K comparator (read as 255.6 tok/s at 128.8K = actually
-   consistent with ~263 @100K, but the confusion cost a cycle). Fix: ONE salt
-   token-prefix at the head of the prompt + the established filler sized at its
-   own measured chars/tok. Persisted: `bench/phase2_arm.py` (v3) is the corrected form.
+## 2026-10-07 — soak E2BIG pitfall (third arm-probe bug, cost one rung retry)
 
 3. **Never put a 500K-token prompt on a shell command line.** The r500 soak rung died
    with `curl exit 126` / "Argument list too long" (E2BIG) from the `-d "$(python3 -c ...)"`
