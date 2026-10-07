@@ -1,0 +1,3 @@
+[cold-baseline-benign] filler chars=559094 salt=1bd3a759 task=count
+{"rep": 0, "prompt_tokens": 100040, "completion_tokens": 1400, "reasoning_tokens": 998, "ttft_s": 1066.1467, "decode_s": 52.7691, "decode_tps": 26.512, "rounds": null, "mean_accepted": null, "ms_per_round": null, "gamma_implied": null, "prefix_hit": "none"}
+{"rep": 1, "prompt_tokens": 100040, "completion_tokens": 1400, "reasoning_tokens": 998, "ttft_s": 150.7085, "decode_s": 53.0957, "decode_tps": 26.349, "rounds": 370.0, "mean_accepted": 2.7838, "ms_per_round": 143.5, "gamma_implied": 1.529, "prefix_hit": "partial"}

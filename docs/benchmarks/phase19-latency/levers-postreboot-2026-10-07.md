@@ -318,3 +318,200 @@ directly (but is a system-prompt edit ⇒ requires the quality battery).
    >4096 calls), 1–2 relaunches, weak design; only if the prefill term is the target.
 5. **Image-path knob fix** (Phase 2 finding) — a real latent bug
    (transient-budget inert on image requests); low risk, no perf number attached.
+   → **DONE in Part II (§11), committed `c7fc2a9b4`.**
+
+---
+
+# PART II — RESUMED RUN (2026-10-07 16:25 → 17:50 CDT)
+
+The nodes came back (owner unlocked the disks) and this PM resumed the campaign
+that Part I had to stop. **Every live phase below was executed.** Cluster:
+`deploy/next13 @ f4bb14746`, 2× Mac Studio M4 Max, TP2 over jaccl RDMA.
+
+| # | Phase | Part-I status | Part-II result |
+|---|---|---|---|
+| 0 | Cold baseline + drift gate | BLOCKED | **PASS** — benign 100K cold **139.13 ms/round** (vs 135.6 morning champion, 154.1 degraded). §8. |
+| 3 | Kernel go/no-go | INCONCLUSIVE | **SETTLED = EXHAUSTED** — one batched mega-eval; the ~55 GB/s plateau persists. §9. |
+| 4 | Payload-cap validation | recommend-only | **REPLAYED** — 20K cap saves **49.9 s cold prefill = 3.26 % model-time / 2.75 % turn-wall**. Marginal vs the ≥3 % bar. §10. |
+| 2b | Image-path knob gap | open bug | **FIXED + committed** `c7fc2a9b4`; 208 tests pass. §11. |
+
+**Relaunch budget: 3 available, 2 used** (one VOID, one healthy), 1 remaining.
+
+## 7. The reboot did NOT clear the degraded-clock state — and a mid-prefill jaccl hang
+
+This is the most important operational finding of the resumed run.
+
+The **raw-GPU canary rule was violated** at the 16:28 relaunch: no canary was run
+after the 15:50 boot before benching. The first baseline then produced a **void**
+result, and the hardware was diagnosed live:
+
+- **studio2 was in the pre-existing DEGRADED-CLOCK state at ~618 MHz** (lowest bin),
+  ~92–97 % residency, ~3–6 W. PM's own canary, 3× fp16 4096³ matmul:
+  **studio1 = 14.09 TFLOPS** (~1578 MHz) vs **studio2 = 4.07 TFLOPS** (3.49/4.07/4.09).
+  `powermetrics` during the window: studio2 active residency parked on the 618 MHz
+  bin, *no thermal warning* — the exact signature of the 2026-09-22 note.
+- **This was AFTER the 15:50 reboot**, so the standing "a reboot clears it" rule
+  **did NOT hold this time.** Flagged as new information.
+- The workload then **hung in a jaccl collective mid-prefill**: both runners'
+  stderr froze at 16:50:48, jaccl `call_id` stuck at **570 on BOTH nodes**, all
+  threads blocked in `__psynch_cvwait`/`pthread_cond_wait` (waiting, not
+  computing), TB nets still pingable → a rendezvous/collective hang, not link-down.
+
+**Recovery (PM-owned):** killed the client, then **rebooted BOTH nodes with the
+correct tool** — `cd ~/repos/exo && ./reboot-node.sh studio1 studio2`
+(`fdesetup authrestart` + FileVault auto-unlock; `--check` dry-run passed on both
+first). **NEVER** raw `sudo shutdown -r now` — that left them at the FileVault
+screen for ~30 min earlier today. Both returned ssh-able + auto-unlocked in ~70 s.
+
+**Canary after the reboot — HEALTHY on both** (3× fp16 4096³):
+`studio1 9.7 ms 14.22 TFLOPS | studio2 9.7 ms 14.23 TFLOPS` (run0 each ~7.3–7.4,
+the other two ~14.2–14.5 — warm-up transient only). Then relaunched, and
+canaried **again** post-`READY 2/2`: `14.07 / 14.15 TFLOPS`. Final idle canary at
+17:46: `studio1 14.13 | studio2 14.82 TFLOPS`.
+
+**Rules recorded:** (a) run the raw-GPU canary after **every** boot and after
+`READY`, before any bench — the 16:28 window was void precisely because it was
+skipped; (b) a degraded node is a **reboot target**, not something to bench
+through; (c) use `./reboot-node.sh`, never raw `shutdown -r now`.
+
+## 8. Phase 0 — cold baseline (healthy cluster)
+
+Post-reboot, canaries healthy, warm-up + settle done. `phase19_round_measure.py
+--depth 100000 --reps 3` on `deploy/next13 @ f4bb14746`:
+
+| rep | prompt_tok | completion | ttft_s | decode_s | decode_tps | ms/round | mean_acc |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 0 (cold) | 100039 | 955 | **372.65** | 35.09 | 27.18 | – | – |
+| 1 | 100039 | 955 | 4.22 | 34.70 | 27.49 | **139.37** | 2.8353 |
+| 2 | 100039 | 955 | 4.17 | 34.58 | 27.59 | **138.89** | 2.8353 |
+
+**GATE: PASS.** median **139.13 ms/round** (≤ ~140). Cold prefill 372.65 s =
+**268.4 rows/s**. `mean_accepted 2.8353`, `gamma_implied 1.521`.
+
+Interpretation: the reboot **cleared the thermal/driver state** — 139.13 is the
+champion (morning 135.6, degraded 154.1). **VOID prior window** (16:28): rep0
+ttft 1066 s and rep1 143.5 ms/round — that was the degraded node2, recorded here
+only to mark it unusable.
+
+## 9. Phase 3 — SETTLED: **EXHAUSTED** (one batched mega-eval)
+
+The Part-I §3.4 / §6 item-2 decisive test: build the **entire dense set (15
+linears × K) as ONE `mx.eval`**, no per-eval amortisation, on an idle machine.
+Artifacts: `raw/phase3-kernel-megaeval.{md,json,stdout.txt}`,
+`bench/exl3_dense_smallm_probe_megaeval.py` (laptop M4 Max, mlx 0.32.0.dev; the
+nodes' 128 GB is fully resident with the model so the synthetic probe ran on the
+laptop; load 5.07–5.40/14).
+
+```
+M=4: mega-eval 60.70 us/call  vs  prior amortised K=64 64.18 us/call  ->  ratio 0.946  [PLATEAU PERSISTS]
+     per-op floor inside one 600-op graph = 1.818 us/op  (~3% of a call)
+     A 58.1 GB/s (12.9% of 450) | B 247.5 GB/s | roofline C 117.53 us/L | compute E 75.22 us/L
+     x40L:  A 36.419 ms   B 45.593 ms   C 4.701 ms   E 3.009 ms
+```
+
+- Removing the amortisation assumption moved per-call cost by **5.4 %** (inside
+  noise) — **no hidden submission cost** was revealed. K=1→80 per-call is flat
+  (~77.5→60.7 µs, saturating by K≈8) while the graph grows 10×.
+- Arm B (fp16, decode-free, 5.3× the bytes) is also pinned at 247 GB/s — a plain
+  matmul can't reach 450 at these shapes either; measured streaming BW was
+  **343.7 GB/s**. So 450 GB/s is a large-stream number, not reachable here.
+- `dispatch_count`/`gpu_time_ns` still report 0 (not wired on this build).
+
+**Verdict: EXHAUSTED.** The ~55 GB/s plateau is a genuine kernel throughput, not a
+per-eval launch-shape artefact. **No ≥2 ms/round dense-GEMM lever exists**; a
+small-M rewrite / batched-eval change does **not** help. This is not a claim of an
+irreducible hardware bound (arm B fails 450 too) — what is ruled out is
+batching/launch-shape and a decode small-M rewrite. Phase-7 (kernel impl) stays
+closed.
+
+## 10. Phase 4 — payload cap replayed on the cluster (interleaved)
+
+Harness `bench/phase19_agentic_trunc_cap.py` (new; `--cap-chars` truncates each
+tool result's content before rendering, emulating Hermes `tool_output.max_bytes`).
+Verified: the cap truncates **exactly the 3 payloads >20 KB**
+(48,396 / 29,334 / 28,238 chars), removing **45,968 chars** — −23.5 % of the
+195,473-char tool payload. Interleaved arms (orig, then cap; 3 timed reps each):
+
+| arm | prompt_tok | ms/round (reps) | decode_tps | mean_acc | rep0 prefill |
+|---|---:|---|---:|---:|---:|
+| ORIGINAL | 91,044 | 153.22 / 153.68 / **153.40** | 20.609 | 2.1614 | 357.96 s |
+| CAP 20K | 78,225 | 151.69 / 151.87 / **151.87** | 21.288 | 2.2395 | 308.03 s |
+
+- prompt delta = **12,819 tok (−14.08 %)**. Prefill rate identical (254.3 vs
+  254.0 rows/s) → the delta is purely size.
+- Cold-prefill saving = **49.93 s** = **3.26 % of model time** (1530.59 s) /
+  **2.75 % of the real 1814.45 s turn wall**. Delta-row share 45,968/100,828 =
+  **13.45 %** (chars; 12,819/100,828 = 12.7 % in measured tokens).
+- ms/round medians differ 1.0 % with **disjoint** 3-rep IQRs (153.22 > 152.20),
+  but the arms also differ in `mean_accepted` (2.16 vs 2.24) → decode-side
+  acceptance is partly responsible, so the ms/round gap overstates the prefill win.
+
+**Verdict: recommend-with-numbers; not a ≥3 % turn-wall win.** 2.75 % turn-wall
+(3.26 % model-time) sits **just below** the campaign's ≥3 % adoption bar → **the
+cap is NOT applied**. It is trivially reversible and affects **all** sessions, so
+the write-guarded config change is left as a recommendation:
+
+```
+hermes config set tool_output.max_bytes 20000     # revert: hermes config set tool_output.max_bytes 50000
+```
+
+Behaviour caveat: a payload truncated at 20 K can be **re-fetched** (a `read_file`
+re-read with offsets), which this static replay cannot capture — the live risk can
+only increase the cost, not reduce it.
+
+## 11. Phase 2b — image-path knob gap: **FIXED** and committed (`c7fc2a9b4`)
+
+Verdict: the `long_threshold=10**9` pin in mlx-lm `_prefill_planned` is
+**deliberate** (cold==reused bitwise op-sequence contract) and is **left intact**.
+But the contract is **inert on the exo image path** (`engine.py:765` `keep = … and
+embeddings is None`; image caches are closed every turn), so the fix is exo-side
+and touches no fork file: the plan the engine passes in is now **budget-shaped**
+via a new pure function `plan_image_prefill_pieces()` (`session.py`), used by
+`engine._image_prefill_plan` (`engine.py`). Under the shipped 2048 MB budget it is
+**byte-identical to the old uniform tail** (no regression possible); only a
+tightened `EXO_PREFILL_TRANSIENT_BUDGET_MB` changes behaviour — exactly the fix.
+Span atomicity beats the budget (a boundary inside an image span is a hard error).
+
+Committed + pushed `origin/deploy/next15-levers` **`c7fc2a9b4`** (+303/−14, 4
+files). **Verified independently by the PM** in a clean worktree
+(`PYTHONPATH=<wt>/src:<wt>/mlx-lm … pytest`): **208 passed** (dsv41 tests dir),
+33 in `test_dsv41_session.py`. Not deployed (needs a relaunch + sign-off; it is
+behaviour-neutral at the default budget).
+
+## 12. Phase 0 drift probe
+
+Re-ran the benign 100K baseline after ~50 min of campaign load (same healthy
+process): **144.79 ms/round** (144.74/144.83), 27.099 t/s, `mean_accepted 2.9289`,
+cold prefill 373.69 s (267.8 rows/s).
+
+| | ms/round | decode_tps | mean_acc |
+|---|---:|---:|---:|
+| baseline (17:17) | 139.13 | 27.491 | 2.8353 |
+| drift (17:46) | 144.79 | 27.099 | 2.9289 |
+
+Δ ms/round **+4.1 %**, but that is driven by a **+3.3 % acceptance change**;
+**throughput Δ = −1.4 %** (27.491 → 27.099 t/s). No large drift — this is a
+healthy ~1–4 % band, not the 154 ms degraded regime. The acceptance variation is
+the decode-side knob and is why ms/round moves more than throughput.
+
+## 13. Relaunch budget, final cluster state, artifacts
+
+- **Relaunch budget: 3 available — USED 2.** (1) 16:28 production relaunch →
+  VOID (degraded studio2 + jaccl hang). (2) 17:01 post-reboot relaunch → healthy
+  canaries + Phase-0 PASS. **1 remaining.**
+- **Final cluster:** `deploy/next13 @ f4bb14746`, **READY 2/2**, both runners
+  Ready, canaries **14.13 / 14.82 TFLOPS** at idle, no active user/API traffic
+  (idle-guard clean: last exo POST ≤10 min during the window, 0 open `api_calls`
+  in the last hour, last `provider=custom` call ended ~09:55). Cluster left
+  serving production.
+- **Artifacts** (branch `deploy/next15-levers`, origin/adurham/exo):
+  - `raw/phase3-kernel-megaeval.{md,json,stdout.txt}` — the decisive kernel test
+  - `bench/exl3_dense_smallm_probe_megaeval.py` — the mega-eval probe
+  - `bench/phase19_agentic_trunc_cap.py` — the Phase-4b truncating replay harness
+  - `raw/phase0-live/{benign100k_cold2,agentic_orig,agentic_cap,benign100k_drift}.{json,log}`
+    — the raw live-run outputs
+  - `src/exo/worker/engines/mlx/dsv41/{session.py,engine.py,vision.py}` +
+    `tests/test_dsv41_session.py` — the Phase-2b fix (via `c7fc2a9b4`)
+- **Not applied / still open:** Payload cap (§10 — recommendation only, below the
+  ≥3 % bar); Phase-6 chunk-4096 endpoint arm (never needed; go-condition was met
+  but the kernel verdict closed the dense track).

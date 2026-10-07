@@ -1,0 +1,728 @@
+mx.metal.device_info is deprecated and will be removed in a future version. Use mx.device_info instead.
+============================================================================================
+PHASE-3 DECISIVE TEST -- mega-eval (whole dense set, ONE graph)
+============================================================================================
+mlx 0.32.0.dev20260804+ac73d0c9   device_info={'resource_limit': 5000000, 'max_buffer_length': 22613000192, 'architecture': 'applegpu_g16s', 'memory_size': 38654705664, 'max_recommended_working_set_size': 30150672384, 'device_name': 'Apple M4 Max'}
+Ms=[1, 4, 5]  Ks=[1, 2, 4, 8, 16, 40, 80]  iters=15  K_PRIMARY=80
+[load] START: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+built 15 dense linears: 141.0 M params, trellis 52.9 MB/layer  (k=3, packed=48)
+  full model read-once traffic = 2.116 GB (C = 4.701 ms/round @450 GB/s)
+correctness cos(A, B_fp16) on wo_b @M=4 = 0.9999999
+dispatch_count: trivial=0  exl3=0  gpu_time_ns=0  -> STILL 0 / NOT WIRED
+
+EVAL FLOOR  single eval (K=1, zero amortisation)  = 178.4 us
+EVAL FLOOR  per-op inside ONE 600-op graph         = 1.818 us/op
+[load] after floors: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+BW probe: 537 MB fp16  read 343.7 GB/s  read+write 307.4 GB/s  (one eval each)
+compute probe: one 512x8192 @ 8192x5120 fp16 matmul = 11.26 TFLOPS (3.82 ms)
+[load] after probes: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+
+--- M=1 : K-scaling (whole dense set = 15 linears x K in ONE eval) ---
+    K  calls  A us/call  B us/call  A wall ms  B wall ms   A GB/s   B GB/s
+[load] M=1 K=1 pre: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+    1     15      72.28      95.56       1.08       1.43     48.8    196.8
+[load] M=1 K=2 pre: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+    2     30      49.05      77.31       1.47       2.32     71.9    243.2
+[load] M=1 K=4 pre: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+    4     60      44.80      68.96       2.69       4.14     78.7    272.7
+[load] M=1 K=8 pre: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+    8    120      46.41      66.63       5.57       8.00     76.0    282.2
+[load] M=1 K=16 pre: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+   16    240      44.25      63.75      10.62      15.30     79.7    295.0
+[load] M=1 K=40 pre: vm.loadavg={ 5.40 5.79 5.87 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.40 5.79 5.87
+   40    600      42.79      62.60      25.68      37.56     82.4    300.4
+[load] M=1 K=80 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+   80   1200      42.40      63.26      50.88      75.92     83.2    297.2
+
+--- M=4 : K-scaling (whole dense set = 15 linears x K in ONE eval) ---
+    K  calls  A us/call  B us/call  A wall ms  B wall ms   A GB/s   B GB/s
+[load] M=4 K=1 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+    1     15      77.54      89.41       1.16       1.34     45.5    210.3
+[load] M=4 K=2 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+    2     30      68.31      83.27       2.05       2.50     51.6    225.8
+[load] M=4 K=4 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+    4     60      65.08      80.33       3.90       4.82     54.2    234.1
+[load] M=4 K=8 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+    8    120      66.10      78.29       7.93       9.39     53.3    240.2
+[load] M=4 K=16 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+   16    240      62.70      78.18      15.05      18.76     56.2    240.5
+[load] M=4 K=40 pre: vm.loadavg={ 5.29 5.76 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.29 5.76 5.86
+   40    600      60.95      75.67      36.57      45.40     57.8    248.5
+[load] M=4 K=80 pre: vm.loadavg={ 5.35 5.77 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.35 5.77 5.86
+   80   1200      60.70      75.99      72.84      91.19     58.1    247.5
+
+--- M=5 : K-scaling (whole dense set = 15 linears x K in ONE eval) ---
+    K  calls  A us/call  B us/call  A wall ms  B wall ms   A GB/s   B GB/s
+[load] M=5 K=1 pre: vm.loadavg={ 5.35 5.77 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.35 5.77 5.86
+    1     15      86.19      94.08       1.29       1.41     40.9    199.9
+[load] M=5 K=2 pre: vm.loadavg={ 5.35 5.77 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.35 5.77 5.86
+    2     30      78.01      85.85       2.34       2.58     45.2    219.0
+[load] M=5 K=4 pre: vm.loadavg={ 5.35 5.77 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.35 5.77 5.86
+    4     60      73.67      80.60       4.42       4.84     47.9    233.3
+[load] M=5 K=8 pre: vm.loadavg={ 5.35 5.77 5.86 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.35 5.77 5.86
+    8    120      76.14      80.33       9.14       9.64     46.3    234.1
+[load] M=5 K=16 pre: vm.loadavg={ 5.16 5.72 5.84 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.16 5.72 5.84
+   16    240      75.50      80.01      18.12      19.20     46.7    235.0
+[load] M=5 K=40 pre: vm.loadavg={ 5.16 5.72 5.84 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.16 5.72 5.84
+   40    600      77.52      79.52      46.51      47.71     45.5    236.5
+[load] M=5 K=80 pre: vm.loadavg={ 5.16 5.72 5.84 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.16 5.72 5.84
+   80   1200      76.96      79.06      92.35      94.87     45.8    237.9
+
+============================================================================================
+PRIMARY: whole dense set x K=80 in ONE eval (1200 calls, 4.231 GB trellis read, 22.565 GB fp16 read)
+============================================================================================
+  M    A us/L    B us/L    C us/L    E us/L   A GB/s   B GB/s  A %BW  A ms/40L  C ms/40L  E ms/40L  A/amort
+-----------------------------------------------------------------------------------------------------------
+  1     636.0     949.0    117.53     18.80     83.2    297.2  18.5%    25.440     4.701     0.752    0.954
+  4     910.5    1139.8    117.53     75.22     58.1    247.5  12.9%    36.419     4.701     3.009    0.946
+  5    1154.4    1185.9    117.53     94.02     45.8    237.9  10.2%    46.176     4.701     3.761    1.060
+  (us/L = per layer, sum over 15 linears; A GB/s = trellis bytes / wall; B GB/s = fp16 weight bytes / wall; A/amort = mega per-call / prior amortised per-call)
+
+PER-LINEAR at M=4: each linear x K=80 in ONE eval (iters=7)
+key               in    out   A us/L   B us/L  C us/L  E us/L  A GB/s    A/B    A%
+wq_a            5120   1280    48.78    28.75    5.46    3.50    50.4   1.70 11.2%
+wq_b            1280  16384   138.71   246.79   17.48   11.18    56.7   0.56 12.6%
+wkv             5120    512    25.52    16.77    2.18    1.40    38.5   1.52  8.6%
+wo_b            8192   5120   283.88   300.40   34.95   22.37    55.4   0.95 12.3%
+wo_a_x8.0       4096   1024    38.48    20.84    3.50    2.24    40.9   1.85  9.1%
+wo_a_x8.1       4096   1024    35.40    21.18    3.50    2.24    44.4   1.67  9.9%
+wo_a_x8.2       4096   1024    36.02    20.90    3.50    2.24    43.7   1.72  9.7%
+wo_a_x8.3       4096   1024    35.88    20.86    3.50    2.24    43.8   1.72  9.7%
+wo_a_x8.4       4096   1024    35.78    20.82    3.50    2.24    44.0   1.72  9.8%
+wo_a_x8.5       4096   1024    35.48    20.82    3.50    2.24    44.3   1.70  9.9%
+wo_a_x8.6       4096   1024    35.40    20.75    3.50    2.24    44.4   1.71  9.9%
+wo_a_x8.7       4096   1024    35.03    20.79    3.50    2.24    44.9   1.69 10.0%
+shared_w1       5120   2304    82.74    64.55    9.83    6.29    53.5   1.28 11.9%
+shared_w3       5120   2304    82.47    65.61    9.83    6.29    53.6   1.26 11.9%
+shared_w2       2304   5120    83.11   137.36    9.83    6.29    53.2   0.61 11.8%
+
+============================================================================================
+VERDICT
+============================================================================================
+M=1: mega-eval 42.40 us/call  vs  prior amortised K=64 44.45 us/call  ->  ratio 0.954  [PLATEAU PERSISTS]
+     A 83.2 GB/s (18.5% of 450) | B 297.2 GB/s | roofline C 117.53 us/L | compute E 18.80 us/L
+     x40L:  A 25.440 ms   B 37.958 ms   C 4.701 ms   E 0.752 ms
+M=4: mega-eval 60.70 us/call  vs  prior amortised K=64 64.18 us/call  ->  ratio 0.946  [PLATEAU PERSISTS]
+     A 58.1 GB/s (12.9% of 450) | B 247.5 GB/s | roofline C 117.53 us/L | compute E 75.22 us/L
+     x40L:  A 36.419 ms   B 45.593 ms   C 4.701 ms   E 3.009 ms
+M=5: mega-eval 76.96 us/call  vs  prior amortised K=64 72.61 us/call  ->  ratio 1.060  [PLATEAU PERSISTS]
+     A 45.8 GB/s (10.2% of 450) | B 237.9 GB/s | roofline C 117.53 us/L | compute E 94.02 us/L
+     x40L:  A 46.176 ms   B 47.435 ms   C 4.701 ms   E 3.761 ms
+
+DECISIVE (M=4, K=80): mega-eval 60.70 us/call vs prior amortised 64.18 us/call => ratio 0.946
+  achieved 58.1 GB/s = 12.9% of the 450 GB/s roofline (4.701 ms/round)
+  compute roofline 75.22 us/L = 3.009 ms/round @15 TFLOPS
+
+VERDICT: EXHAUSTED
+[load] END: vm.loadavg={ 5.07 5.69 5.83 }  |  16:41  up 7 days,  4:28, 7 users, load averages: 5.07 5.69 5.83
+
+JSON -> /private/tmp/lever3/docs/benchmarks/phase19-latency/raw/phase3-kernel-megaeval.json
+JSON_BEGIN
+{
+  "mlx": "0.32.0.dev20260804+ac73d0c9",
+  "device_info": {
+    "resource_limit": 5000000,
+    "max_buffer_length": 22613000192,
+    "architecture": "applegpu_g16s",
+    "memory_size": 38654705664,
+    "max_recommended_working_set_size": 30150672384,
+    "device_name": "Apple M4 Max"
+  },
+  "load_start": "{ 5.40 5.79 5.87 }",
+  "load_end": "{ 5.07 5.69 5.83 }",
+  "dispatch_count_trivial": 0,
+  "dispatch_count_exl3": 0,
+  "gpu_time_ns": 0,
+  "counters_exposed": false,
+  "floor_us_single_eval": 178.41707449406385,
+  "floor_us_per_op_in_graph": 1.8181933167700965,
+  "bw_probe": {
+    "arr_MB": 536.870912,
+    "read_GBs": 343.661390481242,
+    "readwrite_GBs": 307.44587803656896
+  },
+  "big_matmul_probe": {
+    "M": 512,
+    "wall_ms": 3.815209027379751,
+    "tflops": 11.257488816935785
+  },
+  "n_linears": 15,
+  "params_per_layer": 141033472,
+  "trellis_bytes_per_layer": 52887552,
+  "n_layers": 40,
+  "bandwidth_GBs": 450.0,
+  "tflops": 15.0,
+  "K_scaling": {
+    "1": {
+      "1": {
+        "A": {
+          "n_calls": 15,
+          "iters": 15,
+          "wall_ms_median": 1.084167044609785,
+          "wall_ms_min": 0.9283749386668205,
+          "wall_ms_max": 1.254917006008327,
+          "us_per_call": 72.27780297398567,
+          "us_per_call_min": 61.89166257778804
+        },
+        "B": {
+          "n_calls": 15,
+          "iters": 15,
+          "wall_ms_median": 1.4334589941427112,
+          "wall_ms_min": 1.3918339973315597,
+          "wall_ms_max": 1.64433300960809,
+          "us_per_call": 95.56393294284742,
+          "us_per_call_min": 92.78893315543732
+        },
+        "A_GBs": 48.78173733738177,
+        "B_GBs": 196.77363995242283,
+        "load_pre": "{ 5.40 5.79 5.87 }"
+      },
+      "2": {
+        "A": {
+          "n_calls": 30,
+          "iters": 15,
+          "wall_ms_median": 1.4716250589117408,
+          "wall_ms_min": 1.429624971933663,
+          "wall_ms_max": 1.4952908968552947,
+          "us_per_call": 49.05416863039136,
+          "us_per_call_min": 47.6541657311221
+        },
+        "B": {
+          "n_calls": 30,
+          "iters": 15,
+          "wall_ms_median": 2.319207997061312,
+          "wall_ms_min": 2.216540975496173,
+          "wall_ms_max": 2.606333000585437,
+          "us_per_call": 77.30693323537707,
+          "us_per_call_min": 73.88469918320575
+        },
+        "A_GBs": 71.87639498217035,
+        "B_GBs": 243.24419746517725,
+        "load_pre": "{ 5.40 5.79 5.87 }"
+      },
+      "4": {
+        "A": {
+          "n_calls": 60,
+          "iters": 15,
+          "wall_ms_median": 2.6877919444814324,
+          "wall_ms_min": 2.6612499495968223,
+          "wall_ms_max": 2.807874931022525,
+          "us_per_call": 44.79653240802387,
+          "us_per_call_min": 44.35416582661371
+        },
+        "B": {
+          "n_calls": 60,
+          "iters": 15,
+          "wall_ms_median": 4.1374999564141035,
+          "wall_ms_min": 3.957333043217659,
+          "wall_ms_max": 4.931750008836389,
+          "us_per_call": 68.95833260690172,
+          "us_per_call_min": 65.95555072029433
+        },
+        "A_GBs": 78.70780639638211,
+        "B_GBs": 272.69312093911157,
+        "load_pre": "{ 5.40 5.79 5.87 }"
+      },
+      "8": {
+        "A": {
+          "n_calls": 120,
+          "iters": 15,
+          "wall_ms_median": 5.569083034060895,
+          "wall_ms_min": 5.21333294454962,
+          "wall_ms_max": 5.736124934628606,
+          "us_per_call": 46.40902528384079,
+          "us_per_call_min": 43.444441204580166
+        },
+        "B": {
+          "n_calls": 120,
+          "iters": 15,
+          "wall_ms_median": 7.995499996468425,
+          "wall_ms_min": 7.370417006313801,
+          "wall_ms_max": 8.792666019871831,
+          "us_per_call": 66.62916663723688,
+          "us_per_call_min": 61.42014171928167
+        },
+        "A_GBs": 75.97308451181078,
+        "B_GBs": 282.22569607863187,
+        "load_pre": "{ 5.40 5.79 5.87 }"
+      },
+      "16": {
+        "A": {
+          "n_calls": 240,
+          "iters": 15,
+          "wall_ms_median": 10.619375039823353,
+          "wall_ms_min": 10.522958007641137,
+          "wall_ms_max": 10.99816698115319,
+          "us_per_call": 44.24739599926397,
+          "us_per_call_min": 43.8456583651714
+        },
+        "B": {
+          "n_calls": 240,
+          "iters": 15,
+          "wall_ms_median": 15.299333026632667,
+          "wall_ms_min": 14.69904207624495,
+          "wall_ms_max": 19.014916964806616,
+          "us_per_call": 63.74722094430278,
+          "us_per_call_min": 61.24600865102063
+        },
+        "A_GBs": 79.68461692205909,
+        "B_GBs": 294.984826864267,
+        "load_pre": "{ 5.40 5.79 5.87 }"
+      },
+      "40": {
+        "A": {
+          "n_calls": 600,
+          "iters": 15,
+          "wall_ms_median": 25.675458018667996,
+          "wall_ms_min": 25.58991697151214,
+          "wall_ms_max": 25.74745810125023,
+          "us_per_call": 42.79243003111333,
+          "us_per_call_min": 42.6498616191869
+        },
+        "B": {
+          "n_calls": 600,
+          "iters": 15,
+          "wall_ms_median": 37.559833959676325,
+          "wall_ms_min": 36.16016695741564,
+          "wall_ms_max": 41.89466603565961,
+          "us_per_call": 62.59972326612721,
+          "us_per_call_min": 60.26694492902607
+        },
+        "A_GBs": 82.39393737248504,
+        "B_GBs": 300.39210961669625,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      },
+      "80": {
+        "A": {
+          "n_calls": 1200,
+          "iters": 15,
+          "wall_ms_median": 50.880041904747486,
+          "wall_ms_min": 50.67470809444785,
+          "wall_ms_max": 51.63091700524092,
+          "us_per_call": 42.40003492062291,
+          "us_per_call_min": 42.228923412039876
+        },
+        "B": {
+          "n_calls": 1200,
+          "iters": 15,
+          "wall_ms_median": 75.91604092158377,
+          "wall_ms_min": 73.86795792263001,
+          "wall_ms_max": 82.18908298294991,
+          "us_per_call": 63.26336743465315,
+          "us_per_call_min": 61.55663160219168
+        },
+        "A_GBs": 83.15645981426,
+        "B_GBs": 297.24094204686617,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      }
+    },
+    "4": {
+      "1": {
+        "A": {
+          "n_calls": 15,
+          "iters": 15,
+          "wall_ms_median": 1.1631670640781522,
+          "wall_ms_min": 1.1158749694004655,
+          "wall_ms_max": 1.203416963107884,
+          "us_per_call": 77.54447093854348,
+          "us_per_call_min": 74.3916646266977
+        },
+        "B": {
+          "n_calls": 15,
+          "iters": 15,
+          "wall_ms_median": 1.341082970611751,
+          "wall_ms_min": 1.2552090920507908,
+          "wall_ms_max": 1.4406249392777681,
+          "us_per_call": 89.40553137411673,
+          "us_per_call_min": 83.68060613671939
+        },
+        "A_GBs": 45.468577673246884,
+        "B_GBs": 210.32773525662753,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      },
+      "2": {
+        "A": {
+          "n_calls": 30,
+          "iters": 15,
+          "wall_ms_median": 2.049290924333036,
+          "wall_ms_min": 2.007958013564348,
+          "wall_ms_max": 2.1137079456821084,
+          "us_per_call": 68.30969747776787,
+          "us_per_call_min": 66.93193378547828
+        },
+        "B": {
+          "n_calls": 30,
+          "iters": 15,
+          "wall_ms_median": 2.4980419548228383,
+          "wall_ms_min": 2.4166660150513053,
+          "wall_ms_max": 3.0871249036863446,
+          "us_per_call": 83.26806516076127,
+          "us_per_call_min": 80.55553383504352
+        },
+        "A_GBs": 51.61546500989149,
+        "B_GBs": 225.8304296734714,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      },
+      "4": {
+        "A": {
+          "n_calls": 60,
+          "iters": 15,
+          "wall_ms_median": 3.9046669844537973,
+          "wall_ms_min": 3.850042005069554,
+          "wall_ms_max": 4.026999929919839,
+          "us_per_call": 65.07778307422996,
+          "us_per_call_min": 64.16736675115922
+        },
+        "B": {
+          "n_calls": 60,
+          "iters": 15,
+          "wall_ms_median": 4.819583031348884,
+          "wall_ms_min": 4.7069169813767076,
+          "wall_ms_max": 4.880417021922767,
+          "us_per_call": 80.32638385581473,
+          "us_per_call_min": 78.44861635627845
+        },
+        "A_GBs": 54.17880931774073,
+        "B_GBs": 234.10070304032615,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      },
+      "8": {
+        "A": {
+          "n_calls": 120,
+          "iters": 15,
+          "wall_ms_median": 7.931833970360458,
+          "wall_ms_min": 7.817334029823542,
+          "wall_ms_max": 8.280667010694742,
+          "us_per_call": 66.09861641967048,
+          "us_per_call_min": 65.14445024852951
+        },
+        "B": {
+          "n_calls": 120,
+          "iters": 15,
+          "wall_ms_median": 9.394458029419184,
+          "wall_ms_min": 9.251541923731565,
+          "wall_ms_max": 9.605665924027562,
+          "us_per_call": 78.28715024515986,
+          "us_per_call_min": 77.09618269776304
+        },
+        "A_GBs": 53.34206661171105,
+        "B_GBs": 240.1985878199204,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      },
+      "16": {
+        "A": {
+          "n_calls": 240,
+          "iters": 15,
+          "wall_ms_median": 15.049000037834048,
+          "wall_ms_min": 14.961833017878234,
+          "wall_ms_max": 15.339624951593578,
+          "us_per_call": 62.70416682430853,
+          "us_per_call_min": 62.340970907825984
+        },
+        "B": {
+          "n_calls": 240,
+          "iters": 15,
+          "wall_ms_median": 18.763417028822005,
+          "wall_ms_min": 18.357416964136064,
+          "wall_ms_max": 19.411916029639542,
+          "us_per_call": 78.18090428675835,
+          "us_per_call_min": 76.48923735056692
+        },
+        "A_GBs": 56.22970495531946,
+        "B_GBs": 240.52501189242807,
+        "load_pre": "{ 5.29 5.76 5.86 }"
+      },
+      "40": {
+        "A": {
+          "n_calls": 600,
+          "iters": 15,
+          "wall_ms_median": 36.57012491021305,
+          "wall_ms_min": 36.410541040822864,
+          "wall_ms_max": 37.22754190675914,
+          "us_per_call": 60.950208183688424,
+          "us_per_call_min": 60.684235068038106
+        },
+        "B": {
+          "n_calls": 600,
+          "iters": 15,
+          "wall_ms_median": 45.402207993902266,
+          "wall_ms_min": 45.09150004014373,
+          "wall_ms_max": 46.110333991236985,
+          "us_per_call": 75.67034665650378,
+          "us_per_call_min": 75.15250006690621
+        },
+        "A_GBs": 57.847822100525484,
+        "B_GBs": 248.50504542676245,
+        "load_pre": "{ 5.35 5.77 5.86 }"
+      },
+      "80": {
+        "A": {
+          "n_calls": 1200,
+          "iters": 15,
+          "wall_ms_median": 72.83737498801202,
+          "wall_ms_min": 72.40287493914366,
+          "wall_ms_max": 73.1110410997644,
+          "us_per_call": 60.697812490010016,
+          "us_per_call_min": 60.33572911595305
+        },
+        "B": {
+          "n_calls": 1200,
+          "iters": 15,
+          "wall_ms_median": 91.18654206395149,
+          "wall_ms_min": 90.66558303311467,
+          "wall_ms_max": 92.00754202902317,
+          "us_per_call": 75.98878505329291,
+          "us_per_call_min": 75.55465252759556
+        },
+        "A_GBs": 58.088366867921344,
+        "B_GBs": 247.4636608566024,
+        "load_pre": "{ 5.35 5.77 5.86 }"
+      }
+    },
+    "5": {
+      "1": {
+        "A": {
+          "n_calls": 15,
+          "iters": 15,
+          "wall_ms_median": 1.2929169461131096,
+          "wall_ms_min": 1.2750419555231929,
+          "wall_ms_max": 1.5347079606726766,
+          "us_per_call": 86.1944630742073,
+          "us_per_call_min": 85.00279703487952
+        },
+        "B": {
+          "n_calls": 15,
+          "iters": 15,
+          "wall_ms_median": 1.4112080680206418,
+          "wall_ms_min": 1.3203329872339964,
+          "wall_ms_max": 1.5038329875096679,
+          "us_per_call": 94.08053786804278,
+          "us_per_call_min": 88.0221991489331
+        },
+        "A_GBs": 40.90560662770769,
+        "B_GBs": 199.8762268951783,
+        "load_pre": "{ 5.35 5.77 5.86 }"
+      },
+      "2": {
+        "A": {
+          "n_calls": 30,
+          "iters": 15,
+          "wall_ms_median": 2.3402500664815307,
+          "wall_ms_min": 2.31758295558393,
+          "wall_ms_max": 2.51608295366168,
+          "us_per_call": 78.00833554938436,
+          "us_per_call_min": 77.252765186131
+        },
+        "B": {
+          "n_calls": 30,
+          "iters": 15,
+          "wall_ms_median": 2.575542079284787,
+          "wall_ms_min": 2.4914160603657365,
+          "wall_ms_max": 2.687250031158328,
+          "us_per_call": 85.85140264282624,
+          "us_per_call_min": 83.04720201219122
+        },
+        "A_GBs": 45.19820574517855,
+        "B_GBs": 219.03501112925193,
+        "load_pre": "{ 5.35 5.77 5.86 }"
+      },
+      "4": {
+        "A": {
+          "n_calls": 60,
+          "iters": 15,
+          "wall_ms_median": 4.420042037963867,
+          "wall_ms_min": 4.380207974463701,
+          "wall_ms_max": 4.540374968200922,
+          "us_per_call": 73.6673672993978,
+          "us_per_call_min": 73.00346624106169
+        },
+        "B": {
+          "n_calls": 60,
+          "iters": 15,
+          "wall_ms_median": 4.835749976336956,
+          "wall_ms_min": 4.753208020702004,
+          "wall_ms_max": 5.066332989372313,
+          "us_per_call": 80.59583293894927,
+          "us_per_call_min": 79.22013367836675
+        },
+        "A_GBs": 47.8615828046406,
+        "B_GBs": 233.31805439094566,
+        "load_pre": "{ 5.35 5.77 5.86 }"
+      },
+      "8": {
+        "A": {
+          "n_calls": 120,
+          "iters": 15,
+          "wall_ms_median": 9.136792039498687,
+          "wall_ms_min": 9.069290943443775,
+          "wall_ms_max": 9.227250004187226,
+          "us_per_call": 76.13993366248906,
+          "us_per_call_min": 75.57742452869812
+        },
+        "B": {
+          "n_calls": 120,
+          "iters": 15,
+          "wall_ms_median": 9.639334050007164,
+          "wall_ms_min": 9.440458030439913,
+          "wall_ms_max": 10.346082970499992,
+          "us_per_call": 80.32778375005971,
+          "us_per_call_min": 78.67048358699928
+        },
+        "A_GBs": 46.30732692294203,
+        "B_GBs": 234.09662330338296,
+        "load_pre": "{ 5.16 5.72 5.84 }"
+      },
+      "16": {
+        "A": {
+          "n_calls": 240,
+          "iters": 15,
+          "wall_ms_median": 18.118874984793365,
+          "wall_ms_min": 17.773250001482666,
+          "wall_ms_max": 18.35641695652157,
+          "us_per_call": 75.49531243663901,
+          "us_per_call_min": 74.05520833951111
+        },
+        "B": {
+          "n_calls": 240,
+          "iters": 15,
+          "wall_ms_median": 19.20283294748515,
+          "wall_ms_min": 18.94579199142754,
+          "wall_ms_max": 20.08837496396154,
+          "us_per_call": 80.01180394785479,
+          "us_per_call_min": 78.94079996428142
+        },
+        "A_GBs": 46.702724794458334,
+        "B_GBs": 235.0211094551569,
+        "load_pre": "{ 5.16 5.72 5.84 }"
+      },
+      "40": {
+        "A": {
+          "n_calls": 600,
+          "iters": 15,
+          "wall_ms_median": 46.50916694663465,
+          "wall_ms_min": 45.09349993895739,
+          "wall_ms_max": 47.17162507586181,
+          "us_per_call": 77.51527824439108,
+          "us_per_call_min": 75.15583323159565
+        },
+        "B": {
+          "n_calls": 600,
+          "iters": 15,
+          "wall_ms_median": 47.71204094868153,
+          "wall_ms_min": 47.27066704072058,
+          "wall_ms_max": 49.037415999919176,
+          "us_per_call": 79.52006824780256,
+          "us_per_call_min": 78.78444506786764
+        },
+        "A_GBs": 45.485701397906354,
+        "B_GBs": 236.47443152003297,
+        "load_pre": "{ 5.16 5.72 5.84 }"
+      },
+      "80": {
+        "A": {
+          "n_calls": 1200,
+          "iters": 15,
+          "wall_ms_median": 92.35225000884384,
+          "wall_ms_min": 90.63016704749316,
+          "wall_ms_max": 93.14412507228553,
+          "us_per_call": 76.9602083407032,
+          "us_per_call_min": 75.5251392062443
+        },
+        "B": {
+          "n_calls": 1200,
+          "iters": 15,
+          "wall_ms_median": 94.87025009002537,
+          "wall_ms_min": 93.63708400633186,
+          "wall_ms_max": 96.13920794799924,
+          "us_per_call": 79.0585417416878,
+          "us_per_call_min": 78.03090333860989
+        },
+        "A_GBs": 45.81376371008644,
+        "B_GBs": 237.8549176226164,
+        "load_pre": "{ 5.07 5.69 5.83 }"
+      }
+    }
+  },
+  "primary": {
+    "1": {
+      "K": 80,
+      "n_calls": 1200,
+      "us_A_percall": 42.40003492062291,
+      "us_B_percall": 63.26336743465315,
+      "us_A_layer": 636.0005238093436,
+      "us_B_layer": 948.9505115197973,
+      "us_C_layer": 117.52789333333334,
+      "us_E_layer": 18.804462933333333,
+      "A_GBs": 83.15645981426,
+      "B_GBs": 297.24094204686617,
+      "A_pct_BW": 18.47921329205778,
+      "flops_per_layer": 282066944,
+      "A_x40_ms": 25.440020952373743,
+      "B_x40_ms": 37.95802046079189,
+      "C_x40_ms": 4.701115733333334,
+      "E_x40_ms": 0.7521785173333333,
+      "amortised_prior_us_A": 44.452604197431356,
+      "mega_over_amortised": 0.9538256686224234,
+      "wall_ms_total": 50.880041904747486
+    },
+    "4": {
+      "K": 80,
+      "n_calls": 1200,
+      "us_A_percall": 60.697812490010016,
+      "us_B_percall": 75.98878505329291,
+      "us_A_layer": 910.4671873501502,
+      "us_B_layer": 1139.8317757993937,
+      "us_C_layer": 117.52789333333334,
+      "us_E_layer": 75.21785173333333,
+      "A_GBs": 58.088366867921344,
+      "B_GBs": 247.4636608566024,
+      "A_pct_BW": 12.908525970649187,
+      "flops_per_layer": 1128267776,
+      "A_x40_ms": 36.41868749400601,
+      "B_x40_ms": 45.593271031975746,
+      "C_x40_ms": 4.701115733333334,
+      "E_x40_ms": 3.008714069333333,
+      "amortised_prior_us_A": 64.17660539833985,
+      "mega_over_amortised": 0.945793441601699,
+      "wall_ms_total": 72.83737498801202
+    },
+    "5": {
+      "K": 80,
+      "n_calls": 1200,
+      "us_A_percall": 76.9602083407032,
+      "us_B_percall": 79.0585417416878,
+      "us_A_layer": 1154.403125110548,
+      "us_B_layer": 1185.878126125317,
+      "us_C_layer": 117.52789333333334,
+      "us_E_layer": 94.02231466666667,
+      "A_GBs": 45.81376371008644,
+      "B_GBs": 237.8549176226164,
+      "A_pct_BW": 10.180836380019208,
+      "flops_per_layer": 1410334720,
+      "A_x40_ms": 46.17612500442192,
+      "B_x40_ms": 47.43512504501268,
+      "C_x40_ms": 4.701115733333334,
+      "E_x40_ms": 3.760892586666667,
+      "amortised_prior_us_A": 72.6059918330672,
+      "mega_over_amortised": 1.0599704844972995,
+      "wall_ms_total": 92.35225000884384
+    }
+  },
+  "verdict": {
+    "verdict": "EXHAUSTED",
+    "M": 4,
+    "K": 80,
+    "mega_us_percall": 60.697812490010016,
+    "prior_amortised_us_percall": 64.17660539833985,
+    "mega_over_amortised": 0.945793441601699,
+    "achieved_GBs": 58.088366867921344,
+    "roofline_GBs": 450.0,
+    "pct_of_450_roofline": 12.908525970649187,
+    "compute_roofline_us_layer": 75.21785173333333,
+    "A_x40_ms": 36.41868749400601,
+    "C_x40_ms": 4.701115733333334,
+    "E_x40_ms": 3.008714069333333
+  },
+  "uptime_end": "16:41  up 7 days,  4:28, 7 users, load averages: 5.07 5.69 5.83"
+}
+JSON_END
