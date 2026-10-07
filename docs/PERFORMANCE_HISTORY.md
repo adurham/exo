@@ -11137,3 +11137,23 @@ PLAN (Fable, hardened):
 - STOP items: sub-3% levers on single arms (use means + span/geometry logs); rebuild the
   wall decomposition post-next12 (the 2.66s/3.9s bookkeeping is stale); verify knob
   activation on EVERY entry point (battery/soak/deep runners) before trusting any arm.
+
+## 2026-10-07 — Loop-2 measurements: MoE kernel INCONCLUSIVE (not roofline, not cheaply harvestable); consumer-index-skip GO (up to ~15% of wall, provably exact)
+
+**Task A — MoE expert-path microbench (m4-2, calibrated ceiling; report: loop2/moe_bench_report.md, md5 19323092…):**
+
+- Calibrated ceilings on the node: **15.14 TFLOPS** dense bf16 matmul (plateaus M>=4096); ~450 GB/s triad.
+- Production geometry confirmed from the real loader (world=2): D=5120, H=1152, E=384, gu/dn tiles 72/320, k=3 on layer 0 (2-bit on layers 18-22), 6.64 MB/expert -> 2.55 GB/layer; N=12288 pairs/rank/layer at chunk 2048 x top-6.
+- **Block-level (E=192 real experts): uniform 48.99 ms/layer = 8.88 TF = 60% of ceiling, x40 = 1960 ms/chunk; skewed 57.58 ms = 7.55 TF = 51%, x40 = 2303 ms/chunk.** Kernel is 85-94% of `_prefill` (glue minor).
+- Roofline: AI 201-341 FLOP/B >> ridge 33.6 -> compute-bound regime, but kernel reaches only 51-60% of it. NOT bandwidth-bound (6-9% of 450 GB/s).
+- **VERDICT: (iii) INCONCLUSIVE — headroom exists, unharvested.** Not (ii) ROOFLINE-CONFIRMED (needs >=70-80%).
+- **Dequant->fp16 + dense matmul arm: 1.8-2.1x SLOWER at block level (0.47-0.55x)** — killed. Arm (c) skipped: the path is ALREADY a single-launch segmented GEMM (`inner_mm_seg_mlx`), no per-expert loop to batch. gather_mm geometrically impossible at this shape.
+- **The July "82 TFLOP/s" claim is RETIRED**: max measured anywhere 9.58 TF; 82 TF is 5.4x the 15.14 TF silicon ceiling — physically impossible (was the missing-drain/L2 artifact class, now definitively dead).
+- Consequence: the skill's "ffn = switch_mlp at the small-M physics floor, don't chase" line is CORRECTED — the kernel is at 51-60% of a calibrated ceiling; headroom is real but the tested alternatives don't harvest it (kernel-engineering territory; park unless a concrete kernel change appears).
+
+**Task B — consumer-index-layer sizing (report: loop2/consumer_index_sizing.md):**
+
+- Mechanism (file:line): consumer layers 24/28/32/36 call `coarse_block_scores(..., col_mask=cand_mask)`; the loop bound is `nb` (`indexer_hierarchical.py:241`) — every column scored (`:245`), mask applied AFTER at the `mx.where` (`:247-250`). The `nb-C` non-candidate columns are computed then discarded.
+- Sizing (n=2048, C=16384, 4 consumers): waste 84-98% of consumer coarse FLOPs; **% of wall pessimistic->optimistic: 100K 3.9-13.7%, 350K 12.2-25.2%, 750K 14.8-38.6%** (pessimistic = low span share + extra 50% haircut on the consumer-coarse fraction). Clears the 2% gate at every offset; deep-weighted 14.8%.
+- **Correctness audit: provably EXACT.** Block-constant candidate mask; non-candidate block -> -inf either way; candidate block max = over exactly its candidate+visible columns with the identical `_score_shared_columns` expression; top_blocks picks the same 528 blocks; exact_rescore returns identical (top_v, top_i). One required condition: `HIER_BLOCK == candidate_block_size` (holds today; asserted on the source layer, NOT on consumers — **implementation must add a consumer-side assert**).
+- Impl sketch: seed the coarse pass from candidate block ids via `_gather_rows` + `_score_gathered_columns`; scatter candidate block maxima, rest -inf. ~50-100 LOC behind the existing HIER path, low risk, pure work reduction.
