@@ -11157,3 +11157,50 @@ PLAN (Fable, hardened):
 - Sizing (n=2048, C=16384, 4 consumers): waste 84-98% of consumer coarse FLOPs; **% of wall pessimistic->optimistic: 100K 3.9-13.7%, 350K 12.2-25.2%, 750K 14.8-38.6%** (pessimistic = low span share + extra 50% haircut on the consumer-coarse fraction). Clears the 2% gate at every offset; deep-weighted 14.8%.
 - **Correctness audit: provably EXACT.** Block-constant candidate mask; non-candidate block -> -inf either way; candidate block max = over exactly its candidate+visible columns with the identical `_score_shared_columns` expression; top_blocks picks the same 528 blocks; exact_rescore returns identical (top_v, top_i). One required condition: `HIER_BLOCK == candidate_block_size` (holds today; asserted on the source layer, NOT on consumers — **implementation must add a consumer-side assert**).
 - Impl sketch: seed the coarse pass from candidate block ids via `_gather_rows` + `_score_gathered_columns`; scatter candidate block maxima, rest -inf. ~50-100 LOC behind the existing HIER path, low risk, pure work reduction.
+
+---
+
+## Phase 19 — DSv4.1 turn-latency: engine identification + live round-wall (2026-10-07)
+
+**Deploy:** `f0840af1c`, exo `deploy/next13`, mlx-lm `6cc9c1e`. **Relaunches: 0** (env never changed).
+Artifacts: `docs/benchmarks/phase19-latency/`; harness `bench/phase19_round_measure.py`;
+record branch `deploy/next13-latency` @ `cec0f5955`.
+
+**Headline finding — the prior latency brief rested on a legacy-engine artifact.** The deployed
+model card sets `engine="dsv41"`; the dsv41 package never imports `speculative/dsv4_mtp.py`, which
+is the ONLY emitter of the `[MTP-PROF]` per-cycle brackets (draft 8.29 / verify 48.51 / accept 1.29
+/ rollback 0.70 ms) and the `[MTP] cycles=2400 mean_accept=1.272/3 hist=…` line. Those numbers exist
+in the append-only `runner_log/stderr.log` (~line 14,136,010 of 14,150,154, before the latest boot);
+today's live `~/exo.log` has **261 `[DSV41]` lines and 0 `MTP-PROF` lines**. So the "residual
+~60 ms/round" and the "1.272/3 acceptance collapse" were measured on a build that is not running.
+Consequently every `EXO_DSV4_MTP_*` lever in the brief (`EAGLE_K`, `ACCEPT_LOGPROBS`, `TIEBREAK_FIX`,
+`C2_MAX_CTX`, `MAX_CTX`, `DEDICATED`, `DSPARK*`) is **dormant**, and the engine is **greedy-only**
+(`rounds.py`) with Hermes already at `temperature=0` — the "sampling params" hypothesis is impossible.
+
+**Live round wall is now measured (zero relaunch, API `generation_stats` counters; gamma empirically
+= 3 via `Δcycles=3·rounds`):**
+
+| depth | decode t/s | ms/round | mean accepted /3 |
+|---|---|---|---|
+| 30 K | 29.97 | 126.9 | 2.804 |
+| 100 K | 28.08 | 135.6 | 2.813 |
+| 160 K | 27.39 | 140.0 | 2.841 |
+
+Acceptance is **flat with depth** and at the **top** of the phase-16/17 standalone range (not
+collapsed). Live is **faster** than the standalone 22.7–23.5 t/s, not slower. The 110→135 ms round
+gap is present even at 30 K and is therefore **not** primarily a context-length effect.
+
+**Latent bug found (reported, not a perf lever):** `GammaPolicy` exists with `adaptive_gamma=True`
+but `_one_round` never calls `policy.update()`, so gamma is silently pinned at 3 and the policy's
+stats stay zero. Offline optimum over the real `VERIFY_MS` table at measured (2.8/3) acceptance is
+gamma=3; ≤3–5% headroom at gamma=2 only in a much-worse-acceptance regime. Not worth a relaunch,
+and there is no dsv41 gamma env knob anyway.
+
+**Negative results:** sampling-params lever DEAD (greedy-only); `EXO_DSV4_MTP_*` farm DEAD (dormant);
+gamma matrix NOT RUN (computed flat, no knob); `[MTP-PROF]` attribution NOT REPRODUCIBLE on dsv41;
+the 2 instrumentation relaunches the brief budgeted were dropped as riding on a dead premise (the
+API already exposes per-request acceptance via cumulative counters).
+
+**Traps reproduced:** the `: generation_stats` SSE frame is a comment line, not a `data:` line
+(a `data:`-only parser misses it); a short "reply DONE" task EOS'd at 21 tokens; at 60 K the model
+burned the entire `max_tokens` budget inside `reasoning_content` (`finish=length`, empty content).
