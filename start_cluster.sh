@@ -85,7 +85,7 @@
 # scraping): 128 = 289 t/s, 256 = 353 t/s (+22%), 512 = 293 t/s (regression
 # — OPT-4 gathered-tensor tiling overhead dominates). Needle + BOS-spam
 # gates clean. 512 stays a non-default override.
-: "${EXO_PREFILL_STEP_SIZE:=4096}" # 2026-10-06: 4096 promoted — retest on the M2/sparse stack: +1.5% fresh / +0.5% delta, battery CLEAN (needles 6/6, 0 DIRTY/0 REVIEW). The old "4096 breaks quality" was a v4-era cold-start artifact. Deep end is self-limiting: the M2-aware re-bill caps chunks below 4096 past ~500K offset. =2048 restores the old default.
+: "${EXO_PREFILL_STEP_SIZE:=2048}" # 2026-10-06 RETESTED, REVERTED: on the M2/sparse stack 4096 measured +2.0% shallow (160K) but -0.9% at 750K and -0.3% at 1M (policy keeps 4096 out to ~600K offset; the big-chunk transient hurts exactly where production lives). The old "4096 breaks quality" claim WAS falsified (battery CLEAN at 350K) -- the reason to keep 2048 is now PERFORMANCE at depth, not quality. =4096 remains a valid shallow-workload override.
 # Context-adaptive prefill chunk sizing (2026-06-21). At LOW context, larger
 # chunks (256) amortize the ~390ms per-chunk fixed overhead (43 layers x kernel
 # launches x RDMA all_sum x eval x clear_cache) — +39% throughput at 100K. But
