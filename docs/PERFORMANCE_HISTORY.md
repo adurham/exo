@@ -10983,3 +10983,29 @@ Two probe-script bugs found while measuring next10 (indexer strip-sync package):
    consistent with ~263 @100K, but the confusion cost a cycle). Fix: ONE salt
    token-prefix at the head of the prompt + the established filler sized at its
    own measured chars/tok. Persisted: `bench/phase2_arm.py` (v3) is the corrected form.
+
+## 2026-10-06/07 — exact-pass eval-merge arm: +0.9% fresh (below resolution), SHIPPED as durable improvement
+
+next10 (deploy 10d0b1816 / mlx-lm 5696476): indexer exact-pass eval merge (2 evals/strip
+-> 1) + C1 boundary check fused to one .item(). Both bit-exact (dedicated probe:
+values/indices np.array_equal vs the two-eval sequence).
+
+ARM RESULT (salted fresh x2 + full-reuse delta, next10v3):
+| feed | wall | tokens | tok/s |
+|---|---|---|---|
+| cold (discard) | 375.7 s | 100,013 | 266.2 |
+| f1 | 376.6 s | 100,011 | 265.6 |
+| f2 | 376.0 s | 100,013 | 266.0 |
+| delta (full reuse) | 9.2 s | 100,020 | — |
+FRESH MEDIAN 265.8 vs next9 263.3 = **+0.9%** — below the ±3% resolution band.
+
+MECHANISM VERDICT: the ~424 blocking evals/chunk removed (merge halves 848->424) bought
+~70 ms/chunk ≈ 0.14 ms per removed sync — i.e. the per-eval cost is dominated by DRAIN
+OVERLAP with queued GPU work, not wall-clock blocking. Fable's eval-count!=wall prediction
+confirmed for this path. The merge is still right to keep (strictly fewer syncs, bit-exact,
+zero downside) and is MERGED TO MAIN (mlx-lm 9968cd7).
+
+Follow-on: strip-widening (EXACT_MB 128->384: 424->~191 evals/chunk incl. coarse) is now
+expected to buy <0.5% by the same mechanism; deprecated as a standalone target (env values
+remain for memory tuning). The MoE all_sum bf16 payload halving (39.5% attributed span,
+41.94MB/call x40) is the next measured target — arm in flight on next11.
