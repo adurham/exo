@@ -1,0 +1,166 @@
+{
+  "label": "g3",
+  "generated": "2026-10-07T15:00:48.683761-05:00",
+  "build": {
+    "status": 200,
+    "est_tokens": 40075,
+    "elapsed_s": 143.13275003433228
+  },
+  "needles": {
+    "n": 6,
+    "n_pass": 6,
+    "detail": [
+      {
+        "id": "exact",
+        "pass": true
+      },
+      {
+        "id": "paraphrase",
+        "pass": true
+      },
+      {
+        "id": "negation",
+        "pass": true
+      },
+      {
+        "id": "distractor",
+        "pass": true
+      },
+      {
+        "id": "control",
+        "pass": true
+      },
+      {
+        "id": "multihop",
+        "pass": true
+      }
+    ]
+  },
+  "tools": {
+    "n": 10,
+    "n_pass": 10
+  },
+  "free_prose": {
+    "n": 20,
+    "n_dirty": 0,
+    "n_review": 0,
+    "detector_hits": {
+      "same_script_glue": 4
+    },
+    "per_probe": [
+      {
+        "id": "rain",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "rank_langs",
+        "verdict": "CLEAN",
+        "counts": {
+          "same_script_glue": 1
+        }
+      },
+      {
+        "id": "lighthouse",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "paperclip",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "zh_autumn",
+        "verdict": "CLEAN",
+        "counts": {
+          "same_script_glue": 1
+        }
+      },
+      {
+        "id": "zh_en_teapot",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "ja_sky",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "ru_winter",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "de_baum",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "fr_river",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "market_dawn",
+        "verdict": "CLEAN",
+        "counts": {
+          "same_script_glue": 1
+        }
+      },
+      {
+        "id": "tests_opinion",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "hash_table",
+        "verdict": "CLEAN",
+        "counts": {
+          "same_script_glue": 1
+        }
+      },
+      {
+        "id": "codeswitch_email",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "pencil_history",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "sequences",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "ja_zh_intro",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "limerick",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "es_continue",
+        "verdict": "CLEAN",
+        "counts": {}
+      },
+      {
+        "id": "scene_image",
+        "verdict": "CLEAN",
+        "counts": {}
+      }
+    ]
+  },
+  "park": {
+    "recall_teal": null,
+    "turn2_elapsed_s": null
+  },
+  "phase_verdict": "CLEAN"
+}

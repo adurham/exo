@@ -1,0 +1,63 @@
+{
+  "mode": "build",
+  "started": "2026-10-07T15:00:57.651082-05:00",
+  "meta": {
+    "target_tokens": 40000,
+    "chars_per_token": 5.111,
+    "chars": 204825,
+    "est_tokens": 40075,
+    "sentences": 2222,
+    "needles": {
+      "exact": {
+        "fraction": 0.1,
+        "index": 222
+      },
+      "negation": {
+        "fraction": 0.25,
+        "index": 555
+      },
+      "multihop_a": {
+        "fraction": 0.3,
+        "index": 666
+      },
+      "distractor": {
+        "fraction": 0.5,
+        "index": 1111
+      },
+      "control": {
+        "fraction": 0.55,
+        "index": 1222
+      },
+      "multihop_b": {
+        "fraction": 0.7,
+        "index": 1555
+      },
+      "restate": {
+        "fraction": 0.9,
+        "index": 1999
+      }
+    }
+  },
+  "http_status": 200,
+  "elapsed_s": 6.315550804138184,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 40128,
+    "completion_tokens": 20,
+    "total_tokens": 40148,
+    "prompt_tokens_details": {
+      "cached_tokens": 38912,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 18,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "done",
+  "content_full": "done",
+  "finished": "2026-10-07T15:00:57.651111-05:00"
+}
