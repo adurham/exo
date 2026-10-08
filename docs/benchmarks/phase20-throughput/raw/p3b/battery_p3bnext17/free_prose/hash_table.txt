@@ -1,0 +1,20 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Imagine a giant wall of numbered lockers. You want to store your friends’ phone numbers by name, and you want to find them fast.
+
+Instead of searching every locker, you use a weird recipe called a **hash function**. You type in “Maya,” and the recipe spits out a number, like `472`. So you put Maya’s info in locker 472. Later, to find Maya, you type “Maya” into the same recipe, get `472`, and open that locker. No scanning the whole wall.
+
+That’s the basic trick. A hash table turns a key—like a name, ID, or word—into a number that points to a storage spot.
+
+But two problems show up:
+
+1. **Collisions.** What if “Jay” also gets `472`? Now two people want the same locker. You can’t just shove them together. So locker 472 can hold a small list: Maya, Jay, etc. When you look up Jay, you go to 472 and check each name until you find Jay. Or, if 472 is full, you try 473, 474, and so on until you find an empty spot. Either way, you still compare the actual key, because the hash number alone isn’t unique.
+
+2. **Crowding.** If too many keys pile into the same few lockers, the lists get long and lookups get slow. So when the table gets too full—say, 70% of lockers used—you build a much bigger wall and re-place everyone using the hash recipe again. That’s expensive, but it happens rarely and keeps things fast.
+
+Why is this useful? On average, you compute one number and look in one spot, so storing, finding, and deleting are **O(1)**—constant time, basically instant. Worst case, if a terrible hash function puts everything in the same locker, it becomes **O(n)**, like searching a list.
+
+A good one is consistent: same key always gives the same number, it’s fast, and it spreads keys evenly. Keys usually shouldn’t change while they’re stored, because if “Maya” changes to “Maya Smith,” she’d suddenly belong in a different locker.
+
+Hash tables are used everywhere: dictionaries in Python, Maps in JavaScript, caches, databases, and more. Their downside is they don’t keep things in sorted order. But for “find this by name,” they’re one of the fastest tools around.

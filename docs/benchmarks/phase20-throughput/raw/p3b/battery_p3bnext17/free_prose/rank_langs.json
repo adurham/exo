@@ -1,0 +1,45 @@
+{
+  "id": "rank_langs",
+  "tag": "ranking",
+  "prompt": "Rank these five programming languages by how pleasant they are for a beginner, best to worst: Rust, Python, C, JavaScript, Haskell. Give a one-sentence reason for each, in your ranked order.",
+  "http_status": 200,
+  "elapsed_s": 64.66930198669434,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 46,
+    "completion_tokens": 1193,
+    "total_tokens": 1239,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1061,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. Python — Python’s clean syntax and huge standard library let beginners write useful programs quickly without fighting tooling.  \n2. JavaScript — JavaScript runs instantly in the browser and is forgiving to start with, though its quirks can surprise newcomers.  \n3. C — C has a small, direct imperative core, but manual memory management and pointers soon make simple tasks fiddly.  \n4. Rust — Rust gives helpful compiler messages and Cargo, but ownership and borrowing create steep early complexity.  \n5. Haskell — Haskell’s purity, laziness, and monads are elegant yet unfamiliar, making it the hardest to feel pleasant at first.",
+  "reasoning": "We need answer ranking five languages by pleasant for beginner best to worst: Rust, Python, C, JavaScript, Haskell. One-sentence reason each in ranked order. Need decide ranking. Need be accurate. \"Pleasant for a beginner\" subjective. Likely Python best, JavaScript next? C maybe simple but pitfalls. Haskell hard. Rust hard. Need rank best to worst. Need one sentence reason each. We can rank: 1 Python, 2 JavaScript, 3 C, 4 Rust, 5 Haskell? Or Rust worse than C? For pleasant beginner: C has small core, but manual memory, pointers, undefined behavior. Rust has strict compiler, ownership, but great tooling and errors. Haskell has unfamiliar concepts. JavaScript has immediate visual feedback, but quirks. Python easiest. C maybe simple syntax but low-level. Haskell maybe worst due ownership? Let",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "beginners",
+        "token_index": 11,
+        "head": "begin",
+        "tail": "ners",
+        "context": "beginners"
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

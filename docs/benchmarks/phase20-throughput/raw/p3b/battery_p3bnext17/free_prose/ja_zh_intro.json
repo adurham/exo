@@ -1,0 +1,33 @@
+{
+  "id": "ja_zh_intro",
+  "tag": "multilingual",
+  "prompt": "日本語で短い自己紹介を書いて、最後に中国語で一文だけ付け加えてください。",
+  "http_status": 200,
+  "elapsed_s": 8.761785984039307,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 26,
+    "completion_tokens": 198,
+    "total_tokens": 224,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 156,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "こんにちは。田中と申します。日本語を勉強しています。趣味は音楽を聴くことです。どうぞよろしくお願いします。  \n很高兴认识大家。",
+  "reasoning": "我们需要回答用户。用户要求：用日语写简短自我介绍，最后用中文加一句话。需要满足。应该用日语写短自我介绍，最后中文一句。可以包含名字？没有给定，可以虚构或通用。要简短。最后中文一句。注意“最后に中国語で一文だけ付け加えてください”意思是最后附加一句中文。所以整体：日语自我介绍几句，然后中文一句。可以写：こんにちは。〇〇と申します。日本語を勉強しています。趣味は音楽を聴くことです。よろしくお願いします。最后中文：很高兴认识大家。但中文一句即可。需要确保最后是中文。可以更自然。注意不要用中文在日语部分。可以。最终回答。",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

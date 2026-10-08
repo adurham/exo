@@ -1,0 +1,33 @@
+{
+  "id": "sequences",
+  "tag": "continuation",
+  "prompt": "Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].",
+  "http_status": 200,
+  "elapsed_s": 16.272497177124023,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 47,
+    "completion_tokens": 405,
+    "total_tokens": 452,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 227,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Completed sequences:\n\n1. `[2, 4, 8, 16, 32, 64, 128, ...]`\n2. `[a, c, e, g, i, k, m, ...]`\n3. `[1, 1, 2, 3, 5, 8, 13, 21, ...]`\n\nReasoning: The first sequence doubles each term, so each number is twice the one before it. The second sequence uses every other letter of the alphabet, starting at `a` and skipping one letter each time. The third sequence is the Fibonacci sequence: after the first two `1`s, each term is the sum of the two previous terms, so `1+1=2`, `1+2=3`, `2+3=5`, and so on.",
+  "reasoning": "We need answer. Need complete sequences and explain reasoning in prose. Need likely identify patterns. Sequence1 powers of 2: 32,64,... Sequence2 odd letters: i,k,m,... Sequence3 Fibonacci: 8,13,21,... Need explain. Need maybe \"complete these sequences\" maybe provide next terms. Need prose. Need be careful: [2,4,8,16,...] next 32,64,128. [a,c,e,g,...] next i,k,m. [1,1,2,3,5,...] next 8,13,21. Explain reasoning. Could mention multiple possible completions but these are natural. Need final concise. Ensure prose. Maybe include completed sequences. Since user asks \"Complete these sequences and then explain your reasoning in prose\". We can list completed sequences. Need maybe no overcomplicate. Let's craft.\n\nNeed maybe mention first doubles previous. Second skips one alphabet letter each time (",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "es_continue",
+  "tag": "multilingual",
+  "prompt": "Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'",
+  "http_status": 200,
+  "elapsed_s": 30.704485177993774,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 30,
+    "completion_tokens": 662,
+    "total_tokens": 692,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 472,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "El viento soplaba fuerte sobre las colinas, y las ramas de los robles crujían como huesos viejos; la hierba se tendía en oleadas, y el cielo, bajo y plomizo, parecía una losa a punto de caer. En lo alto del sendero, una figura envuelta en un abrigo oscuro avanzaba contra la corriente, con la cabeza gacha y los puños apretados. Cada paso dejaba una huella breve en el barro, antes de que la lluvia la borrara. A lo lejos, más allá del último cerro, se encendía una luz temblorosa: acaso una casa, acaso una advertencia. Y el viento seguía soplando, tercamente, como si quisiera arrancarle al mundo todas sus promesas.",
+  "reasoning": "We need answer in Spanish, continue same language/style. User asks: \"Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'\" Need continue sentence/story. We need produce continuation. Should match style: literary, atmospheric. We can write maybe a paragraph. Need likely just continue from phrase. We should not overdo. We can craft: \"El viento soplaba fuerte sobre las colinas, y las hierbas se inclinaban como si quisieran arrancarse de raíz...\" etc. Same Spanish. Style evocative. Need maybe one or few paragraphs. Ensure no weird. Let's compose. Could be from a narrative. We can continue with imagery, tension. \"y el cielo, bajo y gris, parecía una losa...\" etc. Maybe mention a figure. Keep same style. Let's produce. Need maybe not too long. We can include ",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

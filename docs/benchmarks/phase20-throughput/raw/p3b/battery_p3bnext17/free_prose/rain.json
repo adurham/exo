@@ -1,0 +1,33 @@
+{
+  "id": "rain",
+  "tag": "prose",
+  "prompt": "Write a short paragraph about the sound of rain on a metal roof.",
+  "http_status": 200,
+  "elapsed_s": 8.859811067581177,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 132,
+    "total_tokens": 150,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 24,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "The first drops land like scattered applause, each one a sharp, bright ping against the tin. Then the sky opens and the rhythm tightens into a steady drumroll, a thousand tiny hammers striking in wild, overlapping time. The sound is almost metallic in its clarity—no softness, no muffling—just pure, ringing percussion that fills the whole house. Underneath it all runs a low, humming roar, and if you close your eyes, the roof becomes an instrument and the storm its restless, tireless player.",
+  "reasoning": "The user wants a short paragraph about the sound of rain on a metal roof. Let me craft something evocative and sensory.",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

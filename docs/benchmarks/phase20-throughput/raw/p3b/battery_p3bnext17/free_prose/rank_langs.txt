@@ -1,0 +1,8 @@
+# rank_langs [ranking]
+PROMPT: Rank these five programming languages by how pleasant they are for a beginner, best to worst: Rust, Python, C, JavaScript, Haskell. Give a one-sentence reason for each, in your ranked order.
+
+1. Python — Python’s clean syntax and huge standard library let beginners write useful programs quickly without fighting tooling.  
+2. JavaScript — JavaScript runs instantly in the browser and is forgiving to start with, though its quirks can surprise newcomers.  
+3. C — C has a small, direct imperative core, but manual memory management and pointers soon make simple tasks fiddly.  
+4. Rust — Rust gives helpful compiler messages and Cargo, but ownership and borrowing create steep early complexity.  
+5. Haskell — Haskell’s purity, laziness, and monads are elegant yet unfamiliar, making it the hardest to feel pleasant at first.

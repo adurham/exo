@@ -1,0 +1,33 @@
+{
+  "id": "codeswitch_email",
+  "tag": "multilingual",
+  "prompt": "Write a friendly email that opens with a Spanish greeting, includes a French compliment in the middle, and closes in English.",
+  "http_status": 200,
+  "elapsed_s": 29.678636074066162,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 28,
+    "completion_tokens": 661,
+    "total_tokens": 689,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 516,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Subject: Just wanted to check in\n\n¡Hola [Name]!\n\nI hope you’re having a wonderful day. It’s been a little while since we caught up, and I wanted to send a friendly hello. I’ve been thinking about our last chat—it was really lovely.\n\nAu fait, tu as un talent fou pour rendre les conversations faciles et agréables. It’s one of the things that makes talking with you such a pleasure.\n\nIf you have some time next week, I’d love to grab a coffee or hop on a quick call. No pressure at all—just would be nice to reconnect.\n\nLooking forward to hearing from you.\n\nBest,\n[Your Name]",
+  "reasoning": "We need answer. Need craft friendly email. Requirements: opens with Spanish greeting, includes French compliment in middle, closes in English. Need likely email. We can write. Need maybe \"¡Hola!\" greeting. Then English body? Opens with Spanish greeting. Includes French compliment in middle e.g. \"Tu as un talent incroyable...\" or \"Votre travail est magnifique.\" Then closes in English. Need friendly. Could be to someone. Let's compose. Ensure opening Spanish greeting. Middle French compliment. Closing English. Maybe subject line? Email subject can be English? \"Quick hello\". But opening greeting. Let's produce.\n\nNeed maybe \"¡Hola [Name]!\" Then body in English. Middle: \"Au fait, ton énergie est vraiment inspirante !\" or \"Tu as un talent remarquable pour...\" Then continue English. Close: \"Warml",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

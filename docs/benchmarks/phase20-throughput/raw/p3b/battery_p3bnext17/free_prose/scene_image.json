@@ -1,0 +1,33 @@
+{
+  "id": "scene_image",
+  "tag": "prose",
+  "prompt": "Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.",
+  "http_status": 200,
+  "elapsed_s": 31.415855884552002,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 33,
+    "completion_tokens": 676,
+    "total_tokens": 709,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 512,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "In the lower third of the frame, three pigeons stand on a slick pavement, their gray feathers puffed against the damp. The ground shines like dark glass, catching smeared reflections of market stalls and a single red umbrella. The umbrella blooms over the crowd—bright, saturated, almost loud against the muted morning—its canopy beaded with rain. Behind it, the street market stretches in soft focus: produce crates, striped awnings, handwritten signs, vendors in coats, shoppers leaning toward trays of fruit. Steam rises from a coffee cart. The pigeons don’t fly; they pivot, coo, peck at a crumb. The red umbrella tilts as its owner moves, and for a moment the whole gray scene leans with them. Everything is wet, ordinary, and briefly luminous.",
+  "reasoning": "We need answer. User asks: \"Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.\" Need produce descriptive narration. We need likely write in first-person observer, present tense, image-like. Include street market, red umbrella, three pigeons on wet pavement. Should be vivid. Maybe mention composition, colors, reflections, atmosphere. \"In the foreground...\" etc. As if narrating an image. Need maybe 1-3 paragraphs. Ensure all elements. Could be poetic. Let's craft.\n\nNeed maybe \"The frame opens on...\" \"A street market...\" \"A red umbrella...\" \"Three pigeons...\" Wet pavement. Maybe rainy morning. Use sensory details. Avoid overdoing? We can describe as if looking at photograph. Maybe mention focal point umbrella, pig",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "paperclip",
+  "tag": "list",
+  "prompt": "List ten genuinely different uses for a paperclip.",
+  "http_status": 200,
+  "elapsed_s": 40.878450870513916,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 839,
+    "total_tokens": 853,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 608,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. **Bookmark** – Clip it onto the edge of a page to mark your place.  \n2. **Zipper pull** – Thread it through a broken zipper tab as a temporary handle.  \n3. **SIM tray ejector** – Straighten it and use the tip to pop open a phone’s SIM slot.  \n4. **Reset button presser** – Use the tip to press tiny recessed reset buttons on routers or gadgets.  \n5. **Chip bag clip** – Fold the top of a snack bag and clip it shut.  \n6. **Cable organizer** – Wrap it around a coiled cord to keep it tidy.  \n7. **Temporary S-hook** – Bend it into a hook for lightweight ornaments or keys.  \n8. **Makeshift key ring** – Bend it into a loop to hold a few keys together.  \n9. **Mini screwdriver** – Use the flattened tip on eyeglass or toy-battery compartment screws.  \n10. **Knitting stitch marker** – Clip onto yarn to mark a stitch or row, like a safety pin.",
+  "reasoning": "We need answer. Need list ten genuinely different uses for a paperclip. Need ensure distinct, not variations. Could include: bookmark, zipper pull replacement, reset pin for electronics, temporary hook for ornament, cable organizer, SIM tray ejector, makeshift fastener for clothing, key ring, chip clip, earring? Need ten genuinely different uses. Let's craft concise. Need maybe explain each. Ensure not overlapping too much. \"Genuinely different\" means categories. Let's list:\n\n1. Bookmark – clip page.\n2. Zipper pull – replace broken tab.\n3. Reset tool – press recessed reset button on router/phone.\n4. SIM tray ejector – open SIM slot.\n5. Cable organizer – wrap around cords, clip to loop.\n6. Temporary hook – bend into S-hook for hanging lightweight ornament.\n7. Chip bag clip – keep snacks sea",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

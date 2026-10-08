@@ -1,0 +1,51 @@
+[2026-10-08 14:15:39] waiting for idle...
+idle OK
+[2026-10-08 14:16:14] running battery (p3bnext17, depth 40000)...
+results dir: /private/tmp/next16-instr/bench/dsv41_quality_battery/results/p3bnext17
+[build] depth=40000 chars=204825 est_tokens=40075 sentences=2222
+[build] sending (this is the long prefill; timeout=5400.0s)...
+[build] done status=200 elapsed=7.6s usage={'prompt_tokens': 40128, 'completion_tokens': 50, 'total_tokens': 40178, 'prompt_tokens_details': {'cached_tokens': 38912, 'audio_tokens': 0}, 'completion_tokens_details': {'reasoning_tokens': 48, 'audio_tokens': 0, 'accepted_prediction_tokens': 0, 'rejected_prediction_tokens': 0}}
+[needles] replaying build reply as middle turn: 'done'
+[needles] exact        PASS  (7s)  '8492'
+[needles] paraphrase   PASS  (6s)  '8492'
+[needles] negation     PASS  (9s)  'No. The correct vault code is 8492.'
+[needles] distractor   PASS  (10s)  'No. The number 8493 is a distractor, not the vault code. The'
+[needles] control      PASS  (6s)  'QK-7731'
+[needles] multihop     PASS  (7s)  'November'
+[needles] 6/6 pass
+[prose] rain                8s  verdict=CLEAN  hits={}
+[prose] rank_langs         64s  verdict=CLEAN  hits={'same_script_glue': 1}
+[prose] lighthouse         25s  verdict=CLEAN  hits={}
+[prose] paperclip          40s  verdict=CLEAN  hits={}
+[prose] zh_autumn          17s  verdict=CLEAN  hits={'same_script_glue': 1}
+[prose] zh_en_teapot       25s  verdict=CLEAN  hits={}
+[prose] ja_sky             50s  verdict=CLEAN  hits={}
+[prose] ru_winter          16s  verdict=CLEAN  hits={}
+[prose] de_baum            19s  verdict=CLEAN  hits={}
+[prose] fr_river           10s  verdict=CLEAN  hits={}
+[prose] market_dawn        29s  verdict=CLEAN  hits={'same_script_glue': 1}
+[prose] tests_opinion      39s  verdict=CLEAN  hits={}
+[prose] hash_table         91s  verdict=CLEAN  hits={'same_script_glue': 1}
+[prose] codeswitch_email   29s  verdict=CLEAN  hits={}
+[prose] pencil_history     73s  verdict=CLEAN  hits={}
+[prose] sequences          16s  verdict=CLEAN  hits={}
+[prose] ja_zh_intro         8s  verdict=CLEAN  hits={}
+[prose] limerick           15s  verdict=CLEAN  hits={}
+[prose] es_continue        30s  verdict=CLEAN  hits={}
+[prose] scene_image        31s  verdict=CLEAN  hits={}
+[prose] 20 prompts, 0 DIRTY, 0 REVIEW
+[tools] t1_weather_celsius         PASS  calls=['get_weather'] 
+[tools] t2_forecast_tokyo          PASS  calls=['get_forecast'] 
+[tools] t3_thermostat_berlin       PASS  calls=['set_thermostat'] 
+[tools] t4_raining_london          PASS  calls=['get_weather'] 
+[tools] t5_nyc_tomorrow            PASS  calls=['get_forecast'] 
+[tools] t6_forecast_madrid_3       PASS  calls=['get_forecast'] 
+[tools] t7_heat_rome               PASS  calls=['set_thermostat'] 
+[tools] t8_sydney_fahrenheit       PASS  calls=['get_weather'] 
+[tools] t9_sydney_2day             PASS  calls=['get_forecast'] 
+[tools] t10_unit_vs_days_confusion PASS  calls=['get_weather', 'get_forecast'] 
+[tools] 10/10 pass
+[park] turn2 recall_teal=True  elapsed=9s
+
+PHASE VERDICT: CLEAN  (needles 6/6, tools 10/10, prose DIRTY 0, REVIEW 0)
+[2026-10-08 14:30:41] battery exit=0

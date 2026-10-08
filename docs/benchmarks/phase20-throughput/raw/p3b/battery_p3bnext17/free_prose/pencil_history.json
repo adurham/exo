@@ -1,0 +1,33 @@
+{
+  "id": "pencil_history",
+  "tag": "prose",
+  "prompt": "Write about the history of the pencil, at least 200 words.",
+  "http_status": 200,
+  "elapsed_s": 73.14434909820557,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 1428,
+    "total_tokens": 1446,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1109,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "The pencil’s history stretches back to ancient writing tools like the stylus and metalpoint, but the modern pencil began with a lucky accident. Around the 1560s, a large, unusually pure graphite deposit was discovered in Borrowdale, England. Legend says shepherds found a black substance under tree roots and used it to mark sheep. Though called “black lead,” it was actually carbon. Because it was solid, people cut it into sticks and wrapped the pieces in string or leather. England guarded the Borrowdale mine closely, and graphite became highly valuable.\n\nGerman woodworkers soon began inserting graphite into wooden casings, and Nuremberg became an early pencil-making center. In 1795, during a graphite shortage caused by war, French inventor Nicolas-Jacques Conté mixed powdered graphite with clay, then shaped and fired it. This process allowed pencils to be made in different hardnesses and became the basis for mass production. Similar advances occurred in Vienna. In the United States, William Munroe began making pencils in 1812 in Concord, Massachusetts, and Henry David Thoreau later improved graphite grinding.\n\nIn 1822, Sampson Mordan and John Isaac Hawkins patented an early mechanical pencil. In 1858, Hymen Lipman patented a pencil with an attached eraser. The word “pencil” comes from Latin penicillus, meaning “little brush.” Modern pencils are graded H, HB, and B, and yellow pencils became common in the late 19th and early 20th centuries. Today, pencils remain cheap, reliable, and widely used.",
+  "reasoning": "We need answer about history of pencil at least 200 words. Need write. We can produce concise but >200. Need ensure accurate. History of pencil: precursors stylus, metalpoint, graphite discovery in Borrowdale England 16th century, shepherds? Legend. Graphite used for marking sheep. Initially wrapped in string/leather, then wood casings. German and Italian woodworkers. Nuremberg pencils. 1795 Nicolas-Jacques Conté developed modern pencil by mixing graphite with clay, controlling hardness, and firing. Also Joseph Hardtmuth in Vienna? Actually Conté and Hardtmuth. Pencil manufacturing. 1812 William Munroe in Concord, Massachusetts. American pencil industry. 1861 Eberhard Faber. Hymen Lipman patented eraser attached to pencil in 1858. Yellow pencils? Hardtmuth's Koh-i-Noor? In 1890s, Austrian ",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

@@ -126,9 +126,32 @@ next17-defaults − M3-OFF ≈ **24 ms benign / 29 ms agentic** is (by subtracti
 That is far larger than M3 §3's *assumed* "small, context-flat" lever-2 — a load-bearing
 contradiction, and the reason the optional lever-2 split (§5) is judged **worth relaunch #2**.
 
-## 5. Lever-2 split — PENDING / maybe skipped
+## 6. R8a battery on next17 — DONE (CLEAN)
 
-## 6. R8a battery on next17 — PENDING
+`battery_next17.sh` → `battery.py --label p3bnext17 --depth 40000 all` on the **live relaunch-#1
+boot** (next17-levers @ `576e9d279`, gates default), 2026-10-08 14:15–14:30 CDT, idle-gated,
+exit=0. Artifacts: `raw/p3b/battery_p3bnext17/`, `raw/p3b/battery_next17.stdout`.
+
+| metric | frozen g3 baseline | **p3bnext17 (this build)** | verdict |
+|---|---|---|---|
+| needles | 6/6 | **6/6** (exact, paraphrase, negation, distractor, control, multihop) | identical ✅ |
+| tools | 10/10 | **10/10** | identical ✅ |
+| free prose | 0 DIRTY / 0 REVIEW | **0 DIRTY / 0 REVIEW** (20 probes) | clean ✅ |
+| advisory `same_script_glue` | **4** | **4** | identical ✅ |
+| `phase_verdict` | CLEAN | **CLEAN** | ✅ |
+| parked-restore recall | `None` (not run in g3) | **`recall_teal=True`** (turn2 9.0 s) | improved |
+
+`compare.py results/g3 results/p3bnext17` → **VERDICT: REVIEW**, with exactly **one** REVIEW item:
+*"parked-restore recall improved in B"* — i.e. the candidate is **better**, not worse (g3 simply did
+not run the park phase). No FAIL items: no new detector hits, no needle/tool regression, no lost
+recall. Per PREREG D4 this is a **byte-identity PASS on the deterministic subset** (needles+tools)
+with prose detectors clean and the advisory count identical. **R8a gate: PASS.**
+
+**Ship gate (§2) — all three legs PASS:** agentic −27.03 ms/round (≥5 ms bar, 5.4×), no benign
+regression (−27.19 ms), R8a clean. The staged fix beat production and its output is
+quality-identical. **Recommendation: SHIP `deploy/next17-levers` as the production line** (§8).
+
+## 5. Lever-2 split — SPENT (relaunch #2)
 
 ## 7. Lever-2 code-fix spec — PENDING (only if worth >=3 ms/round)
 
