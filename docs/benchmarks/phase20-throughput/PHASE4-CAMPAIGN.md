@@ -1,0 +1,94 @@
+# PHASE 20 — Phase-4 continuation campaign (P1 lever-2 guard → P2 MoE → P3 prefill → P5 roofline)
+
+Author: Phase-4 PM. Opened 2026-10-08 ~16:30 CDT. **This doc is the resume anchor — commit+push after EVERY step.**
+
+## 0. Entry state (verified by the Phase-4 PM, 2026-10-08 ~16:20 CDT)
+
+- **PRODUCTION NOW**: `deploy/next13 @ 576e9d279` (exo) + mlx-lm `3bf8316` on both nodes.
+  Both nodes `git rev-parse HEAD` == `576e9d27994b5bd3c2317f7dffbdf384580db0a4`, branch `deploy/next13`.
+  Installed-venv lever-1 guard present (`grep -c "and m > _FENCE_MIN_ROWS"` = 1 both nodes).
+  `/state`: 1 instance, 2 runners `RunnerRunning`. Idle.
+- Tagged: `known-good-decode-next17-20261008-160746` (both forks). Baseline doc:
+  `docs/known-good-decode-baseline-20261008.md` on main.
+- **Proven numbers (Phase-3B, same-session symmetric arms)**: benign 20K g3 800tok /
+  agentic 91K real-session-replay g3 800tok. production-before 145.75 / 157.10 ms;
+  next17-defaults 118.56 / 130.07 ms; next17+`DSV41_INDEXER_HIER=0` **101.06 ms ≈30.2 t/s agentic**.
+  Split: lever-1 code −27.0 ms, lever-2 HIER −29.0 ms, additive (sum 56.04 == total).
+
+## 1. The frozen plan (Fable consult)
+
+Each phase: impl → prove → A/B → battery → ship → doc. Run in order.
+
+| phase | deliverable | gate | budget |
+|---|---|---|---|
+| **P1** | **next18** = lever-2 code guard `indexer.py:531 if _HIER and n > _FENCE_MIN_ROWS:` + shared `_gates.py` | full identity proof suite (below) — **ABORT on any divergence (ties = divergence)**; target ≈101 ms ≈30 t/s agentic | 1 promotion |
+| **P2** | **next19** = `DSV41_MOE_ALLSUM_BF16` decode A/B (env kill-switch), ship only if it wins | ≥3 ms/round net agentic above noise, `mean_accepted` not < ~2.0, battery clean | 1 promotion (if it wins) |
+| **P3** | **next20** = loop-2 consumer-index-skip PREFILL behind an env knob | ≥8% of deep-context prefill wall (half the audit max); decode byte-for-byte unchanged; battery clean | 1 promotion (if it wins) |
+| **P5** | roofline close-out (bench-only) | (i) reconcile round accounting 91.5% vs 98.5%; (ii) bytes-roofline ONE verify round vs MEASURED read BW → near-floor vs headroom verdict | bench-only |
+| — | adaptive gamma — **PARKED** (feature-blocked; `GammaPolicy.update()` never called, candidate set hardcoded {1,2,3,4}; γ5 benign-only) | one paragraph, zero relaunches | 0 |
+
+## 2. Budget / tripwires (declared UP FRONT)
+
+- Total: **≤3 production relaunches** (P1/P2/P3 promotions as they win) **+ 1 rollback reserve
+  + 2–3 bench-only sessions**.
+- Per-phase hard cap: if any single phase needs **>2 unplanned relaunches, HALT that phase**,
+  doc it, move to the next. Never exceed the total.
+- **Every relaunch declared in this doc BEFORE spending** (the prior rounds' pattern).
+- If a phase's proof fails → **do NOT ship**; write it up as a speed-vs-output tradeoff; the
+  prior production build stays; proceed to the next phase. An abort is a valid result.
+
+### Relaunch ledger (declare-before-spend)
+
+| # | phase | deploy | purpose | status |
+|---|---|---|---|---|
+| R1 | P1 | `deploy/next18-identity` (detach + mlx-lm next18) | A/B next18-at-defaults vs prod; battery; guard-engagement (+benign-HIER-off new measure) | PLANNED |
+| R2 | P2 | next19 (only if MoE wins) | MoE decode A/B ship | CONTINGENT |
+| R3 | P3 | next20 (only if prefill wins) | prefill ship | CONTINGENT |
+| RESERVE | — | restore best SHIPPED build | rollback, only if a promotion degrades | HELD |
+| B1-B3 | P2/P3/P5 | bench-only (no relaunch; measurement sessions on the live boot) | MoE arm captures, prefill captures, roofline | PLANNED |
+
+## 3. P1 — lever-2 code guard (next18)
+
+### 3a. The edit (spec §7 of PHASE3B-SHIP-VALIDATION.md)
+
+- `mlx_lm/models/deepseek_v41/indexer.py` line ~531: `if _HIER:` → `if _HIER and n > _FENCE_MIN_ROWS:`
+  where `n = x.shape[1]` (query-row count; same quantity lever-1 guards on as `m`).
+- Hoist the threshold to a NEW `mlx_lm/models/deepseek_v41/_gates.py` read by BOTH
+  `indexer.py` and `sparse_attention.py` (retires the twin-default foot-gun).
+- `DSV41_INDEXER_HIER=0` and `DSV41_SPARSE_FENCE_MIN_ROWS=0` must STILL force old behavior for A/B
+  (HIER=0 → always fallback; FENCE_MIN_ROWS=0 → always HIER).
+- One edit covers both candidate-source (layers 2/8/14/20) and consumer (24-36) roles — do NOT split
+  the predicate (same `n` within a forward).
+
+### 3b. Required proof suite (ABORT on any divergence; ties count as divergence)
+
+1. **Elementwise index-identity**: hier topk ≡ tiled/untiled fallback on the returned `[b,n,k]` int32
+   tensor (incl. `-1` mask pattern + position order) over synthetic grid: n ∈ {1,2,3,4} ∪ {16,17}
+   (guard boundary), nb ∈ {64,512,4096,16384}, many seeds. Also k±1, fully-masked (-1) blocks,
+   deliberate bf16 near-tie mis-ranks (block maxima differing within the mantissa), true-top-k column
+   placed exactly at rank 16 (overfetch boundary).
+2. **REAL-TENSOR diff**: capture indexer inputs (and outputs) from a real 6-8 rep 91K agentic replay at
+   decode(m=1) and verify(m=4) steps, at source AND consumer layers; run hier vs fallback on those exact
+   tensors; require zero diff. (Agentic traffic is tie-rich — synthetic-only is NOT sufficient.)
+3. **Greedy token-identity diff** vs the shipped next17 build on K≥4 real prompts (greedy-only).
+4. Per-forward producer/consumer path-agreement assertion + a grep proving no other module reads
+   `DSV41_INDEXER_HIER` directly (single read point).
+5. Same-build A1/A2 determinism replicate; battery R8a clean on the new build; `mean_accepted` unchanged.
+6. Guard-engagement: next18-at-defaults reproduces ≈101.06 ms ±2% agentic same-session (equivalence AND
+   engagement); also measure BENIGN on the new build (never measured for HIER-off: expect ≈95 ms).
+
+### 3c. P1 status
+
+- [x] Worktrees: `/private/tmp/next18-lever2` (branch `deploy/next18-lever2` from `3bf8316`),
+      `/private/tmp/next18-exo` (branch `deploy/next18-identity` from `576e9d279`).
+- [ ] Implementation + unit tests
+- [ ] Proof suite 1-3 (offline, laptop)
+- [ ] Battery + A/B on cluster (R1)
+- [ ] Ship / abort decision
+
+## 4. P2 / P3 / P5 — see their own sections, appended as reached.
+
+## 5. Resume pointer
+
+Last commit on this doc says where we are. If resuming: read §3c / §4 checkboxes, `git log` this
+branch, re-verify live state against §0, continue from the first unchecked box.
