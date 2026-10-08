@@ -1,8 +1,8 @@
 # MTRACE-NOTES — `bench/phase20_mtrace.py` (Metal System Trace for gate 0d / Phase-1 cross-check)
 
-Status: **built and validated OFFLINE on the laptop**. The PM runs the live
-attach on a node during a decode window. Nothing here was run against the exo
-runner.
+Status: **built, live-validated on the laptop AND on node studio2 with a
+throw-away toy process, and hardened** (FIX 1, §8). The PM runs the live attach
+on a node during a decode window. Nothing here was run against the exo runner.
 
 This is the plan's **Fallback-B** tool for gate 0d (used when powermetrics
 `GPU HW active residency` lands within 5 points of idle → wrong GPU/process)
@@ -217,5 +217,138 @@ python bench/phase20_mtrace.py analyze --dir <dir-with-state.xml>
 
 # pure-parse tests (no xctrace, no cluster)
 PYTHONPATH=bench .venv/bin/python -m pytest --noconftest \
-  bench/phase20_tests/test_phase20_mtrace.py -q -p no:cacheprovider   # 19 passed
+  bench/phase20_tests/test_phase20_mtrace.py -q -p no:cacheprovider   # 26 passed
 ```
+
+## 8. FIX 1 — live end-to-end validation + the real hazard found
+
+Dispatched against two *reported* defects. Both were checked against the live
+CLI and **neither reproduces on xctrace 27.0 (27A266a)**; the real defect was a
+third one, fixed in this commit.
+
+### 8.1 Reported defect (1) — `--xpath` on `xctrace export` is NOT a defect
+
+`xcrun xctrace help export` (verbatim, 27.0) documents it *and* gives an example
+in the exact form the tool uses:
+
+```
+usage: xctrace export [<trace>] [<options>] [--toc | --xpath expression]
+options:
+	--toc                         Present entities to export in the table of contents form
+	--xpath <expression>          Choose elements to export using specified XPath expression
+examples:
+	xctrace export --input input.trace --xpath '/trace-toc/run[@number="1"]/data/table[@schema="my-table-schema"]'
+```
+
+Run against a real 76 MB laptop `.trace`: **rc=0**, wrote a real 1.12 MB XML
+with `name="metal-gpu-state-intervals"` and **4697 rows**. The `run[@number="1"]`
+form is the documented one. (Likely origin of the report: an older Xcode/CLT
+whose `export` predated `--xpath`; not reproducible here.)
+
+### 8.2 Reported defect (2) — `--attach` is NOT a defect
+
+`xcrun xctrace help record` (verbatim, 27.0): `--attach <pid|name>  Attach and
+record process with the given name or pid` (usage line `[--attach |
+--all-processes | --launch -- command]`). A PID works. Attached to a live MLX
+toy on the **laptop** and, remotely, on **studio2** via the tool's own `record`
+subcommand — both produced real traces (59 MB / 38 MB). No sudo, no prompt.
+
+### 8.3 THE REAL DEFECT — the export fails silently and the tool called it success
+
+When `--xpath` matches nothing (wrong schema name, or run index ≠ 1), `xctrace
+export` **exits 0 and writes a 65-byte `<trace-query-result/>`**:
+
+```
+$ xcrun xctrace export --input laptop2.trace \
+    --xpath '/trace-toc/run[@number="1"]/data/table[@schema="does-not-exist-xyz"]' \
+    --output missing.xml
+Finished export to the file: missing.xml      # rc=0
+$ wc -c missing.xml
+      65  missing.xml      # <?xml ...><trace-query-result/></trace-query-result>
+```
+
+The old `cmd_export` reported `(schema, path, bytes)` and returned 0 regardless
+— so a no-op export was indistinguishable from a good one. **This is consistent
+with the prior run's "live analysis UNFINISHED"** (a bad/renamed schema would
+have produced an empty table with a success return code), though I could not
+reproduce that specific session. Fix: `cmd_export` now **parses every file back**
+via `validate_export()` (ok / missing / empty / unreadable), prints per-schema
+rows+bytes+status, lists the *available* schemas from `--toc` on failure, and
+**exits 2** if any schema matched nothing. `toc` also returns nonzero on failure.
+
+Verification (real traces, exit codes are the tool's own):
+
+```
+$ python bench/phase20_mtrace.py export --trace laptop2.trace --out /tmp/ok
+  ok         metal-gpu-state-intervals   rows=2603  bytes=619657  rc=0
+  ...                                                                    # -> exit 0
+$ python bench/phase20_mtrace.py export --trace laptop2.trace --out /tmp/bad \
+      --schemas does-not-exist-xyz
+  missing    does-not-exist-xyz  rows=0  bytes=65  rc=0  [no <table> matched the xpath]
+  # available schemas (17) from --toc: metal-gpu-state-intervals ...
+  # export: 0/1 ok, 0 empty (warn), 1 FAILED                              # -> exit 2
+```
+
+### 8.4 Live toy validation — laptop AND studio2 (the required ±0.10 check)
+
+Workload: uniform rounds of a 100-iter 2048² fp16 matmul+softmax burst then a
+known `sleep`; host-side per-burst timestamps → `truth.json` (host timer is the
+ground truth, never the trace). Traced via `record --attach <pid>`, exported,
+analyzed.
+
+| box | host known duty | recovered busy frac | Δ abs | host median gap | recovered inter-round gap | rounds |
+|---|---|---|---|---|---|---|
+| laptop M4 Max | 0.2272 | **0.1936** | 0.034 ✔ | 30.01 ms | 31.06 ms | 219 |
+| studio2 M4-2  | 0.2038 | **0.1643** | 0.040 ✔ | 30.76 ms | 30.60 ms | 263 |
+
+Both within the ≤0.10 target; gaps recovered at the injected cadence (Δ ≤ 1 ms).
+The residual ≈0.03 ≈ the per-round kernel/launch overhead the sleep loop hides
+from the host timer — expected, same direction as §3.
+
+```
+# laptop, analyze output (analyze --dir laptop2_export)
+# Metal System Trace analysis
+- Window: 258262666 .. 8399575916 ns (8141.313 ms, auto)
+- **GPU-busy fraction: 19.36%** (busy 1576.334 ms / idle 6564.979 ms)
+- Active intervals: 1300
+## Idle gaps (>50 us)
+- gaps: 1299, >50us: 219, median 0.000875 ms, max 33.192583 ms
+  - 1-3ms: 1   - 3-10ms: 2   - >10ms: 216
+## Encoder intervals
+- n=1302 total 1576.348 ms; mean 1.2107 / median 1.1952 / p90 1.3879 / max 1.7862 ms
+## Command buffers
+- distinct ids 1296, rate 159.19 /s; submissions 1284 (157.71 /s)
+## Rounds (gap>=3.0 ms)
+- count 219, busy median 7.105 ms, gap median 0.004 ms   (6 bursts/round)
+```
+
+### 8.5 Working commands (verbatim — copy these for the live run)
+
+```bash
+# record (attach to a pid; laptop or via ssh on a node)
+xcrun xctrace record --template 'Metal System Trace' --attach <PID> \
+      --time-limit 8s --no-prompt --output /tmp/x.trace
+
+# list the schemas actually in the trace
+xcrun xctrace export --input /tmp/x.trace --toc --output /tmp/toc.xml
+
+# export one table (VERIFIED form in 27.0)
+xcrun xctrace export --input /tmp/x.trace \
+  --xpath '/trace-toc/run[@number="1"]/data/table[@schema="metal-gpu-state-intervals"]' \
+  --output /tmp/state.xml
+```
+
+The tool wraps all three (`record`, `export`, `export --toc`) and validates each
+exported file, so prefer the tool over the raw commands.
+
+### 8.6 Schema list + permissions (re-confirmed on this run)
+
+`--toc` on a real Metal System Trace lists 40+ tables; the ones this tool uses
+(all present): `metal-gpu-state-intervals`, `metal-gpu-intervals`,
+`metal-application-command-buffer-submissions`, `gpu-performance-state-intervals`,
+`metal-command-buffer-completed`. Permissions: **no sudo, no password, no
+interactive prompt** on the laptop or studio2 for record *or* export; `--no
+-prompt` suppresses the privacy warning. macOS still has **no coreutils
+`timeout`** — `record` uses `/usr/bin/perl -e 'alarm shift; exec @ARGV'`. On
+studio2 everything (toy, trace, exports) was written to `/tmp` and removed
+after; nothing under `~/repos/exo` was touched.

@@ -258,3 +258,87 @@ def test_cli_selftest_exit_zero():
         capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "passed" in r.stdout
+
+
+# --------------------------------------------------------------------------
+# export validation: xctrace exits 0 but writes an empty result on a no-match
+# (verified against xctrace 27.0 -- see MTRACE-NOTES.md "FIX 1")
+# --------------------------------------------------------------------------
+
+_EMPTY_RESULT = ('<?xml version="1.0"?>\n<trace-query-result>\n'
+                 '</trace-query-result>\n')
+
+
+def test_validate_export_detects_silent_no_match(tmp_path):
+    # the 65-byte document xctrace writes when --xpath matches nothing
+    p = tmp_path / "missing.xml"
+    p.write_text(_EMPTY_RESULT)
+    status, nrows, detail = M.validate_export(str(p))
+    assert status == "missing"
+    assert nrows == 0
+    assert "xpath" in detail
+
+
+def test_validate_export_ok_on_real_table(tmp_path):
+    p = tmp_path / "ok.xml"
+    M._synth_write(str(p), _state_cols(), [[0, 1000, "Active"]])
+    status, nrows, _ = M.validate_export(str(p))
+    assert status == "ok"
+    assert nrows == 1
+
+
+def test_validate_export_warns_on_zero_row_table(tmp_path):
+    p = tmp_path / "empty.xml"
+    M._synth_write(str(p), _state_cols(), [])
+    assert M.validate_export(str(p))[0] == "empty"
+
+
+def test_validate_export_unreadable_on_missing_or_garbage(tmp_path):
+    assert M.validate_export(str(tmp_path / "nope.xml"))[0] == "unreadable"
+    bad = tmp_path / "bad.xml"
+    bad.write_text("<trace-query-result><node></trace-query-result>")
+    assert M.validate_export(str(bad))[0] == "unreadable"
+
+
+def test_parse_toc_schemas_lists_tables(tmp_path):
+    p = tmp_path / "toc.xml"
+    p.write_text('<?xml version="1.0"?>\n<trace-toc><run number="1"><data>'
+                 '<table schema="metal-gpu-state-intervals"/>'
+                 '<table schema="gpu-performance-state-intervals"/>'
+                 '</data></run></trace-toc>')
+    names = M.parse_toc_schemas(str(p))
+    assert names == ["metal-gpu-state-intervals",
+                     "gpu-performance-state-intervals"]
+
+
+def test_cmd_export_fails_loud_on_no_match(tmp_path, monkeypatch):
+    # xctrace is stubbed: writes an empty result and exits 0 (the real
+    # silent-failure behaviour).  cmd_export must NOT report success.
+    def fake_one(schema, trace, out, node, timeout=1800):
+        with open(out, "w") as f:
+            f.write(_EMPTY_RESULT)
+        return 0
+
+    def fake_toc(trace, node, out, timeout=1800):
+        with open(out, "w") as f:
+            f.write('<?xml version="1.0"?>\n<trace-toc><run number="1">'
+                    '<data><table schema="metal-gpu-state-intervals"/>'
+                    '</data></run></trace-toc>')
+        return 0
+
+    monkeypatch.setattr(M, "_export_one", fake_one)
+    monkeypatch.setattr(M, "_run_toc", fake_toc)
+    rc = M.main(["export", "--trace", "x.trace", "--out", str(tmp_path),
+                 "--schemas", "does-not-exist"])
+    assert rc == 2
+
+
+def test_cmd_export_succeeds_when_all_tables_present(tmp_path, monkeypatch):
+    def fake_one(schema, trace, out, node, timeout=1800):
+        M._synth_write(out, _state_cols(), [[0, 1000, "Active"]])
+        return 0
+
+    monkeypatch.setattr(M, "_export_one", fake_one)
+    rc = M.main(["export", "--trace", "x.trace", "--out", str(tmp_path),
+                 "--schemas", "metal-gpu-state-intervals"])
+    assert rc == 0
