@@ -1,6 +1,7 @@
 # PHASE 20 — Phase-3B SHIP-VALIDATION (staged decode fix vs production)
 
-Author: Phase-3B PM. Round opened 2026-10-08 ~11:30 CDT. **LIVE — in progress.**
+Author: Phase-3B PM (round 2, resumed after the round-1 PM died post-deploy). Round opened
+2026-10-08 ~11:30 CDT, resumed 13:03 CDT, closed 15:35 CDT. **COMPLETE — production restored.**
 
 Scope (from the brief): measure what `deploy/next17-levers` (mlx-lm `3bf8316`: the
 small-m row-count guard on the C1 column-boundary derivation) actually delivers versus
@@ -126,7 +127,7 @@ next17-defaults − M3-OFF ≈ **24 ms benign / 29 ms agentic** is (by subtracti
 That is far larger than M3 §3's *assumed* "small, context-flat" lever-2 — a load-bearing
 contradiction, and the reason the optional lever-2 split (§5) is judged **worth relaunch #2**.
 
-## 6. R8a battery on next17 — DONE (CLEAN)
+## 5. R8a battery on next17 — DONE (CLEAN)
 
 `battery_next17.sh` → `battery.py --label p3bnext17 --depth 40000 all` on the **live relaunch-#1
 boot** (next17-levers @ `576e9d279`, gates default), 2026-10-08 14:15–14:30 CDT, idle-gated,
@@ -151,7 +152,7 @@ with prose detectors clean and the advisory count identical. **R8a gate: PASS.**
 regression (−27.19 ms), R8a clean. The staged fix beat production and its output is
 quality-identical. **Recommendation: SHIP `deploy/next17-levers` as the production line** (§8).
 
-## 5. Lever-2 split — DONE (relaunch #2)
+## 6. Lever-2 split — DONE (relaunch #2)
 
 | arm (agentic 91K g3, 800 tok) | reps | ms/round median | decode t/s | mean_accepted |
 |---|---|---|---|---|
@@ -219,7 +220,7 @@ margin is a heuristic, **not** a proof. So the fix ships only with:
 2. **Same-build A1-vs-A2 determinism replicate** (PREREG D4) so real GPU drift cannot masquerade as
    identity.
 3. **R8a battery** byte-identical on the deterministic subset (needles+tools) + detectors clean, on
-   the *new* build (the §6 battery is HIER=1 and does **not** cover this change).
+   the *new* build (the §5 battery is HIER=1 and does **not** cover this change).
 4. **Abort rule:** if step 1 shows *any* index divergence at small m, **do NOT ship the guard** —
    report lever-2 as a genuine speed-vs-output tradeoff and re-validate quality end-to-end. Never
    paper over a divergence with the overfetch margin.
@@ -232,4 +233,53 @@ forces off. Both remain.
 ctx-scaling. Combined with the shipped lever-1, the both-defaults build should reach ≈101 ms/round
 agentic ≈ **30 t/s at gamma 3**.
 
-## 8. RESTORED line — PENDING
+## 8. RESTORED line, recommendation, and round close
+
+### RESTORED
+
+```
+RESTORED f4bb14746 READY 2/2 canary 14.85/14.73 TFLOPS parity 103/103 env vars (lever gates ABSENT)
+```
+
+**Relaunch #3** SPENT 2026-10-08 15:22–15:27 CDT (`restore_next13.sh`, idle_ok=True; log
+`/tmp/p3b/restore_next13.log`). Verified **independently by the resuming PM** (not from the script's
+own echo):
+
+- Both nodes **and** the laptop repo: `git rev-parse HEAD` = `f4bb14746c68deea005f41f590e27e6b182b6384`,
+  branch **`deploy/next13`**, mlx-lm pin = **`6cc9c1e8709e228fca99ac152cd5e681ddcce65d`**. Launcher
+  "Nodes synchronized on commit f4bb14746" → **READY (2/2)** @ 15:27:33, exit=0.
+- Post-boot canary: studio1 14.83/14.87/14.85, studio2 14.72/14.73/14.74 → **healthy**. `/state` and
+  `idle` (ok) both healthy.
+- **Guard absent** from the installed `sparse_attention.py` on both nodes (`grep -c` = 0) → the
+  lever-1 code is gone, production behaviour restored.
+- **Env parity:** live runner var-name set == the pre-campaign `raw/p3b/prod-env-studio{1,2}.txt`
+  snapshots (103/103 identical) **plus** a benign extra `LOG_LEVEL=INFO` (present on all boots,
+  including the ones that produced the baseline). **Both lever gates (`DSV41_INDEXER_HIER`,
+  `DSV41_SPARSE_COLSPLIT`) are ABSENT** in the live env → production defaults.
+- `docs/benchmarks/phase19-latency/` moved back on the laptop; the deploy-state conflict is resolved.
+
+Decode sanity on the restored boot is the §3 production baseline itself (same build, gates default),
+so no separate parity run was spent.
+
+### Recommendation — DEFAULT POLICY: **SHIP `deploy/next17-levers` as the production line**
+
+Pre-registered ship gate (§2) is met on every leg (§4): agentic **−27.03 ms/round** (bar was ≥5 ms,
+5.4× cleared), no benign regression (**−27.19 ms**), R8a **clean** (needles 6/6, tools 10/10, prose 0
+dirty, advisory count identical to `g3`). `mean_accepted` identical/higher → not an acceptance
+artefact. The fix is the shippable *code* form of lever 1 (no env flip, no foot-gun).
+
+**Second, larger finding — spend a relaunch on lever-2.** The split (§6) shows the indexer
+hierarchy (`DSV41_INDEXER_HIER`) is **29.0 ms/round** at 91K agentic — **52%** of the 56 ms total,
+**the larger lever**, and **5–8× the "small" value M3 §3 assumed**. A matching code guard (§7,
+`indexer.py:531` → `if _HIER and n > _FENCE_MIN_ROWS:`) would make the both-levers-off behaviour the
+default **without any env flip**, targeting ≈101 ms/round ≈ **30 t/s at gamma 3** agentic (from
+production's 157 ms / 19.5 t/s). **It is specced, not implemented** (as instructed); shipping it
+requires the value-identity proof in §7 first, because lever-2's coarse-then-exact path is *not*
+obviously bit-identical to the full-width fallback.
+
+### Round close
+
+- Relaunch budget: **3/3 spent** (#1 next17-defaults, #2 next17+HIER=0, #3 production restore); cap
+  respected, no overrun, no degraded-canary reboot needed.
+- All artifacts under `raw/p3b/` (baseline §3, next17 §4, battery §5, HIER=0 §6, env snapshots).
+- Cluster returned to production `f4bb14746`, both nodes serving, gates unset, idle.
