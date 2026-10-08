@@ -11420,3 +11420,59 @@ ALSO FLAGGED FOR RE-EXAMINATION:
   micro-batch's compute) is a standard TP lever absent from the priced list.
 - Reprice the ceiling calibration: what dtype/shape/dequant did 15.14 include? (The 82 TF
   lesson: verify the calibration's own premises.)
+
+## 2026-10-08 — Phase-3B ship-validation COMPLETE + next17 SHIPPED (−27 ms/round both arms); lever-2 split says the indexer hierarchy is −29 ms (52% of the win)
+
+Validated `deploy/next17-levers @ 576e9d279` (exo; mlx-lm `3bf8316`) vs production `deploy/next13 @ f4bb14746`.
+The change: `sparse_attention.py`'s C1 column-boundary derivation did two host round-trips (`.item()`) per
+compressing layer per forward at decode (m=1) and in the 4-row verify, for nothing — `attention.py`'s twin
+gate defaults OFF while `sparse_attention.py`'s own gate defaults ON, so the default call site arrived with
+`colsplit=None` and `_column_boundary(-1)` re-derived the boundary every time. Fix: gate the derivation on
+`m > _FENCE_MIN_ROWS` (16); small m takes the value-identical `_gather_split` fallback. +315 test lines, 17 tests green.
+
+Same-session, same-harness, symmetric arms (benign = 20K g3 8 reps; agentic = 91K real-session replay 6 reps; no PROF on either arm):
+
+| arm (agentic 91K g3, 800 tok) | benign ms/round (t/s) | agentic ms/round (t/s) | mean_accepted (agentic) |
+|---|---|---|---|
+| production f4bb14746 | 145.75 (25.5) | 157.10 (19.5) | 2.050 |
+| next17 defaults (lever-1 code) | 118.56 (31.5) | 130.07 (23.7) | 2.077 |
+| next17 + `DSV41_INDEXER_HIER=0` | — | **101.06 (30.2)** | 2.027 |
+
+Split (same-build, additive): total 56.04 ms/round = lever-1 code **27.03** + lever-2 HIER **29.01**; sum == total, no
+interaction. The HIER=0 point reproduces M3's cross-build both-off value (101.3) to 0.24 ms. **Lever-2 is the larger
+lever — 52% of the win, 5–8× M3's assumed "small, context-flat" value; that assumption is corrected.**
+`mean_accepted` flat across arms → latency effect, not an acceptance artefact.
+
+Battery R8a on next17: CLEAN (needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW; park PASS; advisory
+`same_script_glue`=4 identical to frozen g3).
+
+**Shipped:** deploy/next13 fast-forwarded f4bb14746 → 576e9d279, pushed, deployed 2026-10-08 16:02–16:07 CDT
+(`/tmp/p3b/ship_next17.sh`, idle-guarded; pre-ship expected-state check both nodes). Launcher: "Nodes
+synchronized on commit 576e9d279" → READY (2/2) 16:07:46 exit=0; post-boot canary healthy both nodes
+(14.85/14.86). Guard present in the INSTALLED venv module on BOTH nodes; gates unset (defaults). Post-ship
+parity smoke launched (benign 3×20K g3; expect ≈118.6 ms / 31.5 t/s ±3%; log `/tmp/p3b/ship_smoke.log`).
+
+**Lever-2 code fix — specced, not yet implemented** (measured share 29.0 ms/round ≫ 3 ms bar): `indexer.py:531`
+`if _HIER:` → `if _HIER and n > _FENCE_MIN_ROWS:`, shared threshold via `deepseek_v41/_gates.py`; env overrides
+keep working. Value-identity proof REQUIRED before shipping (bf16 coarse maxima + top-(k+16-overfetch) exact pass
+vs the full-width fallback — the overfetch margin is a heuristic, not a proof): elementwise `[b,n,k]` int32 index
+diff over synthetic grids incl. boundary n∈{16,17}, near-tie bf16 mis-ranks, fully-masked blocks, k±1; PLUS
+real-tensor captures from a 91K replay (tie-rich traffic); PLUS per-forward producer/consumer path-agreement
+assertion (source layers 2/8/14/20 vs consumers 24–36 — same n, one shared predicate); PLUS greedy token-identity
+diff vs next17 on real prompts; ties count as DIVERGENCE; abort on any divergence.
+
+Round close: relaunch budget 3/3 used (#1 next17 defaults / #2 HIER=0 split / #3 restore); RESTORED line:
+`f4bb14746 READY 2/2 canary 14.85/14.73 parity decode=25.70 (benign 144.82 ms/round) prefill=282.4 rows/s`;
+env parity 103/103, gates absent. Docs: `PHASE3B-SHIP-VALIDATION.md` @ deploy/phase20-campaign `0b10977ab`.
+Process note: the first PM died mid-round right after the deploy; doc-commit-after-each-step made the round
+cleanly resumable by a fresh PM — keep this pattern.
+
+Known-good tag: `known-good-decode-next17-20261008-160746` (exo 576e9d279 + mlx-lm 3bf8316, both forks).
+Baseline doc: `docs/known-good-decode-baseline-20261008.md`.
+
+NEXT (authorized): P1 lever-2 impl + identity proof + A/B + ship (target ≈101 ms ≈30 t/s agentic) → P2
+MoE_ALLSUM_BF16 decode A/B (≥3 ms bar) → P3 loop-2 consumer-skip (prefill, ≥8% wall) → P5 roofline close-out
+(reconcile the round-budget residual — verify ≈92.4 ms is 91.5% of 101.06, not 98.5% of a 93.8 ms round; then
+bytes-roofline one verify round vs measured bandwidth → near-floor verdict or headroom). Adaptive gamma parked
+(feature-blocked; γ5 benign-only).
+
