@@ -32,7 +32,7 @@ production and report the RESTORED line.
 
 | # | deploy | purpose | status |
 |---|---|---|---|
-| #1 | `EXO_TARGET_BRANCH=deploy/next17-levers ./start_cluster.sh` (gates default) | measure next17-at-defaults | PLANNED |
+| #1 | `EXO_TARGET_BRANCH=deploy/next17-levers` (detach `576e9d279` + mlx-lm `3bf8316`, gates default) | measure next17-at-defaults | **SPENT** 2026-10-08 13:00:25 (exit=0, READY 2/2; prior PM, log `/tmp/p3b/deploy_next17.log`) |
 | #2 | `EXO_TARGET_BRANCH=deploy/next17-levers` + `DSV41_INDEXER_HIER=0` | lever-2 split (OPTIONAL) | PLANNED |
 | #3 | `EXO_TARGET_BRANCH=deploy/next13 ./start_cluster.sh` | RESTORE production f4bb14746 | MANDATORY |
 
@@ -79,7 +79,19 @@ forces a fresh prefill each rep, so the 15-min chunk cap admits 2 reps/chunk. Ba
 matches the Phase-3 production control (benign 144.5 ms / agentic 156.6 ms) within noise →
 the cluster is in the same thermal/state regime as the Phase-3 round.
 
-## 4. next17-at-defaults — PENDING
+## 3b. Post-deploy canary (relaunch #1 boot, 12:58) — DONE
+
+The previous PM died 2s after `start_cluster.sh` exited, so the 12:58 boot never got a
+post-boot canary. Run 13:04 CDT by the resuming PM:
+
+- `phase20_guard.py canary` → **healthy**: studio1 median **14.86** TFLOPS (14.81/14.86/14.87),
+  studio2 median **14.87** (14.81/14.87/14.87). No reboot needed (budget spend: none).
+- `phase20_guard.py idle` → ok, both nodes `state=ready`, no running request, no post routes
+  (clean post-deploy). `/state` serves on both nodes; `git rev-parse HEAD` == `576e9d279` both.
+- Guard verified present in the installed module on both nodes
+  (`and m > _FENCE_MIN_ROWS`, `site-packages/mlx_lm/models/deepseek_v41/sparse_attention.py`).
+
+## 4. next17-at-defaults — RUNNING
 
 ## 5. Lever-2 split — PENDING / maybe skipped
 
