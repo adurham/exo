@@ -178,6 +178,58 @@ prod 2.05) → the split is a latency effect, not an acceptance artefact.
 **Consequence:** the lever-2 code fix (§7) is worth a relaunch-sized investment — 29 ms/round at
 91K, and larger at deeper context (the same ctx-scaling that made lever-1 bigger on agentic).
 
-## 7. Lever-2 code-fix spec — PENDING (only if worth >=3 ms/round)
+## 7. Lever-2 code-fix spec — **SPEC ONLY, NOT IMPLEMENTED** (lever-2 = 29.0 ms/round ≥ 3 ms bar)
+
+Warranted: lever-2's measured share (29.0 ms/round at 91K agentic) is 9.7× the 3 ms shipping bar.
+
+**Where (exact call site):** `mlx_lm/models/deepseek_v41/indexer.py`, `Indexer.__call__`, the branch at
+**line 531 `if _HIER:`**. Today it is gated *only* on the import-time env
+`_HIER = os.environ.get("DSV41_INDEXER_HIER","1")=="1"` (line 122) — **no row-count guard**, which is
+the whole lever: the hierarchical path's coarse-pass + streamed-exact machinery is pure overhead at
+decode (`n=1`) and verify (`n=4`), where the fallback's score row is a single/small row.
+
+**The fix (mirror the lever-1 guard exactly):**
+```python
+# indexer.py __call__: n := x.shape[1] (query-row count; same quantity as m in sparse_attention)
+if _HIER and n > _FENCE_MIN_ROWS:      # was:  if _HIER:
+    ... hierarchical_topk_prod(...) ...        # lines 531-577, unchanged body
+# else: falls through to the existing tiled path (line 579) / untiled reference (line 603)
+```
+- Reuse the **same** `_FENCE_MIN_ROWS` symbol already proven for lever-1
+  (`sparse_attention.py:119` = `int(os.environ.get("DSV41_SPARSE_FENCE_MIN_ROWS","16"))`). Import it,
+  or hoist to a shared `deepseek_v41/_gates.py`, so **both levers share one threshold and one
+  default** — this retires the "two disagreeing module defaults" foot-gun that M3 §7.4 flagged.
+- One edit covers **both** roles: the candidate-source and candidate-consumer branches are the *same*
+  `if _HIER:` block (lines 531–577). **Critical:** source layers (2/8/14/20) and consumer layers
+  (24..36) all see the *same* `n` within one forward, so the single `n > _FENCE_MIN_ROWS` predicate
+  keeps the published `shared.candidates` mask (`model.py:80`, per-forward) produced and consumed on
+  the same path. **Do not** gate source and consumer on different predicates.
+- Env overrides keep working for A/B: `DSV41_INDEXER_HIER=0` still forces HIER off unconditionally.
+
+**Required value-identity proof BEFORE shipping (load-bearing).** Lever-1 was safe because
+`_gather_split` is *stated byte-identical* to the C1 derivation. Lever-2 is **not** obviously
+identity-preserving: HIER ranks blocks by **bf16 coarse maxima** and fp32-exact-scores only the
+surviving top-`(k+overfetch)` blocks, while the fallback exact-scores **all** columns. They select the
+same top-k **iff no true-top-k column lies in a block the coarse pass dropped** — the `overfetch=16`
+margin is a heuristic, **not** a proof. So the fix ships only with:
+1. **Direct index-diff test** `test_dsv41_indexer_smallm_hier.py`: over a grid of `n∈{1,2,3,4}` ×
+   `nb∈{64,512,4096,16384}` × many seeds, assert `hier_topk` ≡ `tiled_topk` **elementwise on the
+   returned `[b,n,k]` int32 index tensor** (including the `-1` mask pattern and position order) — the
+   value-identity proof, per PREREG G-P3.3.
+2. **Same-build A1-vs-A2 determinism replicate** (PREREG D4) so real GPU drift cannot masquerade as
+   identity.
+3. **R8a battery** byte-identical on the deterministic subset (needles+tools) + detectors clean, on
+   the *new* build (the §6 battery is HIER=1 and does **not** cover this change).
+4. **Abort rule:** if step 1 shows *any* index divergence at small m, **do NOT ship the guard** —
+   report lever-2 as a genuine speed-vs-output tradeoff and re-validate quality end-to-end. Never
+   paper over a divergence with the overfetch margin.
+
+**Guard / rollback:** pure-additive (one extra conjunct on an existing `if`); blast radius = 1 import
++ 1 condition. `DSV41_SPARSE_FENCE_MIN_ROWS=0` restores historical always-HIER; `DSV41_INDEXER_HIER=0`
+forces off. Both remain.
+
+**Expected value:** ≈29 ms/round at 91K agentic (measured §5), larger at deeper ctx per lever-1's
+ctx-scaling. Combined with the shipped lever-1, the both-defaults build should reach ≈101 ms/round
+agentic ≈ **30 t/s at gamma 3**.
 
 ## 8. RESTORED line — PENDING
