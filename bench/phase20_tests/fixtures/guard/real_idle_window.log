@@ -1,0 +1,338 @@
+[ 2026-10-07 10:00:00.230 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dc8a7c0>
+[ 2026-10-07 10:00:00.232 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='59b4f6bf-23b3-423d-b7d3-00c1c3440cdf' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:00.282 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9b87bc7f-0691-4ed9-8f7a-5c90fe895f17' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:00.312 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:00.313 | DEBUG    | exo.utils.info_gatherer.net_profile:check_reachability:70 ] Discovered node with unexpected node_id; ip=127.0.0.1, expected_node_id=86d154081e4fa661f9fc5b878d65e193, remote_node_id=87a89140d7c4b15b4131a9e86ee20e6f
+[ 2026-10-07 10:00:00.780 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='11513be4-4c10-412b-86f5-d79ae9b5550b' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:01.265 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1868b0>
+[ 2026-10-07 10:00:01.267 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='297ad631-38cc-4991-ab2b-afc8de0e6291' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:01.327 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dc89950>
+[ 2026-10-07 10:00:01.328 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f777e9d2-935a-4908-bc38-b35f76ea9870' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:01.383 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e2f50a43-e43b-4d2f-96f1-e7a2de1fdb1b' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:01.595 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f186100>
+[ 2026-10-07 10:00:01.597 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='df647b75-f405-49d8-bb7c-650b521a6d64' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:01.597 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dabbd20>
+[ 2026-10-07 10:00:01.599 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f826bba2-dffa-4b5c-8e9f-6f643d913d9a' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:01.934 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1868b0>
+[ 2026-10-07 10:00:01.937 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='39b3d9b5-13ab-4547-847a-69bd6f4a5a36' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:02.338 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dab8900>
+[ 2026-10-07 10:00:02.341 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='77d9de3a-5937-4cd0-b9c0-55f6457d6a55' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:02.430 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef58a50>
+[ 2026-10-07 10:00:02.431 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='74b7f9d0-0c85-4695-b1fe-0074a87d2905' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:02.491 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='2ca0d4b2-13bd-4685-bbce-21731d34d9e2' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:03.103 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='80ef193d-c57e-4277-b9e6-386e6df7d33d' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:03.104 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='438d5e74-d747-45d1-a19a-4232409c3272' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:03.508 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef59950>
+[ 2026-10-07 10:00:03.511 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d839aea2-5fc7-48fe-a943-93a9466f2cda' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:03.580 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='fcfa365d-0988-42e5-8767-1fcb991f6da9' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:03.886 | DEBUG    | exo.download.coordinator:_emit_existing_download_progress:362 ] DownloadCoordinator: Fetching and emitting existing download progress...
+[ 2026-10-07 10:00:04.006 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d24f4f17-7fea-49aa-9e44-e06af22a96c6' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:04.044 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeDownloadProgress(event_id='1ae5aab4-8390-4409-9137-da5a0212a80f' download_progress=DownloadCompl
+[ 2026-10-07 10:00:04.190 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='796b63af-9bf3-442c-a876-04c72138e65d' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:04.237 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeDownloadProgress(event_id='6d84f613-5976-4443-afd5-16957f8a24ea' download_progress=DownloadPendi
+[ 2026-10-07 10:00:04.367 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeDownloadProgress(event_id='79c676de-323b-4eef-9332-4680c00e422e' download_progress=DownloadCompl
+[ 2026-10-07 10:00:04.607 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04c720>
+[ 2026-10-07 10:00:04.607 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='94839901-ca4e-4d13-8e27-8e7013b869f5' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:04.648 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='21798914-09c1-49bb-ab9c-4c7945185e25' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:05.143 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:05.143 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:05.145 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:05.145 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:05.145 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:05.146 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:05.506 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dc8a700>
+[ 2026-10-07 10:00:05.507 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='7565dc6d-b674-4cbb-a770-a0bf143deea4' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:05.675 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f187720>
+[ 2026-10-07 10:00:05.676 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e728457c-72a2-40ee-941b-6eea26a079b7' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:05.757 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='aa07a942-4c0e-412c-bb3c-5864afadb035' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:06.731 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04da40>
+[ 2026-10-07 10:00:06.733 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f9990009-e873-481b-a1e9-df93d62d3a5d' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:06.734 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef59d70>
+[ 2026-10-07 10:00:06.736 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b37d54b7-cd21-4de2-b095-f3e9ad84de06' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:06.771 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef59650>
+[ 2026-10-07 10:00:06.773 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a5174a47-05ce-471e-b018-6d774bcf551d' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:06.873 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='bf2574c2-e3a5-4065-a4e4-a623e5296616' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:07.771 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ae6c01cd-177b-4b15-bf5c-bd79c0fddd11' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:07.878 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dc88db0>
+[ 2026-10-07 10:00:07.880 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='0431a709-70a5-407a-ba2e-6bde53e668cb' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:07.983 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='51e8a881-1dc2-443c-b5e3-fe25411fe4a3' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:08.062 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef59650>
+[ 2026-10-07 10:00:08.064 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeDownloadProgress(event_id='520770a6-f41c-4b5e-922d-7893008928cb' download_progress=DownloadCompl
+[ 2026-10-07 10:00:08.228 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d5b8d7b0-faeb-4654-925b-8e36c092fbca' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:08.228 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='075b987e-f4cb-4255-912a-5d3ec5503f58' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:08.252 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f184660>
+[ 2026-10-07 10:00:08.253 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeDownloadProgress(event_id='9271a348-42a7-4c42-8fe2-740456902234' download_progress=DownloadPendi
+[ 2026-10-07 10:00:08.394 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f184240>
+[ 2026-10-07 10:00:08.396 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeDownloadProgress(event_id='a8e548ae-6034-4629-8dab-ae449e93b56b' download_progress=DownloadCompl
+[ 2026-10-07 10:00:08.882 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef5bb10>
+[ 2026-10-07 10:00:08.884 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c696fbf0-e60f-4004-910e-3b0b2371ebb1' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:08.961 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f037390>
+[ 2026-10-07 10:00:08.962 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='44e4476b-df8c-472e-9883-51e512edf394' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:08.993 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04d770>
+[ 2026-10-07 10:00:08.995 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e0e270d3-2672-4c59-a7c3-9841792d620a' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:09.084 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ceca88fe-2ce7-4728-85ea-e19d8c12d946' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:09.395 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /metrics
+[ 2026-10-07 10:00:10.065 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04e3a0>
+[ 2026-10-07 10:00:10.067 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='45ee3139-90dc-4fb3-afec-3bfe42adc7f5' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:10.205 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='515b0910-59a1-4fec-b054-655f55f7825a' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:10.802 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='3bb4ffd0-ee71-411e-96f0-6720f11a6466' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:11.167 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1a4db0>
+[ 2026-10-07 10:00:11.170 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5da911cd-5d6e-406c-b04a-82f25384e134' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:11.308 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='774fdec3-5bc7-4e76-9050-5d54f0e4ca4c' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:11.850 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1a4e70>
+[ 2026-10-07 10:00:11.853 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d701fce9-9e05-4229-8bf6-8876500427e9' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:11.854 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04df20>
+[ 2026-10-07 10:00:11.855 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a9c8c70a-05d8-4ccd-895c-186212f41ca1' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:12.269 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f0372d0>
+[ 2026-10-07 10:00:12.271 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a09fbb13-4a4e-4a2e-a212-fb045d5b1605' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:12.390 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e73a610>
+[ 2026-10-07 10:00:12.397 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1f8ec47d-c8f3-4861-8ca6-1eec5a3fbec6' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:12.432 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a5e8979a-d31c-429d-bca9-72325ba45db8' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:13.378 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1a6790>
+[ 2026-10-07 10:00:13.380 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='934b8b3b-4849-42d8-812f-853d568c7571' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:13.411 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='993b881b-12d9-4b8c-ab8a-6010bc0cfb93' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:13.412 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9cb430e4-bcae-4fa2-b82d-b707e62dfcd8' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:13.535 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='2bcb94c5-5ce3-4171-9ec2-9f4911e94ad1' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:14.263 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1efc30d4-819a-4fef-8062-df070c7af26a' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:14.499 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d670330>
+[ 2026-10-07 10:00:14.501 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='df124dce-7f00-4288-b045-4f794141e898' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:14.617 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ae45be0f-84bf-438e-8ee7-f006a15e44d3' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:15.526 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef58c30>
+[ 2026-10-07 10:00:15.528 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='dd71a728-50f5-4cf7-9a67-061d52a5cacc' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:15.593 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef5a880>
+[ 2026-10-07 10:00:15.595 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='6cf6f48c-311f-478b-9530-bb6a58801082' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:15.716 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='bed1cc70-5ccb-48ee-8adf-66cbd0ba8532' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:16.696 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d957f90>
+[ 2026-10-07 10:00:16.698 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c44e848b-4a7c-497e-a7d0-5534a6e6eb23' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:16.814 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e6b2a98e-03da-4056-a1d4-8e7eb46faee0' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:17.037 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1841e0>
+[ 2026-10-07 10:00:17.039 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a881789b-6ac1-4087-8c1a-caec2ddb816d' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:17.040 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67bde0>
+[ 2026-10-07 10:00:17.042 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='53deaa8f-c199-4735-b213-2aa8ae8b7b52' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:17.798 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67bbd0>
+[ 2026-10-07 10:00:17.803 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e014490b-636b-4496-bc6c-e68994e0d1ef' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:17.819 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='240b6a17-edbd-44ac-bfe3-bd8e2fd072a0' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:17.901 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b2823d0a-df30-4c46-bed0-467a24dba324' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:18.607 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='062f36b9-056e-42df-bcc9-4d9f2fd210cc' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:18.608 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='48dca802-4b2d-43df-93bb-b72e2b934a07' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:18.897 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f037ab0>
+[ 2026-10-07 10:00:18.899 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='44f56056-28e2-4ba4-88b0-c94eafd00d73' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:18.988 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='319ea983-e365-4784-b0dc-128fa3e19338' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:19.058 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1a6dc0>
+[ 2026-10-07 10:00:19.059 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='df1cc5c6-c4a3-42b3-9dd6-f78b2b9442ce' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:20.008 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1a4c00>
+[ 2026-10-07 10:00:20.010 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c658709e-f145-431b-aaa4-8f66093500d1' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:20.077 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='cad1f477-8c48-4dc2-ac28-cdb43f5ce3c6' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:20.816 | WARNING  | exo.download.download_utils:fetch_file_list_with_cache:431 ] Ran into exception when fetching file list from HF.
+[ 2026-10-07 10:00:20.822 | WARNING  | exo.download.download_utils:fetch_file_list_with_cache:436 ] No cached file list for mlx-community/GLM-4.7-8bit-gs32 - using local file list
+[ 2026-10-07 10:00:20.825 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9799ad28-d609-4737-a9fe-2d25a2c9da39' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:20.853 | DEBUG    | exo.download.coordinator:_emit_existing_download_progress:482 ] DownloadCoordinator: Done emitting existing download progress.
+[ 2026-10-07 10:00:21.108 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d9552c0>
+[ 2026-10-07 10:00:21.110 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5491f40c-160f-4c8f-8752-27e9fcc6ff3a' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:21.175 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='aaf867b8-3f39-489f-bdef-8007b6070a0d' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:22.160 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d670cc0>
+[ 2026-10-07 10:00:22.163 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='6ac28895-1185-4b28-b243-c664612a9c4d' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:22.164 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef58db0>
+[ 2026-10-07 10:00:22.166 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a7c9c330-011a-48b8-ae5e-839a8b5c9f83' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:22.202 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f037f60>
+[ 2026-10-07 10:00:22.203 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a1f243e4-26be-4813-be0b-1269d75faf70' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:22.273 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='da4e3dc9-6b60-464d-8d10-7454a7f47376' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:22.436 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef5a9a0>
+[ 2026-10-07 10:00:22.439 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f66d1aac-fabc-47c7-84a5-dc3390ba8b05' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:23.303 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04d920>
+[ 2026-10-07 10:00:23.306 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='61cfc709-f5dc-4212-a168-da399c238087' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:23.374 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9368f37d-9624-4c4c-8920-8947693098b8' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:23.727 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='12ab5171-d331-41d8-8696-7ca5bbb17237' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:23.728 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a9fa917c-21c7-4f35-83db-295f72b1e31c' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:24.334 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5fa0f7a9-7a01-4e65-870d-1cfeb3076f9f' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:24.394 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /metrics
+[ 2026-10-07 10:00:24.403 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04cc00>
+[ 2026-10-07 10:00:24.404 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1efa08aa-45f3-478d-8698-cd4a3dacb68f' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:24.486 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='915581ea-3733-4345-8541-bfbdcdc38196' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:25.513 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04eee0>
+[ 2026-10-07 10:00:25.515 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e4f24e39-6489-47a5-a70f-b786a44a34fd' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:25.543 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04cf00>
+[ 2026-10-07 10:00:25.544 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1daa36a6-4290-4e43-b377-9af869260bb4' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:25.600 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='325744a8-5a4f-47eb-91b0-3de9995e9fd7' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:26.374 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='937a6961-558f-47be-a5f3-8de8d03a5dc3' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:26.609 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04e580>
+[ 2026-10-07 10:00:26.611 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b3058c4d-94d7-4d8d-a922-602a2d8099b5' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:26.722 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b546ce43-8816-49aa-8385-65875a5a1028' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:27.283 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04f5d0>
+[ 2026-10-07 10:00:27.286 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='55cefcd8-b350-430f-9cac-f865409b5647' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:27.288 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04f390>
+[ 2026-10-07 10:00:27.290 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5757cc2b-c651-4c63-8e38-98a6db3f15e5' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:27.712 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04c7e0>
+[ 2026-10-07 10:00:27.714 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='2d01068e-599d-49da-83dc-dd1224221737' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:27.848 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='35243882-0878-4701-b4c2-9848f317974f' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:27.867 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='7ad450f1-f216-413e-9714-84a6a670a2c0' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:28.337 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:28.340 | DEBUG    | exo.utils.info_gatherer.net_profile:check_reachability:70 ] Discovered node with unexpected node_id; ip=127.0.0.1, expected_node_id=86d154081e4fa661f9fc5b878d65e193, remote_node_id=87a89140d7c4b15b4131a9e86ee20e6f
+[ 2026-10-07 10:00:28.826 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04dce0>
+[ 2026-10-07 10:00:28.827 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='931f0ae1-e264-4e2b-b5e6-a5047d7b24ef' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:28.849 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='739e479e-81f7-4537-925e-e68d2999d2cb' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:28.850 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='776284b7-e2c2-49d1-bcb2-fae4cdb3f5a9' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:28.944 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e0dae391-1cd7-43c3-a208-3fb111ebc011' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:29.128 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dab8a20>
+[ 2026-10-07 10:00:29.129 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='579c0a07-42d1-440e-ac0a-7e888bade747' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:29.943 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f186940>
+[ 2026-10-07 10:00:29.946 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='34d8ee46-db05-4315-a9fe-a2be6acb03fe' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:30.046 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='94e6a931-294f-4b4f-a218-64be306c564e' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:30.845 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='99cb7de9-64cf-40d8-a689-7167e1b89625' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:31.042 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f04ad00>
+[ 2026-10-07 10:00:31.043 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c349c4cb-7a17-48c6-a0e9-ded84455cb77' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:31.131 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='82f7b123-4d6a-4ff3-97e6-933fc720525b' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:31.266 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dc28090>
+[ 2026-10-07 10:00:31.267 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f2351961-002e-4498-9a17-b562c80b507f' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:32.142 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67a100>
+[ 2026-10-07 10:00:32.144 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f07c72fe-c707-4a37-ad9c-9de305757cd7' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:32.222 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='fd86778c-b433-4e26-9bc3-111b6c5ea5cf' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:32.417 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef59c20>
+[ 2026-10-07 10:00:32.419 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ec641457-ae53-43cc-a860-b4100518870e' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:32.420 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1a4cf0>
+[ 2026-10-07 10:00:32.422 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='08d2d365-9994-48f4-9c7a-6d8170e8c2c7' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:32.459 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67a100>
+[ 2026-10-07 10:00:32.461 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='247ec6bb-5fb6-4528-b10b-d530f1210810' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:33.165 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:33.165 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:33.168 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:33.168 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:33.168 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:33.170 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:33.231 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d670a20>
+[ 2026-10-07 10:00:33.233 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='08c1387d-36cb-4005-843d-9dfbeab63af9' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:33.316 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c4375041-51f7-4b54-a9a7-9f7f6db5ddb2' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:33.967 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9b2daeea-0397-488a-94df-c1a22faf618e' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:33.968 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1379f2a2-cd65-4d33-8c39-5cfb2ec891ed' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:34.321 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67b0c0>
+[ 2026-10-07 10:00:34.325 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='7544e55a-fb22-4f5e-a765-78e46d36ea83' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:34.387 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='fb4e5bbe-d9ad-4b02-81cd-3efc5a2a8c79' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:34.398 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='bb66ccbe-5d86-4003-839f-d9d43b64cbfa' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:35.427 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d670f90>
+[ 2026-10-07 10:00:35.430 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='eed32171-2687-49c7-96a3-42c0b302ef99' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:35.494 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='387fb04a-4ebb-423f-9cda-ef2a213bd922' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:35.566 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e522880>
+[ 2026-10-07 10:00:35.567 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='6f5481fc-a9b5-4faf-8fff-cdba6ccbf607' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:36.530 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67a3d0>
+[ 2026-10-07 10:00:36.532 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='13d4e18f-604b-4d99-822e-029ce7d6aed6' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:36.606 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f4ab8da1-3416-4892-a009-e423068a852f' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:37.614 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e522670>
+[ 2026-10-07 10:00:37.616 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='25a81cca-4a62-49f6-95a9-27c1f9b8b74e' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:37.618 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e5234b0>
+[ 2026-10-07 10:00:37.620 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='76808f0f-3ac2-4d4b-85e9-2d43efaa2a85' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:37.622 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e523270>
+[ 2026-10-07 10:00:37.624 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d45aedcd-98f8-4350-9b9d-2f2f10e6e6a9' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:37.710 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5cf454a9-b1b2-478e-885a-f8cc73d58843' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:37.917 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='cec371b9-eea6-4836-8c8d-8eaa0fe47a72' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:38.727 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d957e40>
+[ 2026-10-07 10:00:38.730 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ec826ac8-e727-4477-be81-bb4d0226eefa' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:38.818 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ba3833f4-ff92-4a75-9ca3-afd26bc150a2' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:39.095 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e3070b4c-2a8f-4b07-80af-e07dcf2daabf' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:39.096 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e035a81c-a617-40ba-b12f-83ff02e16720' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:39.198 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e523ed0>
+[ 2026-10-07 10:00:39.199 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b8050d55-7faf-4c18-afb3-6df22edcefe5' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:39.394 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /metrics
+[ 2026-10-07 10:00:39.839 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e522610>
+[ 2026-10-07 10:00:39.841 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='8c2f545d-74cc-456f-8b85-0a7e8f751dec' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:39.941 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='35e37035-424c-4f05-b8d0-cc2e6f7b4d5d' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:40.867 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='0fd247be-ae51-4c12-a934-788fc4af34f3' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:40.947 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e67a8b0>
+[ 2026-10-07 10:00:40.949 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a6f2437e-4109-4072-9275-ebcf4d370824' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:41.032 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c27b2cae-100c-4b8b-9932-555a9a8daacf' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:42.049 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e6788a0>
+[ 2026-10-07 10:00:42.052 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e2cdbb33-2ad5-4a7e-a831-b54732e9024a' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:42.144 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='38d47519-3ee7-44ad-af28-304610d9fe0b' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:42.508 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d5f8870>
+[ 2026-10-07 10:00:42.510 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1701852c-46b6-4b7c-a1a8-66ebc870c43e' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:42.733 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1841e0>
+[ 2026-10-07 10:00:42.734 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='7d71bf95-7710-40af-b5a2-4b7e8fa5cd38' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:42.735 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef58030>
+[ 2026-10-07 10:00:42.737 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1d8800fe-dbd8-4406-8b54-d214e8d66277' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:43.146 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1861f0>
+[ 2026-10-07 10:00:43.149 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='2497ab42-1e44-4b32-aad2-a7ed4ba6676a' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:43.256 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='82c1e423-7734-49d5-8926-b21b0f663e67' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:44.217 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='e2844daf-1709-4a93-a46a-a372e21ccfe3' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:44.218 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d8f560e7-211f-4ebc-b86d-b7d9e562b9a5' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:44.242 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d9552c0>
+[ 2026-10-07 10:00:44.243 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='8aa2a110-2789-4215-818a-7412b004a700' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:44.357 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c994b91a-6be9-4517-953d-68d52d4bfb5d' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:44.450 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='4aee1f84-7632-49d0-844c-db32fd3c7c58' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:45.338 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f049e00>
+[ 2026-10-07 10:00:45.340 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='dd63f3d3-a81b-4403-a78a-dad522873fc3' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:45.454 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9db6bd31-4f18-438e-bd16-358f83251d93' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:45.584 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f185080>
+[ 2026-10-07 10:00:45.585 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b99087bf-7a29-4132-8071-1dee21ee192d' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:46.445 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10ef5a670>
+[ 2026-10-07 10:00:46.446 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='52fcaf20-d569-47f1-bfeb-34914b4056af' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:46.552 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='aa5ef548-7b00-4aee-bbfa-63269cf808c9' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:47.527 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d86edc0>
+[ 2026-10-07 10:00:47.529 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='da6cfba5-260b-473f-ab9b-0f3f3ef06030' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:47.647 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a80d1e0f-c6c6-4881-9963-93f7b64ba6f1' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:47.848 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d86dbc0>
+[ 2026-10-07 10:00:47.850 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='310b8623-9e2c-4ea7-8a03-10446a0d50f3' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:47.851 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f037f60>
+[ 2026-10-07 10:00:47.853 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='10a08795-bed7-4635-a576-b8eeb49be124' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:47.963 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='07547744-e505-4553-bf62-0041dad02cda' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:48.616 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d48c690>
+[ 2026-10-07 10:00:48.618 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='540a88bd-131f-49e1-8b41-19b150c63f76' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:48.735 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ffad95ce-462c-49c1-bf41-183b64b244a3' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:49.271 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f049110>
+[ 2026-10-07 10:00:49.272 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='4f92e28b-20d1-455f-a4e6-ce7d021eabcf' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:49.334 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='cf3c817d-6162-4b93-bab8-96fa7700f710' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:49.335 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='cf594a1f-55f0-455b-b085-745b55d70a13' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:49.709 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d627390>
+[ 2026-10-07 10:00:49.711 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f0a435da-1cb7-4fff-b9df-46d4681cb3eb' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:49.832 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='592016f6-46c9-40b4-8a90-6c7d5a587bbe' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:50.808 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f184840>
+[ 2026-10-07 10:00:50.811 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='f1f63c9d-786f-4816-ab5f-84756eb4c797' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:50.889 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='dfcf088d-f12a-4634-98dd-e30084fadbee' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:50.951 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d510fefe-3ceb-410d-9fb4-67197a64f50f' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:51.893 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d377210>
+[ 2026-10-07 10:00:51.896 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='ac13102c-126c-42c9-b5ee-b8995ce9ad9c' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:52.064 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='bfc97df4-36be-4be1-adf8-3eeda08849a2' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:52.549 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f187cc0>
+[ 2026-10-07 10:00:52.551 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='0f93f5c0-d6ee-4a00-8f51-c91c5ec57250' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:52.964 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1846f0>
+[ 2026-10-07 10:00:52.966 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='807b996b-f7d8-445d-aea6-3662ea611380' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:52.967 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e522a00>
+[ 2026-10-07 10:00:52.969 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='84ccfecf-7497-4b7a-b7bd-d8f2ea7f8866' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:52.993 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d5f8870>
+[ 2026-10-07 10:00:52.994 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c9e7bcb6-f8fc-48c1-acd3-03512e1e865b' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:53.188 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='1c5d06f3-2257-425f-84a3-0ccf0b9534ea' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:54.090 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f0379f0>
+[ 2026-10-07 10:00:54.092 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='65bb95cd-0946-4d32-9e69-17a6c16b7459' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:54.297 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5101a063-a08e-475c-a527-bdb92c387efc' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:54.393 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /metrics
+[ 2026-10-07 10:00:54.455 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='688b5524-5b00-457a-8616-dac9ccfce595' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:54.456 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='7032bc74-acd9-44af-bd19-679e07510138' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:54.482 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='c19ec9a9-6cd4-4416-9828-ed0c57ed03ed' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:55.200 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d86dbc0>
+[ 2026-10-07 10:00:55.202 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='5aa70339-354a-4ffa-8d4a-1a56a30d16b9' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:55.386 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='49bd6208-77de-4cf1-bcb5-78446c09d6c8' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:55.604 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10d627390>
+[ 2026-10-07 10:00:55.606 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='71c64479-1eb5-417a-8dd8-29661feaf68b' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:56.291 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e523540>
+[ 2026-10-07 10:00:56.293 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='6632480a-41f6-45b8-88bc-824f5db14d4d' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:56.359 | DEBUG    | exo.api.main:_log_requests:340 ] API request: GET /node_id
+[ 2026-10-07 10:00:56.363 | DEBUG    | exo.utils.info_gatherer.net_profile:check_reachability:70 ] Discovered node with unexpected node_id; ip=127.0.0.1, expected_node_id=86d154081e4fa661f9fc5b878d65e193, remote_node_id=87a89140d7c4b15b4131a9e86ee20e6f
+[ 2026-10-07 10:00:56.375 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='662b5f59-4681-4f55-87dc-0e35630f923e' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:56.476 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='cf31e63a-771e-4b1b-9318-cf7b209ff84b' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:57.094 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='41e7d516-e5d9-44f7-8f11-bf9ace870a98' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:57.405 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f0496e0>
+[ 2026-10-07 10:00:57.407 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='d9c6d8e9-5768-4950-80d3-d4568be3e855' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:57.581 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='2dac36dc-83ef-49cb-a4ac-306a8891f7b0' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:58.013 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='b6673324-8893-450d-9bfe-703379cdb515' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:58.089 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f185080>
+[ 2026-10-07 10:00:58.091 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9dc5cc5f-ec29-4597-9d56-4f1a33e4edcc' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:58.092 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f049710>
+[ 2026-10-07 10:00:58.094 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='09f18c62-0c59-48a5-9d4e-e74672cdeb0e' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:58.498 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10dc28ba0>
+[ 2026-10-07 10:00:58.500 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='9e72cc01-256a-4561-9198-7c3c4524e4de' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:58.670 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='a7bed9d9-6052-4db0-bc5d-7099acf01d23' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:59.342 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10e521080>
+[ 2026-10-07 10:00:59.344 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='517585ef-3bd7-4dff-85b3-dadec5b00e25' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:59.576 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='22ca70aa-690f-4e6a-b5cf-a660a24cfb34' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:59.577 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='09580465-d56a-4de4-8e67-4e0a59adce01' node_id='87a89140d7c4b15b4131a9e86e
+[ 2026-10-07 10:00:59.598 | DEBUG    | exo.routing.router:_networking_recv:190 ] <builtins.Message object at 0x10f1b3450>
+[ 2026-10-07 10:00:59.599 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='643f6077-c32c-45a4-b2ed-add6f61fea35' node_id='86d154081e4fa661f9fc5b878d
+[ 2026-10-07 10:00:59.765 | DEBUG    | exo.master.main:_index_apply_broadcast:667 ] Master indexing event: NodeGatheredInfo(event_id='dfa3e8cd-b23d-4491-94b9-d0d3f0e516a4' node_id='87a89140d7c4b15b4131a9e86e
