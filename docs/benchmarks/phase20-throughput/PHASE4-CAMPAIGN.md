@@ -161,6 +161,43 @@ is inside the ±noise of these two sessions).
 ./start_cluster.sh` → post-boot matmul canary + **MEASURED read-bandwidth canary** (both nodes).
 Then `p2_off_measure.sh`: benign 4 + agentic 6, same harness. This is the same-build, same-session
 kill-switch arm for the ≥3 ms gate. Log: `p4/p2_off_deploy.log`. **Spent 2026-10-08 ~17:36 CDT.**
+Deploy verified: "Nodes synchronized on commit 576e9d279" → READY (2/2), post-boot matmul canary
+**14.85/14.86** healthy, `DSV41_MOE_ALLSUM_BF16=0` confirmed in BOTH runners' env.
+
+### 4d. P2 OFF-arm result + A/B verdict — DONE
+
+| arm | MOE_ALLSUM_BF16 | reps | ms/round median | decode t/s | mean_accepted |
+|---|---|---|---|---|---|
+| benign 20K | **1 (bf16, shipped)** | 4 | **118.53** (118.17,118.53,118.57) | **32.36** | 2.9314 |
+| benign 20K | **0 (fp32, this boot)** | 4 | **121.21** (122.04,121.21,120.92) | **31.06** | 2.7783 |
+| agentic 91K | **1 (bf16, shipped)** | 6 | **129.90** (129.89,130.08,129.90,129.76,130.16) | **23.62** | 2.0611 |
+| agentic 91K | **0 (fp32, this boot)** | 6 | **133.22** (132.36,132.98,133.22,133.27,133.75) | **23.63** | 2.1575 |
+
+**A/B (bf16-ON minus fp32-OFF):**
+```
+agentic : 133.22 − 129.90 = 3.32 ms/round  →  PASS (≥3 ms bar, ranges DISJOINT)
+benign  : 121.21 − 118.53 = 2.68 ms/round  →  below the 3 ms bar
+mean_accepted: agentic ON 2.0611 vs OFF 2.1575 (−0.096, still > 2.0) ; benign 2.9314 vs 2.7783
+```
+- **Gate verdict: PASS on agentic** (3.32 ms ≥ 3 ms; the ON range max 130.16 < OFF range min 132.36,
+  so it is robust to rep noise). mean_accepted stays >2.0 (2.06) → the acceptance leg passes; note
+  bf16 is marginally *lower* acceptance than fp32 (2.06 vs 2.16) — a mild quality direction, already
+  accepted at the 2026-10-07 promotion (battery PASSED on the bf16 arm then).
+- **Caveat (honest):** this is a **cross-boot** A/B (the env is set at launch, so no same-boot
+  kill-switch is possible). The ON boot reproduced the §P3B next17-defaults point to 0.03–0.17 ms,
+  and both boots show the same benign:agentic ratio, so the ~3 ms is far more likely the lever than
+  boot drift — but it is NOT a same-boot measurement and is labelled as such.
+- **Consequence: no next19 build is needed.** `DSV41_MOE_ALLSUM_BF16=1` is **already the shipped
+  default** and this A/B *validates* it clears the Phase-4 ≥3 ms bar. Production stays as-is.
+- **Budget: P2 spent 1 relaunch (R2, the OFF arm).**
+
+## 4e. ADAPTIVE GAMMA — **PARKED** (feature-blocked, one paragraph per the brief)
+
+The adaptive-gamma lever is **feature-blocked** and gets **zero relaunches** this campaign: the
+`GammaPolicy.update()` hook is **never called** anywhere in the code path, and the candidate γ set
+is **hardcoded to {1,2,3,4}** — so γ5 (a benign-only regime) can never be selected adaptively. Until
+the update path is wired and the candidate set is opened, adaptive gamma cannot be measured as a
+lever; it is parked, not attempted. No build, no budget.
 
 
 ## 5. P3 — loop-2 consumer-index-skip, PREFILL (next20) — **ALREADY SHIPPED; nothing to do**
