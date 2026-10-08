@@ -158,8 +158,7 @@ def test_classify_config_retunable():
     cfg = json.loads(json.dumps(gb.DEFAULT_CLASSIFY_CONFIG))
     cfg["categories"]["comm"]["patterns"].append(r"acme_nic")
     comp = gb._compile_config(cfg)
-    assert gb.classify_path(["Thread", "start", "acme_nic_poll"], comp) != "comm" or True
-    # frame itself is the leaf -> comm
+    # the frame itself is the leaf -> comm
     assert gb.classify_path(["Thread", "acme_nic_poll"], comp) == "comm"
     # with the default config the same frame is unclassified
     comp0 = gb._compile_config(gb.DEFAULT_CLASSIFY_CONFIG)
