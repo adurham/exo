@@ -28,9 +28,11 @@ documented chunk-shape effect of the body, never through an unverified draft.
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from collections.abc import Generator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TextIO
 
 import mlx.core as mx
 
@@ -331,6 +333,132 @@ def _ensure_capacity_for_round(cache: Any, rows: int) -> None:
         ) from e
 
 
+def _round_prof_hook_for(
+    engine: Dsv41Engine, round_prof: int
+) -> _RoundProf | None:
+    """The engine's per-worker ``_RoundProf``, attached lazily -- or ``None``.
+
+    ``mode < 1`` returns ``None`` *immediately*: the caller's only trace of
+    ``round_prof`` is then its ``if hook is None`` tests, so the off path
+    builds no object and takes no timer branch (byte-identical).
+
+    The timer object is cached on the engine (one per worker), so the JSONL
+    file is opened once and survives across requests.
+    """
+    if round_prof < 1:
+        return None
+    hook = engine._round_prof  # pyright: ignore[reportPrivateUsage]
+    if not isinstance(hook, _RoundProf):
+        hook = _RoundProf(round_prof, rank=engine.device_rank)
+        engine._round_prof = hook  # pyright: ignore[reportPrivateUsage]
+    elif hook.mode != round_prof:
+        hook.mode = round_prof
+    return hook
+
+
+class _RoundProf:
+    """Opt-in per-round phase timer (PROF 1 host-wallclock, 2 eval-fenced).
+
+    One instance per worker, created lazily by
+    :func:`_round_prof_hook_for`. It holds the wallclock readings a round
+    takes at its natural sync points and appends them, one JSONL line per
+    round, to ``EXO_DSV41_ROUND_PROF_PATH`` (default
+    ``/tmp/dsv41_round_prof.<rank>.jsonl``, ``<rank>`` filled with the
+    worker's ``device_rank``), flushed per line so a killed runner still
+    leaves every round it completed.
+
+    Lifecycle per round, split across the two halves of the round's span:
+      * ``enter_fields`` -- called at the END of ``_one_round`` with that
+        round's bracket milliseconds (``draft_build_ms``,
+        ``verify_block_ms``, ``tail_bookkeep_ms``) plus ``gamma`` and
+        ``n_accepted``. It stamps ``round_idx`` (a per-worker counter) and
+        stages the row.
+      * ``flush_pending`` -- called by the engine's ``_rounds`` AFTER the
+        consumer drained the round's batch (i.e. after the generator resumed
+        from its ``yield``), adding ``round_total_ms`` and the ``emit_ms``
+        span measured across that suspension, then writing one line.
+
+    IT MUST NEVER KILL A RUNNER. The file ``open`` and the ``write``/``flush``
+    are each wrapped: a failure is logged ONCE and the hook self-disables
+    (``_disabled``), returning to a pure no-op, rather than propagating into
+    the decode loop. Every row also carries a ``rank`` tag so the two TP
+    workers' files can be told apart when merged.
+    """
+
+    __slots__ = ("mode", "rank", "path", "_fh", "_disabled", "_n_rounds", "_pending")
+
+    def __init__(self, mode: int, rank: int = 0) -> None:
+        self.mode = mode
+        self.rank = rank
+        self.path = _round_prof_path_from_env().replace("<rank>", str(rank))
+        self._fh: TextIO | None = None
+        self._disabled = False
+        self._n_rounds = 0
+        self._pending: dict[str, float | int] | None = None
+        try:
+            self._fh = open(self.path, "a", buffering=1)  # noqa: SIM115
+        except Exception as exc:  # noqa: BLE001 - instrumentation must never raise
+            self._disabled = True
+            logger.warning(  # pyright: ignore[reportUnknownMemberType]
+                f"[DSV41] round_prof disabled: cannot open {self.path} "
+                f"({type(exc).__name__}: {exc})"
+            )
+
+    def enter_fields(
+        self,
+        *,
+        gamma: int,
+        n_accepted: int,
+        draft_build_ms: float,
+        verify_block_ms: float,
+        tail_bookkeep_ms: float,
+    ) -> None:
+        """Stage one round's bracket fields; ``round_idx`` is assigned here.
+
+        The engine-side spans (``round_total_ms``, ``emit_ms``, ``rank``) are
+        added later by :meth:`flush_pending`, because ``emit_ms`` only exists
+        after the generator resumes from the round's ``yield``.
+        """
+        self._n_rounds += 1
+        self._pending = {
+            "round_idx": self._n_rounds,
+            "gamma": gamma,
+            "n_accepted": n_accepted,
+            "draft_build_ms": draft_build_ms,
+            "verify_block_ms": verify_block_ms,
+            "tail_bookkeep_ms": tail_bookkeep_ms,
+        }
+
+    def flush_pending(self, *, round_total_ms: float, emit_ms: float) -> None:
+        """Complete the staged row with the engine-side spans and write it."""
+        pending = self._pending
+        if pending is None:
+            return
+        self._pending = None
+        pending["round_total_ms"] = round_total_ms
+        pending["emit_ms"] = emit_ms
+        pending["rank"] = self.rank
+        if self._disabled or self._fh is None:
+            return
+        try:
+            self._fh.write(json.dumps(pending, separators=(",", ":")) + "\n")
+            self._fh.flush()
+        except Exception as exc:  # noqa: BLE001 - instrumentation must never raise
+            self._disabled = True
+            logger.warning(  # pyright: ignore[reportUnknownMemberType]
+                f"[DSV41] round_prof disabled: write to {self.path} failed "
+                f"({type(exc).__name__}: {exc})"
+            )
+
+
+def _round_prof_path_from_env() -> str:
+    """JSONL dump path for the per-round timer (``<rank>`` filled per worker)."""
+    raw = os.environ.get("EXO_DSV41_ROUND_PROF_PATH")
+    if raw is None or raw.strip() == "":
+        return "/tmp/dsv41_round_prof.<rank>.jsonl"
+    return raw
+
+
 def _one_round(
     engine: Dsv41Engine,
     *,
@@ -366,15 +494,39 @@ def _one_round(
     change to the prefill path. If a future revision passes the prefill taps
     in, the only change here is to append them before the first draft.
 
-    ``round_prof`` selects a per-round instrumentation mode (0 = off, 1 =
-    host-wallclock timer, 2 = eval-fenced timer). It is accepted here so the
-    call chain (``_generate -> _rounds -> _one_round``) is wired end to end, but
-    it is deliberately a NO-OP for now: the timer itself lands in a later
-    change, so this round is byte-identical for every value. The mode is
-    identical on both TP ranks (it rides in the task params), so a per-request
-    mode can never diverge across ranks.
+    ``round_prof`` selects a per-round instrumentation mode. 0 (or unset)
+    is OFF and this round is byte-identical: the only trace of the mode on
+    that path is one ``hook is None`` test. 1 = host-wallclock timer (no
+    added ``mx.eval``; the numbers are taken at sync points the round
+    already has, so it is non-perturbing). 2 = the same timer with an
+    ``mx.eval`` of each deferred graph at its bracket end, so every phase is
+    billed to itself instead of draining inside the NEXT round's verify.
+
+    The mode is identical on both TP ranks (it rides in the task params), so
+    a per-request mode can never diverge across ranks -- if it did, a
+    mismatched number of ``mx.eval``s would deadlock the collectives.
+
+    PROF=1 brackets (see ``docs``/phase-1 design Q6):
+      * ``draft_build`` -- around ``head.draft(...)`` + the ``verify_in``
+        concat: the draft's HOST graph-build only (sub-ms); its GPU work is
+        reached by the verify graph and billed to ``verify_block``.
+      * ``verify_block`` -- around the verify forward through its single
+        ``mx.eval(logits)``: the one honest blocking bracket. It absorbs the
+        verify forward, the draft's GPU compute, the compiler's per-layer
+        host round-trips, AND the PREVIOUS round's deferred rollback/
+        append_ctx tail (both queue lazy work with no eval and drain here).
+      * ``tail_bookkeep`` -- the post-eval accept/rollback/append_ctx
+        bookkeeping: host graph-build + lazy queueing, eval-free (its
+        compute is billed to the next round's ``verify_block``).
+    PROF=2 adds an ``mx.eval`` at the close of ``draft_build`` and of the
+    ``tail_bookkeep`` bracket (which spans both ``spec.rollback`` and
+    ``head.append_ctx``), so each drains its own deferred work. PROF=2 is
+    deliberately SERIALIZING: never quote a PROF=2 round time as the
+    production round time.
+    A single JSON line is emitted per round by the engine's ``_rounds``
+    span (``_RoundProf``), carrying every bracket plus ``round_total``.
     """
-    del round_prof  # timer lands in the next change; keep this round byte-identical
+    hook = _round_prof_hook_for(engine, round_prof)
     started = time.perf_counter()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
     if head is None:
@@ -383,7 +535,13 @@ def _one_round(
         logits = model(anchor, cache, last_logit_only=True)
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
         _row_logprobs(logits, logprobs, lp_out)
-        return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
+        elapsed = (time.perf_counter() - started) * 1e3
+        if hook is not None:
+            hook.enter_fields(
+                gamma=1, n_accepted=1,
+                draft_build_ms=0.0, verify_block_ms=elapsed, tail_bookkeep_ms=0.0,
+            )
+        return [next_token], elapsed, 1, 1
 
     from mlx_lm.models.deepseek_v41 import spec
 
@@ -413,7 +571,16 @@ def _one_round(
             "drafting from the next round (the prefill forward carries no taps "
             "-- see rounds._one_round)."
         )
-        return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
+        elapsed = (time.perf_counter() - started) * 1e3
+        if hook is not None:
+            # The priming round has no draft: it steps plainly and feeds the
+            # draft window. Its append_ctx graph is lazy, so -- like every
+            # deferred tail -- it drains in the NEXT round's verify_block.
+            hook.enter_fields(
+                gamma=1, n_accepted=1,
+                draft_build_ms=0.0, verify_block_ms=elapsed, tail_bookkeep_ms=0.0,
+            )
+        return [next_token], elapsed, 1, 1
 
     gamma = int(policy.next()) if policy is not None else 1
     # Speculative verify feeds the anchor + EVERY drafted row in ONE forward
@@ -421,6 +588,7 @@ def _one_round(
     # for that whole worst case here, at the eval-clean boundary.
     _ensure_capacity_for_round(cache, 1 + gamma)
     position = int(cache.offset)
+    t_draft = time.perf_counter()
     drafted = head.draft(
         anchor.reshape(-1),  # DSparkHead.draft takes [b] anchor ids
         getattr(model, "embed", None),
@@ -435,7 +603,23 @@ def _one_round(
     verify_in = mx.concatenate(
         [anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1
     )
+    draft_build_ms = 0.0
+    if hook is not None:
+        # PROF=1: host graph-build only (sub-ms); the draft's GPU work is
+        # reached by the verify graph and billed to verify_block. PROF=2:
+        # force the draft + its window writes so the draft stage is drained
+        # here. (The per-stage ``draft_stage{0,1,2}`` split from the design's
+        # Q6b is a follow-up: it needs an eval hook inside ``DSparkHead``.)
+        if hook.mode >= 2:
+            # Force the draft + its window writes (R1 force expressions) so the
+            # draft stage is billed here. Untyped mlx objects -> local ignores.
+            mx.eval(
+                drafted,  # pyright: ignore[reportUnknownArgumentType]
+                [w.win_kv for w in draft_state],  # pyright: ignore[reportAny]
+            )
+        draft_build_ms = (time.perf_counter() - t_draft) * 1e3
     snapshot = spec.snap(cache, position)
+    t_verify = time.perf_counter()
     if logprobs:
         logits, taps, lp = model(verify_in, cache, return_taps=True, argmax=True,
                                  logprobs=logprobs)
@@ -443,6 +627,9 @@ def _one_round(
         logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
         lp = None
     mx.eval(logits)
+    verify_block_ms = 0.0
+    if hook is not None:
+        verify_block_ms = (time.perf_counter() - t_verify) * 1e3
     stashes = spec.stashes(cache)
     target = [int(v) for v in logits[0]]
     draft = [int(v) for v in drafted[0]]
@@ -465,9 +652,32 @@ def _one_round(
         # committed[i] == target[i] (accepted drafts match the target), so row
         # i of the verify forward carries committed token i's log-probs.
         _rows_logprobs(lp, len(committed), lp_out)
+    t_tail = time.perf_counter()
     committed_position = position + accepted + 1
     spec.rollback(cache, snapshot, committed_position, stashes)
+    if hook is not None and hook.mode >= 2:
+        # rollback is lazy (O(1) carry rebuild, no eval); force its destination
+        # so its compute is billed here, not to the NEXT round's verify.
+        mx.eval(
+            [lc.comp_state.kv_state for lc in cache.layers  # pyright: ignore[reportAny]
+             if lc.comp_state is not None]  # pyright: ignore[reportAny]
+        )
     head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)
+    tail_bookkeep_ms = 0.0
+    if hook is not None:
+        if hook.mode >= 2:
+            # append_ctx is the main_proj GEMM + each stage's ring write; force
+            # the rings so this stage drains here too.
+            mx.eval(
+                [w.win_kv for w in draft_state]  # pyright: ignore[reportAny]
+            )
+        tail_bookkeep_ms = (time.perf_counter() - t_tail) * 1e3
+        hook.enter_fields(
+            gamma=gamma, n_accepted=accepted,
+            draft_build_ms=draft_build_ms,
+            verify_block_ms=verify_block_ms,
+            tail_bookkeep_ms=tail_bookkeep_ms,
+        )
     return (
         committed,
         (time.perf_counter() - started) * 1e3,

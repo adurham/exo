@@ -95,6 +95,7 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _one_round,
     _queue_of,
     _refuse_unsupported,
+    _RoundProf,  # pyright: ignore[reportPrivateUsage]
     _row_logprobs,
     _spec_policy,
     _stop_index,
@@ -359,6 +360,12 @@ class Dsv41Engine(Engine):
     #: for the >30 s spacing watchdog. ``0.0`` (never called) is treated as
     #: "first call" and never warns.
     _last_fence_heartbeat_monotonic: float = field(default=0.0, init=False)
+    #: Opt-in per-round phase timer (PROF 1/2), attached lazily on the first
+    #: round that requests it (``rounds._round_prof_hook_for``). ``None``
+    #: whenever ``EXO_DSV41_ROUND_PROF`` / the request's ``round_prof`` is 0,
+    #: which is what keeps the off path byte-identical (the decode loop's
+    #: only trace of the mode is a ``None`` test).
+    _round_prof: _RoundProf | None = field(default=None, init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -1046,10 +1053,17 @@ class Dsv41Engine(Engine):
         )
         n = 0
         token = anchor
+        emit_start = time.perf_counter()
         while n < max_tokens:
             active = self._active
             self._check_cancel(active.task.task_id if active is not None else None)
+            # PROF emit boundary: the span since the last round's ``yield``
+            # resumed is the consumer's drain of that batch (detokenize ->
+            # parse -> send) plus this ``_check_cancel``. It is added to the
+            # PENDING row, right before this round overwrites it.
+            emit_ms = (time.perf_counter() - emit_start) * 1e3
             lps: list[Any] = []
+            round_start = time.perf_counter()
             committed, _round_ms, _accepted, _gamma = _one_round(
                 self,
                 model=self.loaded.model,
@@ -1062,6 +1076,10 @@ class Dsv41Engine(Engine):
                 lp_out=lps if logprobs else None,
                 round_prof=round_prof_for_request,
             )
+            round_total_ms = (time.perf_counter() - round_start) * 1e3
+            prof = self._round_prof
+            if prof is not None:
+                prof.flush_pending(round_total_ms=round_total_ms, emit_ms=emit_ms)
             # Cumulative spec counters (deltas across requests = live
             # acceptance rate; _accepted == _gamma means a fully-accepted round).
             if head is not None:
