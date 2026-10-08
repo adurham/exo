@@ -17,7 +17,7 @@ total −56.04 ms/round. mean_accepted unchanged across arms.
 
 Verification: R8a battery CLEAN (needles 6/6, tools 10/10, prose 0 dirty, park PASS); guard present in the
 installed venv module on both nodes; post-boot canary healthy; launcher "Nodes synchronized on commit
-576e9d279" + READY 2/2; post-ship parity smoke (benign 3×20K) — log `/tmp/p3b/ship_smoke.log`.
+576e9d279" + READY 2/2; post-ship parity smoke **PASS** (benign 3×20K g3 = 118.60 ms/round / 31.4 t/s; reproduced the pre-ship 118.56 to 0.04 ms; `/tmp/p3b/ship_smoke.json`).
 
 Reproduction: driver + scripts `~/.hermes/cache/scratch/p3b/{p3b_driver.py, ship_next17.sh}`; harness and
 guard `/private/tmp/phase20-campaign/bench/`; artifacts `docs/benchmarks/phase20-throughput/raw/p3b/`
