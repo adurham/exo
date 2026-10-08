@@ -120,13 +120,13 @@ def stub_guard():
         L.GUARD_OVERRIDE = prev
 
 
-def _records_from(tmp_path, chunk, **run_kw):
+def _records_from(tmp_path, chunk, rows_per_s=200.0, **run_kw):
     """Run a chunk against the mock server and return the JSONL records."""
     log_path = str(tmp_path / "exo.log")
     out_dir = str(tmp_path / "out")
     # sleep=False: the mock derives log timestamps (prefill_s = rows/rows_per_s)
     # instead of real sleeping, so rows/s is exact and tests are fast.
-    with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False) as srv:
+    with M.MockExoServer(log_path, rows_per_s=rows_per_s, sleep=False) as srv:
         argv = [chunk, "--api", srv.base_url, "--out-dir", out_dir,
                 "--log-source", f"studio1={log_path}"]
         if run_kw.get("reps"):
@@ -366,14 +366,19 @@ def test_mock_rewind_modeling_branching(tmp_path, stub_guard):
 
 
 def test_fresh_feed_has_no_turn_reuse(tmp_path, stub_guard):
-    rc, recs, _ = _records_from(tmp_path, "fresh100k")
+    rc, recs, _ = _records_from(tmp_path, "fresh100k", rows_per_s=275.0)
     assert rc == L.EXIT_OK
     assert len(recs) == 1
     r = recs[0]
     assert r["kind"] == "fresh"
     assert r["has_turn_reuse"] is False
     assert r["rows_per_s_log"] is None
-    assert r["rows_per_s_ttft"] is not None            # falls back to prompt/ttft
+    # FIX 3: the fresh rate prefers the engine's own generation_stats prompt_tps
+    # (275) -- non-null even though the reasoning stream's content is '';
+    # rows_per_s_ttft remains as the TTFT cross-check.
+    assert r["rows_per_s_fresh"] == 275.0
+    assert r["prompt_tps"] == 275.0
+    assert r["rows_per_s_ttft"] is not None
 
 
 # ============================================================ summarize tests
@@ -915,6 +920,151 @@ def test_record_collapse_uses_base_actual_depth():
     assert r_ok["collapsed"] is False and r_ok["cache_hit"] is False
     r_bad = mk(18206, 2048, 20254, 20000)      # far below base depth -> collapsed
     assert r_bad["collapsed"] is True
+
+
+# ============================================ FIX 3: reasoning_content + fresh rate
+# LIVE bug: this model is a REASONING model -- it streams its tokens in
+# choices[].delta.reasoning_content (the live capture showed content='' and
+# reasoning_content='We').  stream_once() accumulated only delta.content, so its
+# ttft/content fields were permanently None and every fresh-feed rows/s was None
+# (crashing the DEGRADED_REFERENCE format with a NoneType format error).  The
+# generation_stats SSE comment frame carries a DIRECT prefill rate prompt_tps
+# (== prompt_tokens/prefill_time) plus prompt_tokens/generation_tokens/prefix_cache_hit.
+
+
+def test_stream_reasoning_only_content_yields_ttft(tmp_path):
+    """(a) A stream whose deltas carry ONLY reasoning_content must still set a
+    non-None ttft/content (and hence a sane TTFT-derived rows/s)."""
+    log_path = str(tmp_path / "exo.log")
+    with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False,
+                         reasoning_only=True) as srv:
+        r = C.stream_once(srv.base_url, C.base_messages(C.build_base(4000, "SALT-x")))
+    assert r["content"] == "ok"                       # reasoning_content accumulated
+    assert r["content_chars"] == 2
+    assert r["ttft_s"] is not None and r["ttft_s"] >= 0
+    assert r["prompt_tps"] == 200.0                  # surfaced from generation_stats
+    fp = {"prompt_tps": r["prompt_tps"], "log_prefill": None,
+          "prompt_tokens": r["prompt_tokens"], "ttft_s": r["ttft_s"]}
+    assert C.rows_per_s_fresh(fp) == 200.0
+    assert C.rows_per_s_ttft(fp) is not None
+
+
+def test_stream_reasoning_only_pre_fix_content_only_sees_nothing(tmp_path):
+    """(a, sabotage proof) Reproduce the PRE-FIX accumulation (content only) on the
+    SAME reasoning-only stream: it sees no delta.content, so its ttft stays None --
+    exactly the live bug.  The fixed stream_once() on the same stream sets ttft."""
+    import urllib.request
+    log_path = str(tmp_path / "exo.log")
+    with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False,
+                         reasoning_only=True) as srv:
+        url = srv.base_url.rstrip("/") + "/v1/chat/completions"
+        body = json.dumps({"model": M._Handler.model,
+                           "messages": C.base_messages(C.build_base(4000, "SALT-y")),
+                           "max_tokens": 1, "temperature": 0, "stream": True}).encode()
+        req = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type": "application/json"})
+        content_only_text, content_only_ttft = "", None
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").rstrip("\n")
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(payload)
+                except Exception:
+                    continue
+                for ch in obj.get("choices", []):
+                    txt = (ch.get("delta") or {}).get("content")     # OLD behaviour
+                    if txt:
+                        content_only_ttft = 0.0
+                        content_only_text += txt
+        r = C.stream_once(srv.base_url, C.base_messages(C.build_base(4000, "SALT-y")))
+    assert content_only_text == "" and content_only_ttft is None   # pre-fix state
+    assert r["content"] == "ok" and r["ttft_s"] is not None          # fixed state
+
+
+def test_generation_stats_prompt_tps_gives_fresh_rows(tmp_path):
+    """(b) A generation_stats frame with prompt_tps=200 yields exactly 200 rows/s
+    for the fresh reference -- independent of any content delta."""
+    rec = {"kind": "fresh", "prompt_tps": 200.0, "prompt_tokens": 100000,
+           "ttft_s": None, "log_prefill": None}
+    assert C.rows_per_s_fresh(rec) == 200.0
+    # and a fresh record built by the ladder carries a NON-null fresh rate
+    st = {"kind": "fresh", "ctx_nominal": 100000, "ctx_label": "fresh100k",
+          "delta_nominal": None, "cell": "fresh100k"}
+    r = {"usage": {"prompt_tokens": 100000, "completion_tokens": 1},
+         "ttft_s": 12.0, "wall_s": 12.0, "content": "",
+         "prompt_tps": 200.0, "prompt_tokens": 100000, "generation_tokens": 1,
+         "prefix_cache_hit": "none", "decode_s": None, "content_chars": 0}
+    out = L._record("fresh100k", st, 100000, r, {}, "studio1", 1.0,
+                    C.DEFAULT_CHARS_PER_TOKEN, {})
+    assert out["rows_per_s_fresh"] == 200.0
+    assert out["rows_per_s_ttft"] is not None
+
+
+def test_degraded_reference_none_rate_does_not_crash(tmp_path, capsys):
+    """(c) Reproduce the LIVE crash shape on the fresh path: a stream that yields
+    NO generation_stats frame and (reasoning-only) no delta.content, so the fresh
+    rate is None both from prompt_tps and from ttft.  The pre-fix code formatted
+    ``rec['rows_per_s_ttft']`` unconditionally -> ``TypeError: unsupported format
+    string passed to NoneType.__format__``.  The fix must return an exit code and
+    print a sane line instead of raising."""
+    import http.server
+    import socketserver
+    import threading
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(n)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            # No generation_stats frame, no content/reasoning delta, no usage ->
+            # every rate source (prompt_tps, prompt_tokens/ttft) is missing.
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+    srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _H)
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    out_dir = str(tmp_path / "out")
+    log_path = str(tmp_path / "exo.log")
+    L.GUARD_OVERRIDE = _fake_guard_mod()
+    try:
+        rc = L.main(["fresh100k", "--api", f"http://127.0.0.1:{srv.server_address[1]}",
+                     "--out-dir", out_dir, "--log-source", f"studio1={log_path}",
+                     "--fresh-tokens", "1000"])
+    finally:
+        L.GUARD_OVERRIDE = None
+        srv.shutdown()
+        srv.server_close()
+    assert rc == L.EXIT_OK                       # no TypeError raised
+    out = capsys.readouterr().out
+    assert "fresh100k rows/s = None" in out
+    # and the helper never raises on a None rate
+    assert C.rows_per_s_fresh({"rows_per_s_ttft": None, "prompt_tps": None}) is None
+
+
+def test_prefix_cache_hit_parsed_and_corroborates(tmp_path):
+    """(d) prefix_cache_hit is parsed from generation_stats and surfaces in the
+    record; the log-based prefill==0 rule stays authoritative."""
+    assert C.is_full_cache_hit_flag("full") is True
+    assert C.is_full_cache_hit_flag("none") is False
+    assert C.is_full_cache_hit_flag(None) is False
+    assert C.is_full_cache_hit_flag(True) is True
+    assert C.is_full_cache_hit_flag(False) is False
+    log_path = str(tmp_path / "exo.log")
+    with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False) as srv:
+        r = C.stream_once(srv.base_url, C.base_messages(C.build_base(4000, "SALT-z")))
+    assert "prefix_cache_hit" in r and r["prefix_cache_hit"] in ("full", "none")
+    assert r["prompt_tokens"] is not None and r["generation_tokens"] == 1
 
 
 # ============================================================== sabotage proofs

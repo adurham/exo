@@ -56,11 +56,16 @@ class MockExo:
 
     def __init__(self, log_path: str, *, rows_per_s: float = 200.0,
                  chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
-                 sleep: bool = True):
+                 sleep: bool = True, reasoning_only: bool = False):
         self.log_path = log_path
         self.rows_per_s = rows_per_s
         self.chars_per_token = chars_per_token
         self.sleep = sleep
+        # FIX 3: this model is a REASONING model -- it streams its tokens in
+        # ``delta.reasoning_content`` (content stays empty).  reasoning_only makes
+        # the mock reproduce that wire shape so the client's accumulation of BOTH
+        # fields is exercised.
+        self.reasoning_only = reasoning_only
         self.resident: dict[str, int] = {}      # salt -> base prompt-end rows
         self.resident_prompts: dict[str, str] = {}   # salt -> last exact prompt fed
         self.lock = threading.Lock()
@@ -212,12 +217,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         stats = {"prompt_tps": round(self.engine.rows_per_s, 1),
-                 "prefix_cache_hit": plan["reuse"],
+                 "generation_tps": 0.0,
+                 "prompt_tokens": plan["prompt"],
+                 "generation_tokens": req.get("max_tokens", 1),
+                 "prefix_cache_hit": ("full" if plan["reuse"] == plan["prompt"]
+                                      and plan["prefill"] == 0 else "none"),
                  "mtp_cycles_cumulative": 3, "mtp_accepted_drafts_cumulative": 2}
+        tok_key = "reasoning_content" if self.engine.reasoning_only else "content"
         frames = [
             f": generation_stats {json.dumps(stats)}\n\n",
             "data: " + json.dumps({"id": "cmpl-mock", "created": int(time.time()),
-                                   "choices": [{"index": 0, "delta": {"content": "ok"},
+                                   "choices": [{"index": 0, "delta": {tok_key: "ok"},
                                                 "finish_reason": None}]}) + "\n\n",
             "data: " + json.dumps({"id": "cmpl-mock", "created": int(time.time()),
                                    "choices": [{"index": 0, "delta": {},
@@ -235,9 +245,10 @@ class MockExoServer:
 
     def __init__(self, log_path: str, *, rows_per_s: float = 200.0,
                  chars_per_token: float = DEFAULT_CHARS_PER_TOKEN, sleep: bool = True,
-                 host: str = "127.0.0.1"):
+                 reasoning_only: bool = False, host: str = "127.0.0.1"):
         self.engine = MockExo(log_path, rows_per_s=rows_per_s,
-                              chars_per_token=chars_per_token, sleep=sleep)
+                              chars_per_token=chars_per_token, sleep=sleep,
+                              reasoning_only=reasoning_only)
         self.host = host
         self.httpd = None
         self.thread = None

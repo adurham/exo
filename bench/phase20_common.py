@@ -199,6 +199,43 @@ def rows_per_s_ttft(record: dict) -> float | None:
     return rows / ttft
 
 
+def rows_per_s_fresh(record: dict) -> float | None:
+    """Fresh-feed reference rows/s.
+
+    PREFERRED source: the ``: generation_stats`` frame's ``prompt_tps``, the
+    engine's OWN direct prefill rate (== prompt_tokens / prefill_time).  It does
+    NOT depend on the client ever observing a content delta -- the live capture
+    showed ``content=''`` (the tokens stream in ``delta.reasoning_content``), so
+    the TTFT-derived rate can be missing while ``prompt_tps`` is present.
+    Fallback: the TTFT-derived cross-check ``rows_per_s_ttft`` (prompt_tokens /
+    ttft), kept so an older record or a stream without a stats frame still yields
+    a rate.
+    """
+    pt = record.get("prompt_tps")
+    if pt not in (None, 0):
+        return pt
+    return rows_per_s_ttft(record)
+
+
+def is_full_cache_hit_flag(value) -> bool:
+    """Interpret the generation_stats ``prefix_cache_hit`` field.
+
+    The live frame carries a string enum (``"none"`` | ``"partial"`` | ``"full"``);
+    a mock/older frame may carry a bool.  Only a definitive full-prefix hit
+    returns True.
+
+    CORROBORATION ONLY: this is used to cross-check the log-derived
+    ``is_cache_hit`` (``prefill == 0``) rule, never to replace it.
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value > 0
+    return str(value).strip().lower() in ("full", "full_hit", "all", "true", "hit")
+
+
 def is_cache_hit(record: dict) -> bool:
     """FIX 2(a) classification helper: a delta rep that measures NOTHING because
     the engine served a prior rep's exact prompt from cache.
@@ -412,7 +449,19 @@ def stream_once(api_base: str, messages: list[dict], *, max_tokens: int = 1,
                 temperature: float = 0, timeout: float = 3600.0,
                 model: str = MODEL) -> dict:
     """One streamed chat completion.  Reads the ``: generation_stats`` SSE COMMENT
-    frame (does NOT start with ``data:``).  reasoning_effort intentionally omitted."""
+    frame (does NOT start with ``data:``).  reasoning_effort intentionally omitted.
+
+    FIX 3: this model is a REASONING model -- it streams its output in
+    ``choices[].delta.reasoning_content`` (the live capture showed ``content=''``
+    and ``reasoning_content='We'``).  We therefore accumulate BOTH ``content`` and
+    ``reasoning_content`` as output text, and set the first-token time (ttft) on the
+    first NON-EMPTY delta of EITHER kind.  Accumulating only ``content`` left ttft
+    and content permanently None, so every fresh-feed rate was None.
+
+    The ``generation_stats`` frame also carries the engine's own direct prefill
+    rate (``prompt_tps``) and the token/cache fields below; those are surfaced
+    verbatim (FIX 3).  The returned key set is otherwise unchanged.
+    """
     url = api_base.rstrip("/") + "/v1/chat/completions"
     body = {"model": model, "messages": messages, "max_tokens": max_tokens,
             "temperature": temperature, "stream": True}
@@ -450,7 +499,11 @@ def stream_once(api_base: str, messages: list[dict], *, max_tokens: int = 1,
             for ch in obj.get("choices", []):
                 if ch.get("finish_reason"):
                     finish = ch["finish_reason"]
-                txt = (ch.get("delta") or {}).get("content")
+                delta = ch.get("delta") or {}
+                # FIX 3: a reasoning model streams delta.reasoning_content, not
+                # delta.content.  Accumulate BOTH; the first-token time is the
+                # first non-empty delta of EITHER kind.
+                txt = delta.get("content") or delta.get("reasoning_content")
                 if txt:
                     if ttft is None:
                         ttft, first = now - t0, now
@@ -459,6 +512,7 @@ def stream_once(api_base: str, messages: list[dict], *, max_tokens: int = 1,
                     last = now
     wall = time.perf_counter() - t0
     decode_s = (last - first) if (first is not None and last is not None and last > first) else None
+    stats = stats or {}
     return {
         "wall_s": round(wall, 3),
         "ttft_s": round(ttft, 4) if ttft is not None else None,
@@ -469,6 +523,11 @@ def stream_once(api_base: str, messages: list[dict], *, max_tokens: int = 1,
         "created": created,
         "usage": usage,
         "stats": stats,
+        # FIX 3: surfaced verbatim from the generation_stats frame.
+        "prompt_tps": stats.get("prompt_tps"),
+        "prompt_tokens": stats.get("prompt_tokens"),
+        "generation_tokens": stats.get("generation_tokens"),
+        "prefix_cache_hit": stats.get("prefix_cache_hit"),
     }
 
 
@@ -539,7 +598,7 @@ def summarize(records: list[dict]) -> dict:
         table_a.append({"ctx": label, "delta_rows": DELTA_LADDER_ROWS,
                         "actual_rows_median": _med([r.get("log_prefill") for r in recs]),
                         **blk})
-    frates = [rows_per_s_ttft(r) for r in fresh_ref]
+    frates = [rows_per_s_fresh(r) for r in fresh_ref]
     table_a.append({"ctx": "fresh100k", "delta_rows": None,
                     "actual_rows_median": _med([r.get("prompt_tokens") for r in fresh_ref]),
                     **stat_block(frates)})

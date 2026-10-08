@@ -311,7 +311,11 @@ def run_chunk(chunk: str, args) -> int:
             ref = json.load(open(ref_path))
         except Exception:
             ref = {}
-        rate = ref.get("rows_per_s_ttft")
+        # FIX 3: prefer the engine-derived fresh rate (prompt_tps), fall back to the
+        # legacy ttft-derived key; guard against None before formatting.
+        rate = C.rows_per_s_fresh(ref)
+        if rate is None:
+            rate = ref.get("rows_per_s_ttft")
         if rate is not None and rate < C.FRESH_REF_MIN_ROWS_PER_S:
             print(f"DEGRADED_REFERENCE: recorded fresh reference {rate:.1f} < "
                   f"{C.FRESH_REF_MIN_ROWS_PER_S:.0f} rows/s -> refusing to record "
@@ -402,11 +406,24 @@ def run_chunk(chunk: str, args) -> int:
                     if st["kind"] == "fresh":
                         with open(ref_path, "w") as rf:
                             json.dump(rec, rf)
-                        if (rec.get("rows_per_s_ttft") or 0) < C.FRESH_REF_MIN_ROWS_PER_S:
+                        # FIX 3: the fresh rate is the engine's own prompt_tps when
+                        # present (a direct prefill rate that does NOT depend on the
+                        # client seeing a content delta), else the ttft cross-check.
+                        # Guard None before formatting: the pre-fix code crashed with
+                        # ``TypeError: unsupported format string passed to
+                        # NoneType.__format__`` here whenever the fresh rate was None.
+                        rate = C.rows_per_s_fresh(rec)
+                        if rate is None:
+                            rate = rec.get("rows_per_s_ttft")
+                        if rate is not None and rate < C.FRESH_REF_MIN_ROWS_PER_S:
                             print(f"DEGRADED_REFERENCE: fresh100k "
-                                  f"{rec['rows_per_s_ttft']:.1f} rows/s < "
+                                  f"{rate:.1f} rows/s < "
                                   f"{C.FRESH_REF_MIN_ROWS_PER_S:.0f}", file=sys.stderr)
                             return EXIT_DEGRADED
+                        print(f"fresh100k rows/s = "
+                              f"{rate:.1f}" if rate is not None
+                              else "fresh100k rows/s = None (no prompt_tps, no ttft)",
+                              flush=True)
         except guard_mod.ChunkAborted as exc:
             print(f"ChunkAborted: {exc}", file=sys.stderr)
             return EXIT_CHUNK_ABORTED
@@ -439,7 +456,12 @@ def _build_messages(st, salt, base_reply, chars_per_token):
 
 def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actual):
     usage = r.get("usage") or {}
+    # FIX 3: prefer usage.prompt_tokens; fall back to the generation_stats frame's
+    # prompt_tokens (that frame is the only source when the response carries no
+    # usage chunk -- the live reasoning stream returned content='').
     prompt_tokens = usage.get("prompt_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = r.get("prompt_tokens")
     out = {
         "chunk": chunk,
         "cell": st["cell"],
@@ -452,6 +474,13 @@ def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actua
         "completion_tokens": usage.get("completion_tokens"),
         "ttft_s": r.get("ttft_s"),
         "wall_s": r.get("wall_s"),
+        "decode_s": r.get("decode_s"),
+        "content_chars": r.get("content_chars"),
+        # FIX 3: engine's own direct prefill rate + token/cache fields, surfaced
+        # verbatim from the ``: generation_stats`` SSE comment frame.
+        "prompt_tps": r.get("prompt_tps"),
+        "generation_tokens": r.get("generation_tokens"),
+        "prefix_cache_hit": r.get("prefix_cache_hit"),
         "log_prefill": logf.get("log_prefill"),
         "reuse": logf.get("reuse"),
         "rewind": logf.get("rewind"),
@@ -470,6 +499,11 @@ def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actua
     out["rows_per_s_ttft"] = C.rows_per_s_ttft(
         {"log_prefill": out["log_prefill"], "prompt_tokens": prompt_tokens,
          "ttft_s": out["ttft_s"]})
+    # FIX 3: the fresh-feed rate -- the engine's own prompt_tps when present, else
+    # the TTFT cross-check.  Non-null for a fresh feed even though content is ''.
+    out["rows_per_s_fresh"] = C.rows_per_s_fresh(
+        {"prompt_tps": out["prompt_tps"], "log_prefill": out["log_prefill"],
+         "prompt_tokens": prompt_tokens, "ttft_s": out["ttft_s"]})
     if out["kind"] == "delta":
         # FIX 2(a): prefill=0 (reuse == prompt) means the engine served this exact
         # prompt from cache -- the rep measured nothing and must be excluded, not
@@ -479,6 +513,10 @@ def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actua
             out["collapsed"] = False
             out["notes"] = (f"cache hit: prefill=0 reuse={out['reuse']} == "
                             f"prompt={prompt_tokens} (full-cache hit, no rows fed)")
+            # FIX 3: corroborate the log-derived rule with the engine's own flag.
+            flag = out["prefix_cache_hit"]
+            if flag is not None and not C.is_full_cache_hit_flag(flag):
+                out["notes"] += f" | prefix_cache_hit={flag!r} (log says full hit)"
         else:
             # FIX 2(c): collapse is measured against the base's OWN actual depth
             # (ladder rungs are legitimate), not the nominal ctx.
@@ -491,6 +529,12 @@ def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actua
                                 if reuse is not None else "collapsed: no turn-reuse line")
             else:
                 out["collapsed"] = False
+            # FIX 3 corroboration: the engine flag claiming a full hit while the log
+            # shows rows fed is a discrepancy -- surfaced, never used to reclassify.
+            flag = out["prefix_cache_hit"]
+            if C.is_full_cache_hit_flag(flag):
+                out["notes"] = (out["notes"] + " | " if out["notes"] else "") + \
+                    f"prefix_cache_hit={flag!r} but log prefill={out['log_prefill']}"
     else:
         out["collapsed"] = False
         if out["has_turn_reuse"] and (out["reuse"] or 0) > 0:
