@@ -247,4 +247,65 @@ delta reps `log_prefill=2000` (reuse 2048) and `log_prefill=2722` (reuse 2048) �
 real deltas, neither a cache hit (the pilot has one rep per size, so same-size rep
 uniqueness is proven by the unit + mock tests rather than by the pilot).
 
+## FIX 3 — reasoning-model stream + fresh rate from `generation_stats.prompt_tps`
+
+**Symptom (live capture, PM, `max_tokens=1`).** This model
+(`dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw`) is a **REASONING model**: it
+streams its output in `choices[].delta.reasoning_content`, **not**
+`choices[].delta.content`. The real SSE capture showed `content=''`,
+`reasoning_content='We'`. `stream_once()` accumulated only `delta.content`, so its
+`ttft_s`/`content`/`decode_s` were **permanently None** and every fresh-feed `rows/s`
+was None. When the fresh path then formatted `rec['rows_per_s_ttft']` it raised
+`TypeError: unsupported format string passed to NoneType.__format__` at
+`delta_ladder.py:407` inside the `DEGRADED_REFERENCE` check. The SSE
+`: generation_stats` **COMMENT** frame carries, verbatim, a **DIRECT prefill rate**:
+`{"prompt_tps": 34.574, "generation_tps": 0.0, "prompt_tokens": 19, "generation_tokens":
+1, "peak_memory_usage": {...}, "prefix_cache_hit": "none", "mtp_cycles_cum": ...}`
+(`prompt_tps == prompt_tokens / prefill_time`), plus `prompt_tokens`,
+`generation_tokens`, `prefix_cache_hit`.
+
+**Fix.**
+1. `stream_once()` accumulates **BOTH** `delta.content` and `delta.reasoning_content`
+   as output text and sets the first-token time (`ttft`) on the first **non-empty**
+   delta of **either** kind. Returned key set unchanged (plus the new keys below).
+2. The `generation_stats` fields `prompt_tps`, `prompt_tokens`, `generation_tokens`,
+   `prefix_cache_hit` are surfaced verbatim in `stream_once()`'s return dict and in the
+   JSONL record.
+3. **Fresh-feed `rows/s` = `prompt_tps`** (the engine's own direct prefill rate), with
+   the TTFT-derived `rows_per_s_ttft` kept as a cross-check. New helper
+   `C.rows_per_s_fresh(record)` (prompt_tps → fallback rows_per_s_ttft) and new record
+   key `rows_per_s_fresh`; the fresh path no longer depends on `content` being
+   non-empty. `summarize()`'s fresh table row and the pre-chunk `DEGRADED_REFERENCE`
+   gate both use it.
+4. The ~line 407 crash is guarded: `rate = rows_per_s_fresh(rec)`; `if rate is not None
+   and rate < 255:` — a None rate **never** formats and **never** raises; it prints
+   `fresh100k rows/s = None (no prompt_tps, no ttft)` and still returns an exit code.
+   The fresh record now always carries a non-null `rows_per_s_fresh` whenever the node
+   emitted a `generation_stats` frame.
+5. `prefix_cache_hit` is a **corroborating** signal only: `C.is_full_cache_hit_flag()`
+   parses the string enum (`"none"|"partial"|"full"`; also tolerates a bool). A
+   discrepancy between the engine flag and the log-derived `prefill==0` rule is surfaced
+   in `notes`, but the log rule (`C.is_cache_hit`) stays **authoritative** — the flag
+   never reclassifies a rep.
+
+**Tests** (47 → 52): `test_stream_reasoning_only_content_yields_ttft` (reasoning-only
+deltas still set `ttft`/`content` + a sane rate); `test_stream_reasoning_only_pre_fix_
+content_only_sees_nothing` (in-test reproduction of the OLD content-only accumulation
+on the same stream: `content==''`, `ttft is None` — the live bug — while the fixed
+`stream_once()` sets both); `test_generation_stats_prompt_tps_gives_fresh_rows`
+(`prompt_tps=200` → fresh rate 200, independent of any content delta);
+`test_degraded_reference_none_rate_does_not_crash` (no stats frame + no content → None
+rate: returns `EXIT_OK`, prints a sane line, **no TypeError**);
+`test_prefix_cache_hit_parsed_and_corroborates` (`prefix_cache_hit` parsed and surfaced;
+`is_full_cache_hit_flag` semantics). **All 5 FAIL on the pre-fix sources** (2 assert on
+`content`/`ttft`, 1 AttributeError on `rows_per_s_fresh`, 1 reproduces the exact
+`TypeError` at `delta_ladder.py:407`, 1 AttributeError on `is_full_cache_hit_flag`) and
+pass after; the 47 pre-existing tests stay green (the mock now emits a realistic
+`generation_stats` frame with `prompt_tps`/`prompt_tokens`/`generation_tokens`/
+`prefix_cache_hit` and can stream `reasoning_content` only).
+
+**Live pilot** (idle cluster, 1 min, `--api http://192.168.86.48:52415`): _see PM
+report — the base line shows a non-null fresh `rows/s`._
+
+
 
