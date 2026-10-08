@@ -1008,9 +1008,9 @@ export PYTHONUNBUFFERED=1
 EXO_ZENOH_PORT="${EXO_ZENOH_PORT:-52414}"
 # UDP port the discovery beacon binds (exo --discovery-port default).
 EXO_DISCOVERY_PORT="${EXO_DISCOVERY_PORT:-52413}"
-M4_1_IP="192.168.86.201"
+M4_1_IP="192.168.86.48"
 M4_1_PEER_ID="12D3KooWDGQKAJUYpqTHzBhVpGzYxQagWRwFqJPzkEYzHxt3SSUg"
-M4_2_IP="192.168.86.202"
+M4_2_IP="192.168.86.47"
 M4_2_PEER_ID="12D3KooWQDzFqvjsgFRfheeV7uvtVUP1gruphpgoVELP9pkHBses"
 
 # --- Tailscale addresses used for peer DISCOVERY only -------------------------
