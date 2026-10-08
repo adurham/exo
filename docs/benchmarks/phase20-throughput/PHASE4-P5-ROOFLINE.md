@@ -200,14 +200,30 @@ Measured achievable read bandwidth: **~450 GB/s** (repo loop-2 anchor,
 the caveat: 450 is a **triad** (read+write) figure, and a **pure-read** kernel can sit
 somewhat lower; I therefore give the range **400-550 GB/s**.
 
+**MEASURED (Phase-4, 2026-10-08 ~17:42 CDT, both nodes, boot idle).** The Phase-4 PM ran a
+dedicated read-bandwidth canary (`read_bw_canary2.py`; the v1 script had a MLX-CSE bug that
+reported a physically impossible ~30 TB/s — it amortized `K` calls of the *same* `mx.sum(x)`
+expression, which MLX folds; v2 times one fresh full-array reduction per rep):
+
+| node | pure-read | read+write | GEMV-read (verify M=1 shape) |
+|---|---:|---:|---:|
+| macstudio-m4-1 | **496.2 GB/s** | 304.5 | **499.7 GB/s** |
+| macstudio-m4-2 | **498.2 GB/s** | 303.3 | **497.7 GB/s** |
+
+So the **read** bandwidth that the verify weight-stream actually experiences is **≈ 497 GB/s**
+(tight across nodes; the GEMV-shaped arm agrees to <0.5 %). The old 450 "triad" anchor is the
+*read+write* arm (≈304 here) — i.e. read is *higher* than the triad number, so the bytes
+floor is *lower* and the headroom *larger* than the 450-based estimate below. Using **497 GB/s**:
+
 | bandwidth | bytes floor (`total / bw`) | measured 92.4 / floor |
 |---|---:|---:|
-| 400 GB/s | 16.6 ms | **5.6×** |
-| **450 GB/s (central)** | **14.8 ms** | **6.3×** |
-| 550 GB/s | 12.1 ms | 7.6× |
+| 400 GB/s | 16.6 ms | 5.6× |
+| 450 GB/s | 14.8 ms | 6.3× |
+| **497 GB/s (MEASURED)** | **13.4 ms** | **6.9×** |
 
-Achieved rate over the central model = `6.65 GB / 92.4 ms = **72 GB/s** = **16 % of 450`
-(20 % over the no-dedup bound `8.29 GB`).
+Achieved rate over the measured denominator = `6.65 GB / 92.4 ms = **72 GB/s** = **14.5 % of 497**
+(18 % over the no-dedup bound `8.29 GB`). The measured number makes the headroom verdict
+**stronger**, not weaker.
 
 **Sanity check that bytes *is* the binding roof.** FLOPs/rank at m=4 = `2·m·params`:
 dense `2·4·141M·40 = 45.1 GFLOP` + routed `2·24·6.36MB·40 = 12.2 GFLOP` ≈ **57.3 GFLOP**;
@@ -218,8 +234,8 @@ agentic OFF round_total 101.3 ms ⇒ ~30.2 t/s, right at the 6.3× picture.)
 
 ### 2.4 VERDICT — **NOT near-floor; ~6× headroom. Name the component.**
 
-Near-floor for this stack would be **within ~10-15 % of 14.8 ms**, i.e. ≈ 16-17 ms. The
-measured verify is **92.4 ms ≈ 6.3× the bytes floor (range 5.0-7.6×)**. **Headroom = ~77.6 ms.**
+Near-floor for this stack would be **within ~10-15 % of the bytes floor** (≈ 15-16 ms at the MEASURED 497 GB/s, or 16-17 ms at the old 450 anchor). The
+measured verify is **92.4 ms ≈ 6.9× the bytes floor at 497 GB/s (6.3× at the 450 anchor; range 5.6-7.6×)**. **Headroom = ~79 ms.**
 
 Slice decomposition of that 77.6 ms gap (per-rank, using the repo's own macro-op
 measurements):

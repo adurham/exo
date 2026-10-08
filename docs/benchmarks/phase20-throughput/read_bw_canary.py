@@ -1,112 +1,68 @@
 #!/usr/bin/env python3
-"""Read-bandwidth canary for the exo DSv4.1 campaign — the READ-side analogue of
-gpu_canary2.py (which measures the 15.14 TFLOPS dense-matmul ceiling).
+"""Read-bandwidth canary for the exo DSv4.1 campaign (READ-side, v2 — CSE-fixed).
 
-WHY. The Phase-4 P5 bytes-roofline (docs/benchmarks/phase20-throughput/
-PHASE4-P5-ROOFLINE.md) divides a verify round's bytes by "~450 GB/s". That 450 is a
-**triad** (read+write) figure from the loop-2 node calibration
-(PERFORMANCE_HISTORY.md:11145). A pure-read kernel (what the verify weight-stream
-actually is) can sit lower. This canary measures the achievable READ bandwidth so the
-denominator is a measurement, not an anchor, on each node.
+WHY: the P5 bytes-roofline needs a MEASURED read bandwidth, not an assumed anchor.
+The loop-2 "~450 GB/s" is a TRIAD (read+write) figure; a pure-read kernel can differ.
 
-RUN LATER, ON AN IDLE CLUSTER NODE. Do not run while a production measurement is live —
-any GPU work biases both this canary and the measurement. Pure mlx.core: no network, no
-cluster, no file writes; everything goes to stdout.
+v1 BUG (fixed here): v1 amortised K calls of the SAME `mx.sum(x)` expression per timed
+eval, which MLX constant-folds/reuses -> physically impossible ~30 TB/s. v2 times ONE
+fresh `mx.eval` of a full-array reduction per rep (the array is far larger than the
+~150-250 us eval floor, so no amortisation is needed or wanted).
 
-METHOD (mirrors gpu_canary2.py's amortisation, adapted to a memory-bound kernel):
-  * Arrays are large (default >= 1 GB working set) so caches are dwarfed and the traffic
-    is DRAM/SLC-miss — the same regime as the verify path's weight stream.
-  * Each timed eval enqueues K independent identical calls, so the ~150-250 us host/eval
-    floor (phase3-kernel-microbench.md:36-46) divides out. Without this the small-kernel
-    timing is the eval floor, not the kernel.
-  * Three arms:
-      1. pure READ      : mx.sum(x) over a big fp16 array           -> bytes read once
-      2. read+write     : y = a*x + y over big arrays (triad-like)   -> reproduces 450
-      3. GEMV-shaped    : x @ W, x is 1 row, W large (verify M=1)    -> the read the model does
-  * Warm up 3 iters, then take the median of N reps.
-  * Health gate: DEGRADED if pure-read < 0.6 * triad (stuck/thermally-throttled node).
+Arms:
+  1. pure READ      : mx.sum(x) over a large fp16 array            (bytes = nbytes)
+  2. read+write     : y = x + y over large arrays                  (bytes = 2*nbytes)
+  3. GEMV-shaped    : xr[1,D] @ W[D,N], W large (verify M=1 read)  (bytes = W bytes)
 
-Output: one JSON line so two nodes can be diffed.
-
-Usage:
-  python3 read_bw_canary.py                 # default sizes (>=1 GB set), K=64, N=5
-  python3 read_bw_canary.py --mb 2048 --K 128 --reps 7
+Run ON AN IDLE NODE (no production measurement in flight).
 """
 from __future__ import annotations
-
-import argparse
-import json
-import statistics
-import time
-
+import argparse, json, statistics, time
 import mlx.core as mx
 
 
-def _median_gbps(byte_count: int, fn, K: int, reps: int) -> float:
-    """Median GB/s of ``K`` amortised calls to ``fn`` per timed eval.
-
-    ``fn`` returns a lazy mx array whose construction enqueues the kernel(s); ``mx.eval``
-    drains. GB/s = byte_count * K / (median eval wall)."""
-    # warm-up (JIT build + first-touch residency)
-    for _ in range(3):
+def _time_median(nbytes: int, fn, reps: int) -> float:
+    for _ in range(2):
         mx.eval(fn())
     ts = []
     for _ in range(reps):
         t = time.perf_counter()
-        for _ in range(K):
-            out = fn()
-        mx.eval(out)
-        ts.append(byte_count * K / (time.perf_counter() - t) / 1e9)
-    return statistics.median(ts)
+        mx.eval(fn())
+        ts.append(time.perf_counter() - t)
+    dt = statistics.median(ts)
+    return nbytes / dt / 1e9
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mb", type=int, default=1024,
-                    help="per-array size in MB (default 1024 -> >=2 GB working set)")
-    ap.add_argument("--K", type=int, default=64, help="amortisation iters per timed eval")
-    ap.add_argument("--reps", type=int, default=5, help="timed reps (median taken)")
+    ap.add_argument("--mb", type=int, default=1024)
+    ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-
-    n_el = max(1, a.mb * 1024 * 1024 // 2)          # fp16 => 2 B/element
-    side = 1
-    while side * side < n_el:                        # square-ish for the matmul arm
-        side += 1
-    side = min(side, 16384)
-    print(f"# read_bw_canary: {a.mb} MB/array, side={side}, K={a.K}, reps={a.reps}, "
-          f"mlx={mx.__version__}")
-
+    n_el = max(1, a.mb * 1024 * 1024 // 2)
     mx.random.seed(a.seed)
-    x = mx.random.normal((side * side,)).astype(mx.float16)
-    mx.eval(x)
-    nbytes = x.size * x.itemsize
+    x = mx.random.normal((n_el,)).astype(mx.float16); mx.eval(x)
+    nb = x.size * x.itemsize
 
-    # ---- arm 1: pure read (reduction) ----
-    a1 = _median_gbps(nbytes, lambda: mx.sum(x), a.K, a.reps)
-
-    # ---- arm 2: read+write (triad-like) ----
-    y = mx.zeros_like(x)
-    mx.eval(y)
-    a2 = _median_gbps(3 * nbytes, lambda: x + y, a.K, a.reps)   # 2 reads + 1 write
-
-    # ---- arm 3: GEMV-shaped read (verify M=1: x[1,D] @ W[D,N]) ----
-    D, N = side, side
+    r1 = _time_median(nb, lambda: mx.sum(x), a.reps)          # arm 1: pure read
+    y = mx.zeros_like(x); mx.eval(y)
+    r2 = _time_median(2 * nb, lambda: x + y, a.reps)          # arm 2: read x, write y
+    D = 16384
+    N = max(1024, nb // (D * 2))
     W = mx.random.normal((D, N)).astype(mx.float16)
-    xr = mx.random.normal((1, D)).astype(mx.float16)
-    mx.eval(W, xr)
-    wbytes = W.size * W.itemsize
-    a3 = _median_gbps(wbytes, lambda: xr @ W, a.K, a.reps)
+    xr = mx.random.normal((1, D)).astype(mx.float16); mx.eval(W, xr)
+    wb = W.size * W.itemsize
+    r3 = _time_median(wb, lambda: xr @ W, a.reps)             # arm 3: GEMV read (M=1)
 
-    healthy = a1 >= 0.6 * a2
-    rec = {"arm1_read_gbps": round(a1, 1), "arm2_triad_gbps": round(a2, 1),
-           "arm3_gemv_gbps": round(a3, 1), "read_over_triad": round(a1 / a2, 3),
-           "healthy": healthy, "mb_per_array": a.mb, "K": a.K, "reps": a.reps}
+    sane = all(0 < v < 5000 for v in (r1, r2, r3))
+    rec = {"arm1_read_gbps": round(r1, 1), "arm2_readwrite_gbps": round(r2, 1),
+           "arm3_gemv_gbps": round(r3, 1), "mb_per_array": a.mb, "reps": a.reps,
+           "sane": sane}
+    print(f"# read_bw_canary v2: {a.mb} MB/array, reps={a.reps}, mlx={mx.__version__}")
     print(json.dumps(rec))
-    print(f"# arm1 pure-read {a1:.1f} GB/s | arm2 triad {a2:.1f} | arm3 gemv {a3:.1f} "
-          f"| read/triad {a1/a2:.2f} | {'HEALTHY' if healthy else 'DEGRADED (<0.6x triad)'}")
-    print("# => use arm1 (pure read) as the P5 roofline denominator; 450 GB/s is arm2.")
-    return 0 if healthy else 2
+    print(f"# pure-read {r1:.1f} GB/s | read+write {r2:.1f} | gemv-read {r3:.1f} GB/s")
+    print(f"# => P5 denominator: use arm1 (pure read)={r1:.0f} and arm3 (gemv)={r3:.0f} GB/s")
+    return 0 if sane else 2
 
 
 if __name__ == "__main__":
