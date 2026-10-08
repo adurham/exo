@@ -307,5 +307,71 @@ pass after; the 47 pre-existing tests stay green (the mock now emits a realistic
 **Live pilot** (idle cluster, 1 min, `--api http://192.168.86.48:52415`): _see PM
 report — the base line shows a non-null fresh `rows/s`._
 
+## FIX 4 — 110k base-actual sidecar + PREREG 1024-8192 flat rule (real-data bugs)
+
+Two summarise/classification bugs found against the campaign's REAL chunk JSONL.
+
+**Bug 1 — the collapse rule compared reuse to the NOMINAL ctx.** `chunk2a` (the 110K
+base) and `chunk2b` (the 3 deltas) are SEPARATE processes: `chunk2b`'s in-memory
+`base_actual` was empty, so the classifier fell back to `st["ctx_nominal"]` (110000).
+The 110K base's ACTUAL `prompt_tokens` is **100503** (>2 rungs below nominal: the
+5.111 c/t calibration over-sizes, so a nominal-110K filler measures ~100.5K real
+tokens). The legitimate deltas report `reuse=100352`, one 2048-rung below the actual
+base — but one rung below the ACTUAL (100503) means reuse ≥ 100503−2048 = 98455, so
+100352 is fine; against the NOMINAL it is `< 110000−2048 = 107952` → stamped
+`collapsed` and dropped from Table A (the live symptom).
+
+*Fix.*
+1. New helpers in `phase20_common.py`: `load_base_actual(path)` / `save_base_actual(path,
+   rows)` persist a per-ctx sidecar **`<out>/raw/base_actual.json`** = `{ctx_label: rows}`
+   (merge-safe, atomic, best-effort), exactly like the existing
+   `own_requests.jsonl` / `fresh_ref.json` pattern. `raw_base_actuals(records, ctx)` and
+   `resolve_base_actual(...)` recover the base's actual rows from the RAW JSONL alone
+   (the sibling `kind in (fresh, base)` record's `prompt_tokens`) when the sidecar is
+   absent.
+2. `run_chunk` LOADS the sidecar at chunk start (`base_actual = load_base_actual(...)`)
+   and, right after a base runs, SAVES the base's actual `prompt_tokens` (guarded so a
+   base with `content is None` still persists its rows). A delta chunk in a separate
+   process now classifies against the base's real depth.
+3. `summarize()` gains a `base_actual` parameter (from the sidecar, else recovered from
+   the sibling record) and re-derives the collapse verdict for every delta via
+   `_effective_collapsed(r, base_actual)` → `is_collapsed(reuse, actual_base)`. A rep
+   stamped `collapsed` against the nominal ctx is CORRECTED (the 2048-row rung
+   tolerance is kept). The collapsed list is now simply `[delta for delta if
+   _effective_collapsed]` — no phantom entries for corrected reps. `_delta_cells()`
+   honours the same rule so a corrected rep enters Table A. **The 110k row now appears
+   in Table A at 242.4 rows/s.**
+
+**Bug 2 — the flat/slope verdict spanned all four sweep sizes.** PREREG 0c (c) defines
+the flat rule over **1024-8192 rows ONLY**; the 256 row belongs to the fixed-per-call
+overhead rule (0c (b), 256 vs 4096). Including 256 in the spread let a 256 outlier flip
+a genuinely flat 1024-8192 set to "slope present". *Fix:* new `FLAT_RANGE_ROWS =
+(1024, 4096, 8192)`; the spread is computed over that range, and the verdict names the
+range (`FLAT across delta sizes 1024-8192: ... => Phase 4 skipped, slope recorded`). The
+256-vs-4096 ratio is still reported separately by the overhead rule. Real data:
+1024-8192 spread = **4.8%** (<10%) ⇒ **FLAT ⇒ Phase 4 skipped**; 256/4096 = **88%**
+(not <50%) ⇒ no fixed-overhead cliff.
+
+**Tests** (52 → 55): `test_separate_process_110k_delta_not_collapsed` (a real
+chunk2a→chunk2b pair in ONE mock but TWO `run_chunk` calls — the second is a separate
+`base_actual` namespace; the mock tokenises a nominal-110K base SHORT of nominal via
+`chars_per_token=5.65`, so reuse sits below the nominal ctx yet within one rung of the
+actual base ⇒ NOT collapsed, and Table A carries the row; pre-fix it fails exactly as
+the live bug: `collapsed: reuse=99530 < base_actual-2048=107952`);
+`test_summarize_110k_base_actual_sidecar_and_sibling` (sidecar path AND sibling-record
+path both put reuse=100352 deltas in Table A at `median≈242.4`; the nominal fallback is
+shown to be the pre-fix failure); `test_flat_verdict_excludes_256_row` (a 100 r/s 256
+outlier beside a flat 1024/4096/8192 set ⇒ FLAT, not "slope present"; pre-fix it read
+`spread 60.2%`). **All 3 FAIL on the pre-fix sources** (1 TypeError on the new
+`base_actual` kwarg / 1 AssertionError on the nominal-collapse stamp / 1 AssertionError
+on the 4-size spread) and pass after; the 52 pre-existing tests stay green.
+
+**Real-data summarize** (`python bench/phase20_delta_ladder.py summarize --out-dir
+…/phase20-throughput`, READ-ONLY over the 5 chunk JSONL files): Table A now shows
+20k 272.6 / 50k 249.6 / **110k 242.4 (n=2)** / fresh100k 272.2 rows/s; Table B
+256→227.3, 1024→255.1, 4096→258.3, 8192→267.5; verdicts: ctx-depth benign 11.1%,
+no fixed-overhead cliff (88% of d4096), **FLAT across delta sizes 1024-8192: spread
+4.8% <10% => Phase 4 skipped, slope recorded**, fresh reference OK 272.2. The campaign
+raw data was not modified.
 
 
