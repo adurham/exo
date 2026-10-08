@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
+import types
 
 import pytest
 
@@ -314,3 +317,177 @@ def test_parse_sample_cli(tmp_path, capsys):
     assert rc == 0
     assert out["classification"]["total_samples"] == 260
     assert (tmp_path / "s.md").exists()
+
+
+# --------------------------------------------------------------------------- #
+# FIX 2 — reasoning_content stream (reasoning model: delta.reasoning_content)
+# --------------------------------------------------------------------------- #
+class _FakeSSEResponse:
+    """Context-manager, line-iterable stand-in for an urllib response."""
+
+    def __init__(self, lines):
+        self._lines = lines
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        for ln in self._lines:
+            yield (ln + "\n").encode("utf-8")
+
+
+def _sse(*frames):
+    return list(frames)
+
+
+def test_stream_reasoning_content_only_fires_first_token(monkeypatch):
+    """The real model streams ONLY delta.reasoning_content (content=''); the
+    stream client must accumulate it and fire on_first_token / set ttft on it."""
+    seen = {}
+    lines = _sse(
+        'data: {"choices":[{"delta":{"role":"assistant","content":""}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"We"}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":" need"}}]}',
+        ': generation_stats {"prompt_tps": 123.4, "prompt_tokens": 100, '
+        '"generation_tokens": 2, "prefix_cache_hit": true}',
+        'data: [DONE]',
+    )
+    monkeypatch.setattr(gb.urllib.request, "urlopen",
+                        lambda req, timeout=None: _FakeSSEResponse(lines))
+
+    def on_first(epoch, resp):
+        seen["epoch"] = epoch
+
+    out = gb.stream_once("hi", 8, on_first_token=on_first)
+    assert "epoch" in seen, "on_first_token must fire on a reasoning_content-only stream"
+    assert out["first_token_epoch"] is not None
+    assert out["ttft_s"] is not None and out["ttft_s"] >= 0.0
+    assert out["last_token_epoch"] is not None
+    # both reasoning fragments counted as output text
+    assert out["content_chars"] == len("We") + len(" need")
+    assert out["stats"]["prefix_cache_hit"] is True
+    assert out["stats"]["prompt_tps"] == pytest.approx(123.4)
+
+
+def test_stream_content_and_reasoning_both_accumulate(monkeypatch):
+    """A stream carrying both kinds fires once, on the first non-empty delta."""
+    calls = []
+    lines = _sse(
+        'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+        'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}',
+        'data: [DONE]',
+    )
+    monkeypatch.setattr(gb.urllib.request, "urlopen",
+                        lambda req, timeout=None: _FakeSSEResponse(lines))
+    out = gb.stream_once("hi", 8, on_first_token=lambda e, r: calls.append(e))
+    assert len(calls) == 1
+    assert out["content_chars"] == len("Hello") + len("thinking")
+
+
+# --------------------------------------------------------------------------- #
+# FIX 1 — cmd_decode wires the persistent own-request registry into ChunkGuard
+# --------------------------------------------------------------------------- #
+class _FakeGuard:
+    """Records the ChunkGuard kwargs cmd_decode is (not) passing."""
+
+    last_kwargs: dict | None = None
+
+    def __init__(self, label, **kwargs):
+        type(self).last_kwargs = {"label": label, **kwargs}
+        self.cancel_event = threading.Event()
+        self.registered = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def register_own_request(self, t=None):
+        self.registered += 1
+
+
+def _fake_guard_module():
+    m = types.ModuleType("phase20_guard")
+    m.ChunkGuard = _FakeGuard
+    return m
+
+
+def test_cmd_decode_loads_registry_and_passes_to_guard(tmp_path, monkeypatch,
+                                                       capsys):
+    """cmd_decode must load the persistent registry and pass BOTH own_requests
+    (non-empty, from the file) and registry_path to ChunkGuard -- otherwise the
+    guard's entry idle-check stalls on this tool's own prior POSTs (FIX 1)."""
+    outdir = tmp_path / "out"
+    raw = outdir / "raw"
+    raw.mkdir(parents=True)
+    reg = raw / gb.DEFAULT_REGISTRY_NAME
+    reg.write_text(
+        '{"label": "phase20-gpu-busy-benign", "t": 1000.0}\n'
+        '{"label": "phase20-delta-ladder", "t": 1234.5}\n'
+        "not-json-tolerated\n"
+        "\n")
+    # no cluster, and do NOT write into the repo's real RAW_DIR
+    monkeypatch.setattr(gb, "stream_once", lambda *a, **k: {"usage": None})
+    monkeypatch.setattr(gb, "RAW_DIR", str(tmp_path / "raw_out"))
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "phase20_guard", _fake_guard_module())
+
+    rc = gb.main(["decode", "--workload", "benign", "--depth", "1000",
+                  "--outdir", str(outdir)])
+    capsys.readouterr()
+    assert rc == 0
+    kw = _FakeGuard.last_kwargs
+    assert kw is not None, "ChunkGuard was never constructed"
+    assert kw.get("own_requests") == [1000.0, 1234.5], \
+        "own_requests must be the registry epochs, loaded from the file"
+    assert kw.get("registry_path") == str(reg), \
+        "registry_path must point at the default <outdir>/raw/ registry"
+
+
+def test_cmd_decode_own_registry_override(tmp_path, monkeypatch, capsys):
+    """--own-registry PATH overrides the default registry location."""
+    outdir = tmp_path / "out"
+    alt = tmp_path / "shared_registry.jsonl"
+    alt.write_text('{"label": "x", "t": 42.0}\n')
+    monkeypatch.setattr(gb, "stream_once", lambda *a, **k: {"usage": None})
+    monkeypatch.setattr(gb, "RAW_DIR", str(tmp_path / "raw_out"))
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "phase20_guard", _fake_guard_module())
+
+    rc = gb.main(["decode", "--workload", "benign", "--depth", "1000",
+                  "--outdir", str(outdir), "--own-registry", str(alt)])
+    capsys.readouterr()
+    assert rc == 0
+    kw = _FakeGuard.last_kwargs
+    assert kw["registry_path"] == str(alt)
+    assert kw["own_requests"] == [42.0]
+
+
+# --------------------------------------------------------------------------- #
+# FIX 2c — a no-first-token stream must not crash window validity
+# --------------------------------------------------------------------------- #
+def test_window_validity_survives_none_ttft():
+    """A stream that yields no token at all -> ttft/first/last None; the window
+    check must return (False, ...) not raise, and the record stays writable."""
+    first = last = None
+    ok, why = gb.window_inside_stream(10.0, 20.0, first, last)
+    assert ok is False
+    assert "no token" in why
+    # the shape cmd_decode feeds JSON is still serializable
+    rec = {"decode": {"ttft_s": None, "first_token_epoch": first,
+                      "last_token_epoch": last, "decode_s": None},
+           "window_valid": {"m4-1": ok}}
+    assert json.loads(json.dumps(rec))["window_valid"]["m4-1"] is False
+
+
+def test_load_own_requests_tolerates_missing_and_garbage(tmp_path):
+    """The loader must never fail a run: missing file -> [], garbage skipped."""
+    assert gb.load_own_requests(str(tmp_path / "nope.jsonl")) == []
+    assert gb.load_own_requests(None) == []
+    p = tmp_path / "r.jsonl"
+    p.write_text('\n{"t": 1.5}\n{bad\n{"label": "no-t"}\n{"t": "2.5"}\n')
+    assert gb.load_own_requests(str(p)) == [1.5, 2.5]

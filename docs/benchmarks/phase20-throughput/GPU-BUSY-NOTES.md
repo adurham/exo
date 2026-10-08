@@ -10,7 +10,8 @@ synthetic decode fixtures).  This worker built and unit-tested everything
 
 Three windows, on **both nodes simultaneously**: idle baseline; streaming
 decode *benign*; streaming decode *agentic*.  The decode window starts only
-**after the first SSE content token** of a decode-only (prefix-cached) request,
+**after the first SSE token** (content or reasoning_content) of a decode-only
+(prefix-cached) request,
 so prefill cannot contaminate it.  Two independent samplers run in that window:
 
 * `sudo -n powermetrics --samplers gpu_power -i 500 -n <N>` → `GPU HW active
@@ -101,7 +102,7 @@ python bench/phase20_gpu_busy.py parse-pm     FILE [--idle FILE] [--md FILE]
 python bench/phase20_gpu_busy.py parse-sample FILE [--classify-config F] [--md FILE]
 python bench/phase20_gpu_busy.py idle         [--secs 50] [--out FILE] [--dry-run]
 python bench/phase20_gpu_busy.py decode --workload {benign,agentic} \
-        [--depth 100000] [--secs 50] [--max-tokens 2600] [--dry-run]
+        [--depth 100000] [--secs 50] [--max-tokens 2600] [--own-registry PATH] [--dry-run]
 python bench/phase20_gpu_busy.py report       [--idle F] [--benign F] [--agentic F]
 python bench/phase20_gpu_busy.py fallback-b   [--pid N] [--out NAME]
 ```
@@ -111,7 +112,8 @@ All four offline parsers/reporters are safe to run anywhere.  `idle` and
 PM-owned live path (guarded, needs `bench/phase20_guard.py`).  The decode
 sequence (plan in `--dry-run`): canary ok → cold feed (prefix build, **not**
 measured) → the **exact same prompt** re-fed (expect `turn reuse: … prefill=0`)
-→ on the **first SSE content token** start powermetrics + `sample` on both
+→ on the **first SSE token** (content **or** reasoning_content — this model
+streams `delta.reasoning_content`) start powermetrics + `sample` on both
 nodes → stream until the window ends → verify the window lay inside
 `[first token, last token]` (else the run is marked INVALID) → scp back →
 parse → `docs/benchmarks/phase20-throughput/raw/gpu_busy.<workload>.json` + md.
@@ -183,3 +185,44 @@ to the `sample`-only host-wait proxy (already implemented).
   fractions are exercised only against the hand-made synthetic fixture.  The
   `decode` live path itself (SSE start trigger, window-validity, guard
   integration) is untested against the cluster by design; the PM runs it.
+
+## FIX 1 — registry wiring + reasoning_content first-token (branch `p20/gpubusy`)
+
+Two defects root-caused by the PM from live data; both fixed, offline-tested.
+
+**FIX 1a — persistent own-request registry.** `cmd_decode` constructed
+`ChunkGuard(label, max_wall_s, log_dir)` with **no** `own_requests` and **no**
+`registry_path`.  The guard's entry idle-check refuses to start if any
+generation POST on a node is newer than `min_idle_s` (600 s) unless it matches a
+registered own request — so this tool's own prior POSTs (or a sibling phase20
+tool's, in its own process) stalled every run ~10 min.  Now `cmd_decode`:
+loads the registry with a local `load_own_requests()` (copy of the
+`phase20_delta_ladder.py` helper — JSONL `{"label","t"}`, missing file → `[]`,
+garbage/blank lines skipped) and passes **both** `own_requests=<epochs>` and
+`registry_path=<file>` to `ChunkGuard`; `--own-registry PATH` overrides the
+default `<outdir>/raw/own_requests.jsonl`.  Every request (`g.register_own_request()`
+before the warmup feed **and** before the measured feed) keeps appending to it.
+No recorded JSON keys changed.
+
+**FIX 1b — `reasoning_content` first-token.** `stream_once` watched only
+`delta.content`; this reasoning model streams its output in
+`delta.reasoning_content`, so `ttft`/`first`/`last` stayed `None`, the samplers
+never launched, and window-validity read INVALID.  Now it accumulates
+`delta.content or delta.reasoning_content` and fires `on_first_token` on the
+first non-empty delta of **either** kind (mirrors
+`phase20_delta_ladder.py`/`phase20_common.py:stream_once`).  Returned key set
+unchanged.
+
+Tests added (5): reasoning-only stream fires + non-None `ttft`; content+
+reasoning both accumulate (fires once); `cmd_decode` loads the registry and
+passes non-empty `own_requests` + `registry_path`; `--own-registry` override;
+None-ttft stream does not crash window-validity; loader tolerates
+missing/garbage.  Suite: `30 passed` (was 24).  Pre-fix at HEAD, 5 of the new
+tests fail/error.
+
+**NOT verified**: no live smoke of the fixed decode path — `bench/phase20_guard.py`
+is not present in this worktree (the live path needs it; the earlier branch commit
+shipped without it), so `decode` exits 2 with `phase20_guard unavailable` before
+any cluster contact.  The PM's worktree (which has the guard) must run the smoke.
+The registry wiring is asserted only against a fake guard; the real
+`ChunkGuard(own_requests=…, registry_path=…)` call path is exercised by the PM.
