@@ -215,3 +215,60 @@ After the fix: `28 passed in 6.44s` (26 pre-existing + the 2 new tests).
 only the fake-ssh/fake-clock reproduction of the ordering is proven here.  The PM owns the
 live re-run.
 
+## FIX 2 — S1 TP2 false positive (watcher aborts the harness's OWN single request)
+
+**Symptom (live-reproduced by the PM):** the watcher aborted the harness's own single
+request with reason `ABORTED_USER_ARRIVED`, signal
+`S1:active=2 own_inflight=1 state=2 log=1` — blocking **every** live chunk.
+
+**Root cause:** `_state_active_tasks()` counted `RunnerRunning` runners as active requests
+and did `n = max(n, 1)`.  The cluster is **tensor-parallel 2**: one logical request is
+broadcast to both ranks and carries a single shared `task_id` (both nodes' `exo.log` show
+the same `Starting task TextGeneration(task_id='af2a3fbf-…')`), so at IDLE `/state` already
+shows `runners` = 2 entries and during ONE request **BOTH** report `RunnerRunning`.  The
+runner count therefore read a single request as **2** concurrent requests, and the S1 rule
+(`active >= 2` ⇒ arrival) fired on the harness's own work.  (The entry idle-check reads the
+same function, but only when nothing is in flight, so it was the watcher path that misfired.)
+
+**Fix (minimal):** count active generation **TASKS**, not runners.  `_state_active_tasks()`
+now returns the number of `state['tasks']` entries whose `TextGeneration.taskStatus` ∈
+(`Pending`, `Running`), and **never** consults `state['runners']` (a runner is not a
+request — on TP2 it double-counts).  Returns 0 for unknown/malformed payloads.  The
+`max(state_active, log_running)` combination, the ±2 s own-request window, the
+`active = max(state_active, log_running)` combination, the S1 rule, the S2/S3/S4 logic and
+every public API are unchanged.  (One now-inaccurate idle reason string —
+`"/state: {n} runner(s) in RunnerRunning"` — was corrected to
+`"/state: {n} active TextGeneration task(s)"`; no test pins it.)
+
+Two pre-existing S1 fixtures were made to the *live* `/state` shape (they had encoded the
+runner-count bug): `test_s1_concurrency_aborts_when_no_own_inflight` now carries one real
+`TextGeneration` task (still aborts, no own in-flight), and `test_s1_no_abort_when_own_inflight`
+now carries one real active task + own registration (still silent).  The regression test
+that FAILS on the old code and PASSES after is
+`test_state_active_tasks_tp2_single_request_is_one`, plus the integration test
+`test_s1_no_abort_on_tp2_single_own_request` (TP2 state, own_inflight=1 ⇒ no `cancel_event`).
+
+Before the fix (verbatim, `-k tp2_single_request_is_one`):
+
+```
+>       assert g._state_active_tasks(_tp2_state(1)) == 1
+E       AssertionError: assert 2 == 1
+bench/phase20_tests/test_phase20_guard.py:600: AssertionError
+FAILED bench/phase20_tests/test_phase20_guard.py::test_state_active_tasks_tp2_single_request_is_one
+1 failed, 31 deselected in 0.03s
+```
+
+and the integration test (verbatim):
+
+```
+E       AssertionError: TP2 own single request was flagged: ['S1:active=2 own_inflight=1 state=2 log=1'] reason='ABORTED_USER_ARRIVED'
+E       assert True is False
+```
+
+After the fix: `32 passed in 6.23s` (28 pre-existing + 4 new tests).
+
+**Not verified live:** the pilot re-run of a real chunk under `ChunkGuard` on the TP2
+cluster — the PM owns that.  Here only the `/state` shape is confirmed against the live
+cluster (read-only `GET /state`: 2 runners, `tasks` keyed by `task_id` →
+`{"TextGeneration": {"taskStatus": …}}` at IDLE all `Complete`).
+

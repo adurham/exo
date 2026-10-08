@@ -266,28 +266,28 @@ def test_s2_aborts_when_post_outside_own_window(tmp_path, monkeypatch):
 
 
 def test_s1_concurrency_aborts_when_no_own_inflight(monkeypatch):
-    # /state shows one RunnerRunning, we have no in-flight registration -> S1 abort
+    # /state shows one active TextGeneration task, we have no in-flight registration
+    # -> S1 abort.  (FIX 2: the signal counts cluster-wide TextGeneration TASKS, so the
+    # fixture carries a task; the old runner-only fixture encoded the TP2 double-count.)
     guard = g.ChunkGuard("s1", max_wall_s=60, poll_s=0.2, db_uri="file:memory:?mode=ro")
     guard.t_start = g._now()
     monkeypatch.setattr(g, "run_ssh", lambda node, cmd, **kw: (0, "", ))  # no events
     monkeypatch.setattr(g, "measure_clock_offset", lambda node, **kw: 0.0)
-    monkeypatch.setattr(
-        g, "_fetch_json", lambda url, **kw: {"runners": {"r1": {"RunnerRunning": {}}}}
-    )
+    monkeypatch.setattr(g, "_fetch_json", lambda url, **kw: _tp2_state(1))
     guard._poll_signals()
     assert guard.aborted and guard.reason == "ABORTED_USER_ARRIVED"
     assert any(s.startswith("S1:") for s in guard._signals)
 
 
 def test_s1_no_abort_when_own_inflight(monkeypatch):
+    # one active TextGeneration task and our own request registered in flight
+    # (active=1, own_inflight=1) -> no abort.  Control for the S1 rule under FIX 2.
     guard = g.ChunkGuard("s1b", max_wall_s=60, poll_s=0.2, db_uri="file:memory:?mode=ro")
     guard.t_start = g._now()
     guard.register_own_request(g._now())  # our request is in flight
     monkeypatch.setattr(g, "run_ssh", lambda node, cmd, **kw: (0, ""))
     monkeypatch.setattr(g, "measure_clock_offset", lambda node, **kw: 0.0)
-    monkeypatch.setattr(
-        g, "_fetch_json", lambda url, **kw: {"runners": {"r1": {"RunnerRunning": {}}}}
-    )
+    monkeypatch.setattr(g, "_fetch_json", lambda url, **kw: _tp2_state(1))
     guard._poll_signals()
     assert guard.aborted is False
 
@@ -562,3 +562,85 @@ def test_sigint_actually_kills_child():
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+# ======================================================================================
+# (9) S1 TP2 regression -- FIX 2: count TextGeneration TASKS, not runners
+# ======================================================================================
+
+
+def _tp2_state(n_tasks: int) -> dict:
+    """A live-shaped TP2 ``GET /state`` payload.
+
+    On a tensor-parallel-2 deployment ONE request is broadcast to both ranks: BOTH
+    ``state['runners']`` entries report ``RunnerRunning`` while the request appears as
+    exactly ``n_tasks`` cluster-wide ``TextGeneration`` entries in ``state['tasks']``
+    (one shared ``task_id`` per request).  Shape confirmed read-only against the live
+    cluster: http://192.168.86.48:52415/state has 2 runners and a ``tasks`` map keyed by
+    task_id whose values are ``{"TextGeneration": {"taskStatus": ...}}``.
+    """
+    return {
+        "runners": {
+            "rank0": {"RunnerRunning": {"prefillServerPort": None}},
+            "rank1": {"RunnerRunning": {"prefillServerPort": None}},
+        },
+        "tasks": {
+            f"task-{i}": {"TextGeneration": {"taskId": f"task-{i}", "taskStatus": "Running"}}
+            for i in range(n_tasks)
+        },
+    }
+
+
+def test_state_active_tasks_tp2_single_request_is_one():
+    """(1) TP2 REGRESSION: 2 RunnerRunning runners + ONE TextGeneration task => 1.
+
+    Pre-FIX 2 the runner loop counted 2 and ``n = max(n, 1)`` kept it at 2, so a single
+    request looked like two concurrent ones -- the live misfire.
+    """
+    assert g._state_active_tasks(_tp2_state(1)) == 1
+
+
+def test_state_active_tasks_two_requests_is_two():
+    """(2) two distinct cluster-wide TextGeneration tasks => 2 (real concurrency)."""
+    assert g._state_active_tasks(_tp2_state(2)) == 2
+
+
+def test_state_active_tasks_idle_and_malformed_is_zero():
+    """(3) no generation task (and unknown/malformed payloads) => 0.
+
+    Includes the runner-only payload: with no TextGeneration task, ``state['runners']``
+    must NOT contribute a count (runners are ignored -- a runner is not a request).
+    """
+    assert g._state_active_tasks({"runners": {}, "tasks": {}}) == 0
+    assert g._state_active_tasks({}) == 0  # no tasks key at all
+    assert g._state_active_tasks({"tasks": None}) == 0  # malformed tasks value
+    assert g._state_active_tasks({"runners": {"r": {"RunnerRunning": {}}}, "tasks": {}}) == 0
+
+
+def test_s1_no_abort_on_tp2_single_own_request(monkeypatch):
+    """(4) INTEGRATION -- the exact live misfire shape must NOT abort.
+
+    TP2 state (2 runners ``RunnerRunning`` + 1 TextGeneration task) with our own request
+    in flight (``own_inflight=1``) and a node log ending in ``runner running`` (``log=1``).
+    Pre-FIX 2 this computed ``state=2`` -> ``active=max(2, 1)=2`` and the S1 rule
+    (``active >= 2``) fired on the harness's OWN single request -- live signal
+    ``S1:active=2 own_inflight=1 state=2 log=1``.  After the fix ``state=1`` -> ``active=1``
+    and the watcher must stay silent.
+    """
+    guard = g.ChunkGuard("s1tp2", max_wall_s=60, poll_s=0.2, db_uri="file:memory:?mode=ro")
+    guard.t_start = g._now()
+    guard.register_own_request(g._now())  # our single request is in flight
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(g._now())) + ".000"
+    log = (
+        f"[ {ts} | INFO | exo.worker.runner.runner:handle_generation_tasks:571 ] "
+        f"runner running\n"
+    )
+    monkeypatch.setattr(g, "run_ssh", lambda node, cmd, **kw: (0, log + g._SSH_OK_MARKER))
+    monkeypatch.setattr(g, "measure_clock_offset", lambda node, **kw: 0.0)
+    monkeypatch.setattr(g, "_fetch_json", lambda url, **kw: _tp2_state(1))
+    guard._poll_signals()
+    assert guard.aborted is False, (
+        f"TP2 own single request was flagged: {guard._signals} reason={guard.reason!r}"
+    )
+    assert guard.cancel_event.is_set() is False
+    assert not any(s.startswith("S1:") for s in guard._signals)

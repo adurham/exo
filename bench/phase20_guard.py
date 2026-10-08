@@ -370,20 +370,26 @@ def _collect_node(node: str, timeout: float) -> dict:
 
 
 def _state_active_tasks(state: dict) -> int:
-    """Count RunnerRunning runners in a ``GET /state`` payload (0 when unknown)."""
+    """Count active cluster-wide ``TextGeneration`` TASKS in a ``GET /state`` payload.
+
+    A generation request is a cluster-wide task: on a tensor-parallel deployment ONE
+    request is broadcast to every rank and carries a single shared ``task_id``, so the
+    number of active ``state['tasks']`` entries is the true in-flight request count.
+    ``state['runners']`` is deliberately NOT consulted: on TP2 one request puts BOTH
+    runners in ``RunnerRunning``, so counting runners double-counts a single request
+    (live-reproduced S1 false positive).  Returns 0 when the payload is unknown or
+    malformed.
+    """
+    tasks = state.get("tasks")
+    if not isinstance(tasks, dict):
+        return 0
     n = 0
-    runners = state.get("runners") or {}
-    for status in runners.values():
-        if isinstance(status, dict) and "RunnerRunning" in status:
-            n += 1
-    for task in (state.get("tasks") or {}).values():
+    for task in tasks.values():
         if not isinstance(task, dict):
             continue
-        if "TextGeneration" in task and task.get("TextGeneration", {}).get("taskStatus") in (
-            "Pending",
-            "Running",
-        ):
-            n = max(n, 1)
+        tg = task.get("TextGeneration")
+        if isinstance(tg, dict) and tg.get("taskStatus") in ("Pending", "Running"):
+            n += 1
     return n
 
 
@@ -432,7 +438,7 @@ def idle_check(
         active = _state_active_tasks(state)
         detail["state_active_tasks"] = active
         if active > 0:
-            reasons.append(f"/state: {active} runner(s) in RunnerRunning")
+            reasons.append(f"/state: {active} active TextGeneration task(s)")
     except Exception as exc:  # noqa: BLE001
         detail["state_error"] = repr(exc)
         reasons.append(f"/state unreachable ({exc!r}) -> cannot evaluate, not idle")
