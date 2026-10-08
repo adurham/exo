@@ -1,0 +1,45 @@
+# BRIEF G — `bench/phase20_guard.py` (idle guard R1, canary R4, chunk guard / abort watcher R2+R3)
+
+Tier: mid-coder. Worktree: `/private/tmp/phase20-campaign` (branch `deploy/phase20-campaign`).
+You own ONLY: `bench/phase20_guard.py`, `bench/phase20_tests/test_phase20_guard.py`, `bench/phase20_tests/fixtures/guard/*`,
+`docs/benchmarks/phase20-throughput/GUARD-NOTES.md`. Read `CHILD-COMMON.md`, `PREREG.md` (D1) and `GUARD-CONTRACT.md` first. Implement the contract's
+API EXACTLY (names, signatures, exit codes) - siblings are coding against it right now.
+
+## Why this exists
+Every live benchmark in this campaign runs on a production cluster whose owner may return at any time. The plan's R1(b) check
+(`api_calls.ended_at is null`) is vacuous (rows are written at call completion), and R1(a) (POST age) is blind to a long in-flight call (a cold 100K
+prefill runs ~6 min, deep ones 40+ min). This module is the safety layer; a false NEGATIVE (missing the user) is the failure that matters most,
+a false positive just costs a retry. Be conservative: when a signal cannot be evaluated (ssh failure, unparsable log) the answer is NOT idle.
+
+## Facts you need (verify each against real data before relying on it)
+1. **In-flight marker (best signal).** Per node, `~/.exo/exo_log/exo.log` (loguru) carries, per generation request on that node's runner:
+   `... exo.worker.runner.runner:handle_generation_tasks:571 ] runner running` at start and
+   `... :860 ] runner idle: reclaimed MLX allocator pool` then `... :865 ] runner ready` at the end (line numbers vary across builds - match the MESSAGE TEXT only).
+   Also `exo.worker.runner.supervisor:start_task:814 ] Starting task TextGeneration(` and `exo.master.main:_command_processor:213 ] Executing command: TaskFinished(`.
+   Real examples: the saved log `/Users/adam.durham/.hermes/cache/scratch/phase20/m41_0901_1400.log.zst` around 2026-10-07 09:20:21 -> 09:21:59 (call 1) and 09:24:30 -> 09:26:48 (call 7).
+   Prove (and document in GUARD-NOTES.md) that for every one of the 42 real calls (session `20261007_092009_9a2ed7`, start epochs in state.db `api_calls`) a `runner running` ... `runner ready` interval brackets the call, then define in-flight = last of {`runner running`, `runner ready`} on either node is `runner running`.
+   Also parse `GET {API_BASE}/state` as a secondary signal if it exposes a running TextGeneration task (check `src/exo/shared/types/tasks.py` and the state JSON; the lifecycle tasks CreateRunner/ConnectToGroup/LoadModel/StartWarmup are NOT requests).
+2. **POST lines.** `API request: POST <path>` (loguru, logger `exo.api.main:_log_requests`). Enumerate the generation-triggering POST routes by reading `src/exo/api/main.py` (and adapters) in the SHARED checkout `/Users/adam.durham/repos/exo` (read-only): chat completions, completions, messages (Claude), responses, bench/..., etc. List them in GUARD-NOTES.md. GET `/state`, `/metrics`, `/node_id`, `/v1/models`, `/models`, dashboard polls are NOT requests.
+3. **Time bases.** exo.log timestamps are NODE-LOCAL wall time without tz marker (`[ 2026-10-07 09:20:21.067 | DEBUG ...`); both nodes are in CDT = the laptop's local tz. state.db `started_at/ended_at/timestamp` are UTC epoch floats. Measure each node's clock offset vs the laptop at guard start
+   (`ssh node '/Users/adam.durham/repos/exo/.venv/bin/python -c "import time;print(time.time())"'`, RTT-midpoint corrected, take the min-RTT of 3), apply it when comparing log times with the laptop's `time.time()`, and print it in IdleReport.detail. Own-request matching window = +-2 s AFTER offset correction; if |offset| > 1.5 s fail loudly (clock skew makes own-request matching unsafe) unless `min_idle_s` logic is the only check.
+4. **Scanning the log cheaply.** Never copy the 20+ MB log. Run the filter ON the node: `ssh -o BatchMode=yes -o ConnectTimeout=8 studioN "grep -a -E 'API request: POST|handle_generation_tasks|Starting task TextGeneration|Executing command: TaskFinished' ~/.exo/exo_log/exo.log | tail -n 400"` (match message text; keep patterns in one constant). The log rotates at relaunch (new file; older ones are `exo.<date>.log.zst`) - handle a missing/short file as "cannot evaluate => not idle" only if ssh itself failed; an empty match set on a healthy node = no activity.
+5. **state.db** (read-only URI, exact equality on model - NOT LIKE, see CHILD-COMMON): S3 = `api_calls` rows with `provider='custom' AND model='dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw'` whose `ended_at` > now-min_idle_s (idle check) or `started_at` > chunk start (watcher). S4 = early signal: `messages` rows (columns `session_id, role, timestamp`) and `sessions.last_activity_at` for sessions whose `sessions.model` equals the exo model id, newer than chunk start. Verify on the real session that the user message row (id 529750, ts 1791382820.28) precedes `api_calls.started_at` (1791382821.05) by <1 s.
+   `session_turn_leases` currently has 2 rows - inspect what they are (they may be unrelated to the exo model); only use them if you can show they carry the model/session relation, else note and ignore.
+6. **Canary** (R4): script already at `/Users/adam.durham/.hermes/cache/scratch/gpu_canary2.py` (copy also at `/tmp/gpu_canary2.py` on both nodes). Run `ssh studioN '~/repos/exo/.venv/bin/python /tmp/gpu_canary2.py'` (~20 s), output `14.82 14.84 14.86 TFLOPS (healthy ~14-15, degraded <5)`. state: median>=10 healthy, 5..10 marginal, <5 degraded. If the remote file is missing, `scp` it (allowed). Sequential per node (the cluster is idle; do not stack GPU loads).
+
+## Required behaviour
+* `idle_check` / `wait_for_idle` / `canary` / `ChunkGuard` / CLI exactly as in GUARD-CONTRACT.md. IdleReport.reasons must name the specific failing signal with evidence (node, log line timestamp, row id).
+* Watcher thread: poll every `poll_s` (default 15; make it injectable for tests); signals S1 (in-flight count > own registered in-flight), S2 (unregistered POST), S3, S4. On first hit: set `cancel_event`, record reason `ABORTED_USER_ARRIVED`, print that literal token to stderr, SIGINT the registered pid (CLI `watch`: the child process; then SIGTERM after 20 s). Wall cap: `ABORTED_WALL_CAP` at `max_wall_s` (default 900).
+  Own-request registry: `register_own_request(t)` appends to an in-memory list AND to `registry_path` (JSONL) if given, so a separate process can read it. For non-registering harnesses (`watch -- <command>`), S2 cannot discriminate: apply S1(concurrency>=2), S3, S4 only and say so in the report's `signals_seen`.
+* Everything read-only: no generation POSTs, no node writes except the canary scp, never kill/modify cluster processes.
+* No third-party deps. Python 3.13. Strict-ish typing (dataclasses, type hints) - the repo uses basedpyright strict for `src/`, but `bench/` is exempt; keep it clean and readable.
+
+## Tests (`bench/phase20_tests/test_phase20_guard.py`, pytest, no network/cluster access)
+Inject fakes for ssh (a callable seam, e.g. `run_ssh(node, cmd) -> (rc, stdout)`), clock, sqlite path, and sleep. Cover at least: (1) log parsing against REAL fixture lines extracted from the saved zst (idle window, in-flight window, completed window); (2) in-flight state machine incl. the 42-call interval proof as a data-driven test over a compact fixture of (start, end) pairs; (3) own-request exclusion within +-2 s and abort on an extra POST; (4) S3/S4 on a temp sqlite DB built from the real schema subset; (5) canary output parsing + state thresholds; (6) watcher: arrival mid-run sets cancel_event, SIGINTs a real `sleep 60` subprocess, `watch` exit code 75; wall cap -> 76; (7) ssh failure => not idle; (8) clock-skew refusal. Prove the tests have teeth: sabotage one detection path (e.g. disable S2) and show the corresponding test fails, then restore (paste the failing line).
+Run: `cd /private/tmp/phase20-campaign && /Users/adam.durham/repos/exo/.venv/bin/python -m pytest bench/phase20_tests/test_phase20_guard.py -q -p no:cacheprovider` (add `--rootdir`/`-c /dev/null` if the repo pytest config interferes: `addopts = -m 'not slow' --ignore=tests --ignore=tmp` is harmless but `pythonpath = "."` plus `EXO_TESTS=1`; bench/ imports of `phase20_guard` need `PYTHONPATH=bench` inline).
+
+## Live READ-ONLY smoke (allowed, once, paste the output)
+`PYTHONPATH=bench python bench/phase20_guard.py idle` (expected: ok=true - the exo model has had no traffic since 17:44; if it says busy, investigate whether that is a true positive or a bug and report), then `canary` (expect ~14.8 TFLOPS both nodes).
+
+## Deliverable
+Commit on `deploy/phase20-campaign` (exact-path adds; do not push). Report: commit SHA, `git status --short` (your files clean), pytest summary line, the sabotage proof, the live smoke output, GUARD-NOTES.md (route list, marker proof, clock-offset numbers, known limitations / false-negative analysis). **NOT verified** list must include "behaviour when a real user request arrives mid-chunk" unless you replayed it with the saved-log fixture.

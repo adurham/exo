@@ -1,0 +1,26 @@
+HEAD=f4bb14746c68deea005f41f590e27e6b182b6384
+BRANCH=deploy/next13
+--- tracked-dirty:
+ M dashboard/package-lock.json
+ D tmp/decode-35-campaign/PLAN.md
+ D tmp/decode-deep-context-campaign-20260922/LOG.md
+ D tmp/decode-deep-context-campaign-20260922/PLAN.md
+ D tmp/decode-deep-context-campaign-20260922/PREREG-adaptive-prefill-2026-09-23.md
+ D tmp/decode-deep-context-campaign-20260922/PREREG-freshboot-control-2026-09-23.md
+ D tmp/p05-lmhead-mxfp8-20260830/PRE_REGISTERED_GATES.md
+ D tmp/p05-lmhead-mxfp8-20260830/analyze_margins.py
+ D tmp/p05-lmhead-mxfp8-20260830/collect_real_margins.py
+ D tmp/p05-lmhead-mxfp8-20260830/diagnose_zero_accept.py
+ D tmp/p05-lmhead-mxfp8-20260830/knob_smoke_test.py
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/base_100k_1.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/base_100k_2.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/base_100k_3.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/base_5k_1.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/base_5k_2.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/base_5k_3.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/quant_100k_1.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/quant_100k_2.json
+ D tmp/p05-lmhead-mxfp8-20260830/live_ab/quant_100k_3.json
+--- submodules:
+ 603f16eb7b45e6763d779ce3a2e401c369be9855 mlx (known-good-prefill-20260821-165048-340-g603f16eb7)
+ 6cc9c1e8709e228fca99ac152cd5e681ddcce65d mlx-lm (known-good-poolgrow-default-20260823-177-g6cc9c1e)
