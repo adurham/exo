@@ -727,6 +727,176 @@ def test_run_chunk_loads_and_persists_default_registry(tmp_path):
     assert len(L.load_own_requests(default_reg)) == 3
 
 
+# ============================================ FIX 2: rep uniqueness / cache hits
+# Live chunk1 bug: every rep of a cell built a BYTE-IDENTICAL delta
+# (build_delta was deterministic in seed+delta_tokens), so reps 2..N were served
+# from the previous rep's exact prompt cache -> prefill=0, reuse==prompt, wall~0.3 s
+# (they measured NOTHING).  The tool recorded them as valid 0-row deltas.
+
+def test_rep_delta_texts_unique_per_rep():
+    """Two reps of the same nominal delta size must build DIFFERENT payloads."""
+    base = C.build_base(4000, "SALT-0123456789abcdef")
+    d0, d1, d2 = (C.build_delta(2048, nonce=i) for i in (0, 1, 2))
+    assert d0 != d1 and d1 != d2 and d0 != d2
+    assert "SESSION-SALT" not in d0 and "SESSION-SALT" not in d1   # salt-free tail
+    assert d0.startswith("\n\n") and d0[2:].strip()
+
+
+def test_ladder_build_messages_unique_delta_per_rep():
+    """The ladder's own builder must fold the rep index into the delta text so
+    rep 0 and rep 1 are not byte-identical (else rep 1 is a full cache hit)."""
+    salt = "SALT-0123456789abcdef"
+    base_reply = {"4k": "ok"}
+    st0 = {"kind": "delta", "ctx_nominal": 4000, "ctx_label": "4k",
+           "delta_nominal": 2048, "rep": 0, "cell": "ctx4k_d2048", "salt": salt}
+    st1 = {**st0, "rep": 1}
+    m0, _ = L._build_messages(st0, salt, base_reply, C.DEFAULT_CHARS_PER_TOKEN)
+    m1, _ = L._build_messages(st1, salt, base_reply, C.DEFAULT_CHARS_PER_TOKEN)
+    assert m0 != m1
+    assert m0[0] == m1[0]           # same base head -> same checkpoint
+    assert m0[1] == m1[1]           # same assistant reply
+    assert m0[2]["content"] != m1[2]["content"]      # DISTINCT delta text
+    assert [m["role"] for m in m0] == ["user", "assistant", "user"]
+
+
+def test_mock_cache_hit_rep_measured_nothing_and_excluded(tmp_path):
+    """A byte-identical repeat is a full cache hit (prefill=0, reuse==prompt); the
+    run must classify it as such and the summarizer must exclude it (Table A n=1)."""
+    log = str(tmp_path / "exo.log")
+    eng = M.MockExo(log, rows_per_s=200.0, sleep=False)
+    base = C.build_base(20000, "SALT-feedfacefeedface")
+    msgs = C.delta_messages(base, "ok", C.build_delta(2048, nonce=0))
+    eng.handle_request(C.base_messages(base))       # cold base feed
+    p1 = eng.handle_request(msgs)                   # rep1: real delta
+    p2 = eng.handle_request(msgs)                   # rep2: byte-identical -> cache
+    assert p1["prefill"] > 0
+    assert p2["prefill"] == 0 and p2["reuse"] == p2["prompt"]
+
+    def rec(plan, rep):
+        r = {"usage": {"prompt_tokens": plan["prompt"], "completion_tokens": 1},
+             "ttft_s": 0.3, "wall_s": 0.3, "content": "ok"}
+        logf = {"log_prefill": plan["prefill"], "reuse": plan["reuse"],
+                "rewind": plan["rewind"], "prefill_controls_rows": plan["prefill"],
+                "prefill_s_log": max(plan["prefill"], 1) / 200.0,
+                "has_turn_reuse": plan["reuse"] > 0}
+        st = {"kind": "delta", "ctx_nominal": 20000, "ctx_label": "20k",
+              "delta_nominal": 2048, "rep": rep, "cell": "ctx20k_d2048"}
+        return L._record("chunk1", st, 2048, r, logf, "studio1", 1.0,
+                         C.DEFAULT_CHARS_PER_TOKEN, {"20k": 20000})
+
+    r1, r2 = rec(p1, 0), rec(p2, 1)
+    assert r1["cache_hit"] is False and r1["log_prefill"] > 0
+    assert r2["cache_hit"] is True and r2["log_prefill"] == 0
+    assert "cache hit" in r2["notes"]
+    s = C.summarize([r1, r2])
+    assert len(s["cache_hits"]) == 1                 # surfaced, not silently dropped
+    row = [x for x in s["table_a"] if x["ctx"] == "20k"][0]
+    assert row["n"] == 1                             # rep2 did NOT count as a delta
+
+
+def test_record_classifies_prefill_zero_as_cache_hit():
+    """Direct classifier exercise on the live rep2/rep3 shape (prefill=0)."""
+    st = {"kind": "delta", "ctx_nominal": 50000, "ctx_label": "50k",
+          "delta_nominal": 2048, "rep": 1, "cell": "ctx50k_d2048"}
+    r = {"usage": {"prompt_tokens": 47561, "completion_tokens": 1},
+         "ttft_s": 0.4, "wall_s": 0.4, "content": "ok"}
+    logf = {"log_prefill": 0, "reuse": 47561, "rewind": 45056,
+            "prefill_controls_rows": 0, "prefill_s_log": 0.4,
+            "has_turn_reuse": True}
+    rec = L._record("chunk1", st, 2048, r, logf, "studio1", 123.0,
+                    C.DEFAULT_CHARS_PER_TOKEN, {"50k": 45705})
+    assert rec["cache_hit"] is True
+    assert rec["collapsed"] is False and rec["invalid"] is False
+    assert rec["log_prefill"] == 0 and "cache hit" in rec["notes"]
+
+
+# ============================================ FIX 2: wall pre-check accounting
+def test_wall_precheck_ignores_predicted_cumulative(tmp_path, monkeypatch):
+    """With a FAST true elapsed and a large per-step prediction, steps that still
+    fit (elapsed + this step's pred <= cap) must NOT be blocked.  The old check
+    added ``pred_cum`` (a running sum of predictions) on top of the real elapsed
+    wall, double-counting and emitting a spurious NOT_RUN_WALL_CAP."""
+    log_path = str(tmp_path / "exo.log")
+    out_dir = str(tmp_path / "out")
+    monkeypatch.setattr(C, "predict_wall_s", lambda rows, **k: 400.0)
+    L.GUARD_OVERRIDE = _fake_guard_mod()
+    try:
+        with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False) as srv:
+            rc = L.main(["chunk1", "--api", srv.base_url, "--out-dir", out_dir,
+                         "--log-source", f"studio1={log_path}", "--reps", "3",
+                         "--max-wall", "900"])
+    finally:
+        L.GUARD_OVERRIDE = None
+    assert rc == L.EXIT_OK
+    raw = os.path.join(out_dir, "raw", "delta_ladder.chunk1.jsonl")
+    recs = C.load_jsonl([raw])
+    # 20K base + 3 deltas + 50K base + 3 deltas = 8 steps, all fit (elapsed~0).
+    assert len(recs) == 8
+    assert not any(r.get("not_run") == "NOT_RUN_WALL_CAP" for r in recs)
+
+
+def test_wall_precheck_blocks_truly_over_step_not_earlier(tmp_path, monkeypatch):
+    """The corrected gate blocks the step whose TRUE elapsed wall + predicted wall
+    first exceeds the cap, and no earlier one.  The old gate added the running
+    ``pred_cum`` on top, blocking one step EARLY (the live chunk1 symptom)."""
+    log_path = str(tmp_path / "exo.log")
+    out_dir = str(tmp_path / "out")
+    # pred fixed at 10 s; elapsed grows 50 s per step; cap 60 s.
+    #   correct: base 0+10 ok, rep0 50+10=60 not>60 ok, rep1 100+10=120>60 BLOCK
+    #   old    : rep0 50 + pred_cum(>=10) + 10 > 60 -> BLOCKS at rep0 (one early)
+    monkeypatch.setattr(C, "predict_wall_s", lambda rows, **k: 10.0)
+    seq = iter([0.0, 0.0, 50.0, 100.0, 150.0, 200.0, 250.0, 300.0, 350.0])
+    monkeypatch.setattr("time.monotonic", lambda: next(seq, 400.0))
+    L.GUARD_OVERRIDE = _fake_guard_mod()
+    try:
+        with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False) as srv:
+            rc = L.main(["chunk1", "--api", srv.base_url, "--out-dir", out_dir,
+                         "--log-source", f"studio1={log_path}", "--reps", "3",
+                         "--max-wall", "60"])
+    finally:
+        L.GUARD_OVERRIDE = None
+    assert rc == L.EXIT_OK
+    raw = os.path.join(out_dir, "raw", "delta_ladder.chunk1.jsonl")
+    recs = C.load_jsonl([raw])
+    blocked = [r for r in recs if r.get("not_run") == "NOT_RUN_WALL_CAP"]
+    assert len(blocked) == 1
+    # step order: 0 base20k, 1 d2048 rep0, 2 d2048 rep1, 3 d2048 rep2, ...
+    assert blocked[0]["rep"] == 1 and blocked[0]["delta_nominal"] == 2048
+
+
+# ============================================ FIX 2: ladder-aware collapse rule
+def test_collapsed_rule_ladder_rung():
+    """Live: base 18390 -> legit rewind to rung 16384 (0.89 of base) is a REAL
+    delta, not a collapse; reuse 2048 against base 20000 IS a collapse."""
+    assert C.is_collapsed(16384, 18390) is False     # within one 2048 rung
+    assert C.is_collapsed(2048, 20000) is True        # far below base depth
+    assert C.is_collapsed(45056, 45705) is False      # live 50k rep1
+    assert C.is_collapsed(18390 - 2048, 18390) is False   # exact rung boundary OK
+    assert C.is_collapsed(18390 - 2049, 18390) is True    # one below -> collapsed
+    assert C.is_collapsed(None, 20000) is True        # no turn-reuse line
+
+
+def test_record_collapse_uses_base_actual_depth():
+    """The classifier must use the base's ACTUAL row count: reuse=16384 with
+    base_actual=18390 is NOT collapsed; reuse=2048 with base_actual=20000 IS."""
+    st = {"kind": "delta", "ctx_nominal": 20000, "ctx_label": "20k",
+          "delta_nominal": 2048, "rep": 2, "cell": "ctx20k_d2048"}
+
+    def mk(prefill, reuse, prompt, base_actual):
+        r = {"usage": {"prompt_tokens": prompt, "completion_tokens": 1},
+             "ttft_s": 1.0, "wall_s": 1.0, "content": "ok"}
+        logf = {"log_prefill": prefill, "reuse": reuse, "rewind": reuse,
+                "prefill_controls_rows": prefill, "prefill_s_log": 1.0,
+                "has_turn_reuse": True}
+        return L._record("chunk1", st, 2048, r, logf, "studio1", 1.0,
+                         C.DEFAULT_CHARS_PER_TOKEN, {"20k": base_actual})
+
+    r_ok = mk(3870, 16384, 20254, 18390)       # live rep1 shape -> real delta
+    assert r_ok["collapsed"] is False and r_ok["cache_hit"] is False
+    r_bad = mk(18206, 2048, 20254, 20000)      # far below base depth -> collapsed
+    assert r_bad["collapsed"] is True
+
+
 # ============================================================== sabotage proofs
 def test_sabotage_rows_math_would_fail():
     """Sabotage proof #1: if rows_per_s_log dropped the division, 200 != 204.8."""
