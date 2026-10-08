@@ -17,6 +17,13 @@ Subcommands
   export  --trace PATH [--node N] --out DIR [--toc] [--schemas ...]
           Export the GPU table schemas to XML (locally, or via ssh + scp when
           --node is given).  ``--toc`` dumps the table of contents only.
+          Every exported file is VALIDATED by parsing it back: ``xctrace
+          export --xpath`` exits 0 and writes a 65-byte ``<trace-query-result/>``
+          when the xpath matches nothing (wrong schema name, or run index != 1),
+          which is otherwise indistinguishable from success.  A schema that
+          matched no table is reported FAIL and the command exits nonzero (the
+          available schema names are listed from ``--toc`` to make it
+          actionable); a matched-but-zero-row table is a WARN.
   analyze --dir DIR [--window-start-ns A] [--window-end-ns B]
           [--round-gap-ms 3] [--json OUT.json] [--md OUT.md]
           Stream-parse the exported XML and print JSON + markdown:
@@ -547,51 +554,159 @@ def cmd_record(a) -> int:
         return 124
 
 
+def parse_toc_schemas(path: str) -> list[str]:
+    """Schema names present in an ``xctrace export --toc`` XML, in order."""
+    names: list[str] = []
+    for _, el in ET.iterparse(path, events=("end",)):
+        if _local(el.tag) == "table":
+            s = el.get("schema")
+            if s:
+                names.append(s)
+            el.clear()
+    return names
+
+
+def validate_export(path: str) -> tuple[str, int, str]:
+    """Classify an ``xctrace export --xpath`` result file.
+
+    Returns ``(status, nrows, detail)`` where status is one of:
+
+    * ``"ok"``         -- a ``<table>`` with >=1 ``<row>`` (usable export)
+    * ``"missing"``    -- xctrace exited 0 but wrote no ``<table>`` node; the
+      xpath matched nothing (bad schema name, or run index != 1).  This is the
+      SILENT failure: the file is ~65 bytes of ``<trace-query-result/>`` and is
+      indistinguishable from success without parsing it back.
+    * ``"empty"``      -- a ``<table>`` matched but has 0 rows (WARN)
+    * ``"unreadable"`` -- file not written, or not well-formed XML
+    """
+    if not os.path.exists(path):
+        return "unreadable", 0, "file not written"
+    tables = 0
+    nrows = 0
+    try:
+        for _, el in ET.iterparse(path, events=("end",)):
+            tag = _local(el.tag)
+            # a "table node" is <schema name=...> (what stream_rows/analyze
+            # key off) or <table schema=...> (the --toc shape)
+            if (tag == "schema" and el.get("name")) or \
+               (tag == "table" and el.get("schema")):
+                tables += 1
+            elif tag == "row":
+                nrows += 1
+                el.clear()
+    except ET.ParseError as e:                    # corrupt/partial transfer
+        return "unreadable", 0, f"XML parse error: {e}"
+    if tables == 0:
+        return "missing", 0, "no <table> matched the xpath"
+    if nrows == 0:
+        return "empty", 0, "table matched but has 0 rows"
+    return "ok", nrows, ""
+
+
+def _run_toc(trace: str, node: str | None, out: str, timeout: int = 1800) -> int:
+    """Run ``xctrace export --input X.trace --toc --output out`` (local/ssh)."""
+    inner = (f"/usr/bin/xcrun xctrace export --input {shlex.quote(trace)} "
+             f"--toc --output {shlex.quote(out)}")
+    if node:
+        tmp = "/tmp/p20_toc.xml"
+        inner = (f"/usr/bin/xcrun xctrace export --input {shlex.quote(trace)} "
+                 f"--toc --output {shlex.quote(tmp)}")
+        try:
+            rc = subprocess.run(["ssh", node, inner], timeout=timeout).returncode
+            subprocess.run(["scp", f"{node}:{tmp}", out], timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return 124
+        return rc
+    try:
+        return subprocess.run(["bash", "-lc", inner], timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        return 124
+
+
+def _export_one(schema: str, trace: str, out: str, node: str | None,
+                timeout: int = 1800) -> int:
+    """Run one ``xctrace export --xpath`` for ``schema`` -> ``out``.
+
+    Returns the export command's return code.  ``--xpath`` is the VERIFIED
+    form in xctrace 27.0 (``xcrun xctrace help export`` lists ``--toc | --xpath
+    expression`` and gives the exact ``/trace-toc/run[@number="1"]/data/table
+    [@schema="..."]`` example).
+    """
+    xp = XPATH_TMPL.format(schema=schema)
+    if node:
+        tmp = f"/tmp/p20_{schema}.xml"
+        inner = (f"/usr/bin/xcrun xctrace export --input {shlex.quote(trace)} "
+                 f"--xpath {shlex.quote(xp)} --output {shlex.quote(tmp)}")
+        print(f"# exporting {schema} on {node} -> {tmp}")
+        try:
+            rc = subprocess.run(["ssh", node, inner], timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            print(f"# TIMEOUT exporting {schema}", file=sys.stderr)
+            return 124
+        print(f"# scp {node}:{tmp} -> {out}")
+        try:
+            subprocess.run(["scp", f"{node}:{tmp}", out], timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"# TIMEOUT scp {schema}", file=sys.stderr)
+            return 124
+        return rc
+    inner = (f"/usr/bin/xcrun xctrace export --input {shlex.quote(trace)} "
+             f"--xpath {shlex.quote(xp)} --output {shlex.quote(out)}")
+    print(f"# exporting {schema} -> {out}")
+    try:
+        return subprocess.run(["bash", "-lc", inner], timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        print(f"# TIMEOUT exporting {schema}", file=sys.stderr)
+        return 124
+
+
 def cmd_export(a) -> int:
     schemas = a.schemas or DEFAULT_SCHEMAS
     os.makedirs(a.out, exist_ok=True)
     results = []
     for s in schemas:
         out = os.path.join(a.out, f"{s}.xml")
-        xp = XPATH_TMPL.format(schema=s)
-        inner = (
-            f"/usr/bin/xcrun xctrace export --input {shlex.quote(a.trace)} "
-            f"--xpath {shlex.quote(xp)} --output {shlex.quote(out)}"
-        )
-        if a.node:
-            tmp = f"/tmp/p20_{s}.xml"
-            inner = (
-                f"/usr/bin/xcrun xctrace export --input {shlex.quote(a.trace)} "
-                f"--xpath {shlex.quote(xp)} --output {shlex.quote(tmp)}"
-            )
-            print(f"# exporting {s} on {a.node} -> {tmp}")
-            subprocess.run(["ssh", a.node, inner], timeout=1800)
-            print(f"# scp {a.node}:{tmp} -> {out}")
-            subprocess.run(["scp", f"{a.node}:{tmp}", out], timeout=1800)
-        else:
-            print(f"# exporting {s} -> {out}")
-            try:
-                subprocess.run(["bash", "-lc", inner], timeout=1800)
-            except subprocess.TimeoutExpired:
-                print(f"# TIMEOUT exporting {s}", file=sys.stderr)
-        results.append((s, out, os.path.getsize(out) if os.path.exists(out) else None))
-    print("# export results (schema, path, bytes):")
-    for s, o, n in results:
-        print(f"  {s}\t{o}\t{n}")
-    return 0
+        rc = _export_one(s, a.trace, out, a.node)
+        status, nrows, detail = validate_export(out)
+        if rc != 0 and status == "ok":
+            # command failed but a stale/prior file is sitting there -> distrust
+            status, detail = "unreadable", f"export rc={rc}"
+        results.append((s, out, status, nrows, rc, detail))
+
+    # Any schema that matched NOTHING is a hard FAIL (silently-successful
+    # export).  Make it actionable by listing the schemas that DO exist.
+    n_fail = sum(1 for r in results if r[2] in ("missing", "unreadable"))
+    if n_fail:
+        try:
+            toc = os.path.join(a.out, "_toc.xml")
+            _run_toc(a.trace, a.node, toc)
+            names = parse_toc_schemas(toc)
+            print(f"# available schemas ({len(names)}) from --toc:")
+            for n in names:
+                if "metal" in n or "gpu" in n:
+                    print(f"    {n}")
+        except Exception as e:                       # noqa: BLE001
+            print(f"# (could not list schemas: {e})", file=sys.stderr)
+
+    print("# export results (status schema rows bytes rc path):")
+    for s, o, st, nrows, rc, detail in results:
+        nbytes = os.path.getsize(o) if os.path.exists(o) else None
+        extra = f"  [{detail}]" if detail else ""
+        print(f"  {st:10s} {s}\trows={nrows}\tbytes={nbytes}\trc={rc}{extra}\t{o}")
+    n_warn = sum(1 for r in results if r[2] == "empty")
+    n_ok = sum(1 for r in results if r[2] == "ok")
+    print(f"# export: {n_ok}/{len(results)} ok, {n_warn} empty (warn), "
+          f"{n_fail} FAILED")
+    return 2 if n_fail else 0
 
 
 def cmd_toc(a) -> int:
-    inner = (f"/usr/bin/xcrun xctrace export --input {shlex.quote(a.trace)} "
-             f"--toc --output {shlex.quote(a.out)}")
-    if a.node:
-        tmp = "/tmp/p20_toc.xml"
-        subprocess.run(["ssh", a.node,
-                        inner.replace(shlex.quote(a.out), shlex.quote(tmp))], timeout=1800)
-        subprocess.run(["scp", f"{a.node}:{tmp}", a.out], timeout=1800)
-    else:
-        subprocess.run(["bash", "-lc", inner], timeout=1800)
-    print(f"# toc written to {a.out}")
+    rc = _run_toc(a.trace, a.node, a.out)
+    if rc != 0 or not os.path.exists(a.out):
+        print(f"# toc export FAILED (rc={rc})", file=sys.stderr)
+        return 2
+    print(f"# toc written to {a.out} "
+          f"({len(parse_toc_schemas(a.out))} tables)")
     return 0
 
 
