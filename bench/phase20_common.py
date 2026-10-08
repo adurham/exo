@@ -58,7 +58,17 @@ LADDER_CTXS = (("20k", 20000), ("50k", 50000), ("110k", 110000))
 DELTA_LADDER_ROWS = 2048                 # the fixed delta used on the ctx ladder
 LADDER_RUNG = 2048                       # engine checkpoint rung (SessionCache.plan)
 DELTA_SWEEP_ROWS = (256, 1024, 4096, 8192)
+# PREREG 0c (c): the FLAT-vs-slope rule spans the 1024..8192 range ONLY.  The 256
+# row is deliberately EXCLUDED here and judged separately by the fixed-per-call
+# overhead rule (0c (b), 256 vs 4096 at the same ctx).
+FLAT_RANGE_ROWS = (1024, 4096, 8192)
 FRESH_REF_TOKENS = 100000
+
+# Sidecar carrying each ctx's ACTUAL base depth (usage.prompt_tokens), persisted
+# when a base runs so a DELTA chunk that is a SEPARATE process (chunk2a base ->
+# chunk2b deltas) can classify reuse against the base's real rows, not its
+# nominal ctx.
+BASE_ACTUAL_NAME = "base_actual.json"
 
 # ------------------------------------------------------------------------ regex
 # Pinned to REAL lines (verbatim shapes) from m41_0901_1400.log.zst:
@@ -274,6 +284,98 @@ def is_collapsed(reuse, base_rows, rung: int = LADDER_RUNG) -> bool:
     if reuse is None:
         return True
     return reuse < (base_rows - rung)
+
+
+# ---------------------------------------------------- base-actual sidecar (FIX 4)
+def load_base_actual(path: str) -> dict[str, int]:
+    """Read the per-ctx base ACTUAL rows sidecar (``{ctx_label: rows}``).
+
+    Written by a base chunk (chunk2a) and READ by a delta chunk that runs in a
+    SEPARATE process (chunk2b) so the delta classifier can compare reuse against
+    the base's real ``prompt_tokens`` rather than the nominal ctx.  A missing file
+    (first run), malformed JSON, or a non-int value is tolerated -- this reader
+    must never fail a chunk.  Returns {} on any problem.
+    """
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            obj = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    out: dict[str, int] = {}
+    for k, v in obj.items():
+        try:
+            out[str(k)] = int(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def save_base_actual(path: str, base_actual: dict[str, int]) -> None:
+    """Persist ``{ctx_label: rows}`` for the ctxs a base chunk has measured.
+
+    Merges with any existing sidecar so a run that establishes a second ctx does
+    not drop the first (chunk1 establishes both 20k and 50k).  Best-effort: an
+    unwritable path must never fail the chunk.
+    """
+    if not path or not base_actual:
+        return
+    merged = load_base_actual(path)
+    merged.update({str(k): int(v) for k, v in base_actual.items()})
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(merged, fh, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def raw_base_actuals(records: list[dict], ctx_label: str | None = None) -> dict[str, int]:
+    """Recover per-ctx base ACTUAL rows from the raw JSONL ALONE (no sidecar).
+
+    The base record for a ctx lives in a SIBLING chunk file with ``kind`` in
+    (``fresh``, ``base``) and a ``prompt_tokens`` (the ladder stores a base as
+    ``kind="fresh"``; other emitters may use ``"base"``).  Used by summarize() as
+    the fallback when ``base_actual.json`` is absent.  A cold base emits no
+    ``turn reuse:`` line, so the row truth is ``prompt_tokens``.
+    """
+    out: dict[str, int] = {}
+    for r in records:
+        if r.get("kind") not in ("fresh", "base"):
+            continue
+        if ctx_label is not None and r.get("ctx_label") != ctx_label:
+            continue
+        pt = r.get("prompt_tokens")
+        if pt is None:
+            continue
+        label = r.get("ctx_label")
+        if label is None:
+            continue
+        # keep the largest (a base is the deepest feed for its ctx); tolerate a
+        # later re-establish that measured slightly deeper.
+        if label not in out or pt > out[label]:
+            out[label] = int(pt)
+    return out
+
+
+def resolve_base_actual(records: list[dict], sidecar: dict[str, int] | None,
+                        ctx_label: str) -> int | None:
+    """The base's ACTUAL row count for ``ctx_label``, preferred source first.
+
+    (1) the persisted sidecar (the base ran in another process); (2) if the ctx is
+    missing there, the raw records (the sibling base/fresh record); (3) None when
+    neither exists.  Callers fall back to the nominal ctx only when this is None
+    AND a nominal is available.
+    """
+    if sidecar and ctx_label in sidecar and sidecar[ctx_label] is not None:
+        return int(sidecar[ctx_label])
+    from_raw = raw_base_actuals(records, ctx_label)
+    return from_raw.get(ctx_label)
 
 
 # ------------------------------------------------------------------ log transport
@@ -557,12 +659,17 @@ def load_jsonl(paths: list[str]) -> list[dict]:
     return out
 
 
-def _delta_cells(records: list[dict], ctx: str) -> dict[int, list[dict]]:
+def _delta_cells(records: list[dict], ctx: str,
+                 base_actual: dict[str, int] | None = None) -> dict[int, list[dict]]:
     out: dict[int, list[dict]] = {}
+    ba = base_actual or {}
     for r in records:
         if r.get("kind") != "delta" or r.get("ctx_label") != ctx:
             continue
-        if r.get("collapsed") or r.get("invalid") or is_cache_hit(r):
+        # FIX 4: exclude a rep only when it is collapsed against the base's ACTUAL
+        # rows (``_effective_collapsed``) -- a stale stamp made against the nominal
+        # ctx must not drop a legitimate delta.
+        if _effective_collapsed(r, ba) or r.get("invalid") or is_cache_hit(r):
             continue
         out.setdefault(r.get("delta_nominal"), []).append(r)
     return out
@@ -573,15 +680,59 @@ def _med(values: list[float]) -> float | None:
     return statistics.median(vals) if vals else None
 
 
-def summarize(records: list[dict]) -> dict:
+def _effective_collapsed(r: dict, base_actual: dict[str, int]) -> bool:
+    """FIX 4: classify a delta rep against the base's ACTUAL rows.
+
+    ``records`` emitted by an OLDER tool build stamped ``collapsed`` against the
+    NOMINAL ctx (110000) when the base's actual depth (>2 rungs below nominal, e.g.
+    100503 vs 110000) was unavailable in that process -- that wrongly dropped the
+    legitimate 110k deltas (reuse=100352, one rung below actual).  Prefer a
+    persisted/explicit ``base_actual`` (sidecar key, then the record's own
+    ``base_actual_rows`` if a future build stamps it); when neither exists, HONOR
+    the record's STAMPED ``collapsed`` (the only signal we have).  When a base
+    actual IS known, re-derive it so a stale wrong stamp is corrected.
+    """
+    label = r.get("ctx_label")
+    base_rows = None
+    if base_actual and label in base_actual and base_actual[label] is not None:
+        base_rows = int(base_actual[label])
+    elif r.get("base_actual_rows") is not None:
+        base_rows = int(r["base_actual_rows"])
+    if base_rows is None:
+        return bool(r.get("collapsed"))
+    if is_cache_hit(r):
+        return False
+    return is_collapsed(r.get("reuse"), base_rows)
+
+
+def summarize(records: list[dict], base_actual: dict[str, int] | None = None) -> dict:
     """Build Table A + Table B and evaluate the three 0c decision rules.
 
     Records with ``collapsed`` (reuse materially below the base's own reusable
     depth) or ``invalid`` (DEGRADED reference) are excluded from the tables and
     listed separately, as are delta reps that were served entirely from cache
     (``prefill=0``, ``reuse == prompt``) -- those measured nothing (FIX 2a).
+
+    FIX 4: ``base_actual`` is the per-ctx base ACTUAL rows.  It may be passed in
+    (from the ``base_actual.json`` sidecar, or recovered from the raw JSONL by the
+    caller).  When a ctx is missing here it is recovered from the sibling base/fresh
+    record in ``records`` (see ``resolve_base_actual``); the nominal ctx is used only
+    as a last resort.  This is what lets the 110k deltas (reuse one rung below the
+    base's real 100503 rows) survive into Table A although they were stamped
+    ``collapsed`` against the nominal 110000.
     """
-    excluded_collapsed = [r for r in records if r.get("collapsed")]
+    base_actual = dict(base_actual or {})
+    for label, _ in LADDER_CTXS:
+        if base_actual.get(label) is None:
+            recovered = raw_base_actuals(records, label)
+            if recovered.get(label) is not None:
+                base_actual[label] = recovered[label]
+
+    def _collapsed(r: dict) -> bool:
+        return _effective_collapsed(r, base_actual)
+
+    excluded_collapsed = [r for r in records
+                          if r.get("kind") == "delta" and _collapsed(r)]
     excluded_invalid = [r for r in records if r.get("invalid")]
     excluded_cachehits = [r for r in records if is_cache_hit(r)]
     fresh_ref = [r for r in records if r.get("cell") == "fresh100k"]
@@ -590,7 +741,7 @@ def summarize(records: list[dict]) -> dict:
     table_a: list[dict] = []
     ctx_med: dict[str, float | None] = {}
     for label, _ in LADDER_CTXS:
-        cells = _delta_cells(records, label)
+        cells = _delta_cells(records, label, base_actual)
         recs = cells.get(DELTA_LADDER_ROWS, [])
         rates = [rows_per_s_log(r) for r in recs]
         blk = stat_block(rates)
@@ -651,17 +802,20 @@ def summarize(records: list[dict]) -> dict:
     else:
         verdicts.append("fixed-overhead: INSUFFICIENT DATA (need 50k d256 + d4096)")
 
-    sm = [sweep_med[d] for d in DELTA_SWEEP_ROWS if sweep_med.get(d)]
+    sm = [sweep_med[d] for d in FLAT_RANGE_ROWS if sweep_med.get(d)]
     if len(sm) >= 2:
         spread = (max(sm) - min(sm)) / statistics.median(sm)
+        lo, hi = min(FLAT_RANGE_ROWS), max(FLAT_RANGE_ROWS)
         if spread < FLAT_SPREAD:
-            verdicts.append(f"FLAT across delta sizes: spread {spread*100:.1f}% "
-                            f"<{FLAT_SPREAD*100:.0f}% => Phase 4 skipped, slope recorded")
+            verdicts.append(f"FLAT across delta sizes {lo}-{hi}: spread "
+                            f"{spread*100:.1f}% <{FLAT_SPREAD*100:.0f}% "
+                            f"=> Phase 4 skipped, slope recorded")
         else:
-            verdicts.append(f"delta-size slope present: spread {spread*100:.1f}% "
-                            f"(>={FLAT_SPREAD*100:.0f}%)")
+            verdicts.append(f"delta-size slope present ({lo}-{hi}): spread "
+                            f"{spread*100:.1f}% (>={FLAT_SPREAD*100:.0f}%)")
     else:
-        verdicts.append("flat-vs-slope: INSUFFICIENT DATA (need >=2 sweep sizes)")
+        verdicts.append("flat-vs-slope: INSUFFICIENT DATA (need >=2 sweep sizes "
+                        "in 1024-8192)")
 
     if frates:
         med = _med(frates)

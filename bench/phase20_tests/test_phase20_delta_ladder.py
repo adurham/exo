@@ -1067,6 +1067,115 @@ def test_prefix_cache_hit_parsed_and_corroborates(tmp_path):
     assert r["prompt_tokens"] is not None and r["generation_tokens"] == 1
 
 
+# ============================================ FIX 4: 110k base-actual + PREREG flat range
+# BUG 1: a SIBLING process's base (chunk2a) has an ACTUAL depth well below its
+# NOMINAL ctx (live: 100503 vs 110000).  chunk2b (the delta chunk) is a separate
+# process, so without a persisted base-actual sidecar it classified reuse against
+# the nominal ctx and dropped every legitimate 110k delta as 'collapsed'.
+# BUG 2: the flat-vs-slope rule must span the 1024..8192 range ONLY (PREREG 0c (c));
+# the 256 row is judged separately by the fixed-per-call overhead rule.
+
+def _mk_110k_delta(rep, rate_rows=2032, prefill_s=8.384, collapsed=True):
+    """A chunk2b 110k delta as the PRE-FIX tool stamped it (collapsed against the
+    nominal ctx).  reuse=100352 is one 2048-rung below the base's ACTUAL 100503."""
+    return {"chunk": "chunk2b", "cell": "ctx110k_d2048", "rep": rep, "kind": "delta",
+            "ctx_nominal": 110000, "ctx_label": "110k", "delta_nominal": 2048,
+            "prompt_tokens": 102384 + rep, "ttft_s": None, "wall_s": 9.0,
+            "log_prefill": rate_rows, "reuse": 100352, "rewind": 102419,
+            "prefill_controls_rows": rate_rows, "prefill_s_log": prefill_s,
+            "has_turn_reuse": True, "invalid": False, "cache_hit": False,
+            "collapsed": collapsed}
+
+
+def test_separate_process_110k_delta_not_collapsed(tmp_path, stub_guard):
+    """(a) chunk2a (base) and chunk2b (deltas) run in SEPARATE processes, so the
+    delta chunk cannot see the base in memory -- only the persisted base-actual
+    sidecar carries it.  The base's ACTUAL rows sit below its nominal ctx (the live
+    calibration gap, 100503 vs 110000); a delta with reuse ~one rung below the actual
+    base is a REAL delta.  Pre-fix the delta chunk fell back to the NOMINAL ctx and
+    stamped collapsed=True, dropping the 110k row from Table A."""
+    log_path = str(tmp_path / "exo.log")
+    out_dir = str(tmp_path / "out")
+    salt = "SALT-0123456789abcdef"
+    # the mock tokenises the base SHORT of its nominal ctx, reproducing the live gap
+    # (a 110000-nominal base measured ~99500 actual rows here, well below 110000-2*2048).
+    with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False,
+                         chars_per_token=5.65) as srv:
+        rc1 = L.main(["chunk2a", "--api", srv.base_url, "--out-dir", out_dir,
+                      "--log-source", f"studio1={log_path}", "--base-salt", salt])
+        # a FRESH run_chunk call == a separate process: its base_actual starts empty.
+        rc2 = L.main(["chunk2b", "--api", srv.base_url, "--out-dir", out_dir,
+                      "--log-source", f"studio1={log_path}", "--base-salt", salt,
+                      "--reps", "2"])
+    assert rc1 == L.EXIT_OK and rc2 == L.EXIT_OK
+    all_recs = C.load_jsonl([
+        os.path.join(out_dir, "raw", "delta_ladder.chunk2a.jsonl"),
+        os.path.join(out_dir, "raw", "delta_ladder.chunk2b.jsonl"),
+    ])
+    base = [r for r in all_recs if r["kind"] == "fresh" and r["ctx_label"] == "110k"]
+    deltas = [r for r in all_recs if r["kind"] == "delta" and r["ctx_label"] == "110k"]
+    assert base and deltas
+    # reuse is far below the nominal ctx (so the nominal fallback would collapse it) ...
+    assert all(r["reuse"] < 110000 - C.LADDER_RUNG for r in deltas)
+    # ... but is within one rung of the base's ACTUAL rows, so it is NOT collapsed.
+    for r in deltas:
+        assert r["collapsed"] is False, r.get("notes")
+        assert r["reuse"] >= base[0]["prompt_tokens"] - C.LADDER_RUNG
+    s = C.summarize(all_recs)
+    row = [x for x in s["table_a"] if x["ctx"] == "110k"][0]
+    assert row["n"] == len(deltas)
+
+
+def test_summarize_110k_base_actual_sidecar_and_sibling():
+    """(b) With the base's ACTUAL rows (100503) recovered from the sidecar OR from
+    the sibling base/fresh record in the raw JSONL, the 110k deltas land in Table A
+    at ~242.4 rows/s, overriding a stale collapsed=True stamped against the nominal
+    ctx."""
+    deltas = [_mk_110k_delta(rep=i) for i in range(3)]
+
+    # (i) persisted sidecar path
+    s = C.summarize(list(deltas), base_actual={"110k": 100503})
+    row = [x for x in s["table_a"] if x["ctx"] == "110k"][0]
+    assert row["n"] == 3
+    assert row["median"] == pytest.approx(242.4, abs=0.1)
+    assert len(s["collapsed"]) == 0
+
+    # (ii) sibling-record path: no sidecar argument, recover from the raw base record
+    sib = {"kind": "fresh", "cell": "ctx110k_base", "ctx_label": "110k",
+           "ctx_nominal": 110000, "prompt_tokens": 100503, "log_prefill": None,
+           "reuse": None, "collapsed": False, "invalid": False}
+    s2 = C.summarize([sib] + list(deltas))
+    row2 = [x for x in s2["table_a"] if x["ctx"] == "110k"][0]
+    assert row2["n"] == 3
+    assert row2["median"] == pytest.approx(242.4, abs=0.1)
+    assert len(s2["collapsed"]) == 0
+
+    # the nominal-ctx fallback WOULD have collapsed them (the pre-fix behaviour)
+    assert C.is_collapsed(100352, 110000) is True
+    assert C.is_collapsed(100352, 100503) is False
+
+    # and the sidecar round-trips through the persisted JSONL helper
+    assert C.raw_base_actuals([sib]) == {"110k": 100503}
+
+
+def test_flat_verdict_excludes_256_row():
+    """(c) PREREG 0c (c): the FLAT-vs-slope spread is over 1024..8192 ONLY.  A
+    synthetic set whose 256 row is a wild outlier but whose 1024/4096/8192 are flat
+    must read FLAT (Phase 4 skipped), NOT 'slope present' (the pre-fix behaviour that
+    let the 256 row dominate the spread)."""
+    recs = [
+        _delta("c", "50k", 50000, 256, 256, 256 / 100.0),      # 100 rows/s outlier
+        _delta("c", "50k", 50000, 1024, 1024, 1024 / 250.0),   # 250.0
+        _delta("c", "50k", 50000, 4096, 4096, 4096 / 250.4),   # 250.4
+        _delta("c", "50k", 50000, 8192, 8192, 8192 / 249.6),   # 249.6
+    ]
+    s = C.summarize(recs)
+    flats = [v for v in s["verdicts"] if "FLAT across delta sizes" in v]
+    assert flats, s["verdicts"]
+    assert "1024-8192" in flats[0]
+    assert not any("slope present" in v for v in s["verdicts"]), s["verdicts"]
+
+
 # ============================================================== sabotage proofs
 def test_sabotage_rows_math_would_fail():
     """Sabotage proof #1: if rows_per_s_log dropped the division, 200 != 204.8."""

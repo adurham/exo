@@ -286,6 +286,10 @@ def run_chunk(chunk: str, args) -> int:
     os.makedirs(raw_dir, exist_ok=True)
     out_path = os.path.join(raw_dir, f"delta_ladder.{chunk}.jsonl")
     ref_path = os.path.join(raw_dir, "fresh_ref.json")
+    # FIX 4: the per-ctx base ACTUAL rows sidecar (the base's usage.prompt_tokens).
+    # A delta chunk that is a SEPARATE process (chunk2b) loads this so its classifier
+    # compares reuse against the base's real depth, not the nominal ctx.
+    base_actual_path = os.path.join(raw_dir, C.BASE_ACTUAL_NAME)
 
     steps = _chunk_specs(chunk, args.reps, args.chars_per_token, args.base_salt,
                          getattr(args, "fresh_tokens", C.FRESH_REF_TOKENS))
@@ -337,7 +341,12 @@ def run_chunk(chunk: str, args) -> int:
     salt = args.base_salt or C.make_salt()
     records: list[dict] = []
     base_reply: dict[str, str] = {}
-    base_actual: dict[str, int] = {}
+    # FIX 4: seed the base's ACTUAL depth from the sidecar.  A delta chunk (chunk2b)
+    # runs in a SEPARATE process from its base (chunk2a), so without this the
+    # classifier would fall back to the NOMINAL ctx (110000) and wrongly flag the
+    # legitimate 110k deltas (reuse=100352, one rung below the base's real 100503).
+    base_actual: dict[str, int] = C.load_base_actual(base_actual_path)
+    base_actual_before = dict(base_actual)
     chunk_start = time.monotonic()
     pred_cum = 0.0
 
@@ -403,6 +412,11 @@ def run_chunk(chunk: str, args) -> int:
                             base_actual[st["ctx_label"]] = rec["prompt_tokens"]
                         elif rows:
                             base_actual[st["ctx_label"]] = rows
+                        # FIX 4: persist the base's ACTUAL depth so a LATER delta
+                        # chunk in a separate process can read it (merge-safe).
+                        if base_actual != base_actual_before:
+                            C.save_base_actual(base_actual_path, base_actual)
+                            base_actual_before = dict(base_actual)
                     if st["kind"] == "fresh":
                         with open(ref_path, "w") as rf:
                             json.dump(rec, rf)
@@ -595,7 +609,11 @@ def summarize_files(args) -> int:
         if f.startswith("delta_ladder.") and f.endswith(".jsonl")
     ) if os.path.isdir(raw_dir) else []
     records = C.load_jsonl(paths)
-    summary = C.summarize(records)
+    # FIX 4: prefer the persisted per-ctx base ACTUAL rows sidecar (the base ran in a
+    # separate process); summarize() falls back to the sibling base/fresh record in
+    # the raw JSONL when a ctx is absent here.
+    base_actual = C.load_base_actual(os.path.join(raw_dir, C.BASE_ACTUAL_NAME))
+    summary = C.summarize(records, base_actual=base_actual)
     _emit_summary(summary, records, args.out_dir, paths)
     return EXIT_OK
 
