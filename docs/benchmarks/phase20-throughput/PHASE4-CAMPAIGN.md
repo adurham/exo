@@ -146,11 +146,22 @@ pure **env-flip A/B on the live production boot**, kill-switch off vs on:
 | arm | reps | ms/round median | decode t/s | mean_accepted |
 |---|---|---|---|---|
 | benign 20K g3, 800tok | 4 | **118.53** (118.17,118.53,118.57) | **32.36** | 2.9314 |
-| agentic 91K g3, 800tok | (running) | — | — | — |
+| agentic 91K g3, 800tok | 6 | **129.90** (129.89,130.08,129.90,129.76,130.16) | **23.62** | 2.0611 |
 
-The benign ON-arm (118.53 ms) reproduces the §P3B next17-defaults benign (118.56) to **0.03 ms** —
-the live boot is in the same regime. **P2 status: in progress** (agentic arm); OFF arm and the
-≥3 ms verdict appended below when measured.
+**Same-session check:** the benign ON-arm (118.53 ms) reproduces the §P3B next17-defaults benign
+(118.56) to **0.03 ms**, and agentic (129.90) to the §P3B agentic (130.07) to **0.17 ms** — the live
+boot is bit-for-bit in the §P3B next17-defaults regime. So the ON arm **is** the §P3B
+next17-defaults point (MOE_ALLSUM_BF16 does not move the ms/round from that number → its own effect
+is inside the ±noise of these two sessions).
+
+### 4c. P2 OFF-arm relaunch — DECLARED before spending (relaunch R2)
+
+`p2_off_deploy.sh`: idle-guard → `git checkout --detach 576e9d279` + mlx-lm `3bf8316` → **export
+`DSV41_MOE_ALLSUM_BF16=0`** (exact fp32 arm) → `EXO_TARGET_BRANCH=deploy/next17-levers
+./start_cluster.sh` → post-boot matmul canary + **MEASURED read-bandwidth canary** (both nodes).
+Then `p2_off_measure.sh`: benign 4 + agentic 6, same harness. This is the same-build, same-session
+kill-switch arm for the ≥3 ms gate. Log: `p4/p2_off_deploy.log`. **Spent 2026-10-08 ~17:36 CDT.**
+
 
 ## 5. P3 — loop-2 consumer-index-skip, PREFILL (next20) — **ALREADY SHIPPED; nothing to do**
 
