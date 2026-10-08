@@ -11450,7 +11450,8 @@ Battery R8a on next17: CLEAN (needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW
 (`/tmp/p3b/ship_next17.sh`, idle-guarded; pre-ship expected-state check both nodes). Launcher: "Nodes
 synchronized on commit 576e9d279" → READY (2/2) 16:07:46 exit=0; post-boot canary healthy both nodes
 (14.85/14.86). Guard present in the INSTALLED venv module on BOTH nodes; gates unset (defaults). Post-ship
-parity smoke launched (benign 3×20K g3; expect ≈118.6 ms / 31.5 t/s ±3%; log `/tmp/p3b/ship_smoke.log`).
+parity smoke **PASS**: benign 3×20K g3 = **118.60 ms/round median, 31.4 t/s** (vs 118.56 pre-ship — reproduced
+to 0.04 ms on the live boot; mean_accepted 2.71; log `/tmp/p3b/ship_smoke.json`).
 
 **Lever-2 code fix — specced, not yet implemented** (measured share 29.0 ms/round ≫ 3 ms bar): `indexer.py:531`
 `if _HIER:` → `if _HIER and n > _FENCE_MIN_ROWS:`, shared threshold via `deepseek_v41/_gates.py`; env overrides
