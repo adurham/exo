@@ -1,0 +1,11 @@
+# sequences [continuation]
+PROMPT: Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].
+
+1. `[2, 4, 8, 16, 32, 64, ...]`  
+2. `[a, c, e, g, i, k, m, ...]`  
+3. `[1, 1, 2, 3, 5, 8, 13, 21, ...]`
+
+Reasoning:  
+- The first sequence doubles each term: \(2 \times 2 = 4\), \(4 \times 2 = 8\), and so on, so the next terms are 32, 64, etc.  
+- The second sequence lists every other letter of the alphabet: a, c, e, g, skipping b, d, f, h, so the next letters are i, k, m, etc.  
+- The third sequence is the Fibonacci sequence: each term after the first two is the sum of the two preceding terms, e.g. \(1+1=2\), \(1+2=3\), \(2+3=5\), so the next terms are 8, 13, 21, etc.

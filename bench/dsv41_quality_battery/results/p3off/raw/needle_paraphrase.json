@@ -1,0 +1,3 @@
+{
+  "raw_body": "{\"id\":\"5b3030bb-ad28-4fd9-9e1f-45a1b0ffebea\",\"object\":\"chat.completion\",\"created\":1791471745,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"We need answer. Need identify vault code from context: 8492. Need brief. Final only? They want answer briefly. \\\"8492\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":40144,\"completion_tokens\":29,\"total_tokens\":40173,\"prompt_tokens_details\":{\"cached_tokens\":38912,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":30,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

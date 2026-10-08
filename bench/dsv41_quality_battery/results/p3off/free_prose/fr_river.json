@@ -1,0 +1,33 @@
+{
+  "id": "fr_river",
+  "tag": "multilingual",
+  "prompt": "Translate this to French, then add one short comment in English: 'The river runs cold in November.'",
+  "http_status": 200,
+  "elapsed_s": 10.163990020751953,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 25,
+    "completion_tokens": 273,
+    "total_tokens": 298,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 241,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "La rivière coule froide en novembre.\n\nComment: This keeps the poetic feel, though “est froide” would be more idiomatic.",
+  "reasoning": "We need answer. User: \"Translate this to French, then add one short comment in English: 'The river runs cold in November.'\" Need translate to French then add short comment in English. Need likely \"La rivière coule froide en novembre.\" Or \"La rivière devient froide en novembre\"? \"runs cold\" idiom? In French, \"La rivière est froide en novembre\" maybe. \"The river runs cold in November\" means river is cold. Translate: \"La rivière coule froide en novembre.\" That's literal maybe okay. Then short comment in English. Need ensure comment in English. Could say: \"Comment: 'coule froide' is a bit poetic; 'est froide' is more natural.\" But user asks add one short comment in English. We can provide translation and comment. Need maybe no extra. Final. Ensure French translation. \"La rivière coule froide e",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

@@ -1,0 +1,6 @@
+# ru_winter [multilingual]
+PROMPT: Напиши короткий абзац на русском языке о зимнем утре, затем переведи его на английский.
+
+Морозное зимнее утро окутало город серебристой дымкой. Крыши домов и ветви деревьев покрылись пушистым инеем, искрящимся в бледном свете рассвета. Воздух был свежим и хрустящим, а тишину нарушало лишь мягкое поскрипывание снега под ногами редких прохожих.
+
+A frosty winter morning wrapped the city in a silvery haze. The rooftops and tree branches were covered with fluffy hoarfrost, sparkling in the pale light of dawn. The air was fresh and crisp, and the silence was broken only by the soft crunch of snow under the feet of the few passersby.

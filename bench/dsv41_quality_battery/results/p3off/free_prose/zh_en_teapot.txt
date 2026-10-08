@@ -1,0 +1,10 @@
+# zh_en_teapot [multilingual]
+PROMPT: Write a bilingual product description for a handmade ceramic teapot: the first half in English, the second half in Chinese (中文).
+
+**English**
+
+This handmade ceramic teapot is a quiet celebration of the potter's craft. Wheel-thrown and shaped by hand, each curve carries the maker's touch—no two pieces are exactly alike. Fired at high temperature and finished with a soft, satin glaze, it offers a warm, tactile surface that invites daily use. The balanced body, snug lid, and steady spout make pouring effortless, while the built-in strainer keeps every cup clean. Perfect for loose-leaf tea, it retains heat gently, letting flavors unfold without haste. Whether on your table or in your hands, this teapot brings calm ritual to every steep.
+
+**中文**
+
+这款手工陶瓷茶壶，是对匠心的静默致敬。拉坯成型，手工修形，每一道弧线都留有制作者的痕迹——没有两只完全相同的作品。高温烧制，施以温润哑光釉，触感柔和，宜于日常把玩使用。壶身匀称，壶盖贴合，壶嘴出水顺畅，内置滤网让每一杯都清澈无渣。用于散叶茶尤佳，保温温和，让滋味从容释放。无论置于案头还是捧于掌心，这把茶壶都为每一次冲泡带来一份宁静。

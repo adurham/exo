@@ -1,0 +1,33 @@
+{
+  "id": "hash_table",
+  "tag": "technical",
+  "prompt": "Explain how a hash table works, in plain language, as if to a curious teenager.",
+  "http_status": 200,
+  "elapsed_s": 85.49602890014648,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 22,
+    "completion_tokens": 1980,
+    "total_tokens": 2002,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1424,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Okay, imagine a giant wall of numbered cubbies. You want to store stuff by a label, like “apple” or “Maya’s phone number.” Instead of dumping things anywhere and searching every cubby later, you use a machine that turns a label into a cubby number.\n\nThat machine is called a **hash function**. It’s like a blender for data. Give it “apple,” and it always spits out the same big number, say `839201`. If your wall has 100 cubbies, you do `839201 % 100 = 1`, so “apple” goes in cubby 1.\n\nLater, to find “apple,” you run the same machine, get the same number, and go straight to cubby 1. No scanning the whole wall. That’s the whole trick: turn searching into a direct jump.\n\nBut two different labels can land in the same cubby. That’s called a **collision**, and it’s normal. So each cubby can hold a small list of items. If “apple” and “banana” both land in cubby 1, cubby 1 just has both. To find “apple,” you go to cubby 1 and check only that tiny list. Another way is: if a cubby is full, try the next empty one nearby.\n\nIf the wall gets too crowded, you build a bigger wall and re-place everything using the new size. That keeps the little lists short.\n\nWhy is this usually super fast? Because a good hash function spreads keys around, so each cubby has about one item. Looking up, adding, or deleting is then O(1) on average — basically constant time, no matter how many items you have. Worst case, if the hash is terrible and all keys collide, one cubby becomes a giant list, and it slows down to O(n), like searching everything.\n\nHash tables don’t keep things sorted. They’re great for “does this exist?”, “get the value for this key,” and “count how many times this appears.” They’re used in dictionaries, caches, databases, spellcheckers, and lots of other places.\n\nOne catch — keys need to be stable. If you use something that changes, like a list you later edit, its hash number changes, and the table won’t know where to find it. That’s why keys are usually strings, numbers, or immutable things.\n\nSo: a hash table is a fast lookup system that uses a math rule to jump straight to the right cubby, with a plan for collisions and resizing. It’s not magic — it trades memory and a good hash function for speed.",
+  "reasoning": "We need answer explain hash table plain language to curious teenager. Need likely include analogy, key concepts: keys, hash function, buckets, collisions, chaining/open addressing, load factor, resizing, lookup/insert/delete O(1) average, worst O(n). Plain language. Teenager curious. Avoid too technical but accurate. Maybe use locker room/library analogy. Explain why fast. Mention collisions inevitable, how handled. Maybe mention not sorted, no order. Security? Maybe hash function deterministic, uniform. Need maybe \"as if to curious teenager\" so conversational. Could start: Imagine a giant wall of mailboxes. You have labels. Hash function turns key into number. Use modulo. If key \"apple\" -> hash -> 42 -> mailbox 42. To find, same process. Collisions: two keys same mailbox. Solutions: each ",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

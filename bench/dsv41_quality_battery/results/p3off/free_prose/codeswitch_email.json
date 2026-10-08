@@ -1,0 +1,33 @@
+{
+  "id": "codeswitch_email",
+  "tag": "multilingual",
+  "prompt": "Write a friendly email that opens with a Spanish greeting, includes a French compliment in the middle, and closes in English.",
+  "http_status": 200,
+  "elapsed_s": 22.69201397895813,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 28,
+    "completion_tokens": 620,
+    "total_tokens": 648,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 461,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Subject: Just wanted to say hello\n\n¡Hola, [Name]!\n\nI hope this email finds you well. It’s been a little while since we last caught up, and I wanted to reach out just to say hello and see how you’re doing. I still really enjoyed our conversation last time—it was lovely talking with you.\n\nBy the way, tu as un talent incroyable pour rendre les choses simples et lumineuses. It’s one of the things that makes you so great to work with.\n\nIf you have some time next week, I’d love to grab a coffee or hop on a quick call. No pressure at all—just let me know what works for you.\n\nLooking forward to hearing from you.\n\nBest,\n[Your Name]",
+  "reasoning": "We need answer. Need craft friendly email. Requirements: opens with Spanish greeting, includes French compliment in middle, closes in English. Need likely email. We can write. Need maybe subject? Friendly. Open with Spanish greeting e.g. \"¡Hola!\" or \"Hola [Name],\" Then body English? It says opens with Spanish greeting, includes French compliment in middle, closes in English. Could be mostly English with Spanish greeting and French compliment. Need ensure French compliment in middle. Close in English. Friendly. Maybe to a friend/colleague. Let's compose.\n\nNeed maybe \"¡Hola, [Name]!\" Then English body. Middle: \"By the way, tu as un talent incroyable pour...\" French. Then continue English. Close: \"Warmly,\" or \"Best,\" in English. Signature.\n\nNeed maybe not too long. Ensure French compliment is",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

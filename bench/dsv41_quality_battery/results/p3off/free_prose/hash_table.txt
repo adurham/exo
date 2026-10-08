@@ -1,0 +1,20 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Okay, imagine a giant wall of numbered cubbies. You want to store stuff by a label, like “apple” or “Maya’s phone number.” Instead of dumping things anywhere and searching every cubby later, you use a machine that turns a label into a cubby number.
+
+That machine is called a **hash function**. It’s like a blender for data. Give it “apple,” and it always spits out the same big number, say `839201`. If your wall has 100 cubbies, you do `839201 % 100 = 1`, so “apple” goes in cubby 1.
+
+Later, to find “apple,” you run the same machine, get the same number, and go straight to cubby 1. No scanning the whole wall. That’s the whole trick: turn searching into a direct jump.
+
+But two different labels can land in the same cubby. That’s called a **collision**, and it’s normal. So each cubby can hold a small list of items. If “apple” and “banana” both land in cubby 1, cubby 1 just has both. To find “apple,” you go to cubby 1 and check only that tiny list. Another way is: if a cubby is full, try the next empty one nearby.
+
+If the wall gets too crowded, you build a bigger wall and re-place everything using the new size. That keeps the little lists short.
+
+Why is this usually super fast? Because a good hash function spreads keys around, so each cubby has about one item. Looking up, adding, or deleting is then O(1) on average — basically constant time, no matter how many items you have. Worst case, if the hash is terrible and all keys collide, one cubby becomes a giant list, and it slows down to O(n), like searching everything.
+
+Hash tables don’t keep things sorted. They’re great for “does this exist?”, “get the value for this key,” and “count how many times this appears.” They’re used in dictionaries, caches, databases, spellcheckers, and lots of other places.
+
+One catch — keys need to be stable. If you use something that changes, like a list you later edit, its hash number changes, and the table won’t know where to find it. That’s why keys are usually strings, numbers, or immutable things.
+
+So: a hash table is a fast lookup system that uses a math rule to jump straight to the right cubby, with a plan for collisions and resizing. It’s not magic — it trades memory and a good hash function for speed.

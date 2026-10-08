@@ -1,0 +1,17 @@
+# codeswitch_email [multilingual]
+PROMPT: Write a friendly email that opens with a Spanish greeting, includes a French compliment in the middle, and closes in English.
+
+Subject: Just wanted to say hello
+
+¡Hola, [Name]!
+
+I hope this email finds you well. It’s been a little while since we last caught up, and I wanted to reach out just to say hello and see how you’re doing. I still really enjoyed our conversation last time—it was lovely talking with you.
+
+By the way, tu as un talent incroyable pour rendre les choses simples et lumineuses. It’s one of the things that makes you so great to work with.
+
+If you have some time next week, I’d love to grab a coffee or hop on a quick call. No pressure at all—just let me know what works for you.
+
+Looking forward to hearing from you.
+
+Best,
+[Your Name]

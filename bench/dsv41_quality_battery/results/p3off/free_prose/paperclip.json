@@ -1,0 +1,33 @@
+{
+  "id": "paperclip",
+  "tag": "list",
+  "prompt": "List ten genuinely different uses for a paperclip.",
+  "http_status": 200,
+  "elapsed_s": 52.231919050216675,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 1273,
+    "total_tokens": 1287,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1023,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. **Bookmark** – Slide it over a page to mark your place in a book or notebook.\n2. **Zipper pull** – Thread it through a broken zipper slider to make a temporary pull tab.\n3. **SIM tray ejector** – Straighten one end and use it to pop open a phone’s SIM card tray.\n4. **Reset-button presser** – Use the tip to press a recessed reset button on a router or small electronic device.\n5. **Cable organizer** – Clip around bundled charging cords to keep them tidy, or wrap it around a cable as a label.\n6. **Bag clip** – Fold the top of a chip or snack bag and clip it shut.\n7. **Money clip** – Bend it into a U-shape to hold folded bills or a few cards.\n8. **Ornament hook** – Bend it into a small S-hook to hang lightweight ornaments or tags.\n9. **Touchscreen stylus** – Hold the metal clip and use the tip on a capacitive touchscreen for more precise tapping.\n10. **Keychain loop** – Bend it into a loop and use it to attach a key to a belt loop or bag strap.",
+  "reasoning": "We need answer. Need list ten genuinely different uses for a paperclip. Need ensure distinct, not variations. Could include: bookmark, zipper pull replacement, reset pin for electronics, temporary hook for ornament, cable organizer, SIM tray ejector, money clip, page marker? Bookmark and page marker maybe similar. Need ten genuinely different uses. Let's brainstorm categories:\n\n1. Bookmark (clip pages)\n2. Zipper pull tab replacement (attach to zipper slider)\n3. SIM card tray ejector tool (straightened)\n4. Reset button presser for router/electronics)\n5. Cable organizer / cord keeper (wrap around cables)\n6. Temporary hook for hanging lightweight ornament/keys)\n7. Money clip / bill holder\n8. Keyring? Paperclip as keychain? Maybe attach keys? But need clip.\n9. Toothpick? Not really.\n10. Earrin",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

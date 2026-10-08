@@ -1,0 +1,33 @@
+{
+  "id": "scene_image",
+  "tag": "prose",
+  "prompt": "Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.",
+  "http_status": 200,
+  "elapsed_s": 21.876966953277588,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 33,
+    "completion_tokens": 474,
+    "total_tokens": 507,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 307,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "In the foreground, three pigeons stand on a slick, rain-darkened pavement, their gray bodies doubled in the shine beneath them. One tilts its head toward a puddle; another huddles low, feathers puffed against the damp. The wet ground catches a smear of red from the umbrella above.\n\nThat umbrella is the image’s bright, beating heart—scarlet, slightly sagging, held over a market stall crowded with crates and hanging produce. Around it, the street market recedes in layers: striped canopies, blurred vendors, damp cardboard signs, a knot of shoppers in muted coats. The red umbrella pulls the eye first, then lets it fall to the pigeons, small and patient on the gleaming stones. Everything looks paused between rain and rush, as if the whole market is holding its breath.",
+  "reasoning": "We need answer. User asks: \"Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.\" Need produce descriptive narration. We need likely first-person present tense, image description. Include street market, red umbrella, three pigeons on wet pavement. Should be vivid. \"As if narrating an image you are looking at\" maybe \"In the foreground...\" etc. Need maybe mention composition, light, reflections. We can craft. Need no overdo? Desired 5. We can write paragraph. Ensure all elements. Maybe \"The frame opens...\" Use sensory details. Street market: stalls, awnings, produce, vendors, crowd blurred. Red umbrella: focal point, bright, maybe vendor's umbrella. Three pigeons on wet pavement: foreground, pecking, reflections. W",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

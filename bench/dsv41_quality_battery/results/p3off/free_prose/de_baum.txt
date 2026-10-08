@@ -1,0 +1,9 @@
+# de_baum [multilingual]
+PROMPT: Schreibe zwei Sätze auf Deutsch über einen alten Baum, dann gib eine englische Übersetzung dazu.
+
+Der alte Baum steht seit Jahrhunderten am Rand der Wiese und trotzt jedem Sturm.  
+Seine knorrigen Äste erzählen von vergangenen Zeiten, während Vögel in seinem dichten Blätterdach Schutz finden.
+
+**English translation:**  
+The old tree has stood at the edge of the meadow for centuries and defies every storm.  
+Its gnarled branches tell of times past, while birds find shelter in its dense canopy.

@@ -1,0 +1,6 @@
+# scene_image [prose]
+PROMPT: Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.
+
+In the foreground, three pigeons stand on a slick, rain-darkened pavement, their gray bodies doubled in the shine beneath them. One tilts its head toward a puddle; another huddles low, feathers puffed against the damp. The wet ground catches a smear of red from the umbrella above.
+
+That umbrella is the image’s bright, beating heart—scarlet, slightly sagging, held over a market stall crowded with crates and hanging produce. Around it, the street market recedes in layers: striped canopies, blurred vendors, damp cardboard signs, a knot of shoppers in muted coats. The red umbrella pulls the eye first, then lets it fall to the pigeons, small and patient on the gleaming stones. Everything looks paused between rain and rush, as if the whole market is holding its breath.

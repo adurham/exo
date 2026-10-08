@@ -1,0 +1,33 @@
+{
+  "id": "sequences",
+  "tag": "continuation",
+  "prompt": "Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].",
+  "http_status": 200,
+  "elapsed_s": 12.649104833602905,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 47,
+    "completion_tokens": 364,
+    "total_tokens": 411,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 129,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. `[2, 4, 8, 16, 32, 64, ...]`  \n2. `[a, c, e, g, i, k, m, ...]`  \n3. `[1, 1, 2, 3, 5, 8, 13, 21, ...]`\n\nReasoning:  \n- The first sequence doubles each term: \\(2 \\times 2 = 4\\), \\(4 \\times 2 = 8\\), and so on, so the next terms are 32, 64, etc.  \n- The second sequence lists every other letter of the alphabet: a, c, e, g, skipping b, d, f, h, so the next letters are i, k, m, etc.  \n- The third sequence is the Fibonacci sequence: each term after the first two is the sum of the two preceding terms, e.g. \\(1+1=2\\), \\(1+2=3\\), \\(2+3=5\\), so the next terms are 8, 13, 21, etc.",
+  "reasoning": "We need answer. Need complete sequences and explain reasoning in prose. Need likely next terms. Sequence 1 powers of 2: 32,64. Sequence 2 odd letters: i,k,m? Actually a,c,e,g,... next i,k,m. Sequence 3 Fibonacci: 1,1,2,3,5,... next 8,13. Need explain. Need maybe \"complete these sequences\" maybe provide next few terms. Need prose. Ensure no overcomplicate. Could mention if continuing indefinitely. Need maybe include enough. Final with completed sequences and reasoning. Need maybe \"assuming standard patterns\". Let's craft concise.",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "market_dawn",
+  "tag": "prose",
+  "prompt": "Describe a street market at dawn in vivid sensory detail, at least 150 words.",
+  "http_status": 200,
+  "elapsed_s": 23.872171878814697,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 21,
+    "completion_tokens": 490,
+    "total_tokens": 511,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 222,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "The street market wakes before the city does. At first light, the sky is a bruised violet, and the cobblestones sweat from the night’s rain. Vendors arrive in layers of wool and plastic aprons, their breath fogging the air as they haul crates from dented vans. Metal shutters rattle upward like applause. Somewhere, a radio crackles with a tinny bolero, while a butcher slaps cleavers against wood and a coffee seller twists the handle of a grinder, releasing a smoky, burnt-sugar perfume.\n\nThe air is a collision: diesel fumes, wet cardboard, crushed mint, overripe mango, raw shrimp on ice. A baker lifts a tray of golden rolls from a stone oven, and the heat rolls over you like a blanket. Underfoot, cabbage leaves and onion skins slick the ground. A fishmonger shouts prices in a hoarse, rhythmic chant; his hands are red and shining. Someone offers a spoonful of honeyed yogurt—cool, tart, sweet. A woman in a flowered scarf arranges pyramids of oranges, each one catching the first true gold of sunrise. The market isn’t clean or quiet or gentle. It is alive, loud, damp, and hungry—a whole world waking up one stall at a time.",
+  "reasoning": "We need answer. Need describe street market at dawn vivid sensory detail at least 150 words. Need likely prose. We can craft. Need sensory: sight, sound, smell, touch, taste maybe. Dawn street market. Vivid. At least 150 words. Let's write maybe 200-250. Ensure no markdown? Fine. We can include. Need maybe first-person? Let's compose.\n\nWe need be careful \"at dawn\" not too late. Street market waking. Sensory details: pale blue light, vendors, crates, ice, fish, fruit, coffee, bread, diesel, damp cobblestones, sounds of shutters, carts, calls, sizzling, smells. Touch humid, cold metal, steam. Taste samples? Maybe.\n\nLet's draft with rich. At least 150. Count roughly. We'll produce final. Ensure vivid. Maybe 220 words. Let's write:\n\n\"The street market wakes before the city does. At first light",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "overripe",
+        "token_index": 93,
+        "head": "over",
+        "tail": "ripe",
+        "context": "overripe"
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

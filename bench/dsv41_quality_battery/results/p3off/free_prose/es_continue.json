@@ -1,0 +1,33 @@
+{
+  "id": "es_continue",
+  "tag": "multilingual",
+  "prompt": "Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'",
+  "http_status": 200,
+  "elapsed_s": 21.94469404220581,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 30,
+    "completion_tokens": 565,
+    "total_tokens": 595,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 422,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "las ramas de los robles crujían como huesos viejos. En el valle, las casas se encogían tras sus ventanas encendidas, y el humo de las chimeneas se deshacía en jirones antes de tocar el cielo. Una figura avanzaba por el sendero, envuelta en un abrigo oscuro, con la mirada fija en la línea del horizonte. Cada ráfaga le arrancaba susurros, nombres que creía olvidados, y ella seguía andando, porque detenerse era recordar, y recordar dolía más que el frío.",
+  "reasoning": "We need answer in Spanish, continue same language/style. User asks: \"Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'\" Need continue sentence/story. We need produce continuation. Should match style: literary, atmospheric. We can write maybe a paragraph. Need likely just continue from phrase. We should not overdo. We can craft: \"El viento soplaba fuerte sobre las colinas, y las ramas de los robles crujían como huesos viejos. En el valle, las casas parecían encogerse...\" etc. Same Spanish. Style evocative. Need maybe continue with \"y...\" after phrase. We can include full sentence. Let's compose in Spanish, literary. Ensure no errors. Maybe:\n\nEl viento soplaba fuerte sobre las colinas, y las ramas de los robles crujían como huesos viejos. En el valle, ",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

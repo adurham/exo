@@ -1,0 +1,33 @@
+{
+  "id": "tests_opinion",
+  "tag": "opinion",
+  "prompt": "Are standardized tests a good measure of intelligence? Write two paragraphs arguing a position.",
+  "http_status": 200,
+  "elapsed_s": 39.189170837402344,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 892,
+    "total_tokens": 912,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 612,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Standardized tests are not a good measure of intelligence because they capture only a narrow slice of what the mind can do. They typically assess timed reading, math, and logical analysis through multiple-choice questions, while intelligence also includes creativity, spatial reasoning, social judgment, practical problem-solving, curiosity, and adaptability. A student who scores poorly on a standardized test might be brilliant at fixing machines, composing music, resolving conflicts, or solving real-world problems that do not fit a bubble sheet. Moreover, test scores are heavily influenced by socioeconomic status, language background, cultural familiarity, anxiety, and access to test prep. As a result, they often measure how well someone has been trained to take a particular kind of test rather than innate intellectual capacity.\n\nEven though standardized tests correlate with academic performance and can be useful for comparing students in a limited domain, that does not make them a comprehensive intelligence measure. They reward speed, conformity, and familiarity with academic conventions, while ignoring motivation, collaboration, persistence, and creative thinking. If schools treat these tests as definitive proof of ability, they risk labeling students unfairly and narrowing the curriculum toward test preparation. A better approach is to use standardized tests as one piece of evidence alongside projects, portfolios, performance tasks, and teacher observations. In short, standardized tests measure a slice of cognitive skill well enough to be useful, but they are not a good stand-alone measure of intelligence.",
+  "reasoning": "We need answer user asks: \"Are standardized tests a good measure of intelligence? Write two paragraphs arguing a position.\" Need write two paragraphs arguing a position. Need likely take position. Need two paragraphs. Should argue maybe standardized tests are not a good measure of intelligence, or are a good measure? Need choose. We can argue they are not a good measure of intelligence. Need two paragraphs. Should be coherent, persuasive. Need mention intelligence multifaceted, tests measure narrow cognitive skills, prep, socioeconomic bias, test-taking skills, not creativity, emotional/social, practical intelligence. But also maybe standardized tests correlate with IQ and academic success. Position: No, not a good measure of intelligence. Two paragraphs. Need maybe first paragraph: standa",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

@@ -1,0 +1,4 @@
+# es_continue [multilingual]
+PROMPT: Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'
+
+las ramas de los robles crujían como huesos viejos. En el valle, las casas se encogían tras sus ventanas encendidas, y el humo de las chimeneas se deshacía en jirones antes de tocar el cielo. Una figura avanzaba por el sendero, envuelta en un abrigo oscuro, con la mirada fija en la línea del horizonte. Cada ráfaga le arrancaba susurros, nombres que creía olvidados, y ella seguía andando, porque detenerse era recordar, y recordar dolía más que el frío.

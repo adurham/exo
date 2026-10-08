@@ -1,0 +1,45 @@
+{
+  "id": "pencil_history",
+  "tag": "prose",
+  "prompt": "Write about the history of the pencil, at least 200 words.",
+  "http_status": 200,
+  "elapsed_s": 51.664490938186646,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 1080,
+    "total_tokens": 1098,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 740,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "The pencil’s history begins with ancient writing tools: Romans used metal styluses to scratch marks on wax and papyrus, and medieval artists drew with silverpoint. The modern pencil, however, depends on graphite. In the 1560s, a large graphite deposit was discovered in Borrowdale, Cumberland, England. According to legend, shepherds found the dark mineral and used it to mark sheep. Because pure Borrowdale graphite was soft and brittle, early users wrapped pieces in string, leather, or cloth. Eventually, carpenters encased graphite in wooden sticks, creating the first crude pencils. By the 1660s, Nuremberg, Germany, had become an early center of pencil manufacturing, producing wooden pencils on a larger scale.\n\nFor centuries, graphite was scarce and valuable, and England controlled the best supply. In 1795, during the French Revolutionary Wars, Nicolas-Jacques Conté developed a method of mixing powdered graphite with clay, shaping the mixture into rods, and firing them in a kiln. This process allowed manufacturers to control pencil hardness and reduced dependence on pure graphite. It became the basis of modern pencil production. In the United States, the Thoreau family in Concord, Massachusetts, made pencils in the 19th century, and companies such as Joseph Dixon and Eberhard Faber expanded the industry.\n\nIn 1858, Hymen Lipman patented a pencil with an attached eraser, a design that became common. By the late 19th and early 20th centuries, pencils were mass-produced in standard grades, often painted yellow, and sold worldwide. Today, despite digital writing tools, the pencil remains a simple, reliable, and enduring instrument.",
+  "reasoning": "We need answer about history of pencil at least 200 words. Need write. We can produce concise but >200. Need ensure accurate. History of pencil: precursors stylus, metalpoint, graphite discovery in Borrowdale England 16th century, shepherds? Legend. Graphite used for marking sheep. Initially wrapped in string/leather, then wood casings. German and Italian carpenters? Nuremberg pencils. 1795 Nicolas-Jacques Conté developed modern pencil by mixing graphite with clay, controlling hardness, and firing. Also William Munroe in US? Concord? Henry David Thoreau made pencils from graphite? In 19th century, pencil manufacturing. Eberhard Faber, Staedtler, Dixon Ticonderoga. Yellow pencils? Chinese? No. The \"lead\" misnomer. Eraser attached 1858 Hymen Lipman patent. Mechanical pencils earlier 1822 Sam",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "worldwide",
+        "token_index": 235,
+        "head": "world",
+        "tail": "wide",
+        "context": "worldwide."
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

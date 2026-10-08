@@ -1,0 +1,736 @@
+{
+  "n": 20,
+  "n_dirty": 0,
+  "n_review": 0,
+  "probes": [
+    {
+      "id": "rain",
+      "tag": "prose",
+      "prompt": "Write a short paragraph about the sound of rain on a metal roof.",
+      "http_status": 200,
+      "elapsed_s": 6.81084418296814,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 108,
+        "total_tokens": 126,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 24,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "The first drops land like scattered applause, each one a sharp, bright ping against the tin. Then the sky opens and the rhythm thickens into a steady drumroll, a thousand tiny hammers striking in wild, overlapping time. The sound fills the whole house—a roaring lullaby that drowns out thought, wraps around you like a blanket, and turns the simplest shelter into a fortress against the storm.",
+      "reasoning": "The user wants a short paragraph about the sound of rain on a metal roof. Let me craft something evocative and sensory.",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "rank_langs",
+      "tag": "ranking",
+      "prompt": "Rank these five programming languages by how pleasant they are for a beginner, best to worst: Rust, Python, C, JavaScript, Haskell. Give a one-sentence reason for each, in your ranked order.",
+      "http_status": 200,
+      "elapsed_s": 34.39540505409241,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 46,
+        "completion_tokens": 797,
+        "total_tokens": 843,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 675,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "1. Python — Its clean, readable syntax and immediate REPL feedback let beginners focus on logic rather than boilerplate.  \n2. JavaScript — It runs instantly in any browser and produces visible results, though its quirks and async model can surprise.  \n3. C — Its small core is learnable, but manual memory and pointers add early friction.  \n4. Rust — Its tooling and compiler messages are helpful, but ownership and borrowing are a steep conceptual climb.  \n5. Haskell — Its elegant purity is powerful, but laziness, monads, and a radically functional style overwhelm beginners.",
+      "reasoning": "We need answer ranking five languages by pleasant for beginner best to worst: Rust, Python, C, JavaScript, Haskell. One-sentence reason each in ranked order. Need decide ranking. Need be accurate. \"Pleasant for a beginner\" subjective. Best likely Python, JavaScript, C, Rust, Haskell? Or Python, JavaScript, C, Haskell, Rust? Need rank best to worst. Need one sentence reason each. We need maybe mention beginner-friendly. Let's think.\n\nPython: simple syntax, readable, immediate feedback, huge ecosystem. Best.\n\nJavaScript: easy to start in browser, immediate visual feedback, but quirks and async can confuse. Still accessible. Second.\n\nC: small language, but manual memory, pointers, compilation, undefined behavior. Maybe third. Haskell: pure functional, unfamiliar, monads, lazy, type system, bu",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [
+          {
+            "type": "same_script_glue",
+            "confidence": "advisory",
+            "token": "beginners",
+            "token_index": 12,
+            "head": "begin",
+            "tail": "ners",
+            "context": "beginners"
+          },
+          {
+            "type": "same_script_glue",
+            "confidence": "advisory",
+            "token": "beginners",
+            "token_index": 92,
+            "head": "begin",
+            "tail": "ners",
+            "context": "beginners."
+          }
+        ],
+        "counts": {
+          "same_script_glue": 2
+        },
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "lighthouse",
+      "tag": "continuation",
+      "prompt": "Continue this story in one vivid paragraph: 'The lighthouse keeper noticed the light was not his own.'",
+      "http_status": 200,
+      "elapsed_s": 31.132923126220703,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 24,
+        "completion_tokens": 709,
+        "total_tokens": 733,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 467,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "The lighthouse keeper noticed the light was not his own. It slid across the black water in a slow green sweep, too low for any ship, too steady for any buoy, and when it touched the cliff it left a shimmer like frost on the granite. His own lamp, a faithful yellow pulse he’d tended for thirty years, guttered and bowed as if ashamed; the brass rail hummed under his palms, and the fog tasted of iron and distant rain. Out beyond the reef where no rock should stand, a second tower rose from the sea—slim, dark, crowned with that cold emerald eye—and it began to answer him, not in the old rhythm he knew, but in a slow, deliberate code that spelled his name, letter by letter, then waited. He checked the wick, the oil, the clock, and found all three unchanged; still the stranger flashed again, closer now, its beam cutting a path across the waves like a road only he could walk. When the light finally touched the lantern room, his shadow stretched backward, tall and thin, toward the door behind him, and from the stairwell came the soft, wet sound of footsteps climbing.",
+      "reasoning": "We need answer. Need continue story in one vivid paragraph. Need likely creative. We need produce one paragraph. Must be vivid. Continue from sentence. Need maybe eerie, atmospheric. Let's craft. The lighthouse keeper noticed the light was not his own. Then continue. One paragraph. Vivid. Maybe the beam swept from sea, answering his. Describe. Keep coherent. Maybe supernatural. Need one paragraph only. Let's write. Ensure starts with given sentence? \"The lighthouse keeper noticed the light was not his own.\" Then continue. One paragraph. Vivid. Maybe the light came from a drowned counterpart? Let's craft with sensory details: salt, brass, glass, fog, pulse. The beam was green? It moved against wind, from a place no charted. Keeper's own lamp dimmed. He goes to gallery. The other light blink",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [
+          {
+            "type": "same_script_glue",
+            "confidence": "advisory",
+            "token": "backward",
+            "token_index": 176,
+            "head": "back",
+            "tail": "ward",
+            "context": "backward,"
+          }
+        ],
+        "counts": {
+          "same_script_glue": 1
+        },
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "paperclip",
+      "tag": "list",
+      "prompt": "List ten genuinely different uses for a paperclip.",
+      "http_status": 200,
+      "elapsed_s": 52.231919050216675,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 14,
+        "completion_tokens": 1273,
+        "total_tokens": 1287,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1023,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "1. **Bookmark** – Slide it over a page to mark your place in a book or notebook.\n2. **Zipper pull** – Thread it through a broken zipper slider to make a temporary pull tab.\n3. **SIM tray ejector** – Straighten one end and use it to pop open a phone’s SIM card tray.\n4. **Reset-button presser** – Use the tip to press a recessed reset button on a router or small electronic device.\n5. **Cable organizer** – Clip around bundled charging cords to keep them tidy, or wrap it around a cable as a label.\n6. **Bag clip** – Fold the top of a chip or snack bag and clip it shut.\n7. **Money clip** – Bend it into a U-shape to hold folded bills or a few cards.\n8. **Ornament hook** – Bend it into a small S-hook to hang lightweight ornaments or tags.\n9. **Touchscreen stylus** – Hold the metal clip and use the tip on a capacitive touchscreen for more precise tapping.\n10. **Keychain loop** – Bend it into a loop and use it to attach a key to a belt loop or bag strap.",
+      "reasoning": "We need answer. Need list ten genuinely different uses for a paperclip. Need ensure distinct, not variations. Could include: bookmark, zipper pull replacement, reset pin for electronics, temporary hook for ornament, cable organizer, SIM tray ejector, money clip, page marker? Bookmark and page marker maybe similar. Need ten genuinely different uses. Let's brainstorm categories:\n\n1. Bookmark (clip pages)\n2. Zipper pull tab replacement (attach to zipper slider)\n3. SIM card tray ejector tool (straightened)\n4. Reset button presser for router/electronics)\n5. Cable organizer / cord keeper (wrap around cables)\n6. Temporary hook for hanging lightweight ornament/keys)\n7. Money clip / bill holder\n8. Keyring? Paperclip as keychain? Maybe attach keys? But need clip.\n9. Toothpick? Not really.\n10. Earrin",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "zh_autumn",
+      "tag": "multilingual",
+      "prompt": "先用一句中文描写秋雨的声音，然后用英文解释这句话的意思。(Write one Chinese sentence describing the sound of autumn rain, then explain it in English.)",
+      "http_status": 200,
+      "elapsed_s": 9.308879852294922,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 35,
+        "completion_tokens": 234,
+        "total_tokens": 269,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 171,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "秋雨淅淅沥沥，像无数细小的指尖轻敲着枯黄的梧桐叶。\n\nEnglish explanation: The autumn rain falls with a soft, continuous patter, like countless tiny fingertips gently tapping withered yellow parasol leaves. It describes the quiet, delicate, and slightly melancholy sound of autumn rain.",
+      "reasoning": "We need answer in Chinese sentence describing sound of autumn rain, then English explanation. Need comply. We need craft one Chinese sentence. Then English explanation. Should be concise. Need maybe poetic. \"秋雨淅淅沥沥，像无数细小的指尖轻敲着枯黄的梧桐叶。\" That's Chinese sentence. Then English explain: \"The autumn rain falls with a soft, rustling patter, like countless tiny fingertips gently tapping withered yellow parasol leaves.\" Need ensure describes sound. Good. Maybe \"淅淅沥沥\" onomatopoeia. English explanation. We can include translation and meaning. The prompt: \"先用一句中文描写秋雨的声音，然后用英文解释这句话的意思。\" So answer: Chinese sentence, then English explanation. We can do exactly. Need maybe no extra. Ensure English explains meaning. Let's final.",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [
+          {
+            "type": "same_script_glue",
+            "confidence": "advisory",
+            "token": "withered",
+            "token_index": 18,
+            "head": "with",
+            "tail": "ered",
+            "context": "withered"
+          }
+        ],
+        "counts": {
+          "same_script_glue": 1
+        },
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "zh_en_teapot",
+      "tag": "multilingual",
+      "prompt": "Write a bilingual product description for a handmade ceramic teapot: the first half in English, the second half in Chinese (中文).",
+      "http_status": 200,
+      "elapsed_s": 24.164474725723267,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 31,
+        "completion_tokens": 515,
+        "total_tokens": 546,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 259,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "**English**\n\nThis handmade ceramic teapot is a quiet celebration of the potter's craft. Wheel-thrown and shaped by hand, each curve carries the maker's touch—no two pieces are exactly alike. Fired at high temperature and finished with a soft, satin glaze, it offers a warm, tactile surface that invites daily use. The balanced body, snug lid, and steady spout make pouring effortless, while the built-in strainer keeps every cup clean. Perfect for loose-leaf tea, it retains heat gently, letting flavors unfold without haste. Whether on your table or in your hands, this teapot brings calm ritual to every steep.\n\n**中文**\n\n这款手工陶瓷茶壶，是对匠心的静默致敬。拉坯成型，手工修形，每一道弧线都留有制作者的痕迹——没有两只完全相同的作品。高温烧制，施以温润哑光釉，触感柔和，宜于日常把玩使用。壶身匀称，壶盖贴合，壶嘴出水顺畅，内置滤网让每一杯都清澈无渣。用于散叶茶尤佳，保温温和，让滋味从容释放。无论置于案头还是捧于掌心，这把茶壶都为每一次冲泡带来一份宁静。",
+      "reasoning": "The user wants a bilingual product description for a handmade ceramic teapot, with English first and Chinese second. This is a creative writing task with specific formatting requirements.\n\nLet me think about what makes a good product description for a handmade ceramic teapot. It should highlight craftsmanship, materials, aesthetic qualities, and functionality. Since it's handmade, emphasizing the artisan's touch and uniqueness would be important. The tone should be elegant and appealing to potential buyers who appreciate quality ceramics.\n\nFor the English portion, I'll focus on the artisanal nature, the firing process, the tactile qualities, and the experience of use. Words like \"wheel-thrown,\" \"glaze,\" \"kiln,\" and sensory details about the texture would work well. I should convey both bea",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "ja_sky",
+      "tag": "multilingual",
+      "prompt": "次の質問に日本語で答えてください：なぜ空は青いのですか？",
+      "http_status": 200,
+      "elapsed_s": 41.88770294189453,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 21,
+        "completion_tokens": 1108,
+        "total_tokens": 1129,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 741,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "空が青いのは、太陽の光と地球の大気の物理的な性質による「**レイリー散乱**」という現象が原因です。\n\n詳しい仕組みは以下の通りです：\n\n*   **太陽の光の性質**: 太陽から届く光（白色光）は、実は赤、橙、黄、緑、青、紫など、さまざまな色（波長）の光が混ざっています。\n*   **大気による散乱**: この光が地球の大気に入ると、空気中の窒素や酸素などの非常に小さな分子にぶつかります。すると、光は四方八方に散らばります（散乱）。\n*   **波長の違い**: このとき、**波長の短い光（青や紫）は、波長の長い光（赤や黄）に比べて、圧倒的に強く散乱されます**。\n*   **なぜ青く見えるのか**: そのため、空全体に散乱した光が私たちの目に届き、空が青く見えるのです。紫の光も強く散乱されますが、太陽から届く光の中で紫の量は青より少なく、また人間の目が青に対してより敏感に反応するため、私たちは空を「青」と感じます。\n\n**補足（夕焼けが赤い理由）**:\n夕方になると、太陽の光は大気を通過する距離が長くなります。すると、途中で青い光はすべて散乱されてしまい、散乱されにくい赤い光だけが私たちの目に届くため、夕焼けは赤く見えます。",
+      "reasoning": "1.  **分析请求：**\n    *   **问题：** なぜ空は青いのですか？ (Why is the sky blue?)\n    *   **语言：** 日语。\n    *   **约束：** 用日语回答。\n\n2.  **确定科学解释：**\n    *   核心现象是**瑞利散射**。\n    *   阳光包含所有颜色（白光）。\n    *   当阳光进入地球大气层时，会与气体分子（氮气、氧气）相互作用。\n    *   由于气体分子比可见光波长小，短波长（蓝色、紫色）比长波长（红色、橙色、黄色）散射得更多。\n    *   蓝光向各个方向散射，因此从任何角度（不仅仅是太阳直射方向）看天空，都会看到蓝光。\n    *   为什么不是紫色？因为太阳光中紫光的强度较低，而且人眼对蓝色的敏感度高于紫色。此外，高层大气吸收了一些紫光。\n\n3.  **构建日语回答结构：**\n    *   **引言：** 直接陈述现象（瑞利散射）。\n    *   **机制：**\n        *   阳光由多种颜色混合而成。\n        *   大气层由微小的粒子（氮气、氧气）组成。\n        *   当阳光击中它们时，蓝光散射得最强烈。\n    *   **为什么是蓝色而不是紫色？** 解释人眼感知和太阳光谱。\n    *   **日落/日出对比（可选但有助于理解）：** 解释为什么日落是红色的（光穿过更厚的大气层，蓝光被散射出去，只剩下红光）。\n    *   **结论：** 总结。\n\n4.  **起草日语文本（迭代润色）：**\n    *   *引言：* 空が青いのは、太陽の光と地球の大気の関係による「レイリー散乱」という現象が原因です。\n    *   *机制：* 太陽の光は、実は赤、橙、黄、緑、青、紫など、さまざまな色の光が混ざっています。これらの光が地球の大気（窒素",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "ru_winter",
+      "tag": "multilingual",
+      "prompt": "Напиши короткий абзац на русском языке о зимнем утре, затем переведи его на английский.",
+      "http_status": 200,
+      "elapsed_s": 13.71421504020691,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 32,
+        "completion_tokens": 356,
+        "total_tokens": 388,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 195,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "Морозное зимнее утро окутало город серебристой дымкой. Крыши домов и ветви деревьев покрылись пушистым инеем, искрящимся в бледном свете рассвета. Воздух был свежим и хрустящим, а тишину нарушало лишь мягкое поскрипывание снега под ногами редких прохожих.\n\nA frosty winter morning wrapped the city in a silvery haze. The rooftops and tree branches were covered with fluffy hoarfrost, sparkling in the pale light of dawn. The air was fresh and crisp, and the silence was broken only by the soft crunch of snow under the feet of the few passersby.",
+      "reasoning": "The user wants me to write a short paragraph in Russian about a winter morning, then translate it into English. This is a straightforward creative writing and translation task.\n\nLet me first compose the Russian paragraph. I should capture the atmosphere of a winter morning - the cold, the snow, the light, the quietness. Something evocative but concise. I'll aim for 3-4 sentences that paint a vivid picture.\n\nFor the Russian text, I'll describe the frost, the soft light, snow-covered trees, and the peaceful stillness. Words like \"морозное утро,\" \"иней,\" \"снег,\" \"тишина\" would work well.\n\nThen for the English translation, I need to maintain the same mood and imagery while making it flow naturally in English. The translation should feel literary, not stiff.\n\nLet me draft the Russian paragraph ",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "de_baum",
+      "tag": "multilingual",
+      "prompt": "Schreibe zwei Sätze auf Deutsch über einen alten Baum, dann gib eine englische Übersetzung dazu.",
+      "http_status": 200,
+      "elapsed_s": 11.970108032226562,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 26,
+        "completion_tokens": 309,
+        "total_tokens": 335,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 211,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "Der alte Baum steht seit Jahrhunderten am Rand der Wiese und trotzt jedem Sturm.  \nSeine knorrigen Äste erzählen von vergangenen Zeiten, während Vögel in seinem dichten Blätterdach Schutz finden.\n\n**English translation:**  \nThe old tree has stood at the edge of the meadow for centuries and defies every storm.  \nIts gnarled branches tell of times past, while birds find shelter in its dense canopy.",
+      "reasoning": "We need answer in German? User asks: \"Schreibe zwei Sätze auf Deutsch über einen alten Baum, dann gib eine englische Übersetzung dazu.\" Means write two sentences in German about an old tree, then give English translation. Need comply. We can produce two German sentences, then English translation. Need maybe simple. Ensure two sentences. Then translation. Could be about old tree. Let's craft.\n\nGerman:\nDer alte Baum steht seit Jahrhunderten am Rand der Wiese und trotzt jedem Sturm.\nSeine knorrigen Äste erzählen von vergangenen Zeiten, während Vögel in seinem dichten Blätterdach Schutz finden.\n\nTranslation:\nThe old tree has stood at the edge of the meadow for centuries and defies every storm.\nIts gnarled branches tell of times past, while birds find shelter in its dense canopy.\n\nNeed maybe \"z",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "fr_river",
+      "tag": "multilingual",
+      "prompt": "Translate this to French, then add one short comment in English: 'The river runs cold in November.'",
+      "http_status": 200,
+      "elapsed_s": 10.163990020751953,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 25,
+        "completion_tokens": 273,
+        "total_tokens": 298,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 241,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "La rivière coule froide en novembre.\n\nComment: This keeps the poetic feel, though “est froide” would be more idiomatic.",
+      "reasoning": "We need answer. User: \"Translate this to French, then add one short comment in English: 'The river runs cold in November.'\" Need translate to French then add short comment in English. Need likely \"La rivière coule froide en novembre.\" Or \"La rivière devient froide en novembre\"? \"runs cold\" idiom? In French, \"La rivière est froide en novembre\" maybe. \"The river runs cold in November\" means river is cold. Translate: \"La rivière coule froide en novembre.\" That's literal maybe okay. Then short comment in English. Need ensure comment in English. Could say: \"Comment: 'coule froide' is a bit poetic; 'est froide' is more natural.\" But user asks add one short comment in English. We can provide translation and comment. Need maybe no extra. Final. Ensure French translation. \"La rivière coule froide e",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "market_dawn",
+      "tag": "prose",
+      "prompt": "Describe a street market at dawn in vivid sensory detail, at least 150 words.",
+      "http_status": 200,
+      "elapsed_s": 23.872171878814697,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 21,
+        "completion_tokens": 490,
+        "total_tokens": 511,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 222,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "The street market wakes before the city does. At first light, the sky is a bruised violet, and the cobblestones sweat from the night’s rain. Vendors arrive in layers of wool and plastic aprons, their breath fogging the air as they haul crates from dented vans. Metal shutters rattle upward like applause. Somewhere, a radio crackles with a tinny bolero, while a butcher slaps cleavers against wood and a coffee seller twists the handle of a grinder, releasing a smoky, burnt-sugar perfume.\n\nThe air is a collision: diesel fumes, wet cardboard, crushed mint, overripe mango, raw shrimp on ice. A baker lifts a tray of golden rolls from a stone oven, and the heat rolls over you like a blanket. Underfoot, cabbage leaves and onion skins slick the ground. A fishmonger shouts prices in a hoarse, rhythmic chant; his hands are red and shining. Someone offers a spoonful of honeyed yogurt—cool, tart, sweet. A woman in a flowered scarf arranges pyramids of oranges, each one catching the first true gold of sunrise. The market isn’t clean or quiet or gentle. It is alive, loud, damp, and hungry—a whole world waking up one stall at a time.",
+      "reasoning": "We need answer. Need describe street market at dawn vivid sensory detail at least 150 words. Need likely prose. We can craft. Need sensory: sight, sound, smell, touch, taste maybe. Dawn street market. Vivid. At least 150 words. Let's write maybe 200-250. Ensure no markdown? Fine. We can include. Need maybe first-person? Let's compose.\n\nWe need be careful \"at dawn\" not too late. Street market waking. Sensory details: pale blue light, vendors, crates, ice, fish, fruit, coffee, bread, diesel, damp cobblestones, sounds of shutters, carts, calls, sizzling, smells. Touch humid, cold metal, steam. Taste samples? Maybe.\n\nLet's draft with rich. At least 150. Count roughly. We'll produce final. Ensure vivid. Maybe 220 words. Let's write:\n\n\"The street market wakes before the city does. At first light",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [
+          {
+            "type": "same_script_glue",
+            "confidence": "advisory",
+            "token": "overripe",
+            "token_index": 93,
+            "head": "over",
+            "tail": "ripe",
+            "context": "overripe"
+          }
+        ],
+        "counts": {
+          "same_script_glue": 1
+        },
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "tests_opinion",
+      "tag": "opinion",
+      "prompt": "Are standardized tests a good measure of intelligence? Write two paragraphs arguing a position.",
+      "http_status": 200,
+      "elapsed_s": 39.189170837402344,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 20,
+        "completion_tokens": 892,
+        "total_tokens": 912,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 612,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "Standardized tests are not a good measure of intelligence because they capture only a narrow slice of what the mind can do. They typically assess timed reading, math, and logical analysis through multiple-choice questions, while intelligence also includes creativity, spatial reasoning, social judgment, practical problem-solving, curiosity, and adaptability. A student who scores poorly on a standardized test might be brilliant at fixing machines, composing music, resolving conflicts, or solving real-world problems that do not fit a bubble sheet. Moreover, test scores are heavily influenced by socioeconomic status, language background, cultural familiarity, anxiety, and access to test prep. As a result, they often measure how well someone has been trained to take a particular kind of test rather than innate intellectual capacity.\n\nEven though standardized tests correlate with academic performance and can be useful for comparing students in a limited domain, that does not make them a comprehensive intelligence measure. They reward speed, conformity, and familiarity with academic conventions, while ignoring motivation, collaboration, persistence, and creative thinking. If schools treat these tests as definitive proof of ability, they risk labeling students unfairly and narrowing the curriculum toward test preparation. A better approach is to use standardized tests as one piece of evidence alongside projects, portfolios, performance tasks, and teacher observations. In short, standardized tests measure a slice of cognitive skill well enough to be useful, but they are not a good stand-alone measure of intelligence.",
+      "reasoning": "We need answer user asks: \"Are standardized tests a good measure of intelligence? Write two paragraphs arguing a position.\" Need write two paragraphs arguing a position. Need likely take position. Need two paragraphs. Should argue maybe standardized tests are not a good measure of intelligence, or are a good measure? Need choose. We can argue they are not a good measure of intelligence. Need two paragraphs. Should be coherent, persuasive. Need mention intelligence multifaceted, tests measure narrow cognitive skills, prep, socioeconomic bias, test-taking skills, not creativity, emotional/social, practical intelligence. But also maybe standardized tests correlate with IQ and academic success. Position: No, not a good measure of intelligence. Two paragraphs. Need maybe first paragraph: standa",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "hash_table",
+      "tag": "technical",
+      "prompt": "Explain how a hash table works, in plain language, as if to a curious teenager.",
+      "http_status": 200,
+      "elapsed_s": 85.49602890014648,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 22,
+        "completion_tokens": 1980,
+        "total_tokens": 2002,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1424,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "Okay, imagine a giant wall of numbered cubbies. You want to store stuff by a label, like “apple” or “Maya’s phone number.” Instead of dumping things anywhere and searching every cubby later, you use a machine that turns a label into a cubby number.\n\nThat machine is called a **hash function**. It’s like a blender for data. Give it “apple,” and it always spits out the same big number, say `839201`. If your wall has 100 cubbies, you do `839201 % 100 = 1`, so “apple” goes in cubby 1.\n\nLater, to find “apple,” you run the same machine, get the same number, and go straight to cubby 1. No scanning the whole wall. That’s the whole trick: turn searching into a direct jump.\n\nBut two different labels can land in the same cubby. That’s called a **collision**, and it’s normal. So each cubby can hold a small list of items. If “apple” and “banana” both land in cubby 1, cubby 1 just has both. To find “apple,” you go to cubby 1 and check only that tiny list. Another way is: if a cubby is full, try the next empty one nearby.\n\nIf the wall gets too crowded, you build a bigger wall and re-place everything using the new size. That keeps the little lists short.\n\nWhy is this usually super fast? Because a good hash function spreads keys around, so each cubby has about one item. Looking up, adding, or deleting is then O(1) on average — basically constant time, no matter how many items you have. Worst case, if the hash is terrible and all keys collide, one cubby becomes a giant list, and it slows down to O(n), like searching everything.\n\nHash tables don’t keep things sorted. They’re great for “does this exist?”, “get the value for this key,” and “count how many times this appears.” They’re used in dictionaries, caches, databases, spellcheckers, and lots of other places.\n\nOne catch — keys need to be stable. If you use something that changes, like a list you later edit, its hash number changes, and the table won’t know where to find it. That’s why keys are usually strings, numbers, or immutable things.\n\nSo: a hash table is a fast lookup system that uses a math rule to jump straight to the right cubby, with a plan for collisions and resizing. It’s not magic — it trades memory and a good hash function for speed.",
+      "reasoning": "We need answer explain hash table plain language to curious teenager. Need likely include analogy, key concepts: keys, hash function, buckets, collisions, chaining/open addressing, load factor, resizing, lookup/insert/delete O(1) average, worst O(n). Plain language. Teenager curious. Avoid too technical but accurate. Maybe use locker room/library analogy. Explain why fast. Mention collisions inevitable, how handled. Maybe mention not sorted, no order. Security? Maybe hash function deterministic, uniform. Need maybe \"as if to curious teenager\" so conversational. Could start: Imagine a giant wall of mailboxes. You have labels. Hash function turns key into number. Use modulo. If key \"apple\" -> hash -> 42 -> mailbox 42. To find, same process. Collisions: two keys same mailbox. Solutions: each ",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "codeswitch_email",
+      "tag": "multilingual",
+      "prompt": "Write a friendly email that opens with a Spanish greeting, includes a French compliment in the middle, and closes in English.",
+      "http_status": 200,
+      "elapsed_s": 22.69201397895813,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 28,
+        "completion_tokens": 620,
+        "total_tokens": 648,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 461,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "Subject: Just wanted to say hello\n\n¡Hola, [Name]!\n\nI hope this email finds you well. It’s been a little while since we last caught up, and I wanted to reach out just to say hello and see how you’re doing. I still really enjoyed our conversation last time—it was lovely talking with you.\n\nBy the way, tu as un talent incroyable pour rendre les choses simples et lumineuses. It’s one of the things that makes you so great to work with.\n\nIf you have some time next week, I’d love to grab a coffee or hop on a quick call. No pressure at all—just let me know what works for you.\n\nLooking forward to hearing from you.\n\nBest,\n[Your Name]",
+      "reasoning": "We need answer. Need craft friendly email. Requirements: opens with Spanish greeting, includes French compliment in middle, closes in English. Need likely email. We can write. Need maybe subject? Friendly. Open with Spanish greeting e.g. \"¡Hola!\" or \"Hola [Name],\" Then body English? It says opens with Spanish greeting, includes French compliment in middle, closes in English. Could be mostly English with Spanish greeting and French compliment. Need ensure French compliment in middle. Close in English. Friendly. Maybe to a friend/colleague. Let's compose.\n\nNeed maybe \"¡Hola, [Name]!\" Then English body. Middle: \"By the way, tu as un talent incroyable pour...\" French. Then continue English. Close: \"Warmly,\" or \"Best,\" in English. Signature.\n\nNeed maybe not too long. Ensure French compliment is",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "pencil_history",
+      "tag": "prose",
+      "prompt": "Write about the history of the pencil, at least 200 words.",
+      "http_status": 200,
+      "elapsed_s": 51.664490938186646,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 18,
+        "completion_tokens": 1080,
+        "total_tokens": 1098,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 740,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "The pencil’s history begins with ancient writing tools: Romans used metal styluses to scratch marks on wax and papyrus, and medieval artists drew with silverpoint. The modern pencil, however, depends on graphite. In the 1560s, a large graphite deposit was discovered in Borrowdale, Cumberland, England. According to legend, shepherds found the dark mineral and used it to mark sheep. Because pure Borrowdale graphite was soft and brittle, early users wrapped pieces in string, leather, or cloth. Eventually, carpenters encased graphite in wooden sticks, creating the first crude pencils. By the 1660s, Nuremberg, Germany, had become an early center of pencil manufacturing, producing wooden pencils on a larger scale.\n\nFor centuries, graphite was scarce and valuable, and England controlled the best supply. In 1795, during the French Revolutionary Wars, Nicolas-Jacques Conté developed a method of mixing powdered graphite with clay, shaping the mixture into rods, and firing them in a kiln. This process allowed manufacturers to control pencil hardness and reduced dependence on pure graphite. It became the basis of modern pencil production. In the United States, the Thoreau family in Concord, Massachusetts, made pencils in the 19th century, and companies such as Joseph Dixon and Eberhard Faber expanded the industry.\n\nIn 1858, Hymen Lipman patented a pencil with an attached eraser, a design that became common. By the late 19th and early 20th centuries, pencils were mass-produced in standard grades, often painted yellow, and sold worldwide. Today, despite digital writing tools, the pencil remains a simple, reliable, and enduring instrument.",
+      "reasoning": "We need answer about history of pencil at least 200 words. Need write. We can produce concise but >200. Need ensure accurate. History of pencil: precursors stylus, metalpoint, graphite discovery in Borrowdale England 16th century, shepherds? Legend. Graphite used for marking sheep. Initially wrapped in string/leather, then wood casings. German and Italian carpenters? Nuremberg pencils. 1795 Nicolas-Jacques Conté developed modern pencil by mixing graphite with clay, controlling hardness, and firing. Also William Munroe in US? Concord? Henry David Thoreau made pencils from graphite? In 19th century, pencil manufacturing. Eberhard Faber, Staedtler, Dixon Ticonderoga. Yellow pencils? Chinese? No. The \"lead\" misnomer. Eraser attached 1858 Hymen Lipman patent. Mechanical pencils earlier 1822 Sam",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [
+          {
+            "type": "same_script_glue",
+            "confidence": "advisory",
+            "token": "worldwide",
+            "token_index": 235,
+            "head": "world",
+            "tail": "wide",
+            "context": "worldwide."
+          }
+        ],
+        "counts": {
+          "same_script_glue": 1
+        },
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "sequences",
+      "tag": "continuation",
+      "prompt": "Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].",
+      "http_status": 200,
+      "elapsed_s": 12.649104833602905,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 47,
+        "completion_tokens": 364,
+        "total_tokens": 411,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 129,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "1. `[2, 4, 8, 16, 32, 64, ...]`  \n2. `[a, c, e, g, i, k, m, ...]`  \n3. `[1, 1, 2, 3, 5, 8, 13, 21, ...]`\n\nReasoning:  \n- The first sequence doubles each term: \\(2 \\times 2 = 4\\), \\(4 \\times 2 = 8\\), and so on, so the next terms are 32, 64, etc.  \n- The second sequence lists every other letter of the alphabet: a, c, e, g, skipping b, d, f, h, so the next letters are i, k, m, etc.  \n- The third sequence is the Fibonacci sequence: each term after the first two is the sum of the two preceding terms, e.g. \\(1+1=2\\), \\(1+2=3\\), \\(2+3=5\\), so the next terms are 8, 13, 21, etc.",
+      "reasoning": "We need answer. Need complete sequences and explain reasoning in prose. Need likely next terms. Sequence 1 powers of 2: 32,64. Sequence 2 odd letters: i,k,m? Actually a,c,e,g,... next i,k,m. Sequence 3 Fibonacci: 1,1,2,3,5,... next 8,13. Need explain. Need maybe \"complete these sequences\" maybe provide next few terms. Need prose. Ensure no overcomplicate. Could mention if continuing indefinitely. Need maybe include enough. Final with completed sequences and reasoning. Need maybe \"assuming standard patterns\". Let's craft concise.",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "ja_zh_intro",
+      "tag": "multilingual",
+      "prompt": "日本語で短い自己紹介を書いて、最後に中国語で一文だけ付け加えてください。",
+      "http_status": 200,
+      "elapsed_s": 22.31707215309143,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 26,
+        "completion_tokens": 542,
+        "total_tokens": 568,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 503,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "はじめまして。田中と申します。趣味は読書と映画鑑賞です。よろしくお願いします。  \n很高兴认识大家，请多多关照。",
+      "reasoning": "我们需要回答用户。用户要求：用日语写简短自我介绍，最后用中文加一句话。需要满足。应该用日语写短自我介绍，最后中文一句。可以包含名字？没有给定，可以通用。需要简短。最后中文一句。注意格式。可以写：こんにちは。〇〇と申します。趣味は読書と音楽鑑賞です。どうぞよろしくお願いします。最后中文：很高兴认识大家，请多多关照。但用户要求最后用中文加一句。可以。需要确保日语自然。可以更短。也许自我介绍内容：はじめまして。田中と申します。趣味は映画を見ることと散歩です。日本語を勉強しています。よろしくお願いします。最后中文：希望我们能成为好朋友。但中文一句。可以。\n\n注意“最后に中国語で一文だけ付け加えて” 意思最后加一句中文。可以。整体中文一句即可。不要多句中文。日语部分可以多句。最后中文一句。可以。\n\n需要可能用“〇〇”代替名字。如果没指定，用“田中”可能随意。可以写：こんにちは、田中と申します。趣味は読書と旅行です。どうぞよろしくお願いします。最后中文：很高兴认识大家，请多多关照。这中文一句。可以。\n\n但“自己紹介”通常包括名字、爱好、问候。简短。可以。\n\n最终回答直接给出。确保日语中不要混入中文？最后中文一句。可以。\n\n可以加“はじめまして”等。最后中文一句。好。\n\n需要可能“中国語で一文だけ” 中文是最后一句，标点句号。可以。\n\n最终：\nはじめまして。田中と申します。趣味は読書と音楽を聴くことです。どうぞよろしくお願いします。\n很高兴认识大家，请多多关照。\n\n这符合。但“田中”是姓。可以。如果用户没名字，可以。也许“〇〇”更好？用“田中”可以。简短。可以。\n\nはじめまして。田中と申します。趣味は読書と映画鑑賞です。よろしくお願いします。\n很高兴认识大家，请多多关照。\n\n中文一句。可以。注意“最後に中国語で一文だけ付け加えて” 最后中文一句。可以。\n\n最终回答。",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "limerick",
+      "tag": "prose",
+      "prompt": "Write a limerick about the moon.",
+      "http_status": 200,
+      "elapsed_s": 15.556775093078613,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 419,
+        "total_tokens": 431,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 379,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "There once was a moon in the sky,\nWho watched all the lovers go by.\nShe’d polish her light,\nAnd glow through the night,\nThen hum a soft lullaby high.",
+      "reasoning": "We need answer user asks write a limerick about moon. Need produce limerick. Limerick structure AABBA, anapestic meter, 5 lines. Need likely witty. Let's craft. Ensure rhyme. Example:\n\nThere once was a moon in the sky,\nWho watched all the lovers go by.\nShe'd polish her light,\nAnd glow through the night,\nWhile humming a lullaby high.\n\nCheck limerick: lines 1,2,5 rhyme sky/by/high. lines 3,4 rhyme light/night. Meter okay-ish. \"There once was a moon in the sky\" (There ONCE was a MOON in the SKY) anapestic? \"There once was a moon in the sky\" = da DUM da da DUM da da DUM? Actually limerick often: \"There ONCE was a MAN from Peru\" etc. Good. \"Who watched all the lovers go by\" = who WATCHED all the LOVers go BY? maybe. \"She'd polish her light\" = she'd POLish her LIGHT (3 beats). \"And glow through ",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "es_continue",
+      "tag": "multilingual",
+      "prompt": "Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'",
+      "http_status": 200,
+      "elapsed_s": 21.94469404220581,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 30,
+        "completion_tokens": 565,
+        "total_tokens": 595,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 422,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "las ramas de los robles crujían como huesos viejos. En el valle, las casas se encogían tras sus ventanas encendidas, y el humo de las chimeneas se deshacía en jirones antes de tocar el cielo. Una figura avanzaba por el sendero, envuelta en un abrigo oscuro, con la mirada fija en la línea del horizonte. Cada ráfaga le arrancaba susurros, nombres que creía olvidados, y ella seguía andando, porque detenerse era recordar, y recordar dolía más que el frío.",
+      "reasoning": "We need answer in Spanish, continue same language/style. User asks: \"Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'\" Need continue sentence/story. We need produce continuation. Should match style: literary, atmospheric. We can write maybe a paragraph. Need likely just continue from phrase. We should not overdo. We can craft: \"El viento soplaba fuerte sobre las colinas, y las ramas de los robles crujían como huesos viejos. En el valle, las casas parecían encogerse...\" etc. Same Spanish. Style evocative. Need maybe continue with \"y...\" after phrase. We can include full sentence. Let's compose in Spanish, literary. Ensure no errors. Maybe:\n\nEl viento soplaba fuerte sobre las colinas, y las ramas de los robles crujían como huesos viejos. En el valle, ",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    },
+    {
+      "id": "scene_image",
+      "tag": "prose",
+      "prompt": "Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.",
+      "http_status": 200,
+      "elapsed_s": 21.876966953277588,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 33,
+        "completion_tokens": 474,
+        "total_tokens": 507,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 307,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "In the foreground, three pigeons stand on a slick, rain-darkened pavement, their gray bodies doubled in the shine beneath them. One tilts its head toward a puddle; another huddles low, feathers puffed against the damp. The wet ground catches a smear of red from the umbrella above.\n\nThat umbrella is the image’s bright, beating heart—scarlet, slightly sagging, held over a market stall crowded with crates and hanging produce. Around it, the street market recedes in layers: striped canopies, blurred vendors, damp cardboard signs, a knot of shoppers in muted coats. The red umbrella pulls the eye first, then lets it fall to the pigeons, small and patient on the gleaming stones. Everything looks paused between rain and rush, as if the whole market is holding its breath.",
+      "reasoning": "We need answer. User asks: \"Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.\" Need produce descriptive narration. We need likely first-person present tense, image description. Include street market, red umbrella, three pigeons on wet pavement. Should be vivid. \"As if narrating an image you are looking at\" maybe \"In the foreground...\" etc. Need maybe mention composition, light, reflections. We can craft. Need no overdo? Desired 5. We can write paragraph. Ensure all elements. Maybe \"The frame opens...\" Use sensory details. Street market: stalls, awnings, produce, vendors, crowd blurred. Red umbrella: focal point, bright, maybe vendor's umbrella. Three pigeons on wet pavement: foreground, pecking, reflections. W",
+      "detector": {
+        "verdict": "CLEAN",
+        "hits": [],
+        "counts": {},
+        "n_high": 0,
+        "n_low": 0
+      }
+    }
+  ]
+}

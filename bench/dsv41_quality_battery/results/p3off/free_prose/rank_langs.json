@@ -1,0 +1,54 @@
+{
+  "id": "rank_langs",
+  "tag": "ranking",
+  "prompt": "Rank these five programming languages by how pleasant they are for a beginner, best to worst: Rust, Python, C, JavaScript, Haskell. Give a one-sentence reason for each, in your ranked order.",
+  "http_status": 200,
+  "elapsed_s": 34.39540505409241,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 46,
+    "completion_tokens": 797,
+    "total_tokens": 843,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 675,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. Python — Its clean, readable syntax and immediate REPL feedback let beginners focus on logic rather than boilerplate.  \n2. JavaScript — It runs instantly in any browser and produces visible results, though its quirks and async model can surprise.  \n3. C — Its small core is learnable, but manual memory and pointers add early friction.  \n4. Rust — Its tooling and compiler messages are helpful, but ownership and borrowing are a steep conceptual climb.  \n5. Haskell — Its elegant purity is powerful, but laziness, monads, and a radically functional style overwhelm beginners.",
+  "reasoning": "We need answer ranking five languages by pleasant for beginner best to worst: Rust, Python, C, JavaScript, Haskell. One-sentence reason each in ranked order. Need decide ranking. Need be accurate. \"Pleasant for a beginner\" subjective. Best likely Python, JavaScript, C, Rust, Haskell? Or Python, JavaScript, C, Haskell, Rust? Need rank best to worst. Need one sentence reason each. We need maybe mention beginner-friendly. Let's think.\n\nPython: simple syntax, readable, immediate feedback, huge ecosystem. Best.\n\nJavaScript: easy to start in browser, immediate visual feedback, but quirks and async can confuse. Still accessible. Second.\n\nC: small language, but manual memory, pointers, compilation, undefined behavior. Maybe third. Haskell: pure functional, unfamiliar, monads, lazy, type system, bu",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "beginners",
+        "token_index": 12,
+        "head": "begin",
+        "tail": "ners",
+        "context": "beginners"
+      },
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "beginners",
+        "token_index": 92,
+        "head": "begin",
+        "tail": "ners",
+        "context": "beginners."
+      }
+    ],
+    "counts": {
+      "same_script_glue": 2
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

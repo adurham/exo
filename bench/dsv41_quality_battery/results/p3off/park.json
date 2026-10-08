@@ -1,0 +1,37 @@
+{
+  "mode": "park",
+  "park_tokens": 8000,
+  "turn1": {
+    "status": 200,
+    "elapsed_s": 32.91627812385559,
+    "content": "",
+    "error": null
+  },
+  "evict_B_elapsed_s": 26.883512020111084,
+  "evict_C_elapsed_s": 26.472625017166138,
+  "turn2": {
+    "status": 200,
+    "elapsed_s": 7.361088991165161,
+    "content": "teal",
+    "error": null,
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 8030,
+      "completion_tokens": 27,
+      "total_tokens": 8057,
+      "prompt_tokens_details": {
+        "cached_tokens": 6144,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 24,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    }
+  },
+  "recall_teal": true,
+  "restore_evidence_ssh": null,
+  "note": "TBD-VERIFY-ON-RUN: session keying/restore depends on engine session-match semantics; confirm turn2 elapsed << cold prefill and (if --ssh-park-check) a park/restore log line."
+}
