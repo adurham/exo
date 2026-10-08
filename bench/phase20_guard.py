@@ -686,7 +686,14 @@ class ChunkGuard:
     def _poll_signals(self) -> None:
         assert self.t_start is not None
         chunk_start = self.t_start
-        own = self.own_requests()
+        # NOTE: the own-request list is deliberately NOT snapshotted here.  The two-node
+        # ssh log read below takes ~1-3 s, and the harness calls register_own_request()
+        # *immediately before* it sends -- i.e. AFTER this point but before the logs are
+        # read.  A snapshot taken here would miss that registration and mis-classify the
+        # harness's own first POST as non-own (live-reproduced false positive).  A POST
+        # line can only be in a node log if its registration already happened, so the
+        # own list is (re-)read AFTER the logs are read, just before each signal is
+        # evaluated (see below).
 
         # ---- read both nodes' logs + offsets
         node_data: dict[str, dict] = {}
@@ -701,6 +708,10 @@ class ChunkGuard:
                     LogEvent(_apply_offset(e.epoch, offsets[node]), e.ts, e.kind, e.value)
                 )
         events.sort(key=lambda e: e.epoch)
+
+        # Re-read the own-request list now that the logs have been read: any registration
+        # the harness made during the read is now visible, so its own POST lines match.
+        own = self.own_requests()
 
         # ---- S2: unregistered generation POST newer than chunk start
         for ev in events:
@@ -724,6 +735,10 @@ class ChunkGuard:
         last_kind, _ = runner_state(events)
         log_running = 1 if last_kind == "running" else 0
         active = max(state_active, log_running)
+
+        # Re-read the own list for the S1 in-flight computation: the /state fetch above
+        # takes time, during which the harness may have registered its request.
+        own = self.own_requests()
 
         # own_inflight: registrations newer than the last observed "runner ready"
         last_ready = max((e.epoch for e in events if e.kind == "ready"), default=None)

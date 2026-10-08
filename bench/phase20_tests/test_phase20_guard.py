@@ -197,6 +197,74 @@ def test_s2_no_abort_when_own_registered(tmp_path, monkeypatch):
     assert guard.aborted is False
 
 
+def test_s2_no_abort_when_own_registered_during_log_read(tmp_path, monkeypatch):
+    """RACE REGRESSION (live-reproduced false positive).
+
+    ``_poll_signals`` used to snapshot the own-request list at the TOP of the method,
+    *before* the two-node ssh log read (~1-3 s).  The harness registers immediately
+    before it sends, so its own POST can only be present in a log line written *after*
+    the registration -- i.e. the registration lands DURING the watcher's log read.  A
+    stale (empty) snapshot then mis-classifies the harness's own first POST as non-own
+    and aborts every live chunk.  The fix re-reads ``own_requests()`` after the logs are
+    read, just before the S2 loop.  Here the registration happens inside the second
+    node's log read, mirroring the real register-during-read ordering.
+    """
+    now = g._now()
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + 1)) + ".000"
+    log = f"[ {ts} | DEBUG | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions\n"
+    ev_epoch = g.parse_log_lines(log)[0].epoch  # the harness's own POST timestamp
+    guard = g.ChunkGuard("s2race", max_wall_s=60, poll_s=0.2, db_uri="file:memory:?mode=ro")
+    guard.t_start = now  # chunk started a moment ago
+    seen = {"nodes": 0}
+
+    monkeypatch.setattr(g, "_now", lambda: ev_epoch)  # frozen clock at the POST epoch
+    monkeypatch.setattr(g, "measure_clock_offset", lambda node, **kw: 0.0)
+    monkeypatch.setattr(g, "_fetch_json", lambda url, **kw: {"runners": {}})
+
+    def fake_ssh(node, cmd, **kw):
+        if "date" in cmd:  # clock probe (offset is patched too)
+            return 0, f"{g._now()}\n"
+        seen["nodes"] += 1
+        if seen["nodes"] == 1:
+            # watcher's own-list snapshot (top of _poll_signals) is still empty here
+            assert guard.own_requests() == []
+        else:
+            # harness's register_own_request() lands DURING the log read -- after the
+            # watcher's snapshot, before it evaluates S2 (the real register-during-read):
+            guard.register_own_request(ev_epoch)
+            assert guard.own_requests() == [ev_epoch]
+        return 0, log + g._SSH_OK_MARKER
+
+    monkeypatch.setattr(g, "run_ssh", fake_ssh)
+    guard._poll_signals()
+    assert guard.aborted is False, (
+        f"own POST @{ev_epoch} registered during the log read was flagged as non-own: "
+        f"{guard._signals} reason={guard.reason!r}"
+    )
+    assert guard.cancel_event.is_set() is False
+
+
+def test_s2_aborts_when_post_outside_own_window(tmp_path, monkeypatch):
+    """Control for the race fix: a genuinely non-own POST (no own registration within
+    +-2 s) STILL aborts after the post-log-read re-read of the own list.  The stale
+    registration here is 10 s away, so it must not exclude the POST."""
+    now = g._now()
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now + 1)) + ".000"
+    log = f"[ {ts} | DEBUG | exo.api.main:_log_requests:340 ] API request: POST /v1/chat/completions\n"
+    ev_epoch = g.parse_log_lines(log)[0].epoch
+    guard = g.ChunkGuard("s2non", max_wall_s=60, poll_s=0.2, db_uri="file:memory:?mode=ro")
+    guard.t_start = now
+    monkeypatch.setattr(g, "_now", lambda: ev_epoch)
+    guard.register_own_request(ev_epoch - 10.0)  # own list non-empty, but >2 s away
+    monkeypatch.setattr(g, "run_ssh", lambda node, cmd, **kw: (0, log + g._SSH_OK_MARKER))
+    monkeypatch.setattr(g, "measure_clock_offset", lambda node, **kw: 0.0)
+    monkeypatch.setattr(g, "_fetch_json", lambda url, **kw: {"runners": {}})
+    guard._poll_signals()
+    assert guard.aborted is True
+    assert guard.reason == "ABORTED_USER_ARRIVED"
+    assert any(s.startswith("S2:") for s in guard._signals)
+
+
 def test_s1_concurrency_aborts_when_no_own_inflight(monkeypatch):
     # /state shows one RunnerRunning, we have no in-flight registration -> S1 abort
     guard = g.ChunkGuard("s1", max_wall_s=60, poll_s=0.2, db_uri="file:memory:?mode=ro")
