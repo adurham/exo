@@ -46,3 +46,27 @@ Live chunk1 complete (canary healthy both nodes each run):
 ## Budget / status
 - Relaunches used: **0 / 3**. Cluster untouched (production, idle, canary 14.8–14.86 TFLOPS both nodes).
 - Next: finish 0c (chunk2a/2b/3, fresh100k) + 0d live window → M0 final; then relaunch #1 (`deploy/next16-instr`, built: merge + round_prof plumbing, 234 dsv41 tests green).
+
+---
+
+## Phase 0 — FINAL (0c complete, 0d complete)
+
+### 0c — delta-prefill ladder (COMPLETE)
+| table | result |
+|---|---|
+| ctx ladder @2048 delta | 20k **272.6** (n=3) · 50k **249.6** (n=3) · 110k **242.4** (n=2) rows/s |
+| delta-size sweep @50k | 256 **227.3** · 1024 **255.1** · 4096 **258.3** · 8192 **267.5** rows/s (n=3 each) |
+| fresh 100K reference | **272.2** rows/s (≥255 → healthy, chunk recorded) |
+Verdicts (PREREG 0c): ctx-depth 20k→110k = **11.1% (≤15%, benign)**; fixed-overhead: d256 = **88%** of d4096 (no cliff); **FLAT across 1024–8192 = 4.8% (<10%) → Phase 4 SKIPPED, slope recorded** (rows/s rises mildly with delta size: 255→267 over 1024→8192). Delta path (~250 rows/s) sits below the fresh-feed ceiling (~272); the gap is ctx-depth (KV/history cost), not per-call overhead.
+
+### 0d — GPU-busy fraction of the decode round (COMPLETE)
+Two live windows (both nodes, powermetrics gpu_power 500 ms + `sample` 30 s started on the first SSE token; `first_token→last_token` brackets the 20.4 s window):
+- **benign** (20K prefix-cached decode, 500 tok / 21.8 s): GPU HW active residency **100.0%** both nodes (1578 MHz); host `python_busy` **1.75%**, `gpu_wait` 5.3%, comm 0%.
+- **agentic** (40K prefix-cached decode, 500 tok / 31.3 s): GPU HW active residency **100.0%** both nodes (1578 MHz); all-threads `python_busy` 59% (tokenize/detok/driver across 57 threads), main-thread ~0%, comm 0%.
+- idle baseline (fixtures): m4-1 **3.98%**, m4-2 **3.71%** → **GPU-busy ≈ 96 points** above idle.
+**Decision gate (PREREG 0d): GPU-busy ≥90% both nodes → GPU-SERIALIZED (launch bound).** The Phase-1 falsifier (GPU-busy ≥95% both nodes AND host-busy <3%) **FIRES** → Phase 1 should emphasize the **PROF=2 (eval-fenced) per-segment timer**; the missing ~40% of the round is GPU/comm-wait inside the fused graph, not host starvation.
+
+### Phase 0 priority statement for Phases 1–4
+1. Decode dominates (1085 s of 1413 s model time); the round is GPU-serialized with comm 0% on `sample` → attribute the unaccounted ~55–60 ms to fused-graph segments (PROF=2) and the per-layer `_column_boundary` host round-trip (R1 finding).
+2. Prefill: fresh feed ≈ roofline; the delta path is ctx-depth bound and **flat vs delta size** → **Phase 4 (chunk-4096 endpoint arm) is killed by the 0c falsifier**; no per-call-overhead lever to chase.
+3. Cache: 0 misses → no rewrite win.

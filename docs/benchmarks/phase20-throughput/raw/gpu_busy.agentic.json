@@ -1,0 +1,5064 @@
+{
+ "kind": "decode",
+ "workload": "agentic",
+ "depth": 40000,
+ "secs": 20.0,
+ "max_tokens": 500,
+ "salt": "a8ee7de4",
+ "meta": {
+  "n_messages_total": 98,
+  "n_messages_used": 56,
+  "preamble_chars": 22770,
+  "prompt_chars": 202017
+ },
+ "prompt_chars": 202017,
+ "warmup": {
+  "usage": {
+   "prompt_tokens": 59670,
+   "completion_tokens": 8,
+   "total_tokens": 59678,
+   "prompt_tokens_details": {
+    "cached_tokens": 0,
+    "audio_tokens": 0
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 8,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+   }
+  }
+ },
+ "decode": {
+  "wall_s": 31.721,
+  "ttft_s": 0.3838,
+  "first_token_epoch": 648205.216371625,
+  "last_token_epoch": 648236.552970708,
+  "decode_s": 31.3366,
+  "content_chars": 1722,
+  "usage": {
+   "prompt_tokens": 59670,
+   "completion_tokens": 500,
+   "total_tokens": 60170,
+   "prompt_tokens_details": {
+    "cached_tokens": 59670,
+    "audio_tokens": 0
+   },
+   "completion_tokens_details": {
+    "reasoning_tokens": 500,
+    "audio_tokens": 0,
+    "accepted_prediction_tokens": 0,
+    "rejected_prediction_tokens": 0
+   }
+  },
+  "stats": {
+   "prompt_tps": 0.0,
+   "generation_tps": 0.0,
+   "prompt_tokens": 59670,
+   "generation_tokens": 500,
+   "peak_memory_usage": {
+    "in_bytes": 125579130466
+   },
+   "prefix_cache_hit": "partial",
+   "mtp_cycles_cumulative": 12885,
+   "mtp_accepted_drafts_cumulative": 10435,
+   "phase_marks_ms": null,
+   "api_phase_marks_ms": null
+  }
+ },
+ "window_valid": {
+  "m4-1": false,
+  "m4-2": false
+ },
+ "parsed": {
+  "m4-1": {
+   "powermetrics": {
+    "n_blocks": 40,
+    "total_elapsed_ms": 20394.27,
+    "mean_hw_active_residency_pct": 100.0,
+    "first_block_hw_active_residency_pct": 100.0,
+    "mean_hw_active_freq_mhz": 1578.0,
+    "hw_active_freq_mhz_by_block": [
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578
+    ],
+    "hw_bin_distribution": [
+     {
+      "freq_mhz": 338,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 618,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 796,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 924,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 952,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1056,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1062,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1182,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1182,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1312,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1242,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1380,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1326,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1470,
+      "pct": 0.00325028059351965
+     },
+     {
+      "freq_mhz": 1578,
+      "pct": 100.0
+     }
+    ],
+    "sw_requested_distribution": [
+     {
+      "state": "P1",
+      "pct": 0.0
+     },
+     {
+      "state": "P2",
+      "pct": 0.0
+     },
+     {
+      "state": "P3",
+      "pct": 0.0
+     },
+     {
+      "state": "P4",
+      "pct": 0.0
+     },
+     {
+      "state": "P5",
+      "pct": 0.0
+     },
+     {
+      "state": "P6",
+      "pct": 0.0
+     },
+     {
+      "state": "P7",
+      "pct": 0.0
+     },
+     {
+      "state": "P8",
+      "pct": 0.0
+     },
+     {
+      "state": "P9",
+      "pct": 58.025314953661
+     },
+     {
+      "state": "P10",
+      "pct": 41.974685046339
+     },
+     {
+      "state": "P11",
+      "pct": 0.0
+     },
+     {
+      "state": "P12",
+      "pct": 0.0
+     },
+     {
+      "state": "P13",
+      "pct": 0.0
+     },
+     {
+      "state": "P14",
+      "pct": 0.0
+     },
+     {
+      "state": "P15",
+      "pct": 0.0
+     }
+    ],
+    "sw_state_distribution": [
+     {
+      "state": "SW_P1",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P2",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P3",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P4",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P5",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P6",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P7",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P8",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P9",
+      "pct": 0.00325028059351965
+     },
+     {
+      "state": "SW_P10",
+      "pct": 100.0
+     },
+     {
+      "state": "SW_P11",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P12",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P13",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P14",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P15",
+      "pct": 0.0
+     }
+    ],
+    "mean_idle_residency_pct": 0.0,
+    "mean_power_mw": 26996.88804453408,
+    "per_block_residency_pct": [
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0
+    ]
+   },
+   "sample": {
+    "n_threads": 59,
+    "total_samples": 881431,
+    "all_threads_pct": {
+     "python_busy": 59.21,
+     "gpu_wait": 5.23,
+     "other": 35.56,
+     "comm": 0.0
+    },
+    "all_threads_counts": {
+     "python_busy": 521916,
+     "gpu_wait": 46092,
+     "other": 313399,
+     "comm": 24
+    },
+    "main_thread_id": 26612,
+    "main_thread_pct": {
+     "python_busy": 99.98,
+     "gpu_wait": 0.02
+    },
+    "threads": [
+     {
+      "thread_id": 26612,
+      "header": "Thread_26612   DispatchQueue_1: com.apple.main-thread  (serial)",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15367,
+       "gpu_wait": 3
+      },
+      "top_frames": [
+       {
+        "frame": "method_vectorcall_VARARGS_KEYWORDS.llvm.11042529475825813929",
+        "samples": 11987
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 3210
+       },
+       {
+        "frame": "gc_collect_main.llvm.2066754034620847737",
+        "samples": 119
+       },
+       {
+        "frame": "gc_collect_main.llvm.2066754034620847737 + 1588,672,...  [0x1019ecfdc,0x1019ecc48,...]",
+        "samples": 49
+       },
+       {
+        "frame": "-[IOGPUMetalBuffer dealloc]",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.98,
+       "gpu_wait": 0.02
+      },
+      "is_main": true
+     },
+     {
+      "thread_id": 26621,
+      "header": "Thread_26621",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15369,
+       "other": 1
+      },
+      "top_frames": [
+       {
+        "frame": "time_sleep",
+        "samples": 15368
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 1
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.99,
+       "other": 0.01
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 26622,
+      "header": "Thread_26622",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 26623,
+      "header": "Thread_26623",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "read",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 27355,
+      "header": "Thread_27355",
+      "total_samples": 15370,
+      "categories": {
+       "gpu_wait": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 13604
+       },
+       {
+        "frame": "std::__function::__func<mlx::core::scheduler::Scheduler::enqueue(mlx::core::Stream, std::function<void ()>)::$_0, void ()>::operator()()",
+        "samples": 1738
+       },
+       {
+        "frame": "std::__function::__func<mlx::core::scheduler::Scheduler::signal_event(mlx::core::Stream, mlx::core::Event, std::function<void (mlx::core::Event&)>)::$_0, void ()>::~__func()",
+        "samples": 14
+       },
+       {
+        "frame": "iokit_user_client_trap",
+        "samples": 8
+       },
+       {
+        "frame": "std::__function::__func<mlx::core::scheduler::Scheduler::enqueue(mlx::core::Stream, std::function<void ()>)::$_0, void ()>::~__func()",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "gpu_wait": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28365,
+      "header": "Thread_28365",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15350,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15257
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 57
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "pread",
+        "samples": 18
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 17
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28366,
+      "header": "Thread_28366",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15353,
+       "other": 17
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 63
+       },
+       {
+        "frame": "pread",
+        "samples": 23
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 17
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 5
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.89,
+       "other": 0.11
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28367,
+      "header": "Thread_28367",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15345,
+       "other": 25
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15259
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 85
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 25
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28368,
+      "header": "Thread_28368",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15350,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15255
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 64
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "pread",
+        "samples": 17
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 14
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28369,
+      "header": "Thread_28369",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15349,
+       "other": 21
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15257
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 67
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 21
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 4
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28370,
+      "header": "Thread_28370",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15355,
+       "other": 15
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15258
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 60
+       },
+       {
+        "frame": "pread",
+        "samples": 20
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 14
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.9,
+       "other": 0.1
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28371,
+      "header": "Thread_28371",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15353,
+       "other": 17
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15262
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 85
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 17
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 3
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.89,
+       "other": 0.11
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28372,
+      "header": "Thread_28372",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15352,
+       "other": 18
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 83
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 18
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 7
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28373,
+      "header": "Thread_28373",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15346,
+       "other": 24
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15256
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 66
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 24
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 3
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28374,
+      "header": "Thread_28374",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15347,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15259
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 65
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 23
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "_tlv_get_addr",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28375,
+      "header": "Thread_28375",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15351,
+       "other": 19
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15261
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 63
+       },
+       {
+        "frame": "pread",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 19
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 4
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28376,
+      "header": "Thread_28376",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15350,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15261
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 87
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "drop_gil.llvm.11590127013830550927",
+        "samples": 1
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28378,
+      "header": "Thread_28378",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15351,
+       "other": 19
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15261
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 89
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 19
+       },
+       {
+        "frame": "__psynch_mutexdrop",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28379,
+      "header": "Thread_28379",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15352,
+       "other": 18
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15268
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 80
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 18
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 2
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28380,
+      "header": "Thread_28380",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15352,
+       "other": 18
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15258
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 74
+       },
+       {
+        "frame": "pread",
+        "samples": 20
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 18
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28381,
+      "header": "Thread_28381",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15350,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 67
+       },
+       {
+        "frame": "pread",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28382,
+      "header": "Thread_28382",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15354,
+       "other": 16
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15262
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 74
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 16
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 16
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.9,
+       "other": 0.1
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28383,
+      "header": "Thread_28383",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15351,
+       "other": 19
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15263
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 86
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 19
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28384,
+      "header": "Thread_28384",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15351,
+       "other": 19
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15264
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 66
+       },
+       {
+        "frame": "pread",
+        "samples": 19
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 17
+       },
+       {
+        "frame": "DYLD-STUB$$pread",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28386,
+      "header": "Thread_28386",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15348,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15262
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 68
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 21
+       },
+       {
+        "frame": "pread",
+        "samples": 13
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 4
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28387,
+      "header": "Thread_28387",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15354,
+       "other": 16
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15262
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 77
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 16
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 13
+       },
+       {
+        "frame": "__psynch_mutexdrop",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.9,
+       "other": 0.1
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28388,
+      "header": "Thread_28388",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15343,
+       "other": 27
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15258
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 67
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 27
+       },
+       {
+        "frame": "pread",
+        "samples": 16
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.82,
+       "other": 0.18
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28389,
+      "header": "Thread_28389",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15345,
+       "other": 25
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15261
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 83
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 2
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28390,
+      "header": "Thread_28390",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15347,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 85
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 23
+       },
+       {
+        "frame": "drop_gil.llvm.11590127013830550927",
+        "samples": 1
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28391,
+      "header": "Thread_28391",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15348,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15259
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 75
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 22
+       },
+       {
+        "frame": "pread",
+        "samples": 14
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28392,
+      "header": "Thread_28392",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15349,
+       "other": 21
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 87
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 21
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28393,
+      "header": "Thread_28393",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15350,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15262
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 73
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 15
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28394,
+      "header": "Thread_28394",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15347,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15258
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 88
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28395,
+      "header": "Thread_28395",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15346,
+       "other": 24
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 70
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 24
+       },
+       {
+        "frame": "pread",
+        "samples": 15
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28396,
+      "header": "Thread_28396",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15349,
+       "other": 21
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15263
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 66
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 21
+       },
+       {
+        "frame": "pread",
+        "samples": 17
+       },
+       {
+        "frame": "vgetargskeywords.llvm.6813319701793157374",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28397,
+      "header": "Thread_28397",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15344,
+       "other": 26
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15260
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 59
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 23
+       },
+       {
+        "frame": "pread",
+        "samples": 13
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 11
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.83,
+       "other": 0.17
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28398,
+      "header": "Thread_28398",
+      "total_samples": 15370,
+      "categories": {
+       "python_busy": 15348,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15261
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 61
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 22
+       },
+       {
+        "frame": "pread",
+        "samples": 17
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 7
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29202,
+      "header": "Thread_29202",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29203,
+      "header": "Thread_29203",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29204,
+      "header": "Thread_29204",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29205,
+      "header": "Thread_29205",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29206,
+      "header": "Thread_29206",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29207,
+      "header": "Thread_29207",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29208,
+      "header": "Thread_29208",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29209,
+      "header": "Thread_29209",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29210,
+      "header": "Thread_29210",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29211,
+      "header": "Thread_29211",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29212,
+      "header": "Thread_29212",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29213,
+      "header": "Thread_29213",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29214,
+      "header": "Thread_29214",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29215,
+      "header": "Thread_29215",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29216,
+      "header": "Thread_29216",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29217,
+      "header": "Thread_29217",
+      "total_samples": 15370,
+      "categories": {
+       "other": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29218,
+      "header": "Thread_29218",
+      "total_samples": 15370,
+      "categories": {
+       "gpu_wait": 15346,
+       "comm": 24
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15346
+       },
+       {
+        "frame": "jaccl::SideChannel::all_gather<std::vector<char>>(std::vector<char> const&)",
+        "samples": 18
+       },
+       {
+        "frame": "__recvfrom",
+        "samples": 6
+       }
+      ],
+      "categories_pct": {
+       "gpu_wait": 99.84,
+       "comm": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 46560,
+      "header": "Thread_46560",
+      "total_samples": 15370,
+      "categories": {
+       "gpu_wait": 15370
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15370
+       }
+      ],
+      "categories_pct": {
+       "gpu_wait": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 418679,
+      "header": "Thread_418679   DispatchQueue_44: com.Metal.DeviceDispatchQueue  (serial)",
+      "total_samples": 1,
+      "categories": {
+       "other": 15286,
+       "gpu_wait": 2
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_wqthread",
+        "samples": 15100
+       },
+       {
+        "frame": "start_wqthread",
+        "samples": 171
+       },
+       {
+        "frame": "_dispatch_workloop_worker_thread",
+        "samples": 14
+       },
+       {
+        "frame": "_voucher_create_with_mach_voucher",
+        "samples": 1
+       },
+       {
+        "frame": "class_createInstance",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 99.99,
+       "gpu_wait": 0.01
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 419900,
+      "header": "Thread_419900   DispatchQueue_20: com.apple.root.user-interactive-qos.overcommit  (concurrent)",
+      "total_samples": 1,
+      "categories": {
+       "other": 14232
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_wqthread",
+        "samples": 13985
+       },
+       {
+        "frame": "start_wqthread",
+        "samples": 245
+       },
+       {
+        "frame": "_dispatch_queue_wakeup",
+        "samples": 1
+       },
+       {
+        "frame": "???",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 413428,
+      "header": "Thread_413428",
+      "total_samples": 6139,
+      "categories": {
+       "other": 6138,
+       "gpu_wait": 1
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_wqthread",
+        "samples": 5816
+       },
+       {
+        "frame": "start_wqthread",
+        "samples": 314
+       },
+       {
+        "frame": "???",
+        "samples": 8
+       },
+       {
+        "frame": "_xzm_xzone_malloc_tiny",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 99.98,
+       "gpu_wait": 0.02
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": null,
+      "header": "Thread_<multiple>   DispatchQueue_83: com.Metal.CompletionQueueDispatch  (serial)",
+      "total_samples": 210,
+      "categories": {
+       "other": 422
+      },
+      "top_frames": [
+       {
+        "frame": "-[_MTLCommandQueue _submitAvailableCommandBuffers]",
+        "samples": 210
+       },
+       {
+        "frame": "_dispatch_lane_serial_drain",
+        "samples": 209
+       },
+       {
+        "frame": "pthread_mutex_lock",
+        "samples": 1
+       },
+       {
+        "frame": "???",
+        "samples": 1
+       },
+       {
+        "frame": "_dispatch_mach_invoke",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     }
+    ],
+    "unclassified_top_frames": [
+     {
+      "frame": "__psynch_cvwait",
+      "samples": 261856
+     },
+     {
+      "frame": "_pthread_wqthread",
+      "samples": 34901
+     },
+     {
+      "frame": "read",
+      "samples": 15370
+     },
+     {
+      "frame": "start_wqthread",
+      "samples": 730
+     },
+     {
+      "frame": "-[_MTLCommandQueue _submitAvailableCommandBuffers]",
+      "samples": 210
+     },
+     {
+      "frame": "_dispatch_lane_serial_drain",
+      "samples": 209
+     },
+     {
+      "frame": "_pthread_cond_wait",
+      "samples": 89
+     },
+     {
+      "frame": "_dispatch_workloop_worker_thread",
+      "samples": 14
+     },
+     {
+      "frame": "???",
+      "samples": 10
+     },
+     {
+      "frame": "__psynch_mutexwait",
+      "samples": 6
+     },
+     {
+      "frame": "_voucher_create_with_mach_voucher",
+      "samples": 1
+     },
+     {
+      "frame": "_dispatch_queue_wakeup",
+      "samples": 1
+     },
+     {
+      "frame": "pthread_mutex_lock",
+      "samples": 1
+     },
+     {
+      "frame": "_dispatch_mach_invoke",
+      "samples": 1
+     }
+    ],
+    "top_of_stack_section": [
+     {
+      "frame": "__psynch_cvwait",
+      "count": 808787
+     },
+     {
+      "frame": "__workq_kernreturn",
+      "count": 34901
+     },
+     {
+      "frame": "__semwait_signal",
+      "count": 16940
+     },
+     {
+      "frame": "read",
+      "count": 15370
+     },
+     {
+      "frame": "std::__function::__func<mlx::core::Fence::wait(mlx::core::Stream, mlx::core::array const&)::$_1, void ()>::operator()()",
+      "count": 980
+     },
+     {
+      "frame": "start_wqthread",
+      "count": 730
+     },
+     {
+      "frame": "pread",
+      "count": 556
+     },
+     {
+      "frame": "mach_absolute_time",
+      "count": 416
+     },
+     {
+      "frame": "iokit_user_client_trap",
+      "count": 193
+     },
+     {
+      "frame": "mach_msg2_trap",
+      "count": 106
+     },
+     {
+      "frame": "_xzm_free_tc",
+      "count": 97
+     },
+     {
+      "frame": "__psynch_mutexwait",
+      "count": 89
+     },
+     {
+      "frame": "jaccl::MeshImpl::reliable_all_reduce_v2<jaccl::bfloat16_t, jaccl::SumOp<jaccl::bfloat16_t>>(unsigned int, jaccl::bfloat16_t const*, jaccl::bfloat16_t*, long long, jaccl::SumOp<jaccl::bfloat16_t>)",
+      "count": 87
+     },
+     {
+      "frame": "objc_msgSend",
+      "count": 80
+     },
+     {
+      "frame": "_xzm_malloc_tc",
+      "count": 78
+     },
+     {
+      "frame": "mlx::core::eval_impl(std::vector<mlx::core::array>, bool)",
+      "count": 65
+     },
+     {
+      "frame": "_platform_memmove",
+      "count": 56
+     },
+     {
+      "frame": "_PyEval_EvalFrameDefault",
+      "count": 53
+     },
+     {
+      "frame": "gc_collect_main.llvm.2066754034620847737",
+      "count": 49
+     },
+     {
+      "frame": "objc_msgSend",
+      "count": 48
+     },
+     {
+      "frame": "<deduplicated_symbol>",
+      "count": 40
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::performEnqueueKernel(eAGXDataBufferPools, unsigned long long, unsigned int, unsigned long long*)",
+      "count": 39
+     },
+     {
+      "frame": "deduce_unreachable",
+      "count": 38
+     },
+     {
+      "frame": "__xzm_xzone_free_to_freelist_chunk",
+      "count": 30
+     },
+     {
+      "frame": "_free",
+      "count": 30
+     },
+     {
+      "frame": "_xzm_xzone_malloc_tiny",
+      "count": 30
+     },
+     {
+      "frame": "__recvfrom",
+      "count": 28
+     },
+     {
+      "frame": "malloc_type_malloc",
+      "count": 27
+     },
+     {
+      "frame": "tbt_poll_cq",
+      "count": 27
+     },
+     {
+      "frame": "mlx::core::detail::compile_replace(std::vector<mlx::core::array> const&, std::vector<mlx::core::array> const&, std::vector<mlx::core::array> const&, std::vector<mlx::core::array> const&, bool)",
+      "count": 26
+     },
+     {
+      "frame": "std::__split_buffer<mlx::core::array>::__destruct_at_end[abi:nqe220106](mlx::core::array*)",
+      "count": 24
+     },
+     {
+      "frame": "tbt_poll_qp_send",
+      "count": 24
+     },
+     {
+      "frame": "visit_decref",
+      "count": 23
+     },
+     {
+      "frame": "mlx::core::BufferCache<MTL::Buffer>::reuse_from_cache(unsigned long)",
+      "count": 22
+     },
+     {
+      "frame": "tbt_poll_qp_recv",
+      "count": 21
+     },
+     {
+      "frame": "IOGPUResourceListAddResource",
+      "count": 20
+     },
+     {
+      "frame": "std::__hash_table<void const*>::__emplace_unique[abi:nqe220106]<void const*>(void const*&&)::'lambda'(void const* const&, void const*&&)::operator()(void const* const&, void const*&&) const",
+      "count": 20
+     },
+     {
+      "frame": "_platform_memset",
+      "count": 19
+     },
+     {
+      "frame": "std::__function::__func<mlx::core::gpu::eval(mlx::core::array&)::$_1, void (MTL::CommandBuffer*)>::~__func()",
+      "count": 19
+     },
+     {
+      "frame": "_kernelrpc_mach_port_mod_refs_trap",
+      "count": 18
+     },
+     {
+      "frame": "-[IOGPUMetalResource virtualAddress]",
+      "count": 17
+     },
+     {
+      "frame": "AGX::ComputeCoalescingResourceTracker<AGX::HAL200::Encoders, AGX::HAL200::Classes>::addResource(unsigned int, unsigned int)",
+      "count": 17
+     },
+     {
+      "frame": "mlx::core::array::release(std::shared_ptr<mlx::core::array::ArrayDesc>)",
+      "count": 17
+     },
+     {
+      "frame": "std::__hash_table<MTL::Resource*>::__emplace_unique[abi:nqe220106]<MTL::Resource* const&>(MTL::Resource* const&)::'lambda'(MTL::Resource* const&, MTL::Resource* const&)::operator()(MTL::Resource* const&, MTL::Resource* const&) const",
+      "count": 17
+     },
+     {
+      "frame": "dict_traverse",
+      "count": 16
+     },
+     {
+      "frame": "kevent_id",
+      "count": 16
+     },
+     {
+      "frame": "_tlv_get_addr",
+      "count": 15
+     },
+     {
+      "frame": "std::__murmur2_or_cityhash<unsigned long, 64ul>::operator()[abi:nqe220106](void const*, unsigned long) const",
+      "count": 15
+     },
+     {
+      "frame": "_dispatch_root_queue_drain_deferred_wlh.cold.5",
+      "count": 14
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<std::basic_string<char>, NS::SharedPtr<MTL::ComputePipelineState>>>::find<std::basic_string<char>>(std::basic_string<char> const&)",
+      "count": 13
+     },
+     {
+      "frame": "AGX::PassiveResourceGroupUsage<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses>::bindPassiveResource(_PassiveResourceInfo const&)",
+      "count": 12
+     },
+     {
+      "frame": "__psynch_cvsignal",
+      "count": 12
+     },
+     {
+      "frame": "_platform_memcmp",
+      "count": 12
+     },
+     {
+      "frame": "func_traverse",
+      "count": 12
+     },
+     {
+      "frame": "AGX::SpillInfoGen3<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses>::checkSpillParamsForCompute(unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned long long)",
+      "count": 11
+     },
+     {
+      "frame": "ioGPUResourceListAddHashValue",
+      "count": 11
+     },
+     {
+      "frame": "mlx::core::array::ArrayDesc::ArrayDesc(mlx::core::SmallVector<int, 10ul>, mlx::core::Dtype, std::shared_ptr<mlx::core::Primitive>, std::vector<mlx::core::array>)",
+      "count": 11
+     },
+     {
+      "frame": "visit_reachable",
+      "count": 11
+     },
+     {
+      "frame": "+[NSAutoreleasePool allocWithZone:]",
+      "count": 10
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::allocateDataBuffer(unsigned long long&, unsigned long, bool)",
+      "count": 10
+     },
+     {
+      "frame": "mlx::core::metal::Device::get_library(std::basic_string<char> const&, mlx::core::CompileOptions const&, std::function<std::basic_string<char> ()> const&)",
+      "count": 10
+     },
+     {
+      "frame": "std::__tree_balance_after_insert[abi:nqe220106]<std::__tree_node_base<void*>*>(std::__tree_node_base<void*>*, std::__tree_node_base<void*>*)",
+      "count": 10
+     },
+     {
+      "frame": "__bzero",
+      "count": 9
+     },
+     {
+      "frame": "mlx::core::BufferCache<MTL::Buffer>::recycle_to_cache(MTL::Buffer*)",
+      "count": 9
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<unsigned long, mlx::core::array>>::__emplace_unique[abi:nqe220106]<std::pair<unsigned long const, mlx::core::array>>(std::pair<unsigned long const, mlx::core::array>&&)::'lambda'(unsigned long const&, std::pair<unsigned long const, mlx::core::array>&&)::operator()(unsigned long const&, std::pair<unsigned long const, mlx::core::array>&&) const",
+      "count": 9
+     },
+     {
+      "frame": "???",
+      "count": 8
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::setBuffer_impl<AGXBuffer>(AGXBuffer const*, unsigned long, unsigned int, unsigned long)",
+      "count": 8
+     },
+     {
+      "frame": "_Block_copy",
+      "count": 8
+     },
+     {
+      "frame": "_PyObject_GenericGetAttrWithDict",
+      "count": 8
+     },
+     {
+      "frame": "__psynch_mutexdrop",
+      "count": 8
+     },
+     {
+      "frame": "mlx::core::gpu::eval(mlx::core::array&)",
+      "count": 8
+     },
+     {
+      "frame": "-[IOSurfaceSharedEvent signaledValue]",
+      "count": 7
+     },
+     {
+      "frame": "_Block_release",
+      "count": 7
+     },
+     {
+      "frame": "_PyObject_Malloc",
+      "count": 7
+     },
+     {
+      "frame": "pthread_mutex_lock",
+      "count": 7
+     },
+     {
+      "frame": "std::__hash_table<std::shared_ptr<mlx::core::array::Data>>::__emplace_unique[abi:nqe220106]<std::shared_ptr<mlx::core::array::Data> const&>(std::shared_ptr<mlx::core::array::Data> const&)::'lambda'(std::shared_ptr<mlx::core::array::Data> const&, std::shared_ptr<mlx::core::array::Data> const&)::operator()(std::shared_ptr<mlx::core::array::Data> const&, std::shared_ptr<mlx::core::array::Data> const&) const",
+      "count": 7
+     },
+     {
+      "frame": "-[AGXG16XFamilyComputeContext setBytes:length:atIndex:]",
+      "count": 6
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::bindBufferResourceToCommand(unsigned int, bool)",
+      "count": 6
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::prepareForEnqueue(bool)",
+      "count": 6
+     },
+     {
+      "frame": "AutoreleasePoolPage::releaseUntil(objc_object**)",
+      "count": 6
+     },
+     {
+      "frame": "DYLD-STUB$$operator delete(void*)",
+      "count": 6
+     },
+     {
+      "frame": "PyDict_GetItemRef",
+      "count": 6
+     },
+     {
+      "frame": "PyObject_GenericGetAttr",
+      "count": 6
+     },
+     {
+      "frame": "_PyDict_GetItemRef_KnownHash",
+      "count": 6
+     },
+     {
+      "frame": "_object_remove_associations",
+      "count": 6
+     },
+     {
+      "frame": "_platform_strlen",
+      "count": 6
+     },
+     {
+      "frame": "mlx::core::eval_impl(std::vector<mlx::core::array>, bool)::$_0::operator()(mlx::core::array const&) const",
+      "count": 6
+     },
+     {
+      "frame": "os_unfair_lock_unlock",
+      "count": 6
+     },
+     {
+      "frame": "pthread_mutex_unlock",
+      "count": 6
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<unsigned long, int>>::__emplace_unique[abi:nqe220106]<std::pair<unsigned long const, int>>(std::pair<unsigned long const, int>&&)::'lambda'(unsigned long const&, std::pair<unsigned long const, int>&&)::operator()(unsigned long const&, std::pair<unsigned long const, int>&&) const",
+      "count": 6
+     },
+     {
+      "frame": "std::__shared_ptr_emplace<mlx::core::array::Data>::__shared_ptr_emplace[abi:nqe220106]<mlx::core::allocator::Buffer&, std::function<void (mlx::core::allocator::Buffer)>&, 0>(std::allocator<mlx::core::array::Data>, mlx::core::allocator::Buffer&, std::function<void (mlx::core::allocator::Buffer)>&)",
+      "count": 6
+     },
+     {
+      "frame": "std::__tree_remove[abi:nqe220106]<std::__tree_node_base<void*>*>(std::__tree_node_base<void*>*, std::__tree_node_base<void*>*)",
+      "count": 6
+     },
+     {
+      "frame": "std::construct_at[abi:nqe220106]<mlx::core::array::ArrayDesc, mlx::core::SmallVector<int, 10ul>, mlx::core::Dtype&, std::shared_ptr<mlx::core::Primitive>, std::vector<mlx::core::array>, mlx::core::array::ArrayDesc*>(mlx::core::array::ArrayDesc*, mlx::core::SmallVector<int, 10ul>&&, mlx::core::Dtype&, std::shared_ptr<mlx::core::Primitive>&&, std::vector<mlx::core::array>&&)",
+      "count": 6
+     },
+     {
+      "frame": "???",
+      "count": 5
+     },
+     {
+      "frame": "AGX::ComputePipeline<AGX::HAL200::ObjClasses, AGX::HAL200::Classes, AGX::HAL200::Encoders>::bindResources(MTLResourceList*, IOGPUResourceList*)",
+      "count": 5
+     },
+     {
+      "frame": "DYLD-STUB$$_Block_object_dispose",
+      "count": 5
+     },
+     {
+      "frame": "dict_get",
+      "count": 5
+     },
+     {
+      "frame": "jaccl::native_bf16_sum(void const*, void*, unsigned long)",
+      "count": 5
+     },
+     {
+      "frame": "mlx::core::array::array(mlx::core::SmallVector<int, 10ul>, mlx::core::Dtype, std::shared_ptr<mlx::core::Primitive>, std::vector<mlx::core::array>)",
+      "count": 5
+     },
+     {
+      "frame": "mlx::core::array::set_data(mlx::core::allocator::Buffer, std::function<void (mlx::core::allocator::Buffer)>)",
+      "count": 5
+     },
+     {
+      "frame": "mlx::core::metal::Device::get_kernel(std::basic_string<char> const&, MTL::Library*, std::basic_string<char> const&, std::vector<std::tuple<void const*, MTL::DataType, unsigned long>> const&, std::vector<MTL::Function*> const&)",
+      "count": 5
+     },
+     {
+      "frame": "mlx::core::slice(mlx::core::array const&, mlx::core::array&, mlx::core::SmallVector<int, 10ul> const&, mlx::core::SmallVector<int, 10ul> const&)",
+      "count": 5
+     },
+     {
+      "frame": "operator new(unsigned long)",
+      "count": 5
+     },
+     {
+      "frame": "os_unfair_lock_lock",
+      "count": 5
+     },
+     {
+      "frame": "subtype_traverse",
+      "count": 5
+     }
+    ]
+   }
+  },
+  "m4-2": {
+   "powermetrics": {
+    "n_blocks": 40,
+    "total_elapsed_ms": 20378.33,
+    "mean_hw_active_residency_pct": 99.99825476866847,
+    "first_block_hw_active_residency_pct": 100.0,
+    "mean_hw_active_freq_mhz": 1577.9999999999998,
+    "hw_active_freq_mhz_by_block": [
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578,
+     1578
+    ],
+    "hw_bin_distribution": [
+     {
+      "freq_mhz": 338,
+      "pct": 0.000997275046581344
+     },
+     {
+      "freq_mhz": 618,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 796,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 924,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 952,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1056,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1062,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1182,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1182,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1312,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1242,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1380,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1326,
+      "pct": 0.0
+     },
+     {
+      "freq_mhz": 1470,
+      "pct": 0.0022523386361885393
+     },
+     {
+      "freq_mhz": 1578,
+      "pct": 99.99999999999999
+     }
+    ],
+    "sw_requested_distribution": [
+     {
+      "state": "P1",
+      "pct": 0.0
+     },
+     {
+      "state": "P2",
+      "pct": 0.0
+     },
+     {
+      "state": "P3",
+      "pct": 0.0
+     },
+     {
+      "state": "P4",
+      "pct": 0.0
+     },
+     {
+      "state": "P5",
+      "pct": 0.0
+     },
+     {
+      "state": "P6",
+      "pct": 0.0
+     },
+     {
+      "state": "P7",
+      "pct": 0.0
+     },
+     {
+      "state": "P8",
+      "pct": 0.0
+     },
+     {
+      "state": "P9",
+      "pct": 57.99986505273002
+     },
+     {
+      "state": "P10",
+      "pct": 42.00013494726996
+     },
+     {
+      "state": "P11",
+      "pct": 0.0
+     },
+     {
+      "state": "P12",
+      "pct": 0.0
+     },
+     {
+      "state": "P13",
+      "pct": 0.0
+     },
+     {
+      "state": "P14",
+      "pct": 0.0
+     },
+     {
+      "state": "P15",
+      "pct": 0.0
+     }
+    ],
+    "sw_state_distribution": [
+     {
+      "state": "SW_P1",
+      "pct": 0.000997275046581344
+     },
+     {
+      "state": "SW_P2",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P3",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P4",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P5",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P6",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P7",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P8",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P9",
+      "pct": 0.0022523386361885393
+     },
+     {
+      "state": "SW_P10",
+      "pct": 99.99999999999999
+     },
+     {
+      "state": "SW_P11",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P12",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P13",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P14",
+      "pct": 0.0
+     },
+     {
+      "state": "SW_P15",
+      "pct": 0.0
+     }
+    ],
+    "mean_idle_residency_pct": 0.0017452313315173518,
+    "mean_power_mw": 24927.601551746386,
+    "per_block_residency_pct": [
+     100.0,
+     100.0,
+     99.93,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0,
+     100.0
+    ]
+   },
+   "sample": {
+    "n_threads": 59,
+    "total_samples": 866312,
+    "all_threads_pct": {
+     "python_busy": 59.45,
+     "gpu_wait": 5.28,
+     "other": 35.27,
+     "comm": 0.0
+    },
+    "all_threads_counts": {
+     "python_busy": 515018,
+     "gpu_wait": 45720,
+     "other": 305562,
+     "comm": 12
+    },
+    "main_thread_id": 27873,
+    "main_thread_pct": {
+     "python_busy": 99.98,
+     "gpu_wait": 0.01,
+     "other": 0.01
+    },
+    "threads": [
+     {
+      "thread_id": 27873,
+      "header": "Thread_27873   DispatchQueue_1: com.apple.main-thread  (serial)",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15164,
+       "gpu_wait": 2,
+       "other": 1
+      },
+      "top_frames": [
+       {
+        "frame": "method_vectorcall_VARARGS_KEYWORDS.llvm.8371976158726395142",
+        "samples": 11862
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 3062
+       },
+       {
+        "frame": "gc_collect_main.llvm.17472156640773223667",
+        "samples": 189
+       },
+       {
+        "frame": "gc_collect_main.llvm.17472156640773223667 + 1588,672,...  [0x10192072c,0x101920398,...]",
+        "samples": 44
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault + 23520,160608,...  [0x101985558,0x1019a6cd8,...]",
+        "samples": 6
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.98,
+       "gpu_wait": 0.01,
+       "other": 0.01
+      },
+      "is_main": true
+     },
+     {
+      "thread_id": 27881,
+      "header": "Thread_27881",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15165,
+       "python_busy": 2
+      },
+      "top_frames": [
+       {
+        "frame": "__semwait_signal",
+        "samples": 15165
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "other": 99.99,
+       "python_busy": 0.01
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 27882,
+      "header": "Thread_27882",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "method_vectorcall_VARARGS_KEYWORDS.llvm.8371976158726395142",
+        "samples": 15163
+       },
+       {
+        "frame": "dump",
+        "samples": 2
+       },
+       {
+        "frame": "_PyObject_Realloc",
+        "samples": 1
+       },
+       {
+        "frame": "take_gil.llvm.8914855522214485887",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 27883,
+      "header": "Thread_27883",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "read",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 28651,
+      "header": "Thread_28651",
+      "total_samples": 15167,
+      "categories": {
+       "gpu_wait": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 13580
+       },
+       {
+        "frame": "std::__function::__func<mlx::core::scheduler::Scheduler::enqueue(mlx::core::Stream, std::function<void ()>)::$_0, void ()>::operator()()",
+        "samples": 1556
+       },
+       {
+        "frame": "iokit_user_client_trap",
+        "samples": 13
+       },
+       {
+        "frame": "std::__function::__func<mlx::core::scheduler::Scheduler::signal_event(mlx::core::Stream, mlx::core::Event, std::function<void (mlx::core::Event&)>)::$_0, void ()>::~__func()",
+        "samples": 13
+       },
+       {
+        "frame": "_xzm_free_tc",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "gpu_wait": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29903,
+      "header": "Thread_29903",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15151,
+       "other": 16
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15056
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 63
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 16
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 10
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.89,
+       "other": 0.11
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29904,
+      "header": "Thread_29904",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15146,
+       "other": 21
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15050
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 67
+       },
+       {
+        "frame": "pread",
+        "samples": 28
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 20
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29905,
+      "header": "Thread_29905",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15050
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 70
+       },
+       {
+        "frame": "pread",
+        "samples": 24
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29906,
+      "header": "Thread_29906",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15147,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15051
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 86
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 9
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29907,
+      "header": "Thread_29907",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15148,
+       "other": 19
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15055
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 92
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 19
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29908,
+      "header": "Thread_29908",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15145,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15051
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 73
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 22
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29909,
+      "header": "Thread_29909",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15149,
+       "other": 18
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15054
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 55
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 22
+       },
+       {
+        "frame": "pread",
+        "samples": 18
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 17
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.88,
+       "other": 0.12
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29910,
+      "header": "Thread_29910",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15140,
+       "other": 27
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15048
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 91
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 25
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.82,
+       "other": 0.18
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29911,
+      "header": "Thread_29911",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15145,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15053
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 83
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 21
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 5
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29912,
+      "header": "Thread_29912",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15055
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 87
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29913,
+      "header": "Thread_29913",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15148,
+       "other": 19
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15056
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 68
+       },
+       {
+        "frame": "pread",
+        "samples": 22
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 18
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29914,
+      "header": "Thread_29914",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15146,
+       "other": 21
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15061
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 65
+       },
+       {
+        "frame": "pread",
+        "samples": 19
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 18
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.86,
+       "other": 0.14
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29915,
+      "header": "Thread_29915",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15143,
+       "other": 24
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15054
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 88
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 24
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29916,
+      "header": "Thread_29916",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15059
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 83
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 20
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 2
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29917,
+      "header": "Thread_29917",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15140,
+       "other": 27
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15057
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 80
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 27
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 2
+       },
+       {
+        "frame": "_platform_strchr",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.82,
+       "other": 0.18
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29918,
+      "header": "Thread_29918",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15049
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 84
+       },
+       {
+        "frame": "take_gil.llvm.8914855522214485887",
+        "samples": 21
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 8
+       },
+       {
+        "frame": "deduce_unreachable",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29919,
+      "header": "Thread_29919",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15141,
+       "other": 26
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15049
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 58
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 25
+       },
+       {
+        "frame": "pread",
+        "samples": 23
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 8
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.83,
+       "other": 0.17
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29920,
+      "header": "Thread_29920",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15143,
+       "other": 24
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15055
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 62
+       },
+       {
+        "frame": "pread",
+        "samples": 25
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 23
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29921,
+      "header": "Thread_29921",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15049
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 86
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 7
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29922,
+      "header": "Thread_29922",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15056
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 86
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 21
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 3
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29923,
+      "header": "Thread_29923",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15147,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15053
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 61
+       },
+       {
+        "frame": "pread",
+        "samples": 25
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 7
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29924,
+      "header": "Thread_29924",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15147,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15051
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 83
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 19
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 12
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29925,
+      "header": "Thread_29925",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15145,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15051
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 87
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 21
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 5
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29926,
+      "header": "Thread_29926",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15054
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 65
+       },
+       {
+        "frame": "pread",
+        "samples": 24
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 23
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29927,
+      "header": "Thread_29927",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15145,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15061
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 81
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 18
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 3
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29928,
+      "header": "Thread_29928",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15147,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15056
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 89
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29929,
+      "header": "Thread_29929",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15145,
+       "other": 22
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15053
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 58
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 21
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 13
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29930,
+      "header": "Thread_29930",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15147,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15054
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 53
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 20
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 18
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29931,
+      "header": "Thread_29931",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15166,
+       "other": 1
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15071
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 57
+       },
+       {
+        "frame": "pread",
+        "samples": 26
+       },
+       {
+        "frame": "_PyEval_EvalFrameDefault",
+        "samples": 10
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.99,
+       "other": 0.01
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29932,
+      "header": "Thread_29932",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15142,
+       "other": 25
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15054
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 64
+       },
+       {
+        "frame": "pread",
+        "samples": 23
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.84,
+       "other": 0.16
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29933,
+      "header": "Thread_29933",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15147,
+       "other": 20
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15058
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 86
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 17
+       },
+       {
+        "frame": "__psynch_cvsignal",
+        "samples": 2
+       },
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 2
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.87,
+       "other": 0.13
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 29934,
+      "header": "Thread_29934",
+      "total_samples": 15167,
+      "categories": {
+       "python_busy": 15144,
+       "other": 23
+      },
+      "top_frames": [
+       {
+        "frame": "_PySemaphore_Wait",
+        "samples": 15053
+       },
+       {
+        "frame": "os_pread_impl",
+        "samples": 69
+       },
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 22
+       },
+       {
+        "frame": "pread",
+        "samples": 21
+       },
+       {
+        "frame": "__psynch_mutexwait",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "python_busy": 99.85,
+       "other": 0.15
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30820,
+      "header": "Thread_30820",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30821,
+      "header": "Thread_30821",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30822,
+      "header": "Thread_30822",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30823,
+      "header": "Thread_30823",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30824,
+      "header": "Thread_30824",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30825,
+      "header": "Thread_30825",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30826,
+      "header": "Thread_30826",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30827,
+      "header": "Thread_30827",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30828,
+      "header": "Thread_30828",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30829,
+      "header": "Thread_30829",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30830,
+      "header": "Thread_30830",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30831,
+      "header": "Thread_30831",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30832,
+      "header": "Thread_30832",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30833,
+      "header": "Thread_30833",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30834,
+      "header": "Thread_30834",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30835,
+      "header": "Thread_30835",
+      "total_samples": 15167,
+      "categories": {
+       "other": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 30836,
+      "header": "Thread_30836",
+      "total_samples": 15167,
+      "categories": {
+       "gpu_wait": 15155,
+       "comm": 12
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_cond_wait",
+        "samples": 15155
+       },
+       {
+        "frame": "jaccl::SideChannel::all_gather<std::vector<char>>(std::vector<char> const&)",
+        "samples": 6
+       },
+       {
+        "frame": "__recvfrom",
+        "samples": 6
+       }
+      ],
+      "categories_pct": {
+       "gpu_wait": 99.92,
+       "comm": 0.08
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 48238,
+      "header": "Thread_48238",
+      "total_samples": 15167,
+      "categories": {
+       "gpu_wait": 15167
+      },
+      "top_frames": [
+       {
+        "frame": "__psynch_cvwait",
+        "samples": 15167
+       }
+      ],
+      "categories_pct": {
+       "gpu_wait": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 402204,
+      "header": "Thread_402204   DispatchQueue_78: com.Metal.CompletionQueueDispatch  (serial)",
+      "total_samples": 1,
+      "categories": {
+       "other": 14901
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_wqthread",
+        "samples": 14539
+       },
+       {
+        "frame": "start_wqthread",
+        "samples": 360
+       },
+       {
+        "frame": "???",
+        "samples": 1
+       },
+       {
+        "frame": "_dispatch_lane_invoke",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 402935,
+      "header": "Thread_402935",
+      "total_samples": 13750,
+      "categories": {
+       "other": 13750
+      },
+      "top_frames": [
+       {
+        "frame": "__workq_kernreturn",
+        "samples": 13750
+       }
+      ],
+      "categories_pct": {
+       "other": 100.0
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": 364699,
+      "header": "Thread_364699   DispatchQueue_81: IOGPUNotificationQueueDispatchMach  (serial)",
+      "total_samples": 1,
+      "categories": {
+       "other": 2971,
+       "gpu_wait": 1
+      },
+      "top_frames": [
+       {
+        "frame": "_pthread_wqthread",
+        "samples": 2554
+       },
+       {
+        "frame": "start_wqthread",
+        "samples": 413
+       },
+       {
+        "frame": "_dispatch_event_loop_merge",
+        "samples": 4
+       },
+       {
+        "frame": "_dispatch_lane_serial_drain",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 99.97,
+       "gpu_wait": 0.03
+      },
+      "is_main": false
+     },
+     {
+      "thread_id": null,
+      "header": "Thread_<multiple>   DispatchQueue_80: com.Metal.CompletionQueueDispatch  (serial)",
+      "total_samples": 228,
+      "categories": {
+       "other": 276,
+       "gpu_wait": 228
+      },
+      "top_frames": [
+       {
+        "frame": "-[_MTLCommandQueue _submitAvailableCommandBuffers]",
+        "samples": 272
+       },
+       {
+        "frame": "IOGPUNotificationQueueDispatchAvailableCompletionNotifications",
+        "samples": 227
+       },
+       {
+        "frame": "???",
+        "samples": 2
+       },
+       {
+        "frame": "_dispatch_lane_serial_drain",
+        "samples": 2
+       },
+       {
+        "frame": "__xzm_xzone_free_to_freelist_chunk",
+        "samples": 1
+       }
+      ],
+      "categories_pct": {
+       "other": 54.76,
+       "gpu_wait": 45.24
+      },
+      "is_main": false
+     }
+    ],
+    "unclassified_top_frames": [
+     {
+      "frame": "__psynch_cvwait",
+      "samples": 242898
+     },
+     {
+      "frame": "_pthread_wqthread",
+      "samples": 17093
+     },
+     {
+      "frame": "read",
+      "samples": 15167
+     },
+     {
+      "frame": "__semwait_signal",
+      "samples": 15165
+     },
+     {
+      "frame": "__workq_kernreturn",
+      "samples": 13750
+     },
+     {
+      "frame": "start_wqthread",
+      "samples": 773
+     },
+     {
+      "frame": "_pthread_cond_wait",
+      "samples": 414
+     },
+     {
+      "frame": "-[_MTLCommandQueue _submitAvailableCommandBuffers]",
+      "samples": 272
+     },
+     {
+      "frame": "__psynch_mutexwait",
+      "samples": 20
+     },
+     {
+      "frame": "_dispatch_event_loop_merge",
+      "samples": 4
+     },
+     {
+      "frame": "???",
+      "samples": 3
+     },
+     {
+      "frame": "_dispatch_lane_serial_drain",
+      "samples": 2
+     },
+     {
+      "frame": "_dispatch_lane_invoke",
+      "samples": 1
+     }
+    ],
+    "top_of_stack_section": [
+     {
+      "frame": "__psynch_cvwait",
+      "count": 798082
+     },
+     {
+      "frame": "__workq_kernreturn",
+      "count": 30840
+     },
+     {
+      "frame": "__semwait_signal",
+      "count": 16583
+     },
+     {
+      "frame": "read",
+      "count": 15167
+     },
+     {
+      "frame": "std::__function::__func<mlx::core::Fence::wait(mlx::core::Stream, mlx::core::array const&)::$_1, void ()>::operator()()",
+      "count": 994
+     },
+     {
+      "frame": "start_wqthread",
+      "count": 773
+     },
+     {
+      "frame": "pread",
+      "count": 718
+     },
+     {
+      "frame": "mach_absolute_time",
+      "count": 254
+     },
+     {
+      "frame": "iokit_user_client_trap",
+      "count": 244
+     },
+     {
+      "frame": "__psynch_mutexwait",
+      "count": 129
+     },
+     {
+      "frame": "mach_msg2_trap",
+      "count": 101
+     },
+     {
+      "frame": "_xzm_malloc_tc",
+      "count": 92
+     },
+     {
+      "frame": "_PyEval_EvalFrameDefault",
+      "count": 89
+     },
+     {
+      "frame": "_xzm_free_tc",
+      "count": 84
+     },
+     {
+      "frame": "objc_msgSend",
+      "count": 81
+     },
+     {
+      "frame": "jaccl::MeshImpl::reliable_all_reduce_v2<jaccl::bfloat16_t, jaccl::SumOp<jaccl::bfloat16_t>>(unsigned int, jaccl::bfloat16_t const*, jaccl::bfloat16_t*, long long, jaccl::SumOp<jaccl::bfloat16_t>)",
+      "count": 75
+     },
+     {
+      "frame": "_platform_memmove",
+      "count": 64
+     },
+     {
+      "frame": "mlx::core::eval_impl(std::vector<mlx::core::array>, bool)",
+      "count": 59
+     },
+     {
+      "frame": "objc_msgSend",
+      "count": 55
+     },
+     {
+      "frame": "visit_reachable",
+      "count": 53
+     },
+     {
+      "frame": "<deduplicated_symbol>",
+      "count": 45
+     },
+     {
+      "frame": "gc_collect_main.llvm.17472156640773223667",
+      "count": 44
+     },
+     {
+      "frame": "deduce_unreachable",
+      "count": 40
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::performEnqueueKernel(eAGXDataBufferPools, unsigned long long, unsigned int, unsigned long long*)",
+      "count": 36
+     },
+     {
+      "frame": "visit_decref",
+      "count": 34
+     },
+     {
+      "frame": "_xzm_xzone_malloc_tiny",
+      "count": 30
+     },
+     {
+      "frame": "__xzm_xzone_free_to_freelist_chunk",
+      "count": 29
+     },
+     {
+      "frame": "std::__function::__func<mlx::core::gpu::eval(mlx::core::array&)::$_1, void (MTL::CommandBuffer*)>::~__func()",
+      "count": 29
+     },
+     {
+      "frame": "std::__split_buffer<mlx::core::array>::__destruct_at_end[abi:nqe220106](mlx::core::array*)",
+      "count": 27
+     },
+     {
+      "frame": "mlx::core::BufferCache<MTL::Buffer>::reuse_from_cache(unsigned long)",
+      "count": 24
+     },
+     {
+      "frame": "std::__hash_table<void const*>::__emplace_unique[abi:nqe220106]<void const*>(void const*&&)::'lambda'(void const* const&, void const*&&)::operator()(void const* const&, void const*&&) const",
+      "count": 24
+     },
+     {
+      "frame": "mlx::core::array::release(std::shared_ptr<mlx::core::array::ArrayDesc>)",
+      "count": 23
+     },
+     {
+      "frame": "IOGPUResourceListAddResource",
+      "count": 22
+     },
+     {
+      "frame": "func_traverse",
+      "count": 22
+     },
+     {
+      "frame": "_platform_memset",
+      "count": 20
+     },
+     {
+      "frame": "malloc_type_malloc",
+      "count": 19
+     },
+     {
+      "frame": "tbt_poll_cq",
+      "count": 19
+     },
+     {
+      "frame": "-[IOGPUMetalResource virtualAddress]",
+      "count": 18
+     },
+     {
+      "frame": "__psynch_cvsignal",
+      "count": 18
+     },
+     {
+      "frame": "_free",
+      "count": 18
+     },
+     {
+      "frame": "_kernelrpc_mach_port_mod_refs_trap",
+      "count": 18
+     },
+     {
+      "frame": "kevent_id",
+      "count": 17
+     },
+     {
+      "frame": "tbt_poll_qp_send",
+      "count": 17
+     },
+     {
+      "frame": "__recvfrom",
+      "count": 16
+     },
+     {
+      "frame": "std::__hash_table<MTL::Resource*>::__emplace_unique[abi:nqe220106]<MTL::Resource* const&>(MTL::Resource* const&)::'lambda'(MTL::Resource* const&, MTL::Resource* const&)::operator()(MTL::Resource* const&, MTL::Resource* const&) const",
+      "count": 16
+     },
+     {
+      "frame": "mlx::core::detail::compile_replace(std::vector<mlx::core::array> const&, std::vector<mlx::core::array> const&, std::vector<mlx::core::array> const&, std::vector<mlx::core::array> const&, bool)",
+      "count": 14
+     },
+     {
+      "frame": "mlx::core::gpu::eval(mlx::core::array&)",
+      "count": 14
+     },
+     {
+      "frame": "mlx::core::metal::Device::get_kernel(std::basic_string<char> const&, MTL::Library*, std::basic_string<char> const&, std::vector<std::tuple<void const*, MTL::DataType, unsigned long>> const&, std::vector<MTL::Function*> const&)",
+      "count": 14
+     },
+     {
+      "frame": "AGX::SpillInfoGen3<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses>::checkSpillParamsForCompute(unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned long long)",
+      "count": 13
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::setBuffer_impl<AGXBuffer>(AGXBuffer const*, unsigned long, unsigned int, unsigned long)",
+      "count": 12
+     },
+     {
+      "frame": "_object_remove_associations",
+      "count": 11
+     },
+     {
+      "frame": "std::__hash_table<std::shared_ptr<mlx::core::array::Data>>::__emplace_unique[abi:nqe220106]<std::shared_ptr<mlx::core::array::Data> const&>(std::shared_ptr<mlx::core::array::Data> const&)::'lambda'(std::shared_ptr<mlx::core::array::Data> const&, std::shared_ptr<mlx::core::array::Data> const&)::operator()(std::shared_ptr<mlx::core::array::Data> const&, std::shared_ptr<mlx::core::array::Data> const&) const",
+      "count": 11
+     },
+     {
+      "frame": "subtype_traverse",
+      "count": 11
+     },
+     {
+      "frame": "tbt_poll_qp_recv",
+      "count": 11
+     },
+     {
+      "frame": "DYLD-STUB$$_Block_object_dispose",
+      "count": 10
+     },
+     {
+      "frame": "_tlv_get_addr",
+      "count": 10
+     },
+     {
+      "frame": "mlx::core::array::ArrayDesc::ArrayDesc(mlx::core::SmallVector<int, 10ul>, mlx::core::Dtype, std::shared_ptr<mlx::core::Primitive>, std::vector<mlx::core::array>)",
+      "count": 10
+     },
+     {
+      "frame": "mlx::core::collapse_contiguous_dims(mlx::core::SmallVector<int, 10ul> const&, std::vector<mlx::core::SmallVector<long long, 10ul>> const&, long long)",
+      "count": 10
+     },
+     {
+      "frame": "std::__murmur2_or_cityhash<unsigned long, 64ul>::operator()[abi:nqe220106](void const*, unsigned long) const",
+      "count": 10
+     },
+     {
+      "frame": "std::__tree_balance_after_insert[abi:nqe220106]<std::__tree_node_base<void*>*>(std::__tree_node_base<void*>*, std::__tree_node_base<void*>*)",
+      "count": 10
+     },
+     {
+      "frame": "_Block_copy",
+      "count": 9
+     },
+     {
+      "frame": "_PyObject_GenericGetAttrWithDict",
+      "count": 9
+     },
+     {
+      "frame": "_platform_strlen",
+      "count": 9
+     },
+     {
+      "frame": "mlx::core::BufferCache<MTL::Buffer>::recycle_to_cache(MTL::Buffer*)",
+      "count": 9
+     },
+     {
+      "frame": "operator new(unsigned long)",
+      "count": 9
+     },
+     {
+      "frame": "<deduplicated_symbol>",
+      "count": 8
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::allocateDataBuffer(unsigned long long&, unsigned long, bool)",
+      "count": 8
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::prepareForEnqueue(bool)",
+      "count": 8
+     },
+     {
+      "frame": "ioGPUResourceListAddHashValue",
+      "count": 8
+     },
+     {
+      "frame": "objc_autoreleasePoolPush",
+      "count": 8
+     },
+     {
+      "frame": "os_unfair_lock_lock",
+      "count": 8
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<unsigned int, _ResourceTrackerBinding>>::__emplace_unique[abi:nqn220106]<std::piecewise_construct_t const&, std::tuple<unsigned int const&>, std::tuple<>>(std::piecewise_construct_t const&, std::tuple<unsigned int const&>&&, std::tuple<>&&)::'lambda'(unsigned int const&, std::piecewise_construct_t const&, std::tuple<unsigned int const&>&&, std::tuple<>&&)::operator()(unsigned int const&, std::piecewise_construct_t const&, std::tuple<unsigned int const&>&&, std::tuple<>&&) const",
+      "count": 8
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<unsigned long, int>>::__emplace_unique[abi:nqe220106]<std::pair<unsigned long const, int>>(std::pair<unsigned long const, int>&&)::'lambda'(unsigned long const&, std::pair<unsigned long const, int>&&)::operator()(unsigned long const&, std::pair<unsigned long const, int>&&) const",
+      "count": 8
+     },
+     {
+      "frame": "AGX::ComputeCoalescingResourceTracker<AGX::HAL200::Encoders, AGX::HAL200::Classes>::addResource(unsigned int, unsigned int)",
+      "count": 7
+     },
+     {
+      "frame": "IOGPUMetalPooledResourceRelease",
+      "count": 7
+     },
+     {
+      "frame": "dict_traverse",
+      "count": 7
+     },
+     {
+      "frame": "mlx::core::copy_gpu_inplace(mlx::core::array const&, mlx::core::array&, mlx::core::SmallVector<int, 10ul> const&, mlx::core::SmallVector<long long, 10ul> const&, mlx::core::SmallVector<long long, 10ul> const&, long long, long long, mlx::core::CopyType, mlx::core::Stream const&, std::optional<mlx::core::array>, std::optional<mlx::core::array>)",
+      "count": 7
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<std::basic_string<char>, NS::SharedPtr<MTL::ComputePipelineState>>>::find<std::basic_string<char>>(std::basic_string<char> const&)",
+      "count": 7
+     },
+     {
+      "frame": "std::__hash_table<std::__hash_value_type<unsigned long, mlx::core::array>>::__emplace_unique[abi:nqe220106]<std::pair<unsigned long const, mlx::core::array>>(std::pair<unsigned long const, mlx::core::array>&&)::'lambda'(unsigned long const&, std::pair<unsigned long const, mlx::core::array>&&)::operator()(unsigned long const&, std::pair<unsigned long const, mlx::core::array>&&) const",
+      "count": 7
+     },
+     {
+      "frame": "std::vector<mlx::core::array>::__emplace_back_slow_path<mlx::core::array const&>(mlx::core::array const&)",
+      "count": 7
+     },
+     {
+      "frame": "-[AGXG16XFamilyComputeContext setBytes:length:atIndex:]",
+      "count": 6
+     },
+     {
+      "frame": "DYLD-STUB$$operator delete(void*)",
+      "count": 6
+     },
+     {
+      "frame": "PyObject_GenericGetAttr",
+      "count": 6
+     },
+     {
+      "frame": "mlx::core::array::ArrayDesc::init()",
+      "count": 6
+     },
+     {
+      "frame": "mlx::core::array::copy_shared_buffer(mlx::core::array const&, mlx::core::SmallVector<long long, 10ul> const&, mlx::core::array::Flags, unsigned long, long long)",
+      "count": 6
+     },
+     {
+      "frame": "mlx::core::metal::EventImpl::wait(unsigned long long)",
+      "count": 6
+     },
+     {
+      "frame": "pthread_mutex_lock",
+      "count": 6
+     },
+     {
+      "frame": "ring_get_completions_to_check",
+      "count": 6
+     },
+     {
+      "frame": "AGX::ComputeContext<AGX::HAL200::Encoders, AGX::HAL200::Classes, AGX::HAL200::ObjClasses, AGX::HAL200::CommandEncoding, AGX::HAL200::EncoderComputeServiceClasses>::bindBufferResourceToCommand(unsigned int, bool)",
+      "count": 5
+     },
+     {
+      "frame": "AGX::ESLInstructionEncoderGen3<AGX::HAL200::Encoders>::AGX3EncodedInstr<AGXIotoInstruction_SPECLM_0>::AGX3EncodedInstr(AGX::ESLInstructionEncoderGen3<AGX::HAL200::Encoders>::AGX3Instr<AGXIotoInstruction_SPECLM_0> const&)",
+      "count": 5
+     },
+     {
+      "frame": "DYLD-STUB$$objc_msgSend",
+      "count": 5
+     },
+     {
+      "frame": "_Block_object_dispose",
+      "count": 5
+     },
+     {
+      "frame": "__bzero",
+      "count": 5
+     },
+     {
+      "frame": "__psynch_mutexdrop",
+      "count": 5
+     },
+     {
+      "frame": "mlx::core::detail::CompileCache::find(unsigned long, std::vector<mlx::core::array> const&, bool, std::vector<unsigned long long> const&)",
+      "count": 5
+     },
+     {
+      "frame": "std::__shared_ptr_emplace<mlx::core::array::Data>::__shared_ptr_emplace[abi:nqe220106]<mlx::core::allocator::Buffer&, std::function<void (mlx::core::allocator::Buffer)>&, 0>(std::allocator<mlx::core::array::Data>, mlx::core::allocator::Buffer&, std::function<void (mlx::core::allocator::Buffer)>&)",
+      "count": 5
+     },
+     {
+      "frame": "tupledealloc",
+      "count": 5
+     },
+     {
+      "frame": "tupletraverse",
+      "count": 5
+     }
+    ]
+   }
+  }
+ }
+}
