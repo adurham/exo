@@ -28,6 +28,7 @@ Subcommands:
 
 Options: --api URL --reps N --chars-per-token X --out-dir DIR --dry-run
          --max-wall S --calibrate --base-salt HEX --log-source FILE(s)
+         --own-registry PATH (persistent own-request registry)
 """
 from __future__ import annotations
 
@@ -132,6 +133,42 @@ def resolve_guard():
         except Exception:
             pass
     return _StubGuardModule
+
+
+# ---------------------------------------------------------- own-request registry
+DEFAULT_REGISTRY_NAME = "own_requests.jsonl"
+
+
+def load_own_requests(path: str) -> list[float]:
+    """Read the guard's persistent own-request registry and return its ``t`` epochs.
+
+    The registry is the JSONL file ``ChunkGuard(registry_path=...)`` appends to:
+    one object per line, ``{"label": <str>, "t": <float epoch>}``.  A missing file
+    (first run) or a malformed/blank line is tolerated and skipped -- this reader
+    must never fail a chunk.  Registrations are made immediately BEFORE each POST,
+    so an epoch read back here can only correspond to a POST already on a node.
+    """
+    out: list[float] = []
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    t = obj["t"]
+                except (json.JSONDecodeError, TypeError, KeyError):
+                    continue
+                try:
+                    out.append(float(t))
+                except (TypeError, ValueError):
+                    continue
+    except OSError:
+        return out
+    return out
 
 
 # ------------------------------------------------------------------------- plan
@@ -253,6 +290,13 @@ def run_chunk(chunk: str, args) -> int:
     steps = _chunk_specs(chunk, args.reps, args.chars_per_token, args.base_salt,
                          getattr(args, "fresh_tokens", C.FRESH_REF_TOKENS))
 
+    # -- persistent own-request registry: an aborted/killed chunk's registrations
+    #    must not block a later chunk's ChunkGuard entry idle-check for min_idle_s.
+    #    Default lives beside the chunk JSONL + guard.json in <out>/raw/.
+    registry_path = (getattr(args, "own_registry", None)
+                     or os.path.join(raw_dir, DEFAULT_REGISTRY_NAME))
+    own_requests = load_own_requests(registry_path)
+
     # -- dry run: print plan + predicted walls, send nothing
     if args.dry_run:
         plan = plan_chunk(chunk, reps=args.reps, chars_per_token=args.chars_per_token,
@@ -296,7 +340,9 @@ def run_chunk(chunk: str, args) -> int:
     with open(out_path, "a") as out_fh:
         try:
             with guard_mod.ChunkGuard(chunk, max_wall_s=args.max_wall,
-                                      log_dir=raw_dir) as guard:
+                                      log_dir=raw_dir,
+                                      own_requests=own_requests,
+                                      registry_path=registry_path) as guard:
                 for st in steps:
                     guard.check()
                     rows = _step_rows(st)
@@ -557,6 +603,9 @@ def build_parser() -> argparse.ArgumentParser:
                     dest="fresh_tokens", help="fresh100k feed size (offline tests)")
     ap.add_argument("--log-source", action="append", default=None, dest="log_source",
                     help="node=path (repeat); the offline seam instead of ssh")
+    ap.add_argument("--own-registry", default=None, dest="own_registry",
+                    help="persistent own-request registry JSONL "
+                         "(default: <out-dir>/raw/" + DEFAULT_REGISTRY_NAME + ")")
     return ap
 
 

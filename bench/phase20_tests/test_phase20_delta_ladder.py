@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -555,6 +557,174 @@ def test_ladder_runs_against_real_guard_module_classes(tmp_path):
     finally:
         L.GUARD_OVERRIDE = None
     assert rc == 75          # real ChunkAborted caught -> exit 75
+
+
+# ============================================ persistent own-request registry (FIX 1)
+# An aborted/killed chunk's own POSTs must not block a LATER chunk's entry
+# idle-check for min_idle_s.  The fix: run_chunk loads a persistent registry
+# (default <out>/raw/own_requests.jsonl) of the guard's own registrations and
+# passes BOTH own_requests and registry_path into ChunkGuard.
+
+def test_load_own_requests_roundtrips_guard_registry(tmp_path):
+    """load_own_requests returns exactly the ``t`` epochs ChunkGuard.register
+    writes to registry_path (and tolerates a missing file / malformed lines)."""
+    g = _load_real_guard()
+    reg = str(tmp_path / "own_requests.jsonl")
+    guard = g.ChunkGuard("roundtrip", max_wall_s=60, registry_path=reg)
+    t1, t2 = 1791429502.812, 1791429610.031
+    guard.register_own_request(t1)
+    guard.register_own_request(t2)
+    # two JSONL objects, keys label + t (the guard's schema)
+    with open(reg) as fh:
+        lines = [json.loads(ln) for ln in fh if ln.strip()]
+    assert [ln["t"] for ln in lines] == [t1, t2]
+    assert all(ln["label"] == "roundtrip" for ln in lines)
+    # and the reader returns those epochs as floats
+    assert L.load_own_requests(reg) == [t1, t2]
+    assert all(isinstance(t, float) for t in L.load_own_requests(reg))
+    # missing file -> empty list (first run)
+    assert L.load_own_requests(str(tmp_path / "does_not_exist.jsonl")) == []
+    # malformed / blank / non-numeric lines are skipped, valid ones kept
+    bad = str(tmp_path / "bad.jsonl")
+    with open(bad, "w") as fh:
+        fh.write("\n")
+        fh.write("not json at all\n")
+        fh.write(json.dumps({"label": "x"}) + "\n")          # no "t"
+        fh.write(json.dumps({"label": "x", "t": "nope"}) + "\n")  # bad float
+        fh.write(json.dumps({"label": "x", "t": 123.5}) + "\n")
+    assert L.load_own_requests(bad) == [123.5]
+
+
+def _make_state_db(path):
+    """Minimal empty state.db so idle_check's state.db gate passes."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE api_calls (id INTEGER PRIMARY KEY, session_id TEXT,"
+        " call_seq INTEGER, provider TEXT, model TEXT, started_at REAL, ended_at REAL);"
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, model TEXT, last_activity_at REAL);"
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,"
+        " timestamp REAL);"
+    )
+    conn.commit()
+    conn.close()
+
+
+def _post_log_at(epoch):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch))
+    frac = f"{epoch % 1:.3f}"[1:]
+    return (f"[ {ts}{frac} | DEBUG    | exo.api.main:_log_requests:340 ] "
+            f"API request: POST /v1/chat/completions\n")
+
+
+def _patch_idle_seams(monkeypatch, g, log_text, db_uri):
+    monkeypatch.setattr(g, "measure_clock_offset", lambda node, **kw: 0.0)
+
+    def fake_ssh(node, cmd, *, timeout=25.0):
+        if "date" in cmd:
+            return 0, f"{g._now()}\n"
+        return 0, log_text + "\n" + g._SSH_OK_MARKER + "\n"
+
+    monkeypatch.setattr(g, "run_ssh", fake_ssh)
+    monkeypatch.setattr(g, "_fetch_json", lambda url, **kw: {"runners": {}})
+    monkeypatch.setattr(g, "STATE_DB_URI", db_uri)
+
+
+def test_registry_survives_restart_entry_idle_check_passes(tmp_path, monkeypatch):
+    """Two sequential chunk-like passes share one registry path.
+
+    Pass 1: a chunk registers a request (its POST is on the node log), then is
+    killed mid-run -- exactly the PM's aborted-pilot case.  Pass 2: a FRESH
+    ChunkGuard that LOADS the persisted registry must have its ENTRY idle_check
+    succeed (ok True) instead of refusing on the non-own POST; a genuinely
+    non-own POST (no matching registration) STILL refuses.
+    """
+    g = _load_real_guard()
+    reg = str(tmp_path / "own_requests.jsonl")
+    db = str(tmp_path / "state.db")
+    _make_state_db(db)
+    db_uri = f"file:{db}?mode=ro"
+
+    # a generation POST on the node 30 s ago -- recent enough to block for 600 s
+    t_post = time.time() - 30
+    log = _post_log_at(t_post)
+    ev_epoch = g.parse_log_lines(log)[0].epoch
+
+    # ---- PASS 1: register the request, then the chunk is killed (no __enter__)
+    guard1 = g.ChunkGuard("chunkA", max_wall_s=60, registry_path=reg)
+    guard1.register_own_request(ev_epoch)
+    assert os.path.exists(reg), "registry line must be persisted on register"
+
+    # ---- PASS 2: fresh guard LOADS the registry
+    loaded = L.load_own_requests(reg)
+    assert loaded == [ev_epoch]
+
+    _patch_idle_seams(monkeypatch, g, log, db_uri)
+
+    # entry idle_check with the loaded registry -> OK
+    rep = g.idle_check(loaded, min_idle_s=600)
+    assert rep.ok is True, f"entry idle_check refused despite loaded registry: {rep.reasons}"
+
+    # the ChunkGuard ENTRY itself (what run_chunk relies on) does not refuse
+    g2 = g.ChunkGuard("chunkB", max_wall_s=60, poll_s=60,
+                      own_requests=loaded, registry_path=reg, db_uri=db_uri)
+    g2.__enter__()                       # raises GuardFailure if entry refused
+    try:
+        assert g2.own_requests() == loaded
+    finally:
+        g2.__exit__(None, None, None)
+
+    # ---- CONTROL: an unregistered (non-own) POST still refuses
+    rep_ctrl = g.idle_check([], min_idle_s=600)
+    assert rep_ctrl.ok is False
+    assert any("non-own POST" in r for r in rep_ctrl.reasons), rep_ctrl.reasons
+
+    g3 = g.ChunkGuard("chunkC", max_wall_s=60, poll_s=60,
+                      own_requests=[ev_epoch - 3600.0],   # stale, non-matching
+                      registry_path=str(tmp_path / "r2.jsonl"), db_uri=db_uri)
+    with pytest.raises(g.GuardFailure):
+        g3.__enter__()
+
+
+def test_run_chunk_loads_and_persists_default_registry(tmp_path):
+    """run_chunk wires the default registry (<out>/raw/own_requests.jsonl) and
+    passes it into ChunkGuard as both own_requests and registry_path."""
+    log_path = str(tmp_path / "exo.log")
+    out_dir = str(tmp_path / "out")
+    seen = {}
+
+    class CaptureGuard(FakeGuard):
+        def __init__(self, label, *, max_wall_s=900.0, log_dir=None,
+                     own_requests=None, registry_path=None, **kw):
+            super().__init__(label, max_wall_s=max_wall_s, log_dir=log_dir)
+            seen["own_requests"] = own_requests
+            seen["registry_path"] = registry_path
+
+        def register_own_request(self, t_start=None):
+            t = t_start if t_start is not None else time.time()
+            super().register_own_request(t)
+            if seen.get("registry_path"):
+                with open(seen["registry_path"], "a") as fh:
+                    fh.write(json.dumps({"label": self.label, "t": t}) + "\n")
+
+    mod = L._StubGuardModule()
+
+    def make(label, **kw):
+        return CaptureGuard(label, **kw)
+
+    setattr(mod, "ChunkGuard", make)
+    L.GUARD_OVERRIDE = mod
+    try:
+        with M.MockExoServer(log_path, rows_per_s=200.0, sleep=False) as srv:
+            rc = L.main(["pilot", "--api", srv.base_url, "--out-dir", out_dir,
+                         "--log-source", f"studio1={log_path}"])
+    finally:
+        L.GUARD_OVERRIDE = None
+    assert rc == L.EXIT_OK
+    default_reg = os.path.join(out_dir, "raw", "own_requests.jsonl")
+    assert seen["registry_path"] == default_reg
+    assert seen["own_requests"] == []                 # first run: nothing persisted yet
+    assert os.path.exists(default_reg)               # 3 registrations were written
+    assert len(L.load_own_requests(default_reg)) == 3
 
 
 # ============================================================== sabotage proofs
