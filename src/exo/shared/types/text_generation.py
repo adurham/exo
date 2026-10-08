@@ -178,6 +178,11 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     use_prefix_cache: bool = False
     # Per-request dsv41 speculative draft length; None => engine default (3).
     spec_gamma: int | None = None
+    # Per-request dsv41 per-round instrumentation mode; None => engine default
+    # (read once at worker import from EXO_DSV41_ROUND_PROF, itself default 0).
+    # 0 = off, 1 = host-wallclock timer, 2 = eval-fenced timer; the timer lands
+    # in a later change, so every value is currently a documented no-op.
+    round_prof: int | None = None
     # Best-effort background request: its prefix-cache leaf is evicted before
     # interactive sessions when the cache is over its session cap. Set by the
     # chat-completions adapter from a non-default OpenAI ``service_tier``

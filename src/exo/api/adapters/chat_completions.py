@@ -221,6 +221,7 @@ async def chat_request_to_text_generation(
         ),
         correlation_id=request.correlation_id,
         spec_gamma=request.spec_gamma,
+        round_prof=request.round_prof,
     )
 
 

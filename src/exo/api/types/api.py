@@ -317,6 +317,15 @@ class ChatCompletionRequest(BaseModel):
     # relaunch. A supplied value is clamped into the engine's supported [1, 6]
     # by the validator below.
     spec_gamma: int | None = None
+    # Optional per-request DSv4.1 per-round instrumentation mode. Mirrors the
+    # ``spec_gamma`` style: absent / unset => the engine's own default (read
+    # once at worker import from ``EXO_DSV41_ROUND_PROF``, itself defaulting to
+    # 0), so one warm process can serve interleaved instrumentation arms without
+    # a relaunch. ``0`` = off (byte-identical to the un-instrumented path),
+    # ``1`` = host-wallclock timer, ``2`` = eval-fenced timer. A supplied value
+    # is clamped into ``[0, 2]`` by the validator below; the timer itself lands
+    # in a later change, so every value is currently a documented no-op.
+    round_prof: int | None = None
 
     @field_validator("reasoning_effort", mode="before")
     @classmethod
@@ -346,6 +355,22 @@ class ChatCompletionRequest(BaseModel):
         if isinstance(v, bool) or not isinstance(v, int):
             return None
         return max(1, min(6, v))
+
+    @field_validator("round_prof", mode="before")  # pyright: ignore[reportUntypedFunctionDecorator]
+    @classmethod
+    def clamp_round_prof(cls, v: object) -> int | None:
+        """Clamp a requested per-round instrumentation mode into [0, 2].
+
+        Absent / non-int values -- including a JSON ``true``, which is an
+        ``int`` subclass in Python -- resolve to ``None``, i.e. the engine
+        default (read once at worker import from ``EXO_DSV41_ROUND_PROF``), so a
+        malformed or misspelled value degrades to the pre-existing behavior
+        (off) instead of selecting an out-of-range arm or 422-ing the request.
+        ``0`` = off, ``1`` = host-wallclock timer, ``2`` = eval-fenced timer.
+        """
+        if isinstance(v, bool) or not isinstance(v, int):
+            return None
+        return max(0, min(2, v))
 
 
 class BenchChatCompletionRequest(ChatCompletionRequest):

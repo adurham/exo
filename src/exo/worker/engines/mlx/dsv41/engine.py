@@ -51,6 +51,7 @@ uses.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass, field
@@ -136,6 +137,31 @@ _WARMUP_PROMPT = "Reply with the single word: ready"
 #: toward the supervisor's 45 s window): it is measured and warned, never
 #: asserted (see the design doc's corrected invariant).
 FENCE_HEARTBEAT_MAX_SPACING_SECONDS = 30.0
+
+#: Default per-round instrumentation mode for a request that does not set the
+#: per-request ``round_prof`` field. Read ONCE at worker import from
+#: ``EXO_DSV41_ROUND_PROF`` so a relaunch-free campaign can still carry a
+#: different default: unset / empty / non-int => 0 (off), a well-formed value is
+#: clamped into [0, 2] (0 = off, 1 = host-wallclock timer, 2 = eval-fenced
+#: timer). The env var is only the DEFAULT -- the per-request field wins -- and
+#: task params are identical on both TP ranks, so a mode can never diverge
+#: across ranks (a mismatch in the number of ``mx.eval``s would deadlock the
+#: collectives).
+def _read_round_prof_default() -> int:
+    raw = os.environ.get("EXO_DSV41_ROUND_PROF")
+    if raw is None or raw.strip() == "":
+        return 0
+    try:
+        return max(0, min(2, int(raw)))
+    except ValueError:
+        logger.warning(  # pyright: ignore[reportUnknownMemberType]
+            f"[DSV41] ignoring non-integer EXO_DSV41_ROUND_PROF={raw!r} "
+            "(using 0 = off)"
+        )
+        return 0
+
+
+_ROUND_PROF_DEFAULT = _read_round_prof_default()
 
 #: Exhaustion marker for step()'s parser pull (the parser also yields None).
 _END = object()
@@ -803,6 +829,7 @@ class Dsv41Engine(Engine):
             for batch, lps in self._rounds(
                 session, anchor, max_tokens - 1, logprobs=lp_k,
                 spec_gamma=params.spec_gamma,
+                round_prof=params.round_prof,
             ):
                 produced.extend(batch)
                 for i, t in enumerate(batch):
@@ -989,6 +1016,7 @@ class Dsv41Engine(Engine):
         *,
         logprobs: int = 0,
         spec_gamma: int | None = None,
+        round_prof: int | None = None,
     ) -> Iterator[tuple[list[int], list[Any]]]:
         """Decode rounds from the anchor; yields each round's committed tokens
         and (when ``logprobs`` > 0) their log-prob entries.
@@ -999,9 +1027,18 @@ class Dsv41Engine(Engine):
 
         ``spec_gamma`` is the request's optional draft length; ``None`` => the
         engine default (``self.gamma``), byte-identical to the pre-existing path.
+
+        ``round_prof`` is the request's optional per-round instrumentation mode;
+        ``None`` => the engine default read once at import from
+        ``EXO_DSV41_ROUND_PROF`` (itself default 0). The mode is threaded to
+        ``_one_round`` but is a documented no-op there until the timer lands, so
+        every value is currently byte-identical.
         """
         head = self.loaded.head if self.speculative else None
         gamma_for_request = spec_gamma if spec_gamma is not None else self.gamma
+        round_prof_for_request = (
+            round_prof if round_prof is not None else _ROUND_PROF_DEFAULT
+        )
         policy = (
             _spec_policy(gamma_for_request)
             if (head is not None and self.adaptive_gamma)
@@ -1023,6 +1060,7 @@ class Dsv41Engine(Engine):
                 draft_state=session.draft_state,
                 logprobs=logprobs,
                 lp_out=lps if logprobs else None,
+                round_prof=round_prof_for_request,
             )
             # Cumulative spec counters (deltas across requests = live
             # acceptance rate; _accepted == _gamma means a fully-accepted round).

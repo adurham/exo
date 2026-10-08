@@ -2728,6 +2728,13 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_CHECKPOINT_SPACING_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_SPACING_ROWS=$EXO_DSV41_CHECKPOINT_SPACING_ROWS"
   [ -n "${EXO_DSV41_CHECKPOINT_MARGIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_MARGIN_ROWS=$EXO_DSV41_CHECKPOINT_MARGIN_ROWS"
   [ -n "${EXO_DSV41_CHECKPOINT_KEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_KEEP=$EXO_DSV41_CHECKPOINT_KEEP"
+  # DSv4.1 per-round instrumentation (Phase 20). ROUND_PROF is the per-process
+  # DEFAULT mode for requests that omit the per-request `round_prof` field
+  # (0 = off, 1 = host-wallclock timer, 2 = eval-fenced timer); the per-request
+  # field always wins. ROUND_PROF_PATH is the JSONL dump path (unused until the
+  # timer lands). Both forwarded ONLY when set, so unset => production env unchanged.
+  [ -n "${EXO_DSV41_ROUND_PROF:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_ROUND_PROF=$EXO_DSV41_ROUND_PROF"
+  [ -n "${EXO_DSV41_ROUND_PROF_PATH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_ROUND_PROF_PATH=$EXO_DSV41_ROUND_PROF_PATH"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).

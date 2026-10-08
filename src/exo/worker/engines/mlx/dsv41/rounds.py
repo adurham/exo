@@ -342,6 +342,7 @@ def _one_round(
     draft_state: Any | None = None,
     logprobs: int = 0,
     lp_out: list[Any] | None = None,
+    round_prof: int = 0,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -364,7 +365,16 @@ def _one_round(
     no correctness consequence (the target verifies every draft) and no
     change to the prefill path. If a future revision passes the prefill taps
     in, the only change here is to append them before the first draft.
+
+    ``round_prof`` selects a per-round instrumentation mode (0 = off, 1 =
+    host-wallclock timer, 2 = eval-fenced timer). It is accepted here so the
+    call chain (``_generate -> _rounds -> _one_round``) is wired end to end, but
+    it is deliberately a NO-OP for now: the timer itself lands in a later
+    change, so this round is byte-identical for every value. The mode is
+    identical on both TP ranks (it rides in the task params), so a per-request
+    mode can never diverge across ranks.
     """
+    del round_prof  # timer lands in the next change; keep this round byte-identical
     started = time.perf_counter()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
     if head is None:
