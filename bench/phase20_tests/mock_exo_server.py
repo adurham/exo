@@ -39,7 +39,7 @@ import time
 
 DEFAULT_CHARS_PER_TOKEN = 5.111
 SALT_RE = re.compile(r"\[SESSION-SALT\s+([^\]\s]+)\]")
-RUNG = 1024          # checkpoint ladder rung (SessionCache.plan)
+RUNG = 2048          # checkpoint ladder rung (SessionCache.plan, live ~2048)
 
 
 def _est_rows(text: str, chars_per_token: float) -> int:
@@ -62,6 +62,7 @@ class MockExo:
         self.chars_per_token = chars_per_token
         self.sleep = sleep
         self.resident: dict[str, int] = {}      # salt -> base prompt-end rows
+        self.resident_prompts: dict[str, str] = {}   # salt -> last exact prompt fed
         self.lock = threading.Lock()
 
     # ---------------------------------------------------------------- log writer
@@ -100,7 +101,13 @@ class MockExo:
 
     # -------------------------------------------------------------- engine model
     def plan(self, messages: list[dict]) -> dict:
-        """Return {prompt, prefill, reuse, cache, rewind} for this request."""
+        """Return {prompt, prefill, reuse, cache, rewind} for this request.
+
+        ``exact_prompt`` is the rendered text this request feeds (used for the
+        full-cache-hit model).  For the live engine the cache key is the token
+        sequence, so an identical prompt to a prior rep is served entirely from
+        cache (prefill=0, reuse == prompt).
+        """
         head = messages[0].get("content", "") if messages else ""
         m = SALT_RE.search(head)
         salt = m.group(1) if m else None
@@ -108,6 +115,7 @@ class MockExo:
         branching = len(messages) >= 3 and messages[1].get("role") == "assistant"
         if branching:
             delta = messages[-1].get("content", "")
+        exact_prompt = "".join(str(x.get("content", "")) for x in messages)
         with self.lock:
             base_rows = self.resident.get(salt) if salt else None
             head_rows = _est_rows(head, self.chars_per_token)
@@ -117,20 +125,31 @@ class MockExo:
                 # FIRST feed of this salt -> cold; register the base depth.
                 base_rows = head_rows
                 self.resident[salt] = base_rows
-                prefill = head_rows + delta_rows
-                return {"prompt": head_rows + delta_rows, "prefill": prefill,
-                        "reuse": 0, "cache": head_rows + delta_rows, "rewind": None}
+                prompt = head_rows + delta_rows
+                self.resident_prompts[salt] = exact_prompt
+                return {"prompt": prompt, "prefill": prompt,
+                        "reuse": 0, "cache": prompt, "rewind": None}
 
             if branching:
+                # FIX 2(a): an exact-prompt repeat of the previous rep is a full
+                # cache hit -- the engine returns the already-resident prompt with
+                # prefill=0 (measured nothing).  Only a NEW delta text forces a real
+                # rewind to the base depth and a fresh prefill = delta_rows.
+                if exact_prompt == self.resident_prompts.get(salt):
+                    prompt = base_rows + delta_rows
+                    return {"prompt": prompt, "prefill": 0, "reuse": prompt,
+                            "cache": prompt, "rewind": _rung(prompt)}
                 # rewind to the base's prompt-end checkpoint; branch from base depth
                 reuse = base_rows
                 prompt = base_rows + delta_rows
+                self.resident_prompts[salt] = exact_prompt
                 return {"prompt": prompt, "prefill": delta_rows, "reuse": reuse,
                         "cache": prompt, "rewind": _rung(prompt)}
 
             # single-message-append -> collapse to a rung
             reuse = (base_rows // RUNG) * RUNG
             prompt = head_rows
+            self.resident_prompts[salt] = exact_prompt
             return {"prompt": prompt, "prefill": prompt - reuse, "reuse": reuse,
                     "cache": prompt, "rewind": reuse}
 

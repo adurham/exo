@@ -184,3 +184,67 @@ is killed; pass 2 builds a **fresh** guard that *loads* the registry → entry i
 `test_run_chunk_loads_and_persists_default_registry` (run_chunk wires the default path
 and persists 3 registrations). All three FAIL without the change and pass with it.
 
+## FIX 2 — rep uniqueness, wall-cap accounting, ladder-aware collapse (live-repro bugs)
+
+Three bugs reproduced live on the 2-node cluster (chunk1, 2026-10-07). Ground truth:
+
+| step | prompt | log_prefill | reuse | rewind | wall | note |
+|---|---|---|---|---|---|---|
+| ctx20k base (fresh) | 18390 | — | — | — | 63.5 s | cold |
+| ctx20k d2048 rep1 | 20254 | 3870 | 16384 | 18390 | 14.5 s | real delta |
+| ctx20k d2048 rep2 | 20254 | **0** | 20254 | — | 0.3 s | full cache hit |
+| ctx20k d2048 rep3 | 20254 | **0** | 20254 | — | 0.3 s | full cache hit |
+| ctx50k d2048 rep1 | 47561 | 2505 | 45056 | 45705 | 10.3 s | real delta |
+| ctx50k d2048 rep2 | 47561 | **0** | 47561 | — | 0.4 s | full cache hit |
+
+**(a) Reps not unique → reps 2..N are full cache hits that measure nothing.**
+`build_delta(delta_tokens, seed=…)` was deterministic in `seed + delta_tokens`, so
+every rep of the same nominal size built a BYTE-IDENTICAL payload; the engine then
+served the previous rep's exact prompt from cache (`prefill=0`, `reuse == prompt`,
+wall ≈ 0.3 s) and the tool recorded it as a valid 0-row delta. **Fix:** `build_delta`
+gains a `nonce` (the rep index) folded into the fill seed (`+ 1000003*nonce`), and the
+ladder passes `nonce=st["rep"]`. Each rep is now `[base, reply, distinct-delta-N]`,
+the engine rewinds to the base checkpoint, and a real prefill is measured. Salt-free
+and `build_base` untouched. Additionally, a delta with `prefill=0` / `reuse == prompt`
+is now classified `cache_hit=True` and **excluded** from Table A/B (`summarize` gains
+a `cache_hits` list, surfaced in the summary md); it is never silently averaged in as
+a 0-row measurement.
+
+**(b) Wall pre-check double-counted predicted time.** The pre-check computed
+`elapsed = monotonic() − chunk_start` (REAL wall) **and** added `pred_cum` (a running
+sum of *predicted* walls), so it blocked when `elapsed + pred_cum + pred > cap`,
+double-counting time already spent — the live chunk1 hit `NOT_RUN_WALL_CAP: ctx50k_d2048
+pred 28s + used 892s > cap 900s` although the true elapsed wall was far lower.
+**Fix:** the gate is now `elapsed + pred > cap` (true elapsed only). `pred_cum` is
+retained purely as a predicted-elapsed **report**, never a gate. The record schema is
+unchanged.
+
+**(c) `collapsed` threshold mis-calibrated to a 0.9×base rule.** The engine keeps
+checkpoints on a ~2048-row ladder, so a base whose end is not a rung legitimately
+rewinds to the largest rung ≤ the base end (base 18390 → checkpoint 16384; 45705 →
+45056). `reuse < 0.9*base_rows` flagged these real deltas as collapsed
+(16384/18390 = 0.89). **Fix:** `phase20_common.is_collapsed(reuse, base_rows, rung=2048)`
+flags collapsed only when `reuse < base_rows − 2048` (more than one ladder rung below
+the base's **ACTUAL** row count, taken from the base request's `usage.prompt_tokens`
+where available). `LADDER_RUNG = 2048` is the documented rung. Live check: reuse 16384
+vs base 18390 → OK; reuse 2048 vs base 20000 → collapsed.
+
+**Tests** (39 → 47): rep-delta uniqueness (`test_rep_delta_texts_unique_per_rep`,
+`test_ladder_build_messages_unique_delta_per_rep`); full-cache-hit classification +
+exclusion (`test_mock_cache_hit_rep_measured_nothing_and_excluded`,
+`test_record_classifies_prefill_zero_as_cache_hit`); wall gate
+(`test_wall_precheck_ignores_predicted_cumulative` — a mock run must NOT emit
+`NOT_RUN_WALL_CAP`; `test_wall_precheck_blocks_truly_over_step_not_earlier` — the
+corrected gate blocks exactly the first truly-over step, whereas the old gate blocks
+one step early); ladder-aware collapse (`test_collapsed_rule_ladder_rung`,
+`test_record_collapse_uses_base_actual_depth`). **All 8 FAIL on the pre-fix sources
+(7 assert, 1 via the two-run gate divergence) and pass after**; the 39 pre-existing
+tests stay green. The mock now models an exact-prompt full-cache hit (`prefill=0`,
+`reuse == prompt`) and uses a **2048**-row rung.
+
+**Live re-run** (idle cluster, scratch out-dir): pilot base 3775 rows cold (13.2 s);
+delta reps `log_prefill=2000` (reuse 2048) and `log_prefill=2722` (reuse 2048) — both
+real deltas, neither a cache hit (the pilot has one rep per size, so same-size rep
+uniqueness is proven by the unit + mock tests rather than by the pilot).
+
+

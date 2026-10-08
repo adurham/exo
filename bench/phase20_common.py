@@ -56,6 +56,7 @@ FRESH_REF_MIN_ROWS_PER_S = 255.0         # fresh-feed reference falsifier
 
 LADDER_CTXS = (("20k", 20000), ("50k", 50000), ("110k", 110000))
 DELTA_LADDER_ROWS = 2048                 # the fixed delta used on the ctx ladder
+LADDER_RUNG = 2048                       # engine checkpoint rung (SessionCache.plan)
 DELTA_SWEEP_ROWS = (256, 1024, 4096, 8192)
 FRESH_REF_TOKENS = 100000
 
@@ -198,6 +199,46 @@ def rows_per_s_ttft(record: dict) -> float | None:
     return rows / ttft
 
 
+def is_cache_hit(record: dict) -> bool:
+    """FIX 2(a) classification helper: a delta rep that measures NOTHING because
+    the engine served a prior rep's exact prompt from cache.
+
+    Signature (from the live chunk1 data): ``prefill=0`` and ``reuse == prompt``
+    -- the whole prompt was reused, so no rows were prefilled and no delta was
+    actually fed.  Such a record must NEVER be treated as a valid delta
+    measurement (rows/s is degenerate: 0 rows / tiny wall).  Kept here next to
+    the row-truth helpers so summarize() and the classifier share one rule.
+    """
+    if record.get("kind") != "delta":
+        return False
+    prefill = record.get("log_prefill")
+    if prefill is None:
+        return False
+    if prefill == 0:
+        return True
+    prompt = record.get("prompt_tokens")
+    reuse = record.get("reuse")
+    return (prompt is not None and reuse is not None and reuse == prompt)
+
+
+def is_collapsed(reuse, base_rows, rung: int = LADDER_RUNG) -> bool:
+    """FIX 2(c): is a delta rep's reuse materially below the base's OWN reusable
+    depth?
+
+    The engine keeps checkpoints on a ``rung``-row ladder, so a base whose end is
+    not a ladder rung legitimately rewinds to the largest rung <= the base end
+    (live: base 18390 -> checkpoint 16384; base 45705 -> 45056).  Those are REAL
+    deltas, not collapses.  Flag ``collapsed`` only when reuse falls more than one
+    rung below the base's ACTUAL row count, i.e. reuse < base_rows - rung.
+    ``base_rows`` must be the base's measured row count (usage.prompt_tokens of the
+    base request), never its nominal ctx.  A rep with no ``turn reuse:`` line
+    (reuse is None) is collapsed.
+    """
+    if reuse is None:
+        return True
+    return reuse < (base_rows - rung)
+
+
 # ------------------------------------------------------------------ log transport
 class LocalFileLog:
     """A node log that is really a local file (used by the mock/tests)."""
@@ -331,11 +372,19 @@ def build_base(ctx_tokens: int, salt: str, chars_per_token: float = DEFAULT_CHAR
 
 
 def build_delta(delta_tokens: int, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
-                seed: int = 20261007) -> str:
+                seed: int = 20261007, nonce: int = 0) -> str:
     """A NEW unique delta text of ~D tokens.  Salt-free and seed-shifted so two
     reps of the same nominal size are NOT byte-identical (a reused filler would
-    otherwise match a restored session)."""
-    return "\n\n" + build_filler(delta_tokens, chars_per_token, seed + delta_tokens)
+    otherwise match a restored session).
+
+    FIX 2(a): ``nonce`` (the rep index) folds into the fill seed so EVERY rep of
+    the same nominal delta size builds a distinct delta text.  Without it reps
+    2..N of a cell are byte-identical to rep 1, so the engine serves rep 1's exact
+    prompt from cache (prefill=0) and the rep measures nothing.  The delta stays
+    salt-free and only its own tail is re-tokenized; ``build_base`` is untouched.
+    """
+    return "\n\n" + build_filler(delta_tokens, chars_per_token,
+                                 seed + delta_tokens + 1000003 * nonce)
 
 
 def base_messages(base: str) -> list[dict]:
@@ -454,7 +503,7 @@ def _delta_cells(records: list[dict], ctx: str) -> dict[int, list[dict]]:
     for r in records:
         if r.get("kind") != "delta" or r.get("ctx_label") != ctx:
             continue
-        if r.get("collapsed") or r.get("invalid"):
+        if r.get("collapsed") or r.get("invalid") or is_cache_hit(r):
             continue
         out.setdefault(r.get("delta_nominal"), []).append(r)
     return out
@@ -468,11 +517,14 @@ def _med(values: list[float]) -> float | None:
 def summarize(records: list[dict]) -> dict:
     """Build Table A + Table B and evaluate the three 0c decision rules.
 
-    Records with ``collapsed`` (reuse < 0.9*base) or ``invalid`` (DEGRADED
-    reference) are excluded from the tables and listed separately.
+    Records with ``collapsed`` (reuse materially below the base's own reusable
+    depth) or ``invalid`` (DEGRADED reference) are excluded from the tables and
+    listed separately, as are delta reps that were served entirely from cache
+    (``prefill=0``, ``reuse == prompt``) -- those measured nothing (FIX 2a).
     """
     excluded_collapsed = [r for r in records if r.get("collapsed")]
     excluded_invalid = [r for r in records if r.get("invalid")]
+    excluded_cachehits = [r for r in records if is_cache_hit(r)]
     fresh_ref = [r for r in records if r.get("cell") == "fresh100k"]
 
     # ---- Table A: ctx ladder at the fixed 2048 delta + fresh reference
@@ -567,5 +619,6 @@ def summarize(records: list[dict]) -> dict:
     return {
         "table_a": table_a, "table_b": table_b, "verdicts": verdicts,
         "collapsed": excluded_collapsed, "invalid": excluded_invalid,
+        "cache_hits": excluded_cachehits,
         "n_records": len(records),
     }

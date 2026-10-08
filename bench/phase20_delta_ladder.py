@@ -346,18 +346,20 @@ def run_chunk(chunk: str, args) -> int:
                 for st in steps:
                     guard.check()
                     rows = _step_rows(st)
-                    # deterministic wall pre-check: elapsed + predicted-so-far +
-                    # THIS step's predicted wall vs the chunk cap.
+                    # FIX 2(b): wall pre-check on TRUE elapsed wall only.  The
+                    # previous check added ``pred_cum`` (a sum of predicted walls)
+                    # on top of the real elapsed wall, double-counting time already
+                    # spent and blocking steps the chunk could actually afford.
                     pred = C.predict_wall_s(rows)
                     elapsed = time.monotonic() - chunk_start
-                    remaining = args.max_wall - elapsed - pred_cum
-                    if elapsed + pred_cum + pred > args.max_wall:
+                    remaining = args.max_wall - elapsed
+                    if elapsed + pred > args.max_wall:
                         rec = _blocked_record(chunk, st, rows, pred, remaining)
                         records.append(rec)
                         out_fh.write(json.dumps(rec) + "\n")
                         out_fh.flush()
                         print(f"NOT_RUN_WALL_CAP: {st['cell']} pred {pred:.0f}s + "
-                              f"used {elapsed + pred_cum:.0f}s > cap {args.max_wall:.0f}s",
+                              f"used {elapsed:.0f}s > cap {args.max_wall:.0f}s",
                               file=sys.stderr)
                         break
 
@@ -383,14 +385,20 @@ def run_chunk(chunk: str, args) -> int:
                     records.append(rec)
                     out_fh.write(json.dumps(rec) + "\n")
                     out_fh.flush()
-                    # charge the step its actual wall (>= predicted), so the next
-                    # pre-check sees real burn.
+                    # FIX 2(b): ``pred_cum`` is retained ONLY as a predicted-elapsed
+                    # report (never a gate) -- the true wall is the elapsed clock.
                     pred_cum += max(pred, r.get("wall_s") or 0.0)
 
                     if st["kind"] in ("base",) and r.get("content") is not None:
                         base_reply[st["ctx_label"]] = r["content"]
-                        if rec.get("log_prefill") is not None:
-                            base_actual[st["ctx_label"]] = rec["prompt_tokens"] or rows
+                        # FIX 2(c): remember the base's ACTUAL depth (usage
+                        # prompt_tokens) -- the delta classifier measures reuse
+                        # against it, not the nominal ctx.  A cold base emits no
+                        # ``turn reuse:`` line, so gate on prompt_tokens only.
+                        if rec.get("prompt_tokens") is not None:
+                            base_actual[st["ctx_label"]] = rec["prompt_tokens"]
+                        elif rows:
+                            base_actual[st["ctx_label"]] = rows
                     if st["kind"] == "fresh":
                         with open(ref_path, "w") as rf:
                             json.dump(rec, rf)
@@ -416,12 +424,16 @@ def _build_messages(st, salt, base_reply, chars_per_token):
         base = C.build_base(st["ctx_nominal"], step_salt, chars_per_token,
                             seed=20261007 + st["ctx_nominal"])
         return C.base_messages(base), base
-    # delta: branch from the base with a NEW unique delta text
+    # delta: branch from the base with a NEW unique delta text.  FIX 2(a): the rep
+    # index folds into the delta's seed so two reps of the same nominal size build
+    # DISTINCT text -- otherwise rep 2..N is byte-identical to rep 1 and the engine
+    # serves it from cache (prefill=0), measuring nothing.
     base = C.build_base(st["ctx_nominal"], step_salt, chars_per_token,
                         seed=20261007 + st["ctx_nominal"])
     reply = base_reply.get(st["ctx_label"], "ok")
     dtext = C.build_delta(st["delta_nominal"], chars_per_token,
-                          seed=30370000 + st["ctx_nominal"] + st["delta_nominal"])
+                          seed=30370000 + st["ctx_nominal"] + st["delta_nominal"],
+                          nonce=st.get("rep", 0) or 0)
     return C.delta_messages(base, reply, dtext), dtext
 
 
@@ -450,6 +462,7 @@ def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actua
         "t_start": round(t_start, 3),
         "chars_per_token": chars_per_token,
         "invalid": False,
+        "cache_hit": False,
         "notes": "",
     }
     out["rows_per_s_log"] = C.rows_per_s_log({**out, "log_prefill": out["log_prefill"],
@@ -457,16 +470,27 @@ def _record(chunk, st, rows, r, logf, node, t_start, chars_per_token, base_actua
     out["rows_per_s_ttft"] = C.rows_per_s_ttft(
         {"log_prefill": out["log_prefill"], "prompt_tokens": prompt_tokens,
          "ttft_s": out["ttft_s"]})
-    # collapsed classification: a delta rep must reuse ~ the base depth
     if out["kind"] == "delta":
-        reuse = out["reuse"]
-        need = 0.9 * st["ctx_nominal"]
-        if reuse is None or reuse < need:
-            out["collapsed"] = True
-            out["notes"] = (f"collapsed: reuse={reuse} < 0.9*{st['ctx_nominal']}"
-                            if reuse is not None else "collapsed: no turn-reuse line")
-        else:
+        # FIX 2(a): prefill=0 (reuse == prompt) means the engine served this exact
+        # prompt from cache -- the rep measured nothing and must be excluded, not
+        # recorded as a 0-row delta.
+        if C.is_cache_hit(out):
+            out["cache_hit"] = True
             out["collapsed"] = False
+            out["notes"] = (f"cache hit: prefill=0 reuse={out['reuse']} == "
+                            f"prompt={prompt_tokens} (full-cache hit, no rows fed)")
+        else:
+            # FIX 2(c): collapse is measured against the base's OWN actual depth
+            # (ladder rungs are legitimate), not the nominal ctx.
+            base_rows = base_actual.get(st["ctx_label"], st["ctx_nominal"])
+            reuse = out["reuse"]
+            if C.is_collapsed(reuse, base_rows):
+                out["collapsed"] = True
+                out["notes"] = (f"collapsed: reuse={reuse} < base_actual-{C.LADDER_RUNG}"
+                                f"={base_rows - C.LADDER_RUNG}"
+                                if reuse is not None else "collapsed: no turn-reuse line")
+            else:
+                out["collapsed"] = False
     else:
         out["collapsed"] = False
         if out["has_turn_reuse"] and (out["reuse"] or 0) > 0:
@@ -565,6 +589,13 @@ def _emit_summary(summary, records, out_dir, paths) -> None:
         md.append("## Invalid / not-run cells")
         for r in summary["invalid"]:
             md.append(f"- {r.get('cell')}: {r.get('notes')}")
+    if summary.get("cache_hits"):
+        md.append("")
+        md.append("## Cache-hit reps (excluded -- measured nothing)")
+        for r in summary["cache_hits"]:
+            md.append(f"- {r.get('cell')} rep{r.get('rep')}: prefill=0 "
+                      f"reuse={r.get('reuse')} prompt={r.get('prompt_tokens')} "
+                      f"({r.get('notes')})")
     text = "\n".join(md) + "\n"
     md_path = os.path.join(out_dir, "delta_ladder.summary.md")
     with open(md_path, "w") as fh:
