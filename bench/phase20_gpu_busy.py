@@ -69,6 +69,45 @@ RAW_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "docs/benchmarks/phase20-throughput/raw")
 
+# Persistent own-request registry.  Every phase20 tool runs in its OWN process
+# and, immediately before each generation POST, appends one JSONL line
+# ``{"label": <str>, "t": <float epoch>}`` here (via ChunkGuard(registry_path=)
+# / register_own_request()).  The guard's ENTRY idle-check refuses to start if
+# any generation POST on a node is newer than min_idle_s (600 s) unless it
+# matches a registered own request -- so a later run must LOAD this file and
+# hand the epochs to ChunkGuard, or it stalls ~10 min on its own (or a sibling
+# tool's) traffic.  Same pattern as bench/phase20_delta_ladder.py.
+DEFAULT_REGISTRY_NAME = "own_requests.jsonl"
+
+
+def load_own_requests(path: str | None) -> list[float]:
+    """Read the guard's persistent own-request registry and return its ``t`` epochs.
+
+    The registry is the JSONL file ``ChunkGuard(registry_path=...)`` appends to:
+    one object per line, ``{"label": <str>, "t": <float epoch>}``.  A missing
+    file (first run) or a malformed/blank line is tolerated and skipped -- this
+    reader must never fail a run.  Registrations are made immediately BEFORE
+    each POST, so an epoch read back here can only correspond to a request
+    already on a node.
+    """
+    out: list[float] = []
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    t = json.loads(line)["t"]
+                    out.append(float(t))
+                except (json.JSONDecodeError, TypeError, KeyError, ValueError):
+                    continue
+    except OSError:
+        return out
+    return out
+
 # PREREG 0d thresholds
 GATE_GPU_SERIALIZED = 90.0     # >= both nodes
 GATE_HOST_BOUND = 85.0         # < either node
@@ -888,11 +927,21 @@ def build_agentic_prompt(salt: str, char_budget: int | None,
 
 def stream_once(prompt: str, max_tokens: int, effort: str | None = None,
                 on_first_token=None, stop_event=None) -> dict:
-    """Stream a completion; record first/last CONTENT token epochs.
+    """Stream a completion; record first/last token epochs.
 
     Copy-adapted from phase19_agentic_measure.py:stream_once (attribution:
     levers-wt phase19).  ``on_first_token(epoch, resp)`` is invoked exactly
-    once, on the first content token, so the samplers can be launched.
+    once, on the first token, so the samplers can be launched.
+
+    This model is a REASONING model: it streams its output in
+    ``choices[].delta.reasoning_content`` (the live capture showed
+    ``content=''`` and ``reasoning_content='We'``).  We therefore accumulate
+    BOTH ``content`` and ``reasoning_content`` as output text, and fire the
+    first-token time (and ``on_first_token``) on the first NON-EMPTY delta of
+    EITHER kind.  Accumulating only ``content`` left ttft permanently None and
+    the window-validity logic with no token timestamps (INVALID window), and
+    the samplers never launched -- so every decode run measured nothing.
+    Mirrors bench/phase20_delta_ladder.py / phase20_common.py:stream_once.
     """
     body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens, "temperature": 0, "stream": True}
@@ -931,7 +980,10 @@ def stream_once(prompt: str, max_tokens: int, effort: str | None = None,
                 usage = obj["usage"]
             for ch in obj.get("choices", []):
                 d = ch.get("delta") or {}
-                ctxt = d.get("content") or ""
+                # FIX 2: a reasoning model streams delta.reasoning_content, not
+                # delta.content.  Accumulate BOTH; first-token fires on the
+                # first non-empty delta of EITHER kind.
+                ctxt = d.get("content") or d.get("reasoning_content") or ""
                 if ctxt:
                     if first is None:
                         first, ttft = now, now - t0
@@ -958,7 +1010,8 @@ def decode_plan(args) -> dict:
         "secs": secs, "max_tokens": args.max_tokens,
         "steps": [
             "canary ok (R4) via phase20_guard.canary()",
-            "ChunkGuard(label) + register_own_request() around EVERY request (R1/R2/R3)",
+            "ChunkGuard(label, own_requests=<loaded registry>, registry_path=<file>) "
+            "+ register_own_request() around EVERY request (R1/R2/R3)",
             "feed prompt COLD (max_tokens=small) -- prefix build, NOT measured",
             "MEASURED request = EXACT SAME prompt (expect prefill=0 via prompt-end checkpoint)",
             "verify exo.log 'turn reuse: ... prefill=0' before trusting the window",
@@ -1003,9 +1056,22 @@ def cmd_decode(args) -> int:
     window_valid: dict[str, bool] = {}
     node_out: dict[str, dict] = {}
 
+    # FIX 1: persistent own-request registry.  Every phase20 tool runs in its
+    # own process; without loading the shared registry the guard's entry
+    # idle-check treats this tool's own (or a sibling tool's) recent POST as
+    # foreign traffic and refuses to start for min_idle_s (600 s).  Default
+    # lives beside the run outputs in <outdir>/raw/; --own-registry overrides.
+    raw_dir = os.path.join(args.outdir, "raw")
+    os.makedirs(raw_dir, exist_ok=True)
+    registry_path = (getattr(args, "own_registry", None)
+                     or os.path.join(raw_dir, DEFAULT_REGISTRY_NAME))
+    own_requests = load_own_requests(registry_path)
+
     with guard.ChunkGuard(f"phase20-gpu-busy-{arm}",
                           max_wall_s=args.max_wall,
-                          log_dir=args.outdir) as g:
+                          log_dir=args.outdir,
+                          own_requests=own_requests,
+                          registry_path=registry_path) as g:
         g.register_own_request()
         warm = stream_once(prompt, args.warm_tokens, stop_event=getattr(g, "cancel_event", None))
         rec["warmup"] = {"usage": warm.get("usage")}
@@ -1196,6 +1262,9 @@ def main(argv=None) -> int:
     p.add_argument("--warm-tokens", type=int, default=8)
     p.add_argument("--max-wall", type=float, default=900)
     p.add_argument("--outdir", default="/Users/adam.durham/.hermes/cache/scratch/phase20/gpubusy")
+    p.add_argument("--own-registry", default=None, dest="own_registry",
+                   help="persistent own-request registry JSONL "
+                        "(default: <outdir>/raw/" + DEFAULT_REGISTRY_NAME + ")")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=cmd_decode)
 
