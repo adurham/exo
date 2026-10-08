@@ -91,7 +91,23 @@ post-boot canary. Run 13:04 CDT by the resuming PM:
 - Guard verified present in the installed module on both nodes
   (`and m > _FENCE_MIN_ROWS`, `site-packages/mlx_lm/models/deepseek_v41/sparse_attention.py`).
 
-## 4. next17-at-defaults — RUNNING
+## 4. next17-at-defaults — BENIGN DONE, AGENTIC RUNNING
+
+Run 2026-10-08 13:03:53–13:17 CDT on the live relaunch-#1 boot (`576e9d279`, mlx-lm `3bf8316`,
+gates default; post-deploy canary healthy §3b). Symmetric protocol to the §3 baseline
+(same flags, same harness, no round_prof; unique salt per rep ⇒ cold prefill each rep).
+Raw artifacts: `/tmp/p3b/next17_benign.json` (+ `.jsonl`), `/tmp/p3b/next17_agentic.json`.
+
+| workload | reps | ms/round median | decode t/s | mean_accepted |
+|---|---|---|---|---|
+| benign 20K g3, 800 tok | 8 | **118.56** (118.50,118.83,118.75,118.56,118.39,118.86,118.23) | **31.47** (30.42–33.08) | **2.769** |
+
+**Benign vs production:** 118.56 vs 145.75 ms/round → **−27.19 ms/round (−18.7%)**;
+decode 31.47 vs 25.55 t/s (+23.2%). `mean_accepted` is **identical (2.7689)** between arms ⇒
+the acceptance behaviour is unchanged, so the win is a pure per-round latency reduction
+(NOT a spec-decode/acceptance effect). No benign regression — large benign improvement.
+
+Agentic arm: 3×2-rep chunks, running at 13:18 CDT.
 
 ## 5. Lever-2 split — PENDING / maybe skipped
 
