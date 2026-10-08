@@ -278,3 +278,44 @@ set is unchanged; (c) window-validity end-to-end (inside → True, starts-in-pre
 by the PM; the callback/threading/join logic is exercised only against fakes.
 Note the join is best-effort: a capture that overruns its bound leaves that
 node's entry `_pending` (no parsed data) rather than corrupting the record.
+
+## FIX 3 — window-validity epoch UNITS: monotonic vs wall clock (branch `p20/gpubusy`)
+
+**Symptom.** A live decode returned `window_valid={"m4-1": false, "m4-2": false}`
+even though the 20.4 s sampler window plainly sat inside the 21.8 s decode.
+
+**Root cause — unmatched clocks.** `stream_once` stamped
+`first_token_epoch`/`last_token_epoch` with `time.perf_counter()` (a
+**monotonic** clock, ~seconds since boot; the live value was ≈648044 s), while
+`_ssh_capture` stamps the sampler capture's `start_epoch`/`end_epoch` with
+`time.time()` (**wall clock**, ≈1.79e9 = 2026 epoch seconds).  `window_valid`
+calls `window_inside_stream(pm.start_epoch, pm.end_epoch, first_token_epoch,
+last_token_epoch)`, comparing a ~6.5e5 value against a ~1.79e9 value: the
+decode end could never be ≥ the window start, so the check was structurally
+incapable of returning `True`.
+
+**Fix.** In `stream_once`, stamp the emitted epochs with `time.time()`:
+`now_epoch = time.time()` is used for `first`/`last_token_epoch` and passed to
+`on_first_token(now_epoch, resp)`; `now = time.perf_counter()` is retained
+purely for the *durations* (`ttft = now - t0`, `wall = time.perf_counter() -
+t0`), which are differences and unit-agnostic.  The sampler capture side
+(`_ssh_capture`, wall clock) is unchanged.  Recorded JSON schema keys are
+unchanged (`rec["decode"]` and `rec["window_valid"]` shapes identical).
+
+**Tests added (3).** (a) `test_stream_once_epochs_are_wall_clock` — the units
+test: `stream_once`'s emitted `first_token_epoch`/`last_token_epoch` must lie
+within `[time.time() before, time.time() after]` (fails pre-fix with
+`first_token_epoch 648044.3` vs wall `1791436444.6`); (b)
+`test_window_inside_same_unit_wall_clock_magnitudes` — with real wall-clock
+magnitudes, a window strictly inside `[A,B]` (A<a<b<B) → `True`, an end-overhang
+→ `False`, a start-overhang → `False`; (c)
+`test_decode_window_validity_wall_clock_end_to_end` — the real `cmd_decode`
+with wall-clock epochs on both sides yields `{"m4-1": True, "m4-2": False}`.
+Suite: **36 passed** (was 33); the units test fails pre-fix, the other two are
+invariant under the unit swap (they pin the comparison semantics).
+
+**NOT verified**: as FIX 1/2 — the live cluster window needs
+`bench/phase20_guard.py` (absent in this worktree), so the real SSE-triggered
+capture is run by the PM; the unit fix and the comparison are exercised offline
+only.  The live run must be re-checked to confirm `window_valid` now reports
+`true` for a genuinely-inside window.

@@ -626,3 +626,83 @@ def test_decode_window_validity_end_to_end(tmp_path, monkeypatch, capsys):
     assert rec["window_valid"] == {"m4-1": True, "m4-2": False}
     valid, why = gb.window_inside_stream(1230.0, 1235.4, 1234.5, 1235.5)
     assert valid is False and "before" in why
+
+
+# --------------------------------------------------------------------------- #
+# FIX 3 — window-validity epoch UNITS: decode epochs must be WALL CLOCK
+# (time.time()), matching the sampler capture start_epoch/end_epoch.
+# Pre-fix, stream_once stamped first/last_token_epoch with time.perf_counter()
+# (monotonic, ~seconds-since-boot) while _ssh_capture used time.time()
+# (~1.79e9 = 2026 wall seconds); window_inside_stream then compared
+# incomparable magnitudes and could never return True.
+# --------------------------------------------------------------------------- #
+def test_stream_once_epochs_are_wall_clock(monkeypatch):
+    """The units test: stream_once must stamp first/last_token_epoch in the
+    SAME units as the sampler side -- wall clock (time.time()).  A monotonic
+    perf_counter value (seconds since boot) is orders of magnitude below the
+    1.79e9 wall epoch, so this assertion fails pre-fix."""
+    lines = _sse(
+        'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+        'data: {"choices":[{"delta":{"content":" world"}}]}',
+        'data: [DONE]',
+    )
+    monkeypatch.setattr(gb.urllib.request, "urlopen",
+                        lambda req, timeout=None: _FakeSSEResponse(lines))
+    t_before = time.time()
+    out = gb.stream_once("hi", 8)
+    t_after = time.time()
+
+    first, last = out["first_token_epoch"], out["last_token_epoch"]
+    assert first is not None and last is not None
+    # same clock as _ssh_capture's start_epoch/end_epoch (time.time()):
+    assert t_before <= first <= t_after, (
+        f"first_token_epoch {first!r} is not a wall-clock epoch in "
+        f"[{t_before}, {t_after}] (perf_counter/monotonic leak?)")
+    assert t_before <= last <= t_after, (
+        f"last_token_epoch {last!r} is not a wall-clock epoch in "
+        f"[{t_before}, {t_after}] (perf_counter/monotonic leak?)")
+    # and within the same magnitude as a real sampler capture epoch
+    assert abs(first - time.time()) < 300.0 and abs(last - time.time()) < 300.0
+    # ttft/decode_s stay small durations (they are differences, not epochs)
+    assert 0.0 <= out["ttft_s"] < 60.0
+    assert 0.0 <= out["decode_s"] < 60.0
+
+
+def test_window_inside_same_unit_wall_clock_magnitudes():
+    """window_inside_stream must be meaningful with REAL wall-clock epochs
+    (~1.79e9).  A sampler window strictly inside the decode -> True; a window
+    overhanging the decode end -> False."""
+    A, B = 1.79e9, 1.79e9 + 21.8           # decode [first token, last token]
+    a, b = A + 0.7, A + 20.4              # sampler window strictly inside
+    ok, why = gb.window_inside_stream(a, b, A, B)
+    assert ok is True, why
+    # overhanging the decode END -> False
+    ok, why = gb.window_inside_stream(a, B + 3.0, A, B)
+    assert ok is False and "after" in why
+    # overhanging the decode START (prefill contamination) -> False
+    ok, why = gb.window_inside_stream(A - 1.0, b, A, B)
+    assert ok is False and "before" in why
+
+
+def test_decode_window_validity_wall_clock_end_to_end(tmp_path, monkeypatch,
+                                                       capsys):
+    """End-to-end through cmd_decode with wall-clock epochs on BOTH sides (as
+    now recorded post-fix): a sampler window inside the decode -> True, one
+    overhanging the decode end -> False."""
+    A, B = 1.79e9, 1.79e9 + 21.8
+
+    def fake_stream(prompt, max_tokens, on_first_token=None, stop_event=None,
+                    **kw):
+        if on_first_token is not None:            # None == the warmup feed
+            on_first_token(A, object())
+        return {"wall_s": 22.0, "ttft_s": 0.7, "first_token_epoch": A,
+                "last_token_epoch": B, "decode_s": round(B - A, 3),
+                "content_chars": 10, "usage": None, "stats": None}
+
+    rc, rec, _ = _run_decode_with_fakes(
+        tmp_path, monkeypatch, fake_stream, ssh_sleep=0.02,
+        pm_windows={"studio1": (A + 0.7, A + 20.4),   # inside [A, B]
+                    "studio2": (A + 0.7, B + 3.0)})   # overhangs the end
+    capsys.readouterr()
+    assert rc == 0
+    assert rec["window_valid"] == {"m4-1": True, "m4-2": False}

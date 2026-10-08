@@ -975,7 +975,13 @@ def stream_once(prompt: str, max_tokens: int, effort: str | None = None,
                 obj = json.loads(payload)
             except Exception:
                 continue
-            now = time.perf_counter()
+            # FIX 3: epoch timestamps must be WALL CLOCK (time.time()), the same
+            # clock _ssh_capture stamps its start_epoch/end_epoch with.  Pre-fix
+            # this was time.perf_counter() (monotonic, ~seconds since boot),
+            # which window_inside_stream compared against ~1.79e9 wall epochs --
+            # an unmatched-unit comparison that could never be inside.
+            now_epoch = time.time()
+            now = time.perf_counter()          # monotonic: for durations only
             if usage is None and obj.get("usage"):
                 usage = obj["usage"]
             for ch in obj.get("choices", []):
@@ -986,12 +992,12 @@ def stream_once(prompt: str, max_tokens: int, effort: str | None = None,
                 ctxt = d.get("content") or d.get("reasoning_content") or ""
                 if ctxt:
                     if first is None:
-                        first, ttft = now, now - t0
+                        first, ttft = now_epoch, now - t0
                         if on_first_token and not fired:
                             fired = True
-                            on_first_token(now, resp)
+                            on_first_token(now_epoch, resp)
                     cchars += len(ctxt)
-                    last = now
+                    last = now_epoch
     wall = time.perf_counter() - t0
     return {"wall_s": round(wall, 3), "ttft_s": round(ttft, 4) if ttft else None,
             "first_token_epoch": first, "last_token_epoch": last,
