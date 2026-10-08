@@ -100,6 +100,26 @@ def _fake_guard_mod(abort_at_check=None):
     return mod
 
 
+@pytest.fixture
+def stub_guard():
+    """Hermetic guard: pin ``GUARD_OVERRIDE`` to the in-tree offline stub/fake.
+
+    ``L.resolve_guard()`` prefers a REAL ``phase20_guard`` module whenever one is
+    importable; the real ``ChunkGuard.__enter__`` runs a live ssh ``idle_check``
+    against the cluster (and ``canary()`` scps/ssh).  Any test that runs the tool
+    end-to-end against the offline ``MockExoServer`` must never reach the cluster,
+    so it requests this fixture to force a guard that performs NO IO.  The previous
+    value is restored on teardown (exception-safe) so the override never leaks into
+    tests that deliberately exercise the real guard classes.
+    """
+    prev = L.GUARD_OVERRIDE
+    L.GUARD_OVERRIDE = _fake_guard_mod()
+    try:
+        yield
+    finally:
+        L.GUARD_OVERRIDE = prev
+
+
 def _records_from(tmp_path, chunk, **run_kw):
     """Run a chunk against the mock server and return the JSONL records."""
     log_path = str(tmp_path / "exo.log")
@@ -235,7 +255,7 @@ def _mk_delta_record(reuse, ctx_nominal=50000):
             "log_prefill": 2048}
 
 
-def test_classify_delta_vs_collapse_via_run(tmp_path):
+def test_classify_delta_vs_collapse_via_run(tmp_path, stub_guard):
     rc, recs, _ = _records_from(tmp_path, "chunk1", reps=1)
     assert rc == L.EXIT_OK
     deltas = [r for r in recs if r["kind"] == "delta"]
@@ -321,7 +341,7 @@ def test_guard_registers_own_request_before_each_http(tmp_path):
 
 
 # ======================================================== mock end-to-end tests
-def test_mock_offline_end_to_end(tmp_path):
+def test_mock_offline_end_to_end(tmp_path, stub_guard):
     rc, recs, out_dir = _records_from(tmp_path, "pilot")
     assert rc == L.EXIT_OK
     kinds = [r["kind"] for r in recs]
@@ -332,7 +352,7 @@ def test_mock_offline_end_to_end(tmp_path):
             assert 150 < r["rows_per_s_log"] < 260
 
 
-def test_mock_rewind_modeling_branching(tmp_path):
+def test_mock_rewind_modeling_branching(tmp_path, stub_guard):
     """Branching delta reps must report reuse ~= the base depth each time."""
     rc, recs, _ = _records_from(tmp_path, "chunk3", reps=1)
     assert rc == L.EXIT_OK
@@ -345,7 +365,7 @@ def test_mock_rewind_modeling_branching(tmp_path):
         assert abs(r["reuse"] - base_depth) <= 0.02 * base_depth
 
 
-def test_fresh_feed_has_no_turn_reuse(tmp_path):
+def test_fresh_feed_has_no_turn_reuse(tmp_path, stub_guard):
     rc, recs, _ = _records_from(tmp_path, "fresh100k")
     assert rc == L.EXIT_OK
     assert len(recs) == 1
