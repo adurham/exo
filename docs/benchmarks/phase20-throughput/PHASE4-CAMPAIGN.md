@@ -124,9 +124,72 @@ runtime certificate — before anyone ships the guard.
 **Budget: P1 spent 0 relaunches** (proof was off-line). Proceeding to P2.
 
 
-## 4. P2 / P3 / P5 — see their own sections, appended as reached.
+## 4. P2 — MoE_ALLSUM_BF16 decode A/B (next19 only if it wins)
 
-## 5. Resume pointer
+### 4a. Prereg + design
+
+`DSV41_MOE_ALLSUM_BF16` (`moe.py:51`, default "1") rounds each rank's fp32 MoE-tail
+partial to bf16 before the `all_sum` (halved payload), upcasting the result back to fp32.
+**It is ALREADY default-ON in production** (promoted 2026-10-07, PERFORMANCE_HISTORY). So P2 is a
+pure **env-flip A/B on the live production boot**, kill-switch off vs on:
+`DSV41_MOE_ALLSUM_BF16=0` (exact fp32, the comparison arm) vs default 1 (bf16, live).
+
+- Gate (this phase): the bf16 arm wins by **≥3 ms/round net agentic** above noise, `mean_accepted`
+  not below ~2.0, battery clean — else it does not ship (env stays at its shipped default ON).
+- Note: the ON arm needs **no relaunch** (live). The OFF arm needs **1 relaunch** (env-flip), spent
+  only if the ON-vs-historical contrast warrants the confirmation.
+- Same-build symmetric protocol: `p3b_driver.py` benign 20K g3 ×4 reps + agentic 91K g3 ×6 reps
+  (unique-salt cold prefill each rep), no PROF, idle-guarded per chunk.
+
+### 4b. P2 ON-arm (live next17 boot, `576e9d279`, DSV41_MOE_ALLSUM_BF16 default 1) — DONE
+
+| arm | reps | ms/round median | decode t/s | mean_accepted |
+|---|---|---|---|---|
+| benign 20K g3, 800tok | 4 | **118.53** (118.17,118.53,118.57) | **32.36** | 2.9314 |
+| agentic 91K g3, 800tok | (running) | — | — | — |
+
+The benign ON-arm (118.53 ms) reproduces the §P3B next17-defaults benign (118.56) to **0.03 ms** —
+the live boot is in the same regime. **P2 status: in progress** (agentic arm); OFF arm and the
+≥3 ms verdict appended below when measured.
+
+## 5. P3 — loop-2 consumer-index-skip, PREFILL (next20) — **ALREADY SHIPPED; nothing to do**
+
+### 5a. Finding: the lever is in production already
+
+The Phase-4 brief describes P3 as "loop-2 consumer-index-skip, PREFILL … implement behind an env
+knob; gate ≥8% of deep-context prefill wall". The audit it refers to is
+`bench/dsv41_loop2/consumer_index_sizing.md` — "consumer-layer coarse-pass waste … up to ~15% of
+wall, provably exact". That lever is **`coarse_block_scores_candidates` +
+`DSV41_INDEXER_CONSUMER_SKIP`**, i.e. the consumer index layers (24/28/32/36) scoring only candidate
+blocks in the coarse pass instead of all `nb` columns.
+
+It was **implemented and shipped in `5a986da`** (loop-2, 2026-10-07; PERFORMANCE_HISTORY), and the
+ancestry check confirms it is live:
+```
+git merge-base --is-ancestor 5a986da 6cc9c1e   -> IS ancestor (next13 pin)
+git merge-base --is-ancestor 5a986da 3bf8316   -> IS ancestor (next17 / live pin)
+installed prod module: indexer.py:138 _HIER_CONSUMER_SKIP = env("DSV41_INDEXER_CONSUMER_SKIP","1")==1
+                       indexer.py:574 consumer_skip=_HIER_CONSUMER_SKIP
+```
+So the consumer-skip is **already the default in the live production build**, in its prefill role
+(consumers run the coarse pass at prefill m=2048 where the O(offset) O(nb) sweep dominates). The
+measured prefill wins are already recorded (soak13: r500 +29.0%, r750 +57.3%, r1m +65.5%; 350K build
++17.0%) — all far above the 8% bar.
+
+### 5b. Verdict
+
+**P3 = no-op / already-shipped.** There is no new work: the "loop-2 consumer-index-skip" the brief
+asks to ship prefill-side is `5a986da`, already the default on `576e9d279`. No implementation, no
+relaunch, no budget spent. (If the intent were the *variant* in the memo §4 — a single fp32 consumer
+pass, not bit-equivalent — that is a different, output-changing lever and would need its own
+identity/quality gate; it is **not** the exact lever the brief describes and is not attempted here.)
+
+## 6. P5 — roofline close-out (bench-only, last)
+
+See its own section, appended below.
+
+
+## 7. Resume pointer
 
 Last commit on this doc says where we are. If resuming: read §3c / §4 checkboxes, `git log` this
 branch, re-verify live state against §0, continue from the first unchecked box.
