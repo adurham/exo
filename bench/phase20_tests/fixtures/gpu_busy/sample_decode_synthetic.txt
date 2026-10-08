@@ -1,0 +1,60 @@
+Analysis of sampling python (pid 4242) every 1 millisecond
+Process:         python3.13 [4242]
+Path:            /Users/USER/*/python3.13
+Load Address:    0x1006a4000
+Identifier:      python3.13
+Version:         ???
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.13 [4000]
+Target Type:     live task (Roots Present)
+
+Date/Time:       2026-10-07 21:30:00.000 -0500
+Launch Time:     2026-10-07 17:04:45.476 -0500
+OS Version:      macOS 27.0 (26A428)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         107.4G
+Physical footprint (peak):  113.7G
+Idle exit:                  untracked
+----
+
+Call graph:
+    100 Thread_100   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 100 start  (in dyld) + 6688  [0x18da13e80]
+    +   100 Py_RunMain  (in libpython3.13.dylib) + 892  [0x101bc738c]
+    +     100 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 75552  [0x101a6399c]
+    +       100 PyObject_Call  (in libpython3.13.dylib) + 44  [0x1019a0a1c]
+    60 Thread_101
+    + 60 thread_start  (in libsystem_pthread.dylib) + 8  [0x18dde4cec]
+    +   60 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18dde9d00]
+    +     60 mlx::core::scheduler::StreamThread::thread_fn()  (in libmlx.dylib) + 196  [0x10a6e68b8]
+    +       60 metal::compute  (in libmlx.dylib) + 40  [0x10a6e0000]
+    +         60 mach_msg2_trap  (in libsystem_kernel.dylib) + 8  [0x18dda5000]
+    45 Thread_102
+    + 45 thread_start  (in libsystem_pthread.dylib) + 8  [0x18dde4cec]
+    +   45 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18dde9d00]
+    +     45 jaccl::transport::Poll::run()  (in libjaccl.dylib) + 128  [0x109220000]
+    +       45 ibv_poll_cq  (in libibverbs.dylib) + 64  [0x2ba680000]
+    35 Thread_103
+    + 35 thread_start  (in libsystem_pthread.dylib) + 8  [0x18dde4cec]
+    +   35 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18dde9d00]
+    +     35 my_project::do_unknown_work()  (in my_ext.dylib) + 12  [0x111110000]
+    20 Thread_104
+    + 20 thread_start  (in libsystem_pthread.dylib) + 8  [0x18dde4cec]
+    +   20 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18dde9d00]
+    +     20 mlx::core::eval  (in libmlx.dylib) + 40  [0x10a550000]
+    +       20 std::condition_variable::wait  (in libc++.1.dylib) + 32  [0x18dcfa7bc]
+    +         20 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18dda850c]
+
+Total number in stack (recursive counted multiple, when >=5):
+        60       mlx::core::scheduler::StreamThread::thread_fn()  (in libmlx.dylib) + 196  [0x10a6e68b8]
+        45       jaccl::transport::Poll::run()  (in libjaccl.dylib) + 128  [0x109220000]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        20
+        mach_msg2_trap  (in libsystem_kernel.dylib)        60
+
+Binary Images:
+       0x1006a4000 -        0x1006a567f +python3.13 (???) <4C4C44AA-5555-3144-A1A2-EEF9438F1EF6> /Users/*/python3.13
