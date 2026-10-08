@@ -171,3 +171,47 @@ Restored (`return path in _GENERATION_POST_SET` at line 249) → **26 passed**.
 | `canary` | 0 healthy / 1 marginal / 2 degraded (live: 0) |
 | `watch --label L -- <cmd>` | command's exit code on clean finish (live: 0 and 7 both passed through); 75 `ABORTED_USER_ARRIVED`; 76 `ABORTED_WALL_CAP` (both proven in the subprocess integration test) |
 
+## FIX 1 — S2 own-request race (false-positive abort on the harness's own first POST)
+
+**Symptom (live-reproduced by the PM):** `ChunkGuard.aborted` fired with reason
+`ABORTED_USER_ARRIVED`, signal
+`S2:non-own POST /v1/chat/completions @2026-10-07 22:18:22.800`, on the harness's **own
+first request** — which aborts every live chunk (the first request is always flagged).
+
+**Root cause:** `_poll_signals` snapshotted the own-request list at the TOP of the method
+(`own = self.own_requests()`) *before* the two-node ssh log read (~1–3 s).  The harness
+calls `register_own_request()` immediately **before** it sends, so the registration lands
+*during* that read.  The pre-read snapshot was therefore stale/empty, and the harness's own
+POST — which is only in the node log because the registration had already happened — was
+compared against an empty list and classified as non-own.
+
+**Fix (minimal):** do not snapshot before the read.  A POST line can only be present in a
+node log if its registration already happened, so the own list is (re-)read **after** the
+logs are read and events built, immediately before the S2 evaluation loop.  The same fresh
+re-read is performed immediately before the S1 `own_inflight` computation (the `/state`
+fetch also elapses time), so neither signal ever reuses a stale list.  The ±2 s match
+window, the S2/S1 semantics and the public API are all unchanged.  The now-unused
+top-of-method capture was removed.
+
+**Regression test** (`test_s2_no_abort_when_own_registered_during_log_read`): the fake-ssh
+seam registers the own request *inside the second node's log read* (mirroring
+register-during-read) and freezes `_now()` at the POST epoch; asserts no abort and
+`cancel_event` clear.  Control test
+`test_s2_aborts_when_post_outside_own_window`: an empty-adjacent own list (nearest
+registration 10 s away) still aborts — proving S2 still has teeth.
+
+Before the fix (verbatim):
+
+```
+E       AssertionError: own POST @1791429597.0 registered during the log read was flagged as non-own: ['S2:non-own POST /v1/chat/completions @2026-10-07 22:19:57.000'] reason='ABORTED_USER_ARRIVED'
+E       assert True is False
+FAILED bench/phase20_tests/test_phase20_guard.py::test_s2_no_abort_when_own_registered_during_log_read
+1 failed, 1 passed in 0.04s
+```
+
+After the fix: `28 passed in 6.44s` (26 pre-existing + the 2 new tests).
+
+**Not verified live:** the real pilot (a live chunk with the harness under `ChunkGuard`);
+only the fake-ssh/fake-clock reproduction of the ordering is proven here.  The PM owns the
+live re-run.
+
