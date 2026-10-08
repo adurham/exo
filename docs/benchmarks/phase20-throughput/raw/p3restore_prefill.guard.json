@@ -1,0 +1,12 @@
+{
+ "label": "p3restore_prefill",
+ "t_start": 1791475507.534122,
+ "t_end": 1791475895.125519,
+ "aborted": false,
+ "reason": null,
+ "wall_cap_hit": false,
+ "own_requests": [
+  1791475507.5357928
+ ],
+ "signals_seen": []
+}

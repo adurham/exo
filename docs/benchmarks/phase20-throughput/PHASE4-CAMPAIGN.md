@@ -77,14 +77,52 @@ Each phase: impl → prove → A/B → battery → ship → doc. Run in order.
 6. Guard-engagement: next18-at-defaults reproduces ≈101.06 ms ±2% agentic same-session (equivalence AND
    engagement); also measure BENIGN on the new build (never measured for HIER-off: expect ≈95 ms).
 
-### 3c. P1 status
+### 3c. P1 status — **ABORTED (proof suite DIVERGED; not shipped; 0 relaunches spent)**
 
 - [x] Worktrees: `/private/tmp/next18-lever2` (branch `deploy/next18-lever2` from `3bf8316`),
       `/private/tmp/next18-exo` (branch `deploy/next18-identity` from `576e9d279`).
-- [ ] Implementation + unit tests
-- [ ] Proof suite 1-3 (offline, laptop)
-- [ ] Battery + A/B on cluster (R1)
-- [ ] Ship / abort decision
+- [x] Implementation + unit tests — `indexer.py:546` `if _HIER and n > _FENCE_MIN_ROWS:`;
+      shared `deepseek_v41/_gates.py`; `sparse_attention.py` imports the same symbol.
+- [x] Proof suite 1 (`tests/test_dsv41_indexer_smallm_hier.py`, 2045 cells) — **FAIL → ABORT**
+- [x] Independent PM reproduction of the divergence (below)
+- [x] Committed + pushed: `deploy/next18-lever2` @ `938b811` (proof `d4531e2`; capture harness
+      `bench/next18_capture.py`). **Production unchanged (`576e9d279`); no relaunch spent.**
+
+#### 3d. Proof result (the load-bearing finding)
+
+`tests/test_dsv41_indexer_smallm_hier.py` → **2045 cases, 1106 equal, 939 DIVERGENT**, all at
+`n <= 16` (decode m=1, verify m=4). `n=17` (HIER on both sides) is identically 0-diff. Deterministic
+across reruns; path-boundary assertions PASS (n=1,4,15,16 → fallback; 17,18,32 → HIER); RED/GREEN
+sabotage controls PASS (comparator detects a 1-slot diff; overfetch=0 on real keys loses 7 slots).
+
+Minimal reproducing cell: `role=plain, n=1, nb=4096, k=511` → 261/511 slots differ.
+
+**Root cause (PM, independently reproduced on the laptop GPU):**
+```
+fallback(fp32 row) vs hier        : 0 diffs / 165,924 slots (12 seeds × 5 shapes)
+fallback(bf16 row) vs hier        : 264 diffs (the production config)
+fallback(bf16 row) vs fallback(fp32): 264 diffs
+```
+The hierarchical path exact-rescores in **fp32**; the fallback `_tiled_scores_buffer` /
+untiled reference path **stores the row in `_ROW_DTYPE` = bf16** (`DSV41_INDEXER_ROW_BF16`
+default 1). At the k-th boundary the bf16 row creates **ties** the fp32 row does not have, and the
+two `argpartition`s break them differently. So the guard would change decode/verify output vs the
+shipped next17 build — **not** a near-tie margin issue: it is a real semantic gap between the two
+branches of the same `Indexer.__call__`, confirmed *against* §7's stated worry. Setting
+`DSV41_INDEXER_ROW_BF16=0` removes the *continuous-data* divergence (0/165k) but the engineered
+bf16 near-tie / overfetch-boundary cells **still diverge** → `overfetch=16` is genuinely a
+heuristic, so the frozen abort rule (ties count as divergence) fires regardless.
+
+**Verdict:** lever-2 code guard **does not ship**. next17 remains production. The lever-2 *value*
+(29 ms/round) is real but only reachable via an env flip (`DSV41_INDEXER_HIER=0`) that trades
+output for speed — a genuine speed-vs-output tradeoff, reported honestly, **not** papered over.
+Constructive path for a future round (documented, not attempted here): make the small-n fallback
+rank on an **fp32 row** (cheap at n=1/[1,4]) so both branches share one precision, and re-run this
+suite to green *including* the engineered tie cells — i.e. bound the overfetch residual or emit a
+runtime certificate — before anyone ships the guard.
+
+**Budget: P1 spent 0 relaunches** (proof was off-line). Proceeding to P2.
+
 
 ## 4. P2 / P3 / P5 — see their own sections, appended as reached.
 

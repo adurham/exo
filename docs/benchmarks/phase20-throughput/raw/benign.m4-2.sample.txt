@@ -1,0 +1,1438 @@
+Analysis of sampling python (pid 3958) every 1 millisecond
+Process:         python3.13 [3958]
+Path:            /Users/USER/*/python3.13
+Load Address:    0x100568000
+Identifier:      python3.13
+Version:         ???
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.13 [3871]
+Target Type:     live task (Roots Present)
+
+Date/Time:       2026-10-08 00:11:44.863 -0500
+Launch Time:     2026-10-07 17:04:45.503 -0500
+OS Version:      macOS 27.0 (26A428)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         104.0G
+Physical footprint (peak):  113.6G
+Idle exit:                  untracked
+----
+
+Call graph:
+    18629 Thread_27873   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 18629 start  (in dyld) + 6688  [0x19e963e80]
+    +   18629 Py_BytesMain  (in libpython3.13.dylib) + 36  [0x101af1414]
+    +     18629 pymain_main  (in libpython3.13.dylib) + 468  [0x101af15f4]
+    +       18629 Py_RunMain  (in libpython3.13.dylib) + 892  [0x101afb738]
+    +         18629 _PyRun_SimpleStringFlagsWithName  (in libpython3.13.dylib) + 280  [0x101b3d838]
+    +           18629 run_mod.llvm.18281762391043294983  (in libpython3.13.dylib) + 148  [0x101943104]
+    +             18629 run_eval_code_obj  (in libpython3.13.dylib) + 144  [0x101943b90]
+    +               18629 PyEval_EvalCode  (in libpython3.13.dylib) + 132  [0x101943ce8]
+    +                 18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 75208  [0x101991f40]
+    +                   18629 method_vectorcall_VARARGS_KEYWORDS.llvm.8371976158726395142  (in libpython3.13.dylib) + 144  [0x10193ccd0]
+    +                     18629 lock_PyThread_acquire_lock  (in libpython3.13.dylib) + 60  [0x101a73bdc]
+    +                       18629 _PyMutex_LockTimed  (in libpython3.13.dylib) + 480  [0x101a73df4]
+    +                         18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                           18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                             18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                               18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_27881
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18627 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 52948  [0x10198c84c]
+    +           ! 18624 time_sleep  (in libpython3.13.dylib) + 248  [0x101cbcb6c]
+    +           ! : 18624 nanosleep  (in libsystem_c.dylib) + 220  [0x19ebcf054]
+    +           ! :   18621 __semwait_signal  (in libsystem_kernel.dylib) + 8,16  [0x19ecf8308,0x19ecf8310]
+    +           ! :   3 __semwait_signal  (in libsystem_kernel.dylib) + 28  [0x19ecf831c]
+    +           ! :     3 cerror  (in libsystem_kernel.dylib) + 44  [0x19ecf65f8]
+    +           ! :       3 _pthread_exit_if_canceled  (in libsystem_pthread.dylib) + 0  [0x19ed33958]
+    +           ! 1 time_sleep  (in libpython3.13.dylib) + 256  [0x101cbcb74]
+    +           ! : 1 __error  (in libsystem_kernel.dylib) + 0  [0x19ecf5604]
+    +           ! 1 time_sleep  (in libpython3.13.dylib) + 268  [0x101cbcb80]
+    +           ! : 1 PyEval_RestoreThread  (in libpython3.13.dylib) + 56  [0x1019fec28]
+    +           ! :   1 take_gil.llvm.8914855522214485887  (in libpython3.13.dylib) + 60  [0x1019fecf0]
+    +           ! 1 time_sleep  (in libpython3.13.dylib) + 248  [0x101cbcb6c]
+    +           2 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 160592,242824  [0x1019a6cc8,0x1019bae00]
+    18629 Thread_27882
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 75208  [0x101991f40]
+    +             18629 method_vectorcall_VARARGS_KEYWORDS.llvm.8371976158726395142  (in libpython3.13.dylib) + 144  [0x10193ccd0]
+    +               18629 lock_PyThread_acquire_lock  (in libpython3.13.dylib) + 60  [0x101a73bdc]
+    +                 18629 _PyMutex_LockTimed  (in libpython3.13.dylib) + 480  [0x101a73df4]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_27883
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 115880  [0x10199be20]
+    +             18629 slot_tp_iternext  (in libpython3.13.dylib) + 52  [0x101c2b978]
+    +               18629 vectorcall_method  (in libpython3.13.dylib) + 192  [0x10191e464]
+    +                 18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 51944  [0x10198c460]
+    +                   18629 os_read  (in libpython3.13.dylib) + 280  [0x101c97744]
+    +                     18629 _Py_read  (in libpython3.13.dylib) + 140  [0x101a76800]
+    +                       18629 read  (in libsystem_kernel.dylib) + 8  [0x19ecf5910]
+    18629 Thread_28651
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::__thread_proxy[abi:nqe220106]<std::tuple<std::unique_ptr<std::__thread_struct>, void (mlx::core::scheduler::StreamThread::*)(), mlx::core::scheduler::StreamThread*>>(void*)  (in libmlx.dylib) + 72  [0x10a61ae10]
+    +       18629 mlx::core::scheduler::StreamThread::thread_fn()  (in libmlx.dylib) + 196  [0x10a61a8b8]
+    +         18629 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x19ec4a7bc]
+    +           18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +             18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29903
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29904
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29905
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29906
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29907
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29908
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29909
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29910
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29911
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29912
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29913
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29914
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29915
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29916
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29917
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29918
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29919
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29920
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29921
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29922
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29923
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29924
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29925
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29926
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29927
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29928
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29929
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29930
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29931
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29932
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29933
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_29934
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+    +       18629 thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+    +         18629 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+    +           18629 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+    +             18629 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+    +               18629 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+    +                 18629 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+    +                   18629 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+    +                     18629 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+    +                       18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                         18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30820
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30821
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30822
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30823
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30824
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30825
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30826
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30827
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30828
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30829
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30830
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30831
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30832
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30833
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30834
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30835
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+    +       18629 core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+    +         18629 std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+    +           18629 rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+    +             18629 rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+    +               18629 rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+    +                 18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +                   18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_30836
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::__thread_proxy[abi:nqe220106]<std::tuple<std::unique_ptr<std::__thread_struct>, void (mlx::core::scheduler::StreamThread::*)(), mlx::core::scheduler::StreamThread*>>(void*)  (in libmlx.dylib) + 72  [0x10a61ae10]
+    +       18629 mlx::core::scheduler::StreamThread::thread_fn()  (in libmlx.dylib) + 196  [0x10a61a8b8]
+    +         18629 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x19ec4a7bc]
+    +           18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +             18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18629 Thread_48238
+    + 18629 thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+    +   18629 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+    +     18629 std::__thread_proxy[abi:nqe220106]<std::tuple<std::unique_ptr<std::__thread_struct>, void (mlx::core::scheduler::StreamThread::*)(), mlx::core::scheduler::StreamThread*>>(void*)  (in libmlx.dylib) + 72  [0x10a61ae10]
+    +       18629 mlx::core::scheduler::StreamThread::thread_fn()  (in libmlx.dylib) + 196  [0x10a61a8b8]
+    +         18629 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x19ec4a7bc]
+    +           18629 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+    +             18629 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19ecf850c]
+    18628 Thread_364699
+    + 18628 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x19ed34ce0]
+    +   18628 _pthread_wqthread  (in libsystem_pthread.dylib) + 368  [0x19ed35fe8]
+    +     18628 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x19ecf69ec]
+    18628 Thread_374489
+    + 18628 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x19ed34ce0]
+    +   18628 _pthread_wqthread  (in libsystem_pthread.dylib) + 368  [0x19ed35fe8]
+    +     18628 __workq_kernreturn  (in libsystem_kernel.dylib) + 8  [0x19ecf69ec]
+    1 Thread_364699   DispatchQueue_2: com.apple.libdispatch-manager  (serial)
+    + 1 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x19ed34ce0]
+    +   1 _pthread_wqthread  (in libsystem_pthread.dylib) + 348  [0x19ed35fd4]
+    +     1 _dispatch_kevent_worker_thread  (in libdispatch.dylib) + 444  [0x19eb8b45c]
+    +       1 _dispatch_event_loop_drain_timers  (in libdispatch.dylib) + 416  [0x19eb992f8]
+    +         1 _dispatch_source_wakeup  (in libdispatch.dylib) + 0  [0x19eb8f444]
+    1 Thread_374489   DispatchQueue_44: com.Metal.DeviceDispatchQueue  (serial)
+      1 start_wqthread  (in libsystem_pthread.dylib) + 8  [0x19ed34ce0]
+        1 _pthread_wqthread  (in libsystem_pthread.dylib) + 292  [0x19ed35f9c]
+          1 _dispatch_workloop_worker_thread  (in libdispatch.dylib) + 720  [0x19eb8b85c]
+            1 _dispatch_root_queue_drain_deferred_wlh  (in libdispatch.dylib) + 284  [0x19eb8bf58]
+              1 _dispatch_lane_invoke  (in libdispatch.dylib) + 392  [0x19eb81abc]
+                1 _dispatch_lane_serial_drain  (in libdispatch.dylib) + 332  [0x19eb80e24]
+                  1 _dispatch_source_invoke  (in libdispatch.dylib) + 848  [0x19eb8ef7c]
+                    1 _dispatch_source_latch_and_call  (in libdispatch.dylib) + 392  [0x19eb902a8]
+                      1 _dispatch_continuation_pop  (in libdispatch.dylib) + 596  [0x19eb7d1b4]
+                        1 _dispatch_client_callout  (in libdispatch.dylib) + 16  [0x19eb925a0]
+                          1 -[IOGPUMetalDevice periodicUpdateResourcePoolPurgeability]  (in IOGPU) + 96  [0x1c643eb30]
+                            1 -[IOGPUMetalResourcePool updateResourcePurgeability]  (in IOGPU) + 128  [0x1c642c838]
+                              1 -[IOGPUMetalResource setPurgeableState:]  (in IOGPU) + 280  [0x1c642ba44]
+                                1 IOGPUResourceSetPurgeable  (in IOGPU) + 60  [0x1c6432a00]
+                                  1 iokit_user_client_trap  (in IOKit) + 8  [0x1a3234cc0]
+
+Total number in stack (recursive counted multiple, when >=5):
+        54       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19ed39d00]
+        54       thread_start  (in libsystem_pthread.dylib) + 8  [0x19ed34cec]
+        53       __psynch_cvwait  (in libsystem_kernel.dylib) + 0  [0x19ecf8504]
+        53       _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19ed3a1d0]
+        35       method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x101c06dec]
+        35       pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x1021ac8b0]
+        35       thread_run  (in libpython3.13.dylib) + 160  [0x101b0e3b0]
+        34       _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x101a73f80]
+        34       _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x101a7426c]
+        32       _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10198f30c]
+        32       _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x1021e6758]
+        32       _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x1021e6a60]
+        32       method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x101c0a9f8]
+        16       core::ops::function::FnOnce::call_once$u7b$$u7b$vtable.shim$u7d$$u7d$::h66b9211d006d0b92  (in tokenizers.abi3.so) + 272  [0x11498c28c]
+        16       rayon_core::registry::ThreadBuilder::run::he4898907ec568577  (in tokenizers.abi3.so) + 300  [0x1149862d0]
+        16       rayon_core::registry::WorkerThread::wait_until_cold::ha2591be0ae2726c8  (in tokenizers.abi3.so) + 248  [0x114a09308]
+        16       rayon_core::sleep::Sleep::sleep::he6f4b45d38f0c658  (in tokenizers.abi3.so) + 504  [0x114a09cf8]
+        16       std::sys::backtrace::__rust_begin_short_backtrace::hc5f2a408cf1c9855  (in tokenizers.abi3.so) + 52  [0x11498b56c]
+        16       std::sys::thread::unix::Thread::new::thread_start::h98270432b6aefc44  (in tokenizers.abi3.so) + 52  [0x1149bce0c]
+
+Sort by top of stack, same collapsed (when >= 5):
+        __psynch_cvwait  (in libsystem_kernel.dylib)        987337
+        __workq_kernreturn  (in libsystem_kernel.dylib)        37256
+        read  (in libsystem_kernel.dylib)        18629
+        __semwait_signal  (in libsystem_kernel.dylib)        18621
+
+Binary Images:
+       0x100568000 -        0x10056967f +python3.13 (???) <4C4C44B1-5555-3144-A181-BEDDBCEDFA6B> /Users/*/python3.13
+       0x1007ac000 -        0x1007b4ce3 +_psutil_osx.abi3.so (0) <A07C6601-F106-3445-B797-9E730954BDC0> /Users/*/_psutil_osx.abi3.so
+       0x101888000 -        0x1018c4fdf +_yaml.cpython-313-darwin.so (0) <DAF9015F-72DD-3BFE-B679-377D3B6E39A9> /Users/*/_yaml.cpython-313-darwin.so
+       0x1018f4000 -        0x1025ff467 +libpython3.13.dylib (3.13) <4C4C4498-5555-3144-A1A2-AAE8C83E25A8> /Users/*/libpython3.13.dylib
+       0x106fd8000 -        0x10739152f +_pydantic_core.cpython-313-darwin.so (0) <8DF4FF9C-37FC-329A-B665-94F01317B8DC> /Users/*/_pydantic_core.cpython-313-darwin.so
+       0x107678000 -        0x10767bfff +libtorch_global_deps.dylib (0) <3E9D5DAF-023C-39A7-9D2E-F7A7EB9010C5> /Users/*/libtorch_global_deps.dylib
+       0x107680000 -        0x107680ec3 +_speedups.cpython-313-darwin.so (0) <17AB7E07-A7AC-3A0C-84E0-4812FFAB207B> /Users/*/_speedups.cpython-313-darwin.so
+       0x107690000 -        0x107693fff +libtorch.dylib (0) <0F8D6626-5278-3934-9CF0-9A0C51976859> /Users/*/libtorch.dylib
+       0x10769c000 -        0x107733ff7 +backend_c.cpython-313-darwin.so (0) <90984979-4321-389A-8EEC-B7F3D09C8F73> /Users/*/backend_c.cpython-313-darwin.so
+       0x108558000 -        0x10856fff3 +_umath_linalg.cpython-313-darwin.so (0) <FF72B3B7-3538-3670-8B97-763B7562B062> /Users/*/_umath_linalg.cpython-313-darwin.so
+       0x108594000 -        0x108595963 +libXau.6.dylib (0) <CBBC6AAD-C544-3D83-A1C4-59709F2BDECA> /Users/*/libXau.6.dylib
+       0x1085a8000 -        0x1085abfff +_C.cpython-313-darwin.so (0) <730DE730-5BA2-36A6-9538-9B6B8CF0C850> /Users/*/_C.cpython-313-darwin.so
+       0x1085b8000 -        0x1089e7fff +rustworkx.abi3.so (0) <815DC739-0D05-388F-967B-641461018A79> /Users/*/rustworkx.abi3.so
+       0x108b1c000 -        0x108b64893 +_core.cpython-313-darwin.so (0) <888A1137-A1F1-324F-94F0-832982698C9E> /Users/*/_core.cpython-313-darwin.so
+       0x108c80000 -        0x108c9aebf +libz.1.3.1.zlib-ng.dylib (0) <A0DBEA0E-227E-3C20-8CEF-DEC8CB0977EB> /Users/*/libz.1.3.1.zlib-ng.dylib
+       0x108cac000 -        0x108cb3fff +_check_build.cpython-313-darwin.so (0) <501F141C-C611-3D71-A189-6DB5DF1AA77F> /Users/*/_check_build.cpython-313-darwin.so
+       0x108cc4000 -        0x108ccbffb +libshm.dylib (0) <24C09D17-F38F-3E42-A157-CF6A98EF72A1> /Users/*/libshm.dylib
+       0x108cdc000 -        0x108ce7ffb +_sfc64.cpython-313-darwin.so (0) <52272A3E-641F-3E03-B501-2AC11B6BAC19> /Users/*/_sfc64.cpython-313-darwin.so
+       0x108cf4000 -        0x108cf7fff +md.cpython-313-darwin.so (0) <EFD0CA32-9BC7-310F-98F3-390B2B838F8F> /Users/*/md.cpython-313-darwin.so
+       0x108d04000 -        0x108d07fff +_zeros.cpython-313-darwin.so (0) <1296CE04-E1D9-3467-9B3A-83AF54330AED> /Users/*/_zeros.cpython-313-darwin.so
+       0x108d14000 -        0x108e7104b +core.cpython-313-darwin.so (0) <74DA1D2D-8EAF-3E6F-B96F-C71EB2245662> /Users/*/core.cpython-313-darwin.so
+       0x1090a8000 -        0x109105faf +_imaging.cpython-313-darwin.so (0) <0C5696C1-0CFE-30AC-8108-576E35E543DD> /Users/*/_imaging.cpython-313-darwin.so
+       0x109134000 -        0x10913bffb +_comb.cpython-313-darwin.so (0) <5E51C7E1-E543-3944-8BD5-7C36FCEBEBA7> /Users/*/_comb.cpython-313-darwin.so
+       0x109148000 -        0x10933e237 +libjaccl.dylib (0) <59FC7D6E-5CD1-382D-B894-5D2D953C6819> /Users/*/libjaccl.dylib
+       0x1093e8000 -        0x10940c7ff +libxcb.1.1.0.dylib (0) <B8CC0BB4-84BD-3527-9E9B-0B07096D9206> /Users/*/libxcb.1.1.0.dylib
+       0x10942c000 -        0x109466587 +liblzma.5.dylib (0) <1269E243-AB01-393C-B865-252735A667D7> /Users/*/liblzma.5.dylib
+       0x10947c000 -        0x10949bff3 +bit_generator.cpython-313-darwin.so (0) <90535B9D-A129-3498-B6FD-CDA6FCDE246B> /Users/*/bit_generator.cpython-313-darwin.so
+       0x1094ac000 -        0x10954c7b7 +_regex.cpython-313-darwin.so (0) <B10045D9-5913-3791-81DC-9343A5CD1438> /Users/*/_regex.cpython-313-darwin.so
+       0x1098f4000 -        0x109bdffff +_multiarray_umath.cpython-313-darwin.so (0) <56D79654-A403-3AAC-AF57-4DDDC9C3BD19> /Users/*/_multiarray_umath.cpython-313-darwin.so
+       0x109f90000 -        0x10a02fa83 +libtiff.6.dylib (0) <6374B130-FFD6-3443-A718-C6417D6376B2> /Users/*/libtiff.6.dylib
+       0x10a050000 -        0x10a063fff +_pcg64.cpython-313-darwin.so (0) <711C0BEC-51D9-30BF-9877-62E7C28ABCB7> /Users/*/_pcg64.cpython-313-darwin.so
+       0x10a074000 -        0x10a083ffb +_ccallback_c.cpython-313-darwin.so (0) <78CBD5C7-D73E-3CA7-B405-1DABED1DD245> /Users/*/_ccallback_c.cpython-313-darwin.so
+       0x10a390000 -        0x10a415737 +libjpeg.62.4.0.dylib (0) <B38C6ECA-D6C6-395E-BAD3-8758E8B02F03> /Users/*/libjpeg.62.4.0.dylib
+       0x10a430000 -        0x10a45bfff +_common.cpython-313-darwin.so (0) <856C7322-0A6A-344A-AC8A-21678A041C08> /Users/*/_common.cpython-313-darwin.so
+       0x10a46c000 -        0x10a473ff7 +_matfuncs_schur_sqrtm.cpython-313-darwin.so (0) <906266A7-F391-36FF-8024-1ED69D50E294> /Users/*/_matfuncs_schur_sqrtm.cpython-313-darwin.so
+       0x10a488000 -        0x10b5145cf +libmlx.dylib (0) <216574D5-0E59-375B-BBBB-4C6669BDBB6D> /Users/*/libmlx.dylib
+       0x10f9ac000 -        0x10fa372f7 +libopenjp2.2.5.4.dylib (0) <FB411FFE-72B1-30C1-94C9-D579EDFD5808> /Users/*/libopenjp2.2.5.4.dylib
+       0x10fc5c000 -        0x10fcffff7 +libc10.dylib (0) <8D97C466-D00B-36C7-8E36-A2E591A516BD> /Users/*/libc10.dylib
+       0x10fd68000 -        0x10fde3fff +libomp.dylib (0) <38C5AA50-6BAD-3764-BF27-3FAD9AAB41AC> /Users/*/libomp.dylib
+       0x111728000 -        0x111767fff +_pocketfft_umath.cpython-313-darwin.so (0) <ED0DB05D-5CE6-33EB-B203-B89A555B4D50> /Users/*/_pocketfft_umath.cpython-313-darwin.so
+       0x11177c000 -        0x11178ffff +_mt19937.cpython-313-darwin.so (0) <F3581A12-92B8-3528-A641-1853C565622F> /Users/*/_mt19937.cpython-313-darwin.so
+       0x1117ac000 -        0x112857ffb +libtorch_python.dylib (0) <3E639508-707B-3880-BB5E-F720E444D78C> /Users/*/libtorch_python.dylib
+       0x114570000 -        0x1145a7ff7 +_bounded_integers.cpython-313-darwin.so (0) <1EA64AEA-E640-3D43-A4AE-060880401371> /Users/*/_bounded_integers.cpython-313-darwin.so
+       0x1145b8000 -        0x1145c7ffb +_philox.cpython-313-darwin.so (0) <0A194133-85DE-3E9B-9E88-F2E41E9F12F3> /Users/*/_philox.cpython-313-darwin.so
+       0x1145d8000 -        0x1145e7ffb +_ellip_harm_2.cpython-313-darwin.so (0) <F2ED0FAD-2F33-31D1-8FE6-E15B574B7F9F> /Users/*/_ellip_harm_2.cpython-313-darwin.so
+       0x1145f4000 -        0x1145f7ff3 +_rank_filter_1d.cpython-313-darwin.so (0) <C9D2EE72-26A9-306A-B11D-F88894885D10> /Users/*/_rank_filter_1d.cpython-313-darwin.so
+       0x114604000 -        0x11461fffb +_cyutility.cpython-313-darwin.so (0) <CB6A891A-08AC-3E12-A3FB-3B88B8D1D8A0> /Users/*/_cyutility.cpython-313-darwin.so
+       0x114630000 -        0x11463fff3 +_decomp_lu_cython.cpython-313-darwin.so (0) <602CFCDE-51FC-3F87-A404-86227F9C9AFC> /Users/*/_decomp_lu_cython.cpython-313-darwin.so
+       0x114654000 -        0x114bdbf8f +tokenizers.abi3.so (0) <D862101D-4549-32CB-B2D9-914D753D9ECA> /Users/*/tokenizers.abi3.so
+       0x115e38000 -        0x115e47ff3 +_solve_toeplitz.cpython-313-darwin.so (0) <2C53306B-7372-328C-AB08-F8BA4AFDA045> /Users/*/_solve_toeplitz.cpython-313-darwin.so
+       0x115e58000 -        0x115e5bfff +_heap.cpython-313-darwin.so (0) <7BB4D6B5-0DB8-3615-859E-DDFAE57E0475> /Users/*/_heap.cpython-313-darwin.so
+       0x115e68000 -        0x115e87fff +_specfun.cpython-313-darwin.so (0) <FF982D08-9155-322C-8FA4-3E8CC7983FFB> /Users/*/_specfun.cpython-313-darwin.so
+       0x115e98000 -        0x115eabfff +_batched_linalg.cpython-313-darwin.so (0) <481043A2-EBA5-3092-87F9-DB57E4340398> /Users/*/_batched_linalg.cpython-313-darwin.so
+       0x115eb8000 -        0x115ebffff +_lbfgsb.cpython-313-darwin.so (0) <615726A1-33ED-3439-93A6-2741D4521654> /Users/*/_lbfgsb.cpython-313-darwin.so
+       0x115ed8000 -        0x115f63fff +_generator.cpython-313-darwin.so (0) <56A37631-F001-3DBF-9204-15C597FD8EA3> /Users/*/_generator.cpython-313-darwin.so
+       0x115f7c000 -        0x115febffb +mtrand.cpython-313-darwin.so (0) <BF5EEFAC-1A22-350E-A36D-A0CA73E10652> /Users/*/mtrand.cpython-313-darwin.so
+       0x116e00000 -        0x116e27ffb +md__mypyc.cpython-313-darwin.so (0) <A4962FEC-1EA9-3925-800F-586FEE1D01D0> /Users/*/md__mypyc.cpython-313-darwin.so
+       0x116e40000 -        0x116e93ff3 +_csparsetools.cpython-313-darwin.so (0) <A6E9520E-709B-3172-A298-B9F8137E2517> /Users/*/_csparsetools.cpython-313-darwin.so
+       0x116ea4000 -        0x116eb3fff +_matfuncs_expm.cpython-313-darwin.so (0) <306F3777-9589-383A-905C-8FA2CD8FC5F6> /Users/*/_matfuncs_expm.cpython-313-darwin.so
+       0x116ec0000 -        0x116ecbfff +messagestream.cpython-313-darwin.so (0) <659FA065-1D00-3B7F-B9AE-D3E7D67741E5> /Users/*/messagestream.cpython-313-darwin.so
+       0x116ed8000 -        0x116ee3ff7 +_voronoi.cpython-313-darwin.so (0) <2B6D7320-4B5B-31DD-AD2A-FC34CB3F4274> /Users/*/_voronoi.cpython-313-darwin.so
+       0x116ef8000 -        0x116fa7ff7 +_safetensors_rust.abi3.so (0) <79CE966F-A30A-365E-85BE-01D8BA336275> /Users/*/_safetensors_rust.abi3.so
+       0x1175f0000 -        0x11764bff3 +_gufuncs.cpython-313-darwin.so (0) <BFEE6416-0E47-3CF6-800E-EECAEE064BB3> /Users/*/_gufuncs.cpython-313-darwin.so
+       0x11768c000 -        0x11768ffff +_sorting.cpython-313-darwin.so (0) <460A0EF0-5FFC-3B70-BF79-FD827021411E> /Users/*/_sorting.cpython-313-darwin.so
+       0x11769c000 -        0x117733ff7 +_ufuncs.cpython-313-darwin.so (0) <4A9BFDD2-11E7-31E1-98FF-8A8B99DCF825> /Users/*/_ufuncs.cpython-313-darwin.so
+       0x11774c000 -        0x117757fff +_hausdorff.cpython-313-darwin.so (0) <2A2B94A9-FA35-3ED6-8478-2867641B5980> /Users/*/_hausdorff.cpython-313-darwin.so
+       0x117764000 -        0x117a63ff7 +_sparsetools.cpython-313-darwin.so (0) <C082A52C-2476-35F6-9DDB-85B96C3A6E99> /Users/*/_sparsetools.cpython-313-darwin.so
+       0x117bd8000 -        0x117c0bfff +_cythonized_array_utils.cpython-313-darwin.so (0) <7BE9FEB4-E5C7-3F84-9216-6348C51C98B5> /Users/*/_cythonized_array_utils.cpython-313-darwin.so
+       0x117c24000 -        0x117d13fff +_ufuncs_cxx.cpython-313-darwin.so (0) <5473D13A-4435-3130-BDE1-CE0DFF6240CA> /Users/*/_ufuncs_cxx.cpython-313-darwin.so
+       0x117d70000 -        0x117e57ffb +_special_ufuncs.cpython-313-darwin.so (0) <89613A9E-09A8-3126-A5EA-CBC4F3DAEC5F> /Users/*/_special_ufuncs.cpython-313-darwin.so
+       0x117f88000 -        0x117f9ffff +_linalg_pythran.cpython-313-darwin.so (0) <CBCACE5D-B79C-3269-B14C-C9AD9CE3F685> /Users/*/_linalg_pythran.cpython-313-darwin.so
+       0x117fac000 -        0x117fbbffb +cython_blas.cpython-313-darwin.so (0) <A4C0B7FA-2F8B-3343-9C3C-1368AA365082> /Users/*/cython_blas.cpython-313-darwin.so
+       0x117fd0000 -        0x117fefffb +_arpacklib.cpython-313-darwin.so (0) <E2FC982E-07B4-3932-B138-79976581BCA0> /Users/*/_arpacklib.cpython-313-darwin.so
+       0x117ffc000 -        0x118003fff +_slsqplib.cpython-313-darwin.so (0) <7E7BA43B-9474-3D3A-8C4D-24602AFF485A> /Users/*/_slsqplib.cpython-313-darwin.so
+       0x118010000 -        0x11805fffa +_fblas.cpython-313-darwin.so (0) <759F5E64-C9F7-3AF5-B89F-F48101617F6B> /Users/*/_fblas.cpython-313-darwin.so
+       0x118098000 -        0x1180b7ffb +cython_lapack.cpython-313-darwin.so (0) <0CEC601B-E079-3586-AB6A-502FAC7CA59E> /Users/*/cython_lapack.cpython-313-darwin.so
+       0x1181f4000 -        0x11821ffff +_decomp_update.cpython-313-darwin.so (0) <CDA4EDD2-5E8D-3818-90C3-0644DCB89AB6> /Users/*/_decomp_update.cpython-313-darwin.so
+       0x118230000 -        0x118247fff +_propack.cpython-313-darwin.so (0) <BD76D810-98B3-3EC4-AD78-BFB8DFB0B650> /Users/*/_propack.cpython-313-darwin.so
+       0x118264000 -        0x118373fff +_flapack.cpython-313-darwin.so (0) <07AB56A3-F771-3A6E-9B7F-039EDB7F0044> /Users/*/_flapack.cpython-313-darwin.so
+       0x118430000 -        0x11843fff7 +_distance_wrap.cpython-313-darwin.so (0) <C07EA6FF-E42D-35C9-A028-D73C197672C9> /Users/*/_distance_wrap.cpython-313-darwin.so
+       0x11844c000 -        0x118457fff +_group_columns.cpython-313-darwin.so (0) <ECA6F48B-1142-3D07-8EDB-42301354A4E8> /Users/*/_group_columns.cpython-313-darwin.so
+       0x118464000 -        0x11846bffb +givens_elimination.cpython-313-darwin.so (0) <8550C1AF-0715-3F10-9834-4B7C4A33E72B> /Users/*/givens_elimination.cpython-313-darwin.so
+       0x118478000 -        0x1184afff7 +_superlu.cpython-313-darwin.so (0) <E2219216-3C39-3A55-97E0-D46070E77C9D> /Users/*/_superlu.cpython-313-darwin.so
+       0x1184c0000 -        0x1184c7ff3 +_lsap.cpython-313-darwin.so (0) <9767D026-ECE6-396D-A300-43CCF0F0E362> /Users/*/_lsap.cpython-313-darwin.so
+       0x1184dc000 -        0x1184ebff7 +_minpack.cpython-313-darwin.so (0) <0C832310-6572-3179-B440-3797F1F9DB3D> /Users/*/_minpack.cpython-313-darwin.so
+       0x1184f8000 -        0x11851fff7 +_rigid_transform_cy.cpython-313-darwin.so (0) <FF81787E-38B3-3632-8107-0209A026C14D> /Users/*/_rigid_transform_cy.cpython-313-darwin.so
+       0x118540000 -        0x1185a7ffb +_ckdtree.cpython-313-darwin.so (0) <57FB6416-8CE0-3E60-8FE2-42FDC06D1AD5> /Users/*/_ckdtree.cpython-313-darwin.so
+       0x1185c0000 -        0x118613ff3 +_rotation_cy.cpython-313-darwin.so (0) <771A5AFE-93CC-3216-86F3-020850351CA1> /Users/*/_rotation_cy.cpython-313-darwin.so
+       0x118624000 -        0x11863fffb +_trlib.cpython-313-darwin.so (0) <0D5629D3-9C98-37BA-B5F7-899D1BE90DF6> /Users/*/_trlib.cpython-313-darwin.so
+       0x118650000 -        0x118657ff7 +_direct.cpython-313-darwin.so (0) <B6307EE8-6793-3EEC-B967-1ECB4FEA1AB0> /Users/*/_direct.cpython-313-darwin.so
+       0x118670000 -        0x11870bff7 +_qhull.cpython-313-darwin.so (0) <D826C910-771A-3945-BA54-5DBA8176CF41> /Users/*/_qhull.cpython-313-darwin.so
+       0x118720000 -        0x118783ff7 +_distance_pybind.cpython-313-darwin.so (0) <EFDB62F1-F75B-33D7-98AE-724F21974A33> /Users/*/_distance_pybind.cpython-313-darwin.so
+       0x1189ac000 -        0x1189c3ff7 +_moduleTNC.cpython-313-darwin.so (0) <84C280AE-F685-341F-9F44-2033D700F618> /Users/*/_moduleTNC.cpython-313-darwin.so
+       0x1189d0000 -        0x1189dfff3 +_uarray.cpython-313-darwin.so (0) <3F907EE5-13AB-3BF3-8B7C-B129F296B797> /Users/*/_uarray.cpython-313-darwin.so
+       0x1189f0000 -        0x1189f7ffb +levyst.cpython-313-darwin.so (0) <BFA810F5-E966-3FD6-A2F1-B94F89764996> /Users/*/levyst.cpython-313-darwin.so
+       0x118a08000 -        0x118a13ff7 +_odepack.cpython-313-darwin.so (0) <B4941777-A6F7-3DFF-9CD0-7482E57C0450> /Users/*/_odepack.cpython-313-darwin.so
+       0x118a20000 -        0x118a2533f +pandas_parser.cpython-313-darwin.so (0) <21C9C3DF-EA55-3BE1-8B06-1759798EE25F> /Users/*/pandas_parser.cpython-313-darwin.so
+       0x118a34000 -        0x118a77ff3 +_highs_options.cpython-313-darwin.so (0) <BC76C8FD-DAFF-3278-AE28-59A53E544D2A> /Users/*/_highs_options.cpython-313-darwin.so
+       0x118a98000 -        0x118aa3fff +_dop.cpython-313-darwin.so (0) <08E0724E-F475-3A3E-A46E-0AEFFA92C301> /Users/*/_dop.cpython-313-darwin.so
+       0x118bd0000 -        0x118bebffb +_bglu_dense.cpython-313-darwin.so (0) <C6714275-2605-3569-BDF0-94355B46B7B1> /Users/*/_bglu_dense.cpython-313-darwin.so
+       0x118bfc000 -        0x118c1bffb +_pava_pybind.cpython-313-darwin.so (0) <461D5034-53E2-38C2-BF93-6EEA07E5339D> /Users/*/_pava_pybind.cpython-313-darwin.so
+       0x118c34000 -        0x118c3a877 +pandas_datetime.cpython-313-darwin.so (0) <C8733E66-724E-3BB3-AAD5-64F70894B15F> /Users/*/pandas_datetime.cpython-313-darwin.so
+       0x118c58000 -        0x118ccfffb +_decomp_interpolative.cpython-313-darwin.so (0) <413A8A5A-B3E1-3926-91AF-CA593C84E99C> /Users/*/_decomp_interpolative.cpython-313-darwin.so
+       0x118ce0000 -        0x118ceffff +_quadpack.cpython-313-darwin.so (0) <9D7D80AD-273B-37F4-AEF5-A13306A5E339> /Users/*/_quadpack.cpython-313-darwin.so
+       0x118cfc000 -        0x118d0ffff +_vode.cpython-313-darwin.so (0) <787EA633-6EAF-330D-8FAC-FDE79F363C76> /Users/*/_vode.cpython-313-darwin.so
+       0x118d1c000 -        0x118d2bfff +_fitpack.cpython-313-darwin.so (0) <83D91A21-884D-3CED-8C3E-6D97D3045A92> /Users/*/_fitpack.cpython-313-darwin.so
+       0x118d3c000 -        0x118d4bff7 +_dierckx.cpython-313-darwin.so (0) <1F90AD97-06BD-3BC1-870F-3921493E4EDD> /Users/*/_dierckx.cpython-313-darwin.so
+       0x118d58000 -        0x118d5f8b7 +base.cpython-313-darwin.so (0) <8CBDFB4E-A5F1-3A0E-8327-B2D761859461> /Users/*/base.cpython-313-darwin.so
+       0x118d6c000 -        0x118d7bfff +libgcc_s.1.1.dylib (0) <CC460BEA-9872-3F83-8668-C69259E63B43> /Users/*/libgcc_s.1.1.dylib
+       0x118d98000 -        0x118da7ffb +_rgi_cython.cpython-313-darwin.so (0) <DFC9D54D-AD71-3E69-9F0C-BC1400BDD24A> /Users/*/_rgi_cython.cpython-313-darwin.so
+       0x118dc8000 -        0x118e6fff7 +pypocketfft.cpython-313-darwin.so (0) <F7D66DEA-20BD-3C7B-B6F5-EC3B0DEDBE13> /Users/*/pypocketfft.cpython-313-darwin.so
+       0x118fb0000 -        0x118fbffff +_ansari_swilk_statistics.cpython-313-darwin.so (0) <219F6B71-41E1-37A5-A7AE-2B03A143DF91> /Users/*/_ansari_swilk_statistics.cpython-313-darwin.so
+       0x118fcc000 -        0x118fd3187 +ops_dispatch.cpython-313-darwin.so (0) <618FB2BE-E3E0-3A75-BC1C-1411AA007600> /Users/*/ops_dispatch.cpython-313-darwin.so
+       0x118fe0000 -        0x1193b7ff7 +_core.cpython-313-darwin.so (0) <7081D8BE-A820-3180-8E9C-C13C3F8C06D1> /Users/*/_core.cpython-313-darwin.so
+       0x119608000 -        0x119647fff +libquadmath.0.dylib (0) <13842585-89B5-3A2B-9482-99F7B4DDE5BD> /Users/*/libquadmath.0.dylib
+       0x119664000 -        0x11967bff3 +_biasedurn.cpython-313-darwin.so (0) <B822ECFE-68E4-32F3-987C-1D2033DF2756> /Users/*/_biasedurn.cpython-313-darwin.so
+       0x119690000 -        0x11969fffb +_min_spanning_tree.cpython-313-darwin.so (0) <8FEE87E0-3BC2-37E5-B850-18FD9EEAB767> /Users/*/_min_spanning_tree.cpython-313-darwin.so
+       0x1196b4000 -        0x1196ebfff +_dfitpack.cpython-313-darwin.so (0) <3107572B-6EE6-3234-8F29-7841208068C9> /Users/*/_dfitpack.cpython-313-darwin.so
+       0x119704000 -        0x119727ff7 +_ppoly.cpython-313-darwin.so (0) <31B3BF3F-DD1B-3007-803E-8611B087C610> /Users/*/_ppoly.cpython-313-darwin.so
+       0x119738000 -        0x11975bff7 +_interpnd.cpython-313-darwin.so (0) <126363A9-9EAD-3145-A002-0D8607DFE9FE> /Users/*/_interpnd.cpython-313-darwin.so
+       0x11976c000 -        0x1197a7ff7 +_rbfinterp_pythran.cpython-313-darwin.so (0) <AC72E8EF-6B1B-344E-94A0-38D6F7043F13> /Users/*/_rbfinterp_pythran.cpython-313-darwin.so
+       0x1197b8000 -        0x1197c7ffb +_qmc_cy.cpython-313-darwin.so (0) <A4FB9124-71E2-338B-8476-4C201AF7AFE4> /Users/*/_qmc_cy.cpython-313-darwin.so
+       0x1197dc000 -        0x11992ffff +libgfortran.5.dylib (0) <18BCCF8F-B816-387F-BAAB-97018C5046CB> /Users/*/libgfortran.5.dylib
+       0x1199b0000 -        0x1199cffff +_stats_pythran.cpython-313-darwin.so (0) <6706F1E1-C929-3F84-88AD-1BB1C010D77F> /Users/*/_stats_pythran.cpython-313-darwin.so
+       0x1199e0000 -        0x1199ebfff +rcont.cpython-313-darwin.so (0) <8962FA93-2A3D-3B81-9CA7-E6877606E866> /Users/*/rcont.cpython-313-darwin.so
+       0x119a10000 -        0x119a5fffb +_stats.cpython-313-darwin.so (0) <950348A4-21FE-394C-B669-4211711419F7> /Users/*/_stats.cpython-313-darwin.so
+       0x119b70000 -        0x119b8bff3 +_tools.cpython-313-darwin.so (0) <F80C3180-EF9B-3EE7-AD92-236D49C2A5A3> /Users/*/_tools.cpython-313-darwin.so
+       0x119b9c000 -        0x119bb7fff +_flow.cpython-313-darwin.so (0) <0530D5FD-A332-303F-97C5-33DE86CE6CB3> /Users/*/_flow.cpython-313-darwin.so
+       0x119bc8000 -        0x119be3fff +_matching.cpython-313-darwin.so (0) <ECF0E265-0019-3A87-8892-75B24E707D21> /Users/*/_matching.cpython-313-darwin.so
+       0x119bf4000 -        0x119bfda27 +json.cpython-313-darwin.so (0) <7C886220-4BF3-31FF-9295-88A54AD4C904> /Users/*/json.cpython-313-darwin.so
+       0x119c10000 -        0x119d7bff7 +cython_special.cpython-313-darwin.so (0) <9A12058B-7840-395C-AAA3-05F69F5EE58F> /Users/*/cython_special.cpython-313-darwin.so
+       0x119fb0000 -        0x119ff3fff +_shortest_path.cpython-313-darwin.so (0) <5DB1BA64-5270-3083-9775-65FD308F1100> /Users/*/_shortest_path.cpython-313-darwin.so
+       0x11a008000 -        0x11a03fff3 +_traversal.cpython-313-darwin.so (0) <5060CB10-EF4F-3B44-A992-008B047A6C02> /Users/*/_traversal.cpython-313-darwin.so
+       0x11a050000 -        0x11a067ff3 +_reordering.cpython-313-darwin.so (0) <9D455E8A-83E1-3312-AA8E-E1162237C647> /Users/*/_reordering.cpython-313-darwin.so
+       0x11a078000 -        0x11a093fff +_sobol.cpython-313-darwin.so (0) <F783147B-B72E-364D-9498-799A1F0443CE> /Users/*/_sobol.cpython-313-darwin.so
+       0x11a1a4000 -        0x11a1b7fff +_qmvnt_cy.cpython-313-darwin.so (0) <7918AA4A-D12E-3BDD-B495-A9443BC5EEF3> /Users/*/_qmvnt_cy.cpython-313-darwin.so
+       0x11a2c8000 -        0x11a2d3b43 +ccalendar.cpython-313-darwin.so (0) <B0ABBF5F-335E-3AAC-9EAB-DB92CC7EB662> /Users/*/ccalendar.cpython-313-darwin.so
+       0x11a2f0000 -        0x11a30bffb +_nd_image.cpython-313-darwin.so (0) <287A3B13-15AC-3CDD-BF67-8EF448244C89> /Users/*/_nd_image.cpython-313-darwin.so
+       0x11a318000 -        0x11a32fd97 +dtypes.cpython-313-darwin.so (0) <51F716A7-DCF0-3E04-9C9B-E970E08117BE> /Users/*/dtypes.cpython-313-darwin.so
+       0x11a348000 -        0x11a367ff7 +_ni_label.cpython-313-darwin.so (0) <F92E5282-F4DA-33A6-8985-4D7EA8A712F5> /Users/*/_ni_label.cpython-313-darwin.so
+       0x11a478000 -        0x11a4954bf +missing.cpython-313-darwin.so (0) <5F5C031C-BC08-3538-AC8B-49E44FAC6490> /Users/*/missing.cpython-313-darwin.so
+       0x11a4a8000 -        0x11a4b2917 +properties.cpython-313-darwin.so (0) <63825B36-9490-3664-8174-F6E0A896FDAA> /Users/*/properties.cpython-313-darwin.so
+       0x11a5f8000 -        0x11a6128ef +_cyutility.cpython-313-darwin.so (0) <9638BBE5-A4CA-3644-BB9A-0E0F48AC453F> /Users/*/_cyutility.cpython-313-darwin.so
+       0x11a624000 -        0x11a638b13 +np_datetime.cpython-313-darwin.so (0) <71BBCA00-294D-3789-930D-48B781EF3058> /Users/*/np_datetime.cpython-313-darwin.so
+       0x11a64c000 -        0x11a6659af +conversion.cpython-313-darwin.so (0) <57D7832C-6226-31F4-A188-D0EB58414B56> /Users/*/conversion.cpython-313-darwin.so
+       0x11a678000 -        0x11a68d557 +timezones.cpython-313-darwin.so (0) <71C26C1A-BB4B-3EB6-A9E9-152DB1590F6F> /Users/*/timezones.cpython-313-darwin.so
+       0x11a6a0000 -        0x11a6aa95b +hashing.cpython-313-darwin.so (0) <7AC26A37-789C-3C30-9C03-D85E85CD6651> /Users/*/hashing.cpython-313-darwin.so
+       0x11a6c4000 -        0x11a953ffb +lib.cpython-313-darwin.so (0) <B38375CB-10A6-3A04-B798-888937AB00B9> /Users/*/lib.cpython-313-darwin.so
+       0x11aa1c000 -        0x11ab3fff3 +libarrow_python.2300.dylib (0) <54C409E4-6E5C-3FEB-9211-EF003250889B> /Users/*/libarrow_python.2300.dylib
+       0x11ac00000 -        0x11ad37ff7 +libarrow_dataset.2300.dylib (0) <00ED4C61-A07E-3188-BEE8-1B1D222854B5> /Users/*/libarrow_dataset.2300.dylib
+       0x11ae8c000 -        0x11aead0df +nattype.cpython-313-darwin.so (0) <4051EDAC-6D4A-3B6A-9F46-A9CCFE2D5D41> /Users/*/nattype.cpython-313-darwin.so
+       0x11aec0000 -        0x11aecf9af +vectorized.cpython-313-darwin.so (0) <BA388057-A563-39BD-AADB-B52032B016D8> /Users/*/vectorized.cpython-313-darwin.so
+       0x11aee0000 -        0x11aee8213 +indexing.cpython-313-darwin.so (0) <FDC2240A-E43F-3217-A217-7742901ABFE9> /Users/*/indexing.cpython-313-darwin.so
+       0x11af00000 -        0x11af59683 +timestamps.cpython-313-darwin.so (0) <6FB673CB-A277-312F-A178-8F0C845BDADC> /Users/*/timestamps.cpython-313-darwin.so
+       0x11af84000 -        0x11b039b8f +interval.cpython-313-darwin.so (0) <DAA29145-A3DD-3A9B-ABC3-3A3069FFAE86> /Users/*/interval.cpython-313-darwin.so
+       0x11b090000 -        0x11b32ffd3 +libarrow_substrait.2300.dylib (0) <1491B701-20E5-348B-BB3C-769CC9AAB603> /Users/*/libarrow_substrait.2300.dylib
+       0x11b524000 -        0x11b643ffb +libarrow_acero.2300.dylib (0) <87592EC4-D8A8-32E9-BB7A-9F298D819C2F> /Users/*/libarrow_acero.2300.dylib
+       0x11b734000 -        0x11b7f05cf +offsets.cpython-313-darwin.so (0) <2290FFA2-A064-3E33-B641-5F677279D4BD> /Users/*/offsets.cpython-313-darwin.so
+       0x11b828000 -        0x11b848447 +fields.cpython-313-darwin.so (0) <0684B3A9-1BB3-3C38-89EA-ECAA94178A22> /Users/*/fields.cpython-313-darwin.so
+       0x11b860000 -        0x11b87cba7 +tzconversion.cpython-313-darwin.so (0) <224280E9-3031-3019-9933-5408030078BC> /Users/*/tzconversion.cpython-313-darwin.so
+       0x11b898000 -        0x11b8e9abf +timedeltas.cpython-313-darwin.so (0) <7C929E45-F94E-3275-AA73-0AF1616D1BFA> /Users/*/timedeltas.cpython-313-darwin.so
+       0x11b908000 -        0x11b930eaf +parsing.cpython-313-darwin.so (0) <41878FD2-148B-3951-9848-5EFB8E99DF9D> /Users/*/parsing.cpython-313-darwin.so
+       0x11b948000 -        0x11b95ab47 +ops.cpython-313-darwin.so (0) <0B469A21-EAB4-33AC-8E1F-0B431D8828B1> /Users/*/ops.cpython-313-darwin.so
+       0x11b974000 -        0x11bbe3ff7 +libparquet.2300.dylib (0) <B5539094-3645-315F-A066-13E339B3B4F3> /Users/*/libparquet.2300.dylib
+       0x11c204000 -        0x11c36f3d7 +hashtable.cpython-313-darwin.so (0) <112CCEB9-2481-32CE-8AA4-87D664742116> /Users/*/hashtable.cpython-313-darwin.so
+       0x11c4d0000 -        0x11c4f1843 +strptime.cpython-313-darwin.so (0) <8CE098B1-E823-368F-98D2-22ECBE9B919A> /Users/*/strptime.cpython-313-darwin.so
+       0x11c508000 -        0x11c513fff +_isfinite.cpython-313-darwin.so (0) <13F0E891-55C3-30D6-8C66-55ED32EE526D> /Users/*/_isfinite.cpython-313-darwin.so
+       0x11c52c000 -        0x11c53cfa3 +arrays.cpython-313-darwin.so (0) <3DFE0B98-8831-3090-AFAF-FE4849A49162> /Users/*/arrays.cpython-313-darwin.so
+       0x11c564000 -        0x11c5a4ff7 +period.cpython-313-darwin.so (0) <9A6166AD-7C50-31D2-A0DD-970D09ADC5C0> /Users/*/period.cpython-313-darwin.so
+       0x11c6c0000 -        0x11c6ced27 +writers.cpython-313-darwin.so (0) <9DC8BF34-3B30-3770-8C4C-A5B9A1E607A2> /Users/*/writers.cpython-313-darwin.so
+       0x11c6e8000 -        0x11c6fe92f +tslib.cpython-313-darwin.so (0) <9DD5B13D-AE19-3760-9723-BDEFB5FB7244> /Users/*/tslib.cpython-313-darwin.so
+       0x11c710000 -        0x11c71ec6f +testing.cpython-313-darwin.so (0) <C5568C8E-7E6C-30EB-8B52-A443EF54D593> /Users/*/testing.cpython-313-darwin.so
+       0x11c730000 -        0x11c73bffb +murmurhash.cpython-313-darwin.so (0) <BDEC9598-AF6F-3C8C-A033-4C1469BC0370> /Users/*/murmurhash.cpython-313-darwin.so
+       0x11c74c000 -        0x11c89fc2f +algos.cpython-313-darwin.so (0) <FF8F870A-8DD2-3CA0-BC83-3E6E5977F06E> /Users/*/algos.cpython-313-darwin.so
+       0x11c8dc000 -        0x11c947477 +lib.cpython-313-darwin.so (0) <104F2EC3-6386-3D3E-8E16-EC79ACB209B5> /Users/*/lib.cpython-313-darwin.so
+       0x11ca7c000 -        0x11cb27ff7 +_compute.cpython-313-darwin.so (0) <93316130-BA09-37A9-9EC5-43B16FAF7FCB> /Users/*/_compute.cpython-313-darwin.so
+       0x11cc94000 -        0x11cc9bffb +_openmp_helpers.cpython-313-darwin.so (0) <4FE5FC36-1E84-309A-A709-C2B1F260D10F> /Users/*/_openmp_helpers.cpython-313-darwin.so
+       0x11ccb4000 -        0x11d753fff +libarrow_compute.2300.dylib (0) <464BED7D-C1A2-31E6-A867-09AB07963EEB> /Users/*/libarrow_compute.2300.dylib
+       0x11dcac000 -        0x11dcc8c13 +indexers.cpython-313-darwin.so (0) <70816771-7777-32FC-B1BA-9642DBF90676> /Users/*/indexers.cpython-313-darwin.so
+       0x11dcf4000 -        0x11dd2045f +internals.cpython-313-darwin.so (0) <851DCE21-B2FB-3126-9C69-D9F6709B81D7> /Users/*/internals.cpython-313-darwin.so
+       0x11dd3c000 -        0x11dd47fff +_expected_mutual_info_fast.cpython-313-darwin.so (0) <3CFF4294-09D4-34B5-8772-8079311CB7CA> /Users/*/_expected_mutual_info_fast.cpython-313-darwin.so
+       0x11dd5c000 -        0x11dde77b7 +sparse.cpython-313-darwin.so (0) <4CF5CF27-48DF-3E48-B220-9E3074D4F710> /Users/*/sparse.cpython-313-darwin.so
+       0x11e00c000 -        0x11e025a03 +reshape.cpython-313-darwin.so (0) <056D02B2-BF44-30ED-B579-AD11D3D01CCD> /Users/*/reshape.cpython-313-darwin.so
+       0x11e064000 -        0x11e07fffb +_cyutility.cpython-313-darwin.so (0) <9688F0FE-3A22-3FA5-81F7-096EA7CE3BEC> /Users/*/_cyutility.cpython-313-darwin.so
+       0x11e090000 -        0x11e0a3ffb +_vector_sentinel.cpython-313-darwin.so (0) <2859A90E-0B8F-3A9C-AA16-AF3A49B9E3A7> /Users/*/_vector_sentinel.cpython-313-darwin.so
+       0x11e0b4000 -        0x11e12fe4f +index.cpython-313-darwin.so (0) <48750460-E2FB-3B7A-9329-E82D90A4F9DC> /Users/*/index.cpython-313-darwin.so
+       0x11e15c000 -        0x11e19dfe7 +aggregations.cpython-313-darwin.so (0) <EE5B99AC-4B5D-35F4-B09C-FC8AB09927C9> /Users/*/aggregations.cpython-313-darwin.so
+       0x11e1bc000 -        0x11e2019f7 +parsers.cpython-313-darwin.so (0) <3032BEF9-2A9A-3EBA-9795-65BB3FEF281C> /Users/*/parsers.cpython-313-darwin.so
+       0x11e21c000 -        0x11e22ffff +_argkmin_classmode.cpython-313-darwin.so (0) <F1A61FEE-0C7B-3967-AD8B-4EEC1CA7C926> /Users/*/_argkmin_classmode.cpython-313-darwin.so
+       0x11e248000 -        0x11e30937f +join.cpython-313-darwin.so (0) <171C6740-09B1-341A-B6C6-6F1B561AA14D> /Users/*/join.cpython-313-darwin.so
+       0x11e734000 -        0x11e747fff +_radius_neighbors_classmode.cpython-313-darwin.so (0) <8A89A285-3B5A-3170-8EAF-E21593B23F6C> /Users/*/_radius_neighbors_classmode.cpython-313-darwin.so
+       0x11e768000 -        0x11e783fff +_argkmin.cpython-313-darwin.so (0) <ECF5CAE9-0AB8-3D2F-8AE1-8D170A5C31D0> /Users/*/_argkmin.cpython-313-darwin.so
+       0x11e7a8000 -        0x11e7fffff +_dist_metrics.cpython-313-darwin.so (0) <DB6491F4-6725-3DDA-B7FE-D0FD21D62330> /Users/*/_dist_metrics.cpython-313-darwin.so
+       0x11e824000 -        0x11e9ce8af +groupby.cpython-313-darwin.so (0) <A0D4DE24-1FAA-3BCF-BEF6-F42A6F3990B4> /Users/*/groupby.cpython-313-darwin.so
+       0x11eb18000 -        0x11eb8bffb +sparsefuncs_fast.cpython-313-darwin.so (0) <E510139A-A4E6-3CC0-A245-0421C7577333> /Users/*/sparsefuncs_fast.cpython-313-darwin.so
+       0x11ec9c000 -        0x11ed0fff7 +libomp.dylib (0) <E3A31AB3-3AE5-3371-87D0-7FD870A41A0D> /Users/*/libomp.dylib
+       0x11ed48000 -        0x11ed5fffb +_base.cpython-313-darwin.so (0) <52EB7051-217E-37E7-B643-FB1731F2161B> /Users/*/_base.cpython-313-darwin.so
+       0x11ed78000 -        0x11ed97fff +_cython_blas.cpython-313-darwin.so (0) <902678F7-20A7-3337-9BA6-34E858095EA7> /Users/*/_cython_blas.cpython-313-darwin.so
+       0x11edbc000 -        0x11edebffb +_datasets_pair.cpython-313-darwin.so (0) <B7AE2CC2-3BDF-39E2-B11F-B31BFA702DB0> /Users/*/_datasets_pair.cpython-313-darwin.so
+       0x11ee00000 -        0x11ee13ffb +_pairwise_fast.cpython-313-darwin.so (0) <194A44DA-C557-352D-95D2-29451EA4E0C8> /Users/*/_pairwise_fast.cpython-313-darwin.so
+       0x11ee28000 -        0x11ee2d7ff +mask.cpython-313-darwin.so (0) <3EB6ED08-E3D2-3500-800E-F913FC1B892C> /Users/*/mask.cpython-313-darwin.so
+       0x11ee4c000 -        0x11ee7ffff +_middle_term_computer.cpython-313-darwin.so (0) <37DE3E35-FAFC-3FAD-A7F7-8CB29A67EBCF> /Users/*/_middle_term_computer.cpython-313-darwin.so
+       0x11ee98000 -        0x11eebbff3 +_radius_neighbors.cpython-313-darwin.so (0) <E76EDB9B-C6B4-3ED6-AA1C-DD5D293B4AA3> /Users/*/_radius_neighbors.cpython-313-darwin.so
+       0x11efd4000 -        0x11efe2333 +_multidict.cpython-313-darwin.so (0) <B64FEE02-A5D2-315D-B894-2AE827DC962A> /Users/*/_multidict.cpython-313-darwin.so
+       0x11eff4000 -        0x11effc00f +_http_writer.cpython-313-darwin.so (0) <758C952F-E119-357D-B872-9A415C7FCBC3> /Users/*/_http_writer.cpython-313-darwin.so
+       0x11f010000 -        0x11f03bffb +_csr_polynomial_expansion.cpython-313-darwin.so (0) <A9F846E7-799B-3C39-9175-630E20F5014D> /Users/*/_csr_polynomial_expansion.cpython-313-darwin.so
+       0x11f04c000 -        0x11f0580d7 +_helpers_c.cpython-313-darwin.so (0) <17B7DB0A-0F9F-3BE1-996A-CD0A2312D012> /Users/*/_helpers_c.cpython-313-darwin.so
+       0x11f070000 -        0x11f077ffb +libsharpyuv.0.1.2.dylib (0) <70C523DA-02F0-39E3-97A6-1125A69229E6> /Users/*/libsharpyuv.0.1.2.dylib
+       0x11f098000 -        0x11f0d3fff +_target_encoder_fast.cpython-313-darwin.so (0) <E206CBCA-AE80-3170-9CAF-751A5180BFFF> /Users/*/_target_encoder_fast.cpython-313-darwin.so
+       0x11f1e4000 -        0x11f1f5d1b +_quoting_c.cpython-313-darwin.so (0) <F89E6D78-B156-30A1-B107-5156FFA7170D> /Users/*/_quoting_c.cpython-313-darwin.so
+       0x11f210000 -        0x11f21a183 +libbrotlidec.1.2.0.dylib (0) <EA4F9569-9401-324D-8D1C-960410DC1904> /Users/*/libbrotlidec.1.2.0.dylib
+       0x11f34c000 -        0x11f358ffb +_frozenlist.cpython-313-darwin.so (0) <76553D42-BF5D-3F3D-87C1-8617165210D2> /Users/*/_frozenlist.cpython-313-darwin.so
+       0x11f370000 -        0x11f3788eb +_imagingft.cpython-313-darwin.so (0) <11FE2376-943B-35BD-8E66-208F15148624> /Users/*/_imagingft.cpython-313-darwin.so
+       0x11f390000 -        0x11f3a7fff +libz.1.3.1.dylib (0) <B5522AA4-7677-3700-BC93-8931BD5D48CC> /Users/*/libz.1.3.1.dylib
+       0x11f3b8000 -        0x11f3ff22f +_http_parser.cpython-313-darwin.so (0) <47B42240-33B7-3D7E-A06B-7071EBF32B84> /Users/*/_http_parser.cpython-313-darwin.so
+       0x11f440000 -        0x11f58ffef +_sentencepiece.cpython-313-darwin.so (0) <BF93109A-D516-33C5-B03E-3BDFD840B56F> /Users/*/_sentencepiece.cpython-313-darwin.so
+       0x11f834000 -        0x11f854fbb +reader_c.cpython-313-darwin.so (0) <9437208D-1010-3D14-94FB-B57E886DB202> /Users/*/reader_c.cpython-313-darwin.so
+       0x11f9cc000 -        0x11fa0a0f3 +libpng16.16.dylib (0) <CACC6A78-F6ED-38B6-B7B6-A44C3645882A> /Users/*/libpng16.16.dylib
+       0x11fa88000 -        0x11faa8023 +libbrotlicommon.1.2.0.dylib (0) <CBE196E8-F95C-30A4-9C37-62BE2401829C> /Users/*/libbrotlicommon.1.2.0.dylib
+       0x120040000 -        0x120057ff7 +image.so (0) <33289168-70A8-3F71-811A-537DD090E047> /Users/*/image.so
+       0x12009c000 -        0x128413fc7 +libtorch_cpu.dylib (0) <50E40125-4FE2-3DD6-86CF-524D97AD323E> /Users/*/libtorch_cpu.dylib
+       0x12cd90000 -        0x12cdbbffb +libpng16.16.dylib (0) <65D41E43-2581-38B0-A080-2A5A1C2BB7DF> /Users/*/libpng16.16.dylib
+       0x12cec4000 -        0x12cf77fe7 +_C.so (0) <BF9A95B3-9970-3327-A515-A68B76E37A22> /Users/*/_C.so
+       0x12cff8000 -        0x12d0afff3 +libc++.1.0.dylib (0) <093E15CB-4CF0-3B13-9911-A0EC620F6C84> /Users/*/libc++.1.0.dylib
+       0x12d11c000 -        0x12d163ffb +libjpeg.8.2.2.dylib (0) <01FF762D-1F99-3558-9768-E6183674F165> /Users/*/libjpeg.8.2.2.dylib
+       0x12d234000 -        0x12d31c0f7 +libfreetype.6.dylib (0) <839A6A5E-7BA5-3F57-95BF-A74399AA10CD> /Users/*/libfreetype.6.dylib
+       0x12d34c000 -        0x12d3b7fff +libwebp.7.2.0.dylib (0) <6885F01E-6823-39CC-8B15-AC35F6C9C7FD> /Users/*/libwebp.7.2.0.dylib
+       0x12d500000 -        0x12d5ba913 +libharfbuzz.0.dylib (0) <50E75D34-FC6D-3CB2-9A4C-0CFC9BD4FEA3> /Users/*/libharfbuzz.0.dylib
+       0x12e3d8000 -        0x12e84b9a3 +openai_harmony.abi3.so (0) <FA912C65-F543-35D5-A0ED-9F890E3B4E00> /Users/*/openai_harmony.abi3.so
+       0x12f704000 -        0x1311f39e7 +libarrow.2300.dylib (0) <C1B84D8F-3EF0-380D-805E-5480F00BC72B> /Users/*/libarrow.2300.dylib
+       0x19e8b0000 -        0x19e8ff5f7  libobjc.A.dylib (973.1) <C0680DF6-9900-3C29-A071-95A031686EF8> /usr/lib/libobjc.A.dylib
+       0x19e900000 -        0x19e90a23f  libsharedcache.dylib (0) <117C1ED6-AE11-3D9E-B05B-844F35395552> /usr/lib/libsharedcache.dylib
+       0x19e90b000 -        0x19e931d3b  libdyld.dylib (27062) <62863BCA-DD60-3D32-A9DB-89099BA6F3D7> /usr/lib/system/libdyld.dylib
+       0x19e932000 -        0x19e9f16e3  dyld (1.0.0 - 27062) <D341DDCB-7969-3A9C-8E03-0CF4751398A9> /usr/lib/dyld
+       0x19e9f2000 -        0x19e9f501f  libsystem_blocks.dylib (98.1) <6F304731-D95D-3501-B4AD-F2934F7F2446> /usr/lib/system/libsystem_blocks.dylib
+       0x19e9f6000 -        0x19ea4b0df  libxpc.dylib (3298.1.1) <0791121F-B5FC-3F84-BF04-115E86D2D882> /usr/lib/system/libxpc.dylib
+       0x19ea4c000 -        0x19ea6bc13  libsystem_trace.dylib (1966.1.1) <B48A8E3E-A12A-3342-8321-428B555E965E> /usr/lib/system/libsystem_trace.dylib
+       0x19ea6c000 -        0x19eb20f27  libcorecrypto.dylib (2109.0.22) <807AA6C9-5D8A-3CA5-B4CE-FACE5296EF6A> /usr/lib/system/libcorecrypto.dylib
+       0x19eb21000 -        0x19eb76c5f  libsystem_malloc.dylib (886.0.8) <2339CB57-FE5A-3154-A206-A76059C749EB> /usr/lib/system/libsystem_malloc.dylib
+       0x19eb77000 -        0x19ebbd19f  libdispatch.dylib (1605.0.2) <022BF08F-0B3A-3225-9E65-16D1553CE90D> /usr/lib/system/libdispatch.dylib
+       0x19ebbe000 -        0x19ebc0d2b  libsystem_featureflags.dylib (108) <20C1CAB2-1F13-3426-8146-9CAE9FF2A33D> /usr/lib/system/libsystem_featureflags.dylib
+       0x19ebc1000 -        0x19ec43ca3  libsystem_c.dylib (1786.0.3) <FBA7B23E-AA60-3A90-9AA4-A7A2E0AD63EE> /usr/lib/system/libsystem_c.dylib
+       0x19ec44000 -        0x19ecd9033  libc++.1.dylib (2200.27) <1E9BA4AA-B5DA-3CF3-80AC-4B880049573F> /usr/lib/libc++.1.dylib
+       0x19ecda000 -        0x19ecf3eff  libc++abi.dylib (2200.27) <A21743EE-6E1C-3E74-97EA-7AF793DE4BDF> /usr/lib/libc++abi.dylib
+       0x19ecf4000 -        0x19ed329ab  libsystem_kernel.dylib (13432.1.9) <F63BF418-8F75-34A4-AAF1-8CAF2B9B6A05> /usr/lib/system/libsystem_kernel.dylib
+       0x19ed33000 -        0x19ed3f91b  libsystem_pthread.dylib (553.0.1) <5A1828C3-CBC2-3B85-BD07-C8ED10021A41> /usr/lib/system/libsystem_pthread.dylib
+       0x19ed40000 -        0x19ed494f3  libsystem_platform.dylib (402.0.1.0.1) <080E4444-A0FB-3913-9756-4E470015F32F> /usr/lib/system/libsystem_platform.dylib
+       0x19ed4a000 -        0x19ed78903  libsystem_info.dylib (603) <BC387AEB-1CEF-3513-92D7-D7F913596711> /usr/lib/system/libsystem_info.dylib
+       0x19ed79000 -        0x19f209e9f  com.apple.CoreFoundation (6.9 - 5027.0.69) <727E905E-F344-3823-8E13-E7A096388321> /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation
+       0x19f20a000 -        0x19f509ae7  com.apple.LaunchServices (1141.1 - 1141.1) <00ED6A89-5E67-37AA-9342-51EB93F68EE5> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/LaunchServices
+       0x19f50a000 -        0x19f6b84f3  com.apple.gpusw.MetalTools (1.0 - 1) <8317EBC9-11A1-3C21-B224-FF97B6275A67> /System/Library/PrivateFrameworks/MetalTools.framework/Versions/A/MetalTools
+       0x19f6b9000 -        0x19fe8c7df  libBLAS.dylib (1617.1.1) <31104D4F-4A7E-3FA7-9E18-55937B2011F2> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+       0x19fe8d000 -        0x19ff9e3db  com.apple.Lexicon-framework (1.0 - 216) <15A671C9-C620-33E0-9813-D5746EC5ECEF> /System/Library/PrivateFrameworks/Lexicon.framework/Versions/A/Lexicon
+       0x19ff9f000 -        0x1a010b107  libSparse.dylib (196.0.1) <5375A133-2487-3429-B891-9917A51A23B9> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparse.dylib
+       0x1a010c000 -        0x1a019d193  com.apple.SystemConfiguration (1.21 - 1.21) <10869E21-4B5A-3D06-9A03-F0BA544A6DC8> /System/Library/Frameworks/SystemConfiguration.framework/Versions/A/SystemConfiguration
+       0x1a019e000 -        0x1a01d252f  libCRFSuite.dylib (55) <2D2C2F35-AB83-332B-88F0-F3BC4A3D8463> /usr/lib/libCRFSuite.dylib
+       0x1a04a3000 -        0x1a1760287  com.apple.Foundation (6.9 - 5027.0.69) <4317F7C6-73D2-3BE9-B010-F318F1198A1B> /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+       0x1a190f000 -        0x1a1a26afb  com.apple.CoreDisplay (291.4 - 291.4) <D83242DE-F9D7-35F7-BDB1-2D0741AAB3B4> /System/Library/Frameworks/CoreDisplay.framework/Versions/A/CoreDisplay
+       0x1a1a27000 -        0x1a1dec6e3  com.apple.audio.AudioToolboxCore (1.0 - 1638.104.3) <49229A03-C7B7-38DE-99D1-C8A923169FAB> /System/Library/PrivateFrameworks/AudioToolboxCore.framework/Versions/A/AudioToolboxCore
+       0x1a1ded000 -        0x1a20105ff  com.apple.CoreText (904 - 904) <D53BFD8D-65E8-389D-B9A5-1223E1EE9ACC> /System/Library/Frameworks/CoreText.framework/Versions/A/CoreText
+       0x1a2011000 -        0x1a27ae633  com.apple.audio.CoreAudio (5.0 - 5.0) <3AB8F076-7437-38AA-9F5B-B083CF020ADA> /System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio
+       0x1a27af000 -        0x1a2bbe5cf  com.apple.security (7.0 - 62460.1.3) <7B094BB2-DD4D-3A81-8C29-5879451255F5> /System/Library/Frameworks/Security.framework/Versions/A/Security
+       0x1a2bbf000 -        0x1a2ea17e5  libicucore.A.dylib (78132) <7C675D41-84B1-395F-80CA-4FF1837F0DA0> /usr/lib/libicucore.A.dylib
+       0x1a2ea2000 -        0x1a2eabb13  libsystem_darwin.dylib (1786.0.3) <4E66C888-993C-3E6A-A8DA-A949C01C5B67> /usr/lib/system/libsystem_darwin.dylib
+       0x1a2eac000 -        0x1a319cf23  com.apple.CoreServices.CarbonCore (1333 - 1333) <A2180BAC-D51D-3E70-ACCE-E33F35587CB7> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/CarbonCore.framework/Versions/A/CarbonCore
+       0x1a319d000 -        0x1a31db3a3  com.apple.CoreServicesInternal (505 - 505) <6F8147E6-5C1E-3606-94D8-E74383900808> /System/Library/PrivateFrameworks/CoreServicesInternal.framework/Versions/A/CoreServicesInternal
+       0x1a31dc000 -        0x1a3215507  com.apple.CSStore (1141.1 - 1141.1) <AAC9E652-2F49-3855-BD1B-5973CCA58C5D> /System/Library/PrivateFrameworks/CoreServicesStore.framework/Versions/A/CoreServicesStore
+       0x1a3216000 -        0x1a32fb707  com.apple.framework.IOKit (2.0.2 - 100288.0.9) <0E4CF3E4-B0C2-312A-B147-0BD4978EF0B7> /System/Library/Frameworks/IOKit.framework/Versions/A/IOKit
+       0x1a32fc000 -        0x1a330db8b  libsystem_notify.dylib (368) <58FD36D8-37A7-311C-80F2-8E64DD8710CF> /usr/lib/system/libsystem_notify.dylib
+       0x1a330e000 -        0x1a337600b  libsandbox.1.dylib (3051.0.52) <648B6EC9-B80A-3673-AC47-F6F7806BB158> /usr/lib/libsandbox.1.dylib
+       0x1a4b30000 -        0x1a4b431df  com.apple.UniformTypeIdentifiers (709 - 709) <7EEC2F07-8F37-3EAB-94C9-9625F7AF5532> /System/Library/Frameworks/UniformTypeIdentifiers.framework/Versions/A/UniformTypeIdentifiers
+       0x1a5007000 -        0x1a50dccff  libboringssl.dylib (583) <A958707F-4E4B-3E4E-BACE-DCD225F57C58> /usr/lib/libboringssl.dylib
+       0x1a50dd000 -        0x1a54580f7  com.apple.CFNetwork (1.0 - 3896.100.1.1.1) <F78B7942-C45B-3520-92C8-DD66E11C46FE> /System/Library/Frameworks/CFNetwork.framework/Versions/A/CFNetwork
+       0x1a5459000 -        0x1a5473d93  libsystem_networkextension.dylib (2340.1.2) <22E1D190-486F-324F-ABA4-F36AB841BFE9> /usr/lib/system/libsystem_networkextension.dylib
+       0x1a5474000 -        0x1a5474ee7  libenergytrace.dylib (23) <09E921A2-6FB1-33A4-8DB0-2BB45A8DBBE2> /usr/lib/libenergytrace.dylib
+       0x1a5475000 -        0x1a5500277  libMobileGestalt.dylib (1622.0.5) <EA99C094-01F2-3A79-8AFE-368392B35226> /usr/lib/libMobileGestalt.dylib
+       0x1a5501000 -        0x1a5518247  libsystem_asl.dylib (409) <B4D449B7-A821-3A9A-8019-E917B291F10A> /usr/lib/system/libsystem_asl.dylib
+       0x1a5519000 -        0x1a553ef0f  com.apple.TCC (1.0 - 1) <6EB227C1-E59C-35DD-B07F-888EABAFD85F> /System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC
+       0x1a553f000 -        0x1a5b7a77f  com.apple.SkyLight (1.600.0 - 953.5.5) <8A3B348E-4637-3685-92D0-6CBC2F36A234> /System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight
+       0x1a5b7b000 -        0x1a632f357  com.apple.CoreGraphics (2.0 - 2050) <B0FB9AC2-E3CC-31C2-A90E-0D38A776BAE2> /System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics
+       0x1a644e000 -        0x1a646457f  com.apple.ProtocolBuffer (1 - 325.20.6.4.1) <02B6311A-FAEA-3D68-BCEA-466709877974> /System/Library/PrivateFrameworks/ProtocolBuffer.framework/Versions/A/ProtocolBuffer
+       0x1a6465000 -        0x1a6476877  libdns_services.dylib (3111.0.5.0.1) <FA5EA1EF-D140-32BB-86DE-8ABECF70EB95> /usr/lib/libdns_services.dylib
+       0x1a64ac000 -        0x1a64acf2f  libobjcMsgSend.dylib (973.1) <41179EDE-DC97-3BBE-8848-6400D12C1436> /usr/lib/objc/libobjcMsgSend.dylib
+       0x1a68b0000 -        0x1a6a6375f  com.apple.ColorSync (4.13.0 - 3929) <2EAFBBEE-E9E2-33FA-BDF4-1A4F3C60334E> /System/Library/Frameworks/ColorSync.framework/Versions/A/ColorSync
+       0x1a6d7e000 -        0x1a71bcc7f  com.apple.CoreData (120 - 1629.1) <0D53CA68-008E-3228-8AE7-8738FA67143C> /System/Library/Frameworks/CoreData.framework/Versions/A/CoreData
+       0x1a71bd000 -        0x1a73b7057  libsqlite3.dylib (406) <73D616F2-7B6C-3046-8DE6-656F74793D5F> /usr/lib/libsqlite3.dylib
+       0x1a7457000 -        0x1a752bd13  com.apple.BaseBoard (827 - 827) <56EC64E5-6042-3349-B16D-BD9331FE2EE2> /System/Library/PrivateFrameworks/BaseBoard.framework/Versions/A/BaseBoard
+       0x1a752c000 -        0x1a7584d83  com.apple.RunningBoardServices (1.0 - 1080) <EACC9165-43B0-302D-B4BA-44BDE05DEBE4> /System/Library/PrivateFrameworks/RunningBoardServices.framework/Versions/A/RunningBoardServices
+       0x1a7585000 -        0x1a75f71d7  com.apple.AE (944 - 944) <75E434BB-9CD3-39A5-9BB9-87BBD3A2BC3B> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/AE.framework/Versions/A/AE
+       0x1a75f8000 -        0x1a75ffedf  libsystem_symptoms.dylib (2394.0.4) <60EE7884-9F4E-3184-A6AC-FA40A7A0297D> /usr/lib/system/libsystem_symptoms.dylib
+       0x1a7600000 -        0x1a8eec187  com.apple.Network (1.0 - 6681.1.1) <174B455B-2DE6-3364-BFF6-3802CFA599CE> /System/Library/Frameworks/Network.framework/Versions/A/Network
+       0x1a8eed000 -        0x1a8f23a1f  com.apple.analyticsd (1.0 - 1) <BD3F050B-5131-3206-A468-4B4F18965F11> /System/Library/PrivateFrameworks/CoreAnalytics.framework/Versions/A/CoreAnalytics
+       0x1a8f24000 -        0x1a8f25643  libDiagnosticMessagesClient.dylib (113) <B97372C5-7A87-378A-9EE0-77B6DD4825D0> /usr/lib/libDiagnosticMessagesClient.dylib
+       0x1a8f26000 -        0x1a8facc73  com.apple.spotlight.metadata.utilities (1.0 - 2459.405) <86E8A8A2-12CC-3F59-8EFD-074A26A19E5A> /System/Library/PrivateFrameworks/MetadataUtilities.framework/Versions/A/MetadataUtilities
+       0x1a8fad000 -        0x1a902d427  com.apple.Metadata (27.0 - 2459.405) <DB51BB9F-F63F-30C7-88B8-0F23756F2571> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Metadata
+       0x1a902e000 -        0x1a9037513  com.apple.DiskArbitration (2.7 - 2.7) <BCE1A22D-CE13-3F92-B7D5-C21E22BD8B19> /System/Library/Frameworks/DiskArbitration.framework/Versions/A/DiskArbitration
+       0x1a9038000 -        0x1a947c38b  com.apple.vImage (8.1 - 650.0.1) <54CF15B0-6AB6-360D-A4BE-F3130D8EEEDB> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vImage.framework/Versions/A/vImage
+       0x1a947d000 -        0x1a98edb47  com.apple.QuartzCore (1223.2.3 - 1223.2.3) <216F70F6-AEF9-3D60-942B-F64C636DEF69> /System/Library/Frameworks/QuartzCore.framework/Versions/A/QuartzCore
+       0x1a98ee000 -        0x1a993e683  libFontRegistry.dylib (424) <6744349A-6836-3ED2-A2A2-9BCD309D768F> /System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/ATS.framework/Versions/A/Resources/libFontRegistry.dylib
+       0x1a9bbd000 -        0x1a9bc670b  com.apple.OpenDirectory (27.0 - 737) <ED898655-1F26-371A-B87A-E00B455DA537> /System/Library/Frameworks/OpenDirectory.framework/Versions/A/OpenDirectory
+       0x1a9bc7000 -        0x1a9c2b357  com.apple.CFOpenDirectory (27.0 - 737) <537D9D7D-9092-3692-BE4D-447AFB0465F7> /System/Library/Frameworks/OpenDirectory.framework/Versions/A/Frameworks/CFOpenDirectory.framework/Versions/A/CFOpenDirectory
+       0x1a9c2c000 -        0x1a9c37bdb  com.apple.CoreServices.FSEvents (1433 - 1433) <43D6AFA4-5794-3DC0-AC1F-6EB406B5E1DE> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/FSEvents
+       0x1a9c38000 -        0x1a9c593c3  com.apple.coreservices.SharedFileList (225 - 225) <81C1A25D-B0A6-39F3-9872-8472670F05FD> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/SharedFileList.framework/Versions/A/SharedFileList
+       0x1a9c5a000 -        0x1a9c5ce47  libapp_launch_measurement.dylib (17) <7815B21D-226C-3E90-83AE-77E0623B1737> /usr/lib/libapp_launch_measurement.dylib
+       0x1a9c5d000 -        0x1a9c9b4e7  com.apple.CoreAutoLayout (1.0 - 35) <759521BC-E562-3BE6-8AA2-3248573B8E1E> /System/Library/PrivateFrameworks/CoreAutoLayout.framework/Versions/A/CoreAutoLayout
+       0x1a9c9c000 -        0x1a9d825bb  libxml2.2.dylib (40.1) <BB183DA3-EF8E-3F22-8150-E158BF761C0B> /usr/lib/libxml2.2.dylib
+       0x1a9d83000 -        0x1a9e27bc3  com.apple.CoreVideo (1.8 - 758.27) <2DD9BDAC-2339-34E3-B1D4-3C6680F85485> /System/Library/Frameworks/CoreVideo.framework/Versions/A/CoreVideo
+       0x1a9e28000 -        0x1a9e2aba3  com.apple.loginsupport (3.0 - 273) <AD64998C-2323-3410-AD8E-E2871B210CA4> /System/Library/PrivateFrameworks/login.framework/Versions/A/Frameworks/loginsupport.framework/Versions/A/loginsupport
+       0x1a9e60000 -        0x1a9e86e9f  com.apple.UserManagement (1.0 - 1) <ED7940B6-BF1D-3B80-9DF4-0DB10F9BFF52> /System/Library/PrivateFrameworks/UserManagement.framework/Versions/A/UserManagement
+       0x1ab990000 -        0x1ab9caaeb  libsystem_containermanager.dylib (833.0.8.0.1) <08A57205-555D-3792-8931-9D5B585AF326> /usr/lib/system/libsystem_containermanager.dylib
+       0x1ab9cb000 -        0x1ab9e36af  com.apple.IOSurface (402.5 - 402.5) <B7A5EC30-BFB0-3E94-8055-507FD98DB913> /System/Library/Frameworks/IOSurface.framework/Versions/A/IOSurface
+       0x1ab9e4000 -        0x1ab9ed5c3  com.apple.IOAccelerator (491 - 491) <A1E30BDD-E8D3-3159-A93E-F601837B956B> /System/Library/PrivateFrameworks/IOAccelerator.framework/Versions/A/IOAccelerator
+       0x1ab9ee000 -        0x1abc73d77  com.apple.Metal (382.5.3 - 382.5.3) <B0BC74FE-7080-347D-92EE-38195058CCCE> /System/Library/Frameworks/Metal.framework/Versions/A/Metal
+       0x1abc74000 -        0x1abc9e053  com.apple.audio.caulk (1.0 - 247) <C7BA2B3E-B175-30E9-ABF6-4D568D9DAA51> /System/Library/PrivateFrameworks/caulk.framework/Versions/A/caulk
+       0x1abc9f000 -        0x1abed06d7  com.apple.CoreMedia (1.0 - 3350.77.5.6) <976829D2-C1F5-35E4-9FDE-3CCCAF19ED9C> /System/Library/Frameworks/CoreMedia.framework/Versions/A/CoreMedia
+       0x1abed1000 -        0x1ac170e87  libFontParser.dylib (459) <6B07DF95-1102-3971-A1B0-F92CD10792EF> /System/Library/PrivateFrameworks/FontServices.framework/libFontParser.dylib
+       0x1ac4aa000 -        0x1ac971b8b  com.apple.ImageIO (3.3.0 - 2851) <9F466BFF-CD36-33EB-9240-A9DC03202193> /System/Library/Frameworks/ImageIO.framework/Versions/A/ImageIO
+       0x1ac972000 -        0x1acf30027  com.apple.CoreImage (27.0.0 - 1667.21.2) <374BB926-BF7C-3439-843C-D6E5F0D518F6> /System/Library/Frameworks/CoreImage.framework/Versions/A/CoreImage
+       0x1acf31000 -        0x1acfe22c7  com.apple.MetalPerformanceShaders.MPSCore (1.0 - 130.0.19) <95E809A5-CD68-36B9-8C22-5B11055368D4> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSCore.framework/Versions/A/MPSCore
+       0x1acfe3000 -        0x1acfe7317  libsystem_configuration.dylib (1446) <F3EB66A7-7A24-3AE5-B6E8-9A37BB00F119> /usr/lib/system/libsystem_configuration.dylib
+       0x1acfe8000 -        0x1acfeee03  libsystem_sandbox.dylib (3051.0.52) <1E892B56-092E-3832-BDE3-DCE356D7A4FA> /usr/lib/system/libsystem_sandbox.dylib
+       0x1acfef000 -        0x1acff0043  com.apple.AggregateDictionary (1.0 - 1) <CDCFA5A2-D392-384C-A334-2D3873F61CF8> /System/Library/PrivateFrameworks/AggregateDictionary.framework/Versions/A/AggregateDictionary
+       0x1acff1000 -        0x1acff4f8b  com.apple.AppleSystemInfo (3.1.5 - 3.1.5) <0C53A195-E323-368E-9A0A-88AABFB4AF66> /System/Library/PrivateFrameworks/AppleSystemInfo.framework/Versions/A/AppleSystemInfo
+       0x1acff5000 -        0x1acff635b  liblangid.dylib (140) <AE74F74F-21E6-3FA5-AA06-6BBD2D3E3626> /usr/lib/liblangid.dylib
+       0x1acff7000 -        0x1ad1125c3  com.apple.CoreNLP (1.0 - 313) <A8A964E1-9979-3E3C-AC50-DD9C02DE142F> /System/Library/PrivateFrameworks/CoreNLP.framework/Versions/A/CoreNLP
+       0x1ad113000 -        0x1ad118d6b  com.apple.LinguisticData (1.0 - 483.10) <35CC48A6-0E31-368D-944C-2248C8B34CB7> /System/Library/PrivateFrameworks/LinguisticData.framework/Versions/A/LinguisticData
+       0x1ad119000 -        0x1ae34e8f7  libBNNS.dylib (2212.1.1) <21ACE428-0EFB-3080-AFE4-A86EF66D84C6> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBNNS.dylib
+       0x1ae382000 -        0x1ae3c9c13  com.apple.IOMobileFramebuffer (343.0.0 - 343.0.0) <B1C5BB2D-DB25-332B-AD82-CF1EC6170E8B> /System/Library/PrivateFrameworks/IOMobileFramebuffer.framework/Versions/A/IOMobileFramebuffer
+       0x1ae436000 -        0x1ae44b09f  com.apple.MobileKeyBag (2.0 - 1.0) <3E21D7E4-5C92-3781-940A-F1D90D3E7501> /System/Library/PrivateFrameworks/MobileKeyBag.framework/Versions/A/MobileKeyBag
+       0x1ae44c000 -        0x1ae45635b  com.apple.AssertionServices (1.0 - 1080) <C57E2645-3386-395F-88D1-82C3944647DD> /System/Library/PrivateFrameworks/AssertionServices.framework/Versions/A/AssertionServices
+       0x1ae457000 -        0x1ae47e5cb  com.apple.coreservices.BackgroundTaskManagement (1.0 - 104) <1A1A491B-B068-3842-B7E6-2DF944B668FA> /System/Library/PrivateFrameworks/BackgroundTaskManagement.framework/Versions/A/BackgroundTaskManagement
+       0x1ae4ac000 -        0x1ae4acf2f  libobjcMsgSend1.dylib (973.1) <B40D9B2A-E1EE-37ED-8004-711A1F263DE1> /usr/lib/objc/libobjcMsgSend1.dylib
+       0x1ae8b0000 -        0x1ae9ec4eb  libvDSP.dylib (1155) <0826F134-170A-3E0B-A99F-B2CF01A56680> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libvDSP.dylib
+       0x1aeb43000 -        0x1aebc2307  com.apple.securityfoundation (6.0 - 55294.0.2) <B4C1FCB9-3A20-316C-A7BB-160A0C9099AF> /System/Library/Frameworks/SecurityFoundation.framework/Versions/A/SecurityFoundation
+       0x1aebcc000 -        0x1aebcef93  libquarantine.dylib (217.0.4) <7FD4AE22-86EF-382B-83F5-ADF9336C1160> /usr/lib/system/libquarantine.dylib
+       0x1aebcf000 -        0x1aebdb0a7  libCheckFix.dylib (33) <DAB53395-F433-3E13-A6CC-A028029F379C> /usr/lib/libCheckFix.dylib
+       0x1aebdc000 -        0x1aebf316b  libcoretls.dylib (189) <431C2F12-0081-3638-8B2F-D1F650B40942> /usr/lib/libcoretls.dylib
+       0x1aebf4000 -        0x1aec04fb3  libbsm.0.dylib (91.0.1) <E1D17FEE-E5F2-307D-A0A4-A7DA07424E2E> /usr/lib/libbsm.0.dylib
+       0x1aec05000 -        0x1aec652ff  libmecab.dylib (1159) <DCFF867C-64AB-34E3-A2D1-B1BF117C5700> /usr/lib/libmecab.dylib
+       0x1aec66000 -        0x1aec682fb  libgermantok.dylib (31) <66456142-BA99-3D22-9E97-0EAD77D8FE5F> /usr/lib/libgermantok.dylib
+       0x1aec69000 -        0x1aec7ca6b  libLinearAlgebra.dylib (1617.1.1) <34C0511A-9A4D-3302-9E1D-0DD4ABD6E9D1> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLinearAlgebra.dylib
+       0x1aec7d000 -        0x1aee99dbf  com.apple.MetalPerformanceShaders.MPSNeuralNetwork (1.0 - 130.0.19) <532F2FFA-8383-3586-973A-910FF82F7F40> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSNeuralNetwork.framework/Versions/A/MPSNeuralNetwork
+       0x1aee9a000 -        0x1aeeed53f  com.apple.MetalPerformanceShaders.MPSRayIntersector (1.0 - 130.0.19) <C91F6D93-6F2C-37FD-9CDF-90063BEFCC3C> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSRayIntersector.framework/Versions/A/MPSRayIntersector
+       0x1af035000 -        0x1af063167  com.apple.MetalPerformanceShaders.MPSMatrix (1.0 - 130.0.19) <D0C6726A-1AF1-3C81-9050-C3ED0E7EBC5E> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSMatrix.framework/Versions/A/MPSMatrix
+       0x1af064000 -        0x1af236757  com.apple.MetalPerformanceShaders.MPSNDArray (1.0 - 130.0.19) <556369D5-2B69-3CD5-8383-54A36A42ED24> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSNDArray.framework/Versions/A/MPSNDArray
+       0x1af237000 -        0x1af2c54df  com.apple.MetalPerformanceShaders.MPSImage (1.0 - 130.0.19) <D09927CC-5C30-3542-AC58-DAC8507B7E10> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSImage.framework/Versions/A/MPSImage
+       0x1af2c6000 -        0x1af2d0d63  com.apple.AppleFSCompression (182 - 1.0) <3B5065D1-5D8A-3443-B4B8-293DA9FE47C3> /System/Library/PrivateFrameworks/AppleFSCompression.framework/Versions/A/AppleFSCompression
+       0x1af2d1000 -        0x1af2dd48b  libbz2.1.0.dylib (49) <C53E464D-6E83-37EE-8454-ACC2C20EF446> /usr/lib/libbz2.1.0.dylib
+       0x1af2de000 -        0x1af2e41e7  libsystem_coreservices.dylib (203) <57248E07-11A5-3857-918E-4A3A63B69FE8> /usr/lib/system/libsystem_coreservices.dylib
+       0x1af2e5000 -        0x1af315db7  com.apple.CoreServices.OSServices (1141.1 - 1141.1) <EFDD75A9-C053-36E5-AC5A-E61CE1312712> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/OSServices.framework/Versions/A/OSServices
+       0x1af897000 -        0x1af8a5b87  libz.1.dylib (105) <09881E57-159D-3E5F-B9EB-B708249AC31E> /usr/lib/libz.1.dylib
+       0x1af8a6000 -        0x1af8e3b27  libsystem_m.dylib (3326.0.1) <A3FB340F-3ED5-30F4-8B64-9D5860F64D35> /usr/lib/system/libsystem_m.dylib
+       0x1af8e4000 -        0x1af8e4b47  libcharset.1.dylib (121) <3C9B584E-740A-3664-A1B0-52E561EA4B0B> /usr/lib/libcharset.1.dylib
+       0x1af8e5000 -        0x1af8e84f7  libmacho.dylib (27062) <50DEADEC-3E99-3519-AFC3-4A3FEB3F14C3> /usr/lib/system/libmacho.dylib
+       0x1af8e9000 -        0x1af901c4f  libkxld.dylib (13432.1.9) <E83FDCCE-F143-360F-A06A-9BC9993989B0> /usr/lib/system/libkxld.dylib
+       0x1af902000 -        0x1af90e707  libcommonCrypto.dylib (600041) <41C99F45-C5E6-39DB-B1F2-A1BEA9D242A4> /usr/lib/system/libcommonCrypto.dylib
+       0x1af90f000 -        0x1af918c87  libunwind.dylib (2200.5) <3070AB81-B082-39E8-8A00-EF88DDE9AC47> /usr/lib/system/libunwind.dylib
+       0x1af919000 -        0x1af91ffe5  liboah.dylib (385) <E359944B-D230-33F9-A04E-0C3B17C3326E> /usr/lib/liboah.dylib
+       0x1af920000 -        0x1af92a7eb  libcopyfile.dylib (260.0.3) <72D95AF9-BF5E-3A84-81A6-BCC5BDB99857> /usr/lib/system/libcopyfile.dylib
+       0x1af92b000 -        0x1af92e8bf  libcompiler_rt.dylib (103.4) <DFB5CE7F-A36E-36AA-BECE-1392D3D43607> /usr/lib/system/libcompiler_rt.dylib
+       0x1af92f000 -        0x1af934077  libsystem_collections.dylib (1786.0.3) <1E8022D4-5A37-3A7A-8936-603E6FA88358> /usr/lib/system/libsystem_collections.dylib
+       0x1af935000 -        0x1af937f1f  libsystem_secinit.dylib (182) <DE037464-4C5D-3E96-A33F-2A4557CC6A20> /usr/lib/system/libsystem_secinit.dylib
+       0x1af938000 -        0x1af93a97f  libremovefile.dylib (96) <E6E6DFCF-6B2C-3F30-A59D-816CAB1190CE> /usr/lib/system/libremovefile.dylib
+       0x1af93b000 -        0x1af93be27  libkeymgr.dylib (31) <5EC997EF-3ADA-360B-9FCD-5F940C83FA4E> /usr/lib/system/libkeymgr.dylib
+       0x1af93c000 -        0x1af944af7  libsystem_dnssd.dylib (3111.0.5.0.1) <DE22096F-1E5B-3D6E-8164-771582DD6391> /usr/lib/system/libsystem_dnssd.dylib
+       0x1af945000 -        0x1af949f1b  libcache.dylib (95) <80BAE197-E285-3F6E-A1EE-B77FE37D7E5D> /usr/lib/system/libcache.dylib
+       0x1af94a000 -        0x1af94b8f3  libSystem.B.dylib (1359) <4FDC9AA6-B344-37FE-B8C6-A4C94A038F57> /usr/lib/libSystem.B.dylib
+       0x1af94c000 -        0x1af94ddf7  libfakelink.dylib (5) <76412133-41DC-3EE8-9AC1-12441AB8EE4E> /usr/lib/libfakelink.dylib
+       0x1af94e000 -        0x1af94e963  com.apple.SoftLinking (1.0 - 72) <467A5BB5-639E-31D1-8582-D5B0AB28D1F5> /System/Library/PrivateFrameworks/SoftLinking.framework/Versions/A/SoftLinking
+       0x1af984000 -        0x1af98b0a3  libiconv.2.dylib (121) <C343D6F7-6932-30E8-8E8F-F756946D8413> /usr/lib/libiconv.2.dylib
+       0x1af99f000 -        0x1afa968c7  libarchive.2.dylib (182.0.1) <2869F71C-09C9-3037-B209-F5EE4ED7B73E> /usr/lib/libarchive.2.dylib
+       0x1afa97000 -        0x1afafbca7  com.apple.SearchKit (1.4.2 - 1.4.2) <E10E4CC4-CD23-36BC-B33C-BD33A3793509> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/SearchKit.framework/Versions/A/SearchKit
+       0x1afafc000 -        0x1afb03ed7  libThaiTokenizer.dylib (28) <DDAFA8FA-194E-315B-8B0C-D1A801F6BCF9> /usr/lib/libThaiTokenizer.dylib
+       0x1afb04000 -        0x1afb2752f  com.apple.applesauce (1.0 - 17.7) <FD3F8924-2D39-325A-A2A2-E15CB08C42F2> /System/Library/PrivateFrameworks/AppleSauce.framework/Versions/A/AppleSauce
+       0x1afb28000 -        0x1afb40803  libapple_nghttp2.dylib (42) <6486CF8F-DC50-35BF-A36C-080D6E27965D> /usr/lib/libapple_nghttp2.dylib
+       0x1afb41000 -        0x1afbea0b7  libSparseBLAS.dylib (196.0.1) <C182284A-6122-3E5D-B910-5AAB4C981B00> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libSparseBLAS.dylib
+       0x1afbeb000 -        0x1afbec3d3  com.apple.MetalPerformanceShaders.MetalPerformanceShaders (1.0 - 130.0.19) <CAC089E6-4489-3D36-B155-1BB2AF360A22> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/MetalPerformanceShaders
+       0x1afbed000 -        0x1afbf2d0f  libpam.2.dylib (35) <B9C75402-03F2-3D7A-ACDE-A67D9859B499> /usr/lib/libpam.2.dylib
+       0x1afbf3000 -        0x1afcd085f  libcompression.dylib (212.0.1) <C25CA2C2-8DE6-3DBB-A03F-B81A9A0DAF50> /usr/lib/libcompression.dylib
+       0x1afcd1000 -        0x1afcd5437  libQuadrature.dylib (10) <6BA9713A-AEBB-3AFF-84F9-7E1F25BA9563> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libQuadrature.dylib
+       0x1afcd6000 -        0x1b0f9776f  libLAPACK.dylib (1617.1.1) <8A02E4DB-01CA-32D3-9384-DC2AF9FAE7C0> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libLAPACK.dylib
+       0x1b0f98000 -        0x1b0fed85f  com.apple.DictionaryServices (1.2 - 383.7) <769713A5-4C54-3A47-A3A2-042FE798DD5D> /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/DictionaryServices.framework/Versions/A/DictionaryServices
+       0x1b0fee000 -        0x1b100c617  liblzma.5.dylib (21) <2B34F3EF-C505-3D29-9656-E7CEE143585C> /usr/lib/liblzma.5.dylib
+       0x1b100d000 -        0x1b100e53f  libcoretls_cfhelpers.dylib (189) <290FBB06-5D27-3C11-96B7-21D9770E7D8A> /usr/lib/libcoretls_cfhelpers.dylib
+       0x1b100f000 -        0x1b107fc4f  com.apple.APFS (3288.1.3 - 3288.1.3) <207380E2-6E65-3463-89A3-52B3A82FFD24> /System/Library/PrivateFrameworks/APFS.framework/Versions/A/APFS
+       0x1b1080000 -        0x1b108e0eb  libxar.1.dylib (514.0.1) <E5A8C033-10F5-305C-883B-3433D8EC6871> /usr/lib/libxar.1.dylib
+       0x1b108f000 -        0x1b10922bb  libutil.dylib (76) <38245F99-D78C-38F1-94EE-22DF75E72ADE> /usr/lib/libutil.dylib
+       0x1b1093000 -        0x1b10bd0b7  libxslt.1.dylib (22) <993E7F4A-90F1-35C1-BD90-84203244D58A> /usr/lib/libxslt.1.dylib
+       0x1b10c5000 -        0x1b113ed07  libvMisc.dylib (1155) <8E6D9B3D-641B-3BB7-ABA2-1A5F55E21535> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libvMisc.dylib
+       0x1b113f000 -        0x1b11cf3a7  libate.dylib (3.0.11) <693A742F-B963-3654-B3E7-F7BAA5B9582F> /usr/lib/libate.dylib
+       0x1b11d9000 -        0x1b11ea0a7  com.apple.CrashReporterSupport (10.13 - 15146) <94F81559-B4AD-3BDD-A37B-75E023A5C9B9> /System/Library/PrivateFrameworks/CrashReporterSupport.framework/Versions/A/CrashReporterSupport
+       0x1b1311000 -        0x1b1343193  com.apple.pluginkit.framework (1.0 - 1) <AF2A6019-5213-368B-A1E3-03269B5E8993> /System/Library/PrivateFrameworks/PlugInKit.framework/Versions/A/PlugInKit
+       0x1b1344000 -        0x1b134b4cb  libMatch.1.dylib (50.0.1) <61B9B26B-1322-3FBA-913C-FB47AF9D39D0> /usr/lib/libMatch.1.dylib
+       0x1b13ba000 -        0x1b14030cf  com.apple.AppleVAFramework (6.2.10 - 6.2.10) <77418C1A-1CB1-3C54-A10D-B2B87798ACA7> /System/Library/PrivateFrameworks/AppleVA.framework/Versions/A/AppleVA
+       0x1b1404000 -        0x1b141eeb7  libexpat.1.dylib (47) <1A30E0DE-A426-3209-A3B4-2675027F2CF9> /usr/lib/libexpat.1.dylib
+       0x1b141f000 -        0x1b1428bb3  libheimdal-asn1.dylib (725.0.12) <3AB630AA-8755-33C3-B955-A3CECEBBFA4B> /usr/lib/libheimdal-asn1.dylib
+       0x1b151e000 -        0x1b15deb4f  com.apple.MediaExperience (1.0 - 1) <DFF7F55D-6EF0-39C4-886C-2A7DD31A81F5> /System/Library/PrivateFrameworks/MediaExperience.framework/Versions/A/MediaExperience
+       0x1b1601000 -        0x1b1617c87  com.apple.GraphVisualizer (1.0 - 310) <3ED4C650-0272-38D7-9EAC-BEFE69696E71> /System/Library/PrivateFrameworks/GraphVisualizer.framework/Versions/A/GraphVisualizer
+       0x1b1618000 -        0x1b1650e73  com.apple.OTSVG (1.0 - 904) <4E0C0BF7-EA1C-3CBA-B7B1-7E0AC107A174> /System/Library/PrivateFrameworks/OTSVG.framework/Versions/A/OTSVG
+       0x1b1651000 -        0x1b165c05f  com.apple.xpc.AppServerSupport (1.0 - 3298.1.1) <0EA6AF48-F033-31DB-AE1B-4729F37CF2E5> /System/Library/PrivateFrameworks/AppServerSupport.framework/Versions/A/AppServerSupport
+       0x1b165d000 -        0x1b166348b  libspindump.dylib (448) <B59289A5-B57F-3D61-8C87-7D74456047A9> /usr/lib/libspindump.dylib
+       0x1b1664000 -        0x1b1723343  com.apple.Heimdal (4.0 - 2.0) <61DDDEF4-D205-362E-B7C2-63DC75F3AFF5> /System/Library/PrivateFrameworks/Heimdal.framework/Versions/A/Heimdal
+       0x1b1a15000 -        0x1b1a5a04f  com.apple.AppleJPEG (1.0 - 1) <453D6AE3-2DBA-3BD6-9CD7-82B023C2556E> /System/Library/PrivateFrameworks/AppleJPEG.framework/Versions/A/AppleJPEG
+       0x1b1a5b000 -        0x1b1b61347  libJP2.dylib (2851) <8C641091-4DF4-3BE2-BCE5-E38F88B81FC7> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libJP2.dylib
+       0x1b1b62000 -        0x1b1b63c67  com.apple.WatchdogClient.framework (1.0 - 334.0.4) <02171A1C-6E1D-3348-B7DB-CA81F61BD3AB> /System/Library/PrivateFrameworks/WatchdogClient.framework/Versions/A/WatchdogClient
+       0x1b1b64000 -        0x1b1ba76b7  com.apple.MultitouchSupport.framework (10400.44 - 10400.44) <DA05747A-43DB-39DD-82DA-C9D6C2EDE68E> /System/Library/PrivateFrameworks/MultitouchSupport.framework/Versions/A/MultitouchSupport
+       0x1b1ba8000 -        0x1b213176f  com.apple.VideoToolbox (1.0 - 3350.77.5.6) <6EDC2F05-B68B-3810-9103-16B2DCE770B4> /System/Library/Frameworks/VideoToolbox.framework/Versions/A/VideoToolbox
+       0x1b2132000 -        0x1b215c09f  libPng.dylib (2851) <2D9734E3-0991-3823-875A-A7A1ABDC63B4> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libPng.dylib
+       0x1b215d000 -        0x1b21be34f  libTIFF.dylib (2851) <2FF49954-B5F5-3CD4-A4C7-39948EB833A7> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libTIFF.dylib
+       0x1b21bf000 -        0x1b21dd56f  com.apple.IOPresentment (67 - 67) <E2F60270-A88B-34B2-A6AB-6BE37B001B75> /System/Library/PrivateFrameworks/IOPresentment.framework/Versions/A/IOPresentment
+       0x1b21de000 -        0x1b21e23a7  com.apple.GPUWrangler (8.1.12 - 8.1.12) <DD1A8136-0B38-32C0-A23D-794B162AF26A> /System/Library/PrivateFrameworks/GPUWrangler.framework/Versions/A/GPUWrangler
+       0x1b21e3000 -        0x1b21e52bf  libRadiance.dylib (2851) <447C6D93-DA95-3A0A-975B-F9BE9095CC28> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libRadiance.dylib
+       0x1b21e6000 -        0x1b21eab13  com.apple.DSExternalDisplay (3.1 - 380) <A566E2B1-A7CC-3AE3-96A4-4E2994F8C1D0> /System/Library/PrivateFrameworks/DSExternalDisplay.framework/Versions/A/DSExternalDisplay
+       0x1b21eb000 -        0x1b2215f47  libJPEG.dylib (2851) <D27A6E08-328D-3560-A211-A182B505DAB8> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libJPEG.dylib
+       0x1b2243000 -        0x1b2248c27  libGIF.dylib (2851) <6830CD73-C87E-3B59-AD95-FEE4ECC0B759> /System/Library/Frameworks/ImageIO.framework/Versions/A/Resources/libGIF.dylib
+       0x1b2249000 -        0x1b225acd3  com.apple.CMCaptureCore (1.0 - 764.21.3) <E5B093A6-E1AF-3ABD-8A1D-E1DCA943156C> /System/Library/PrivateFrameworks/CMCaptureCore.framework/Versions/A/CMCaptureCore
+       0x1b3236000 -        0x1b32a30d7  libusrtcp.dylib (6681.1.1) <DD6DE768-C695-31DA-A1B8-B089AD8721FC> /usr/lib/libusrtcp.dylib
+       0x1b32a4000 -        0x1b383ce2f  libswiftCore.dylib (6.4.0 - 6.4.0.31.5) <C9B36DA7-BB34-35AF-BC5D-91ECBCAA9ED0> /usr/lib/swift/libswiftCore.dylib
+       0x1b38cd000 -        0x1b391f9eb  libSessionUtility.dylib (449.108) <2D305F72-8E2A-3B72-8617-4278A3D605A4> /System/Library/PrivateFrameworks/AudioSession.framework/libSessionUtility.dylib
+       0x1b3920000 -        0x1b3af9fb3  com.apple.audio.toolbox.AudioToolbox (1.14 - 1.14) <C5FDDD2A-A45C-39E0-AF9C-64755A6BD394> /System/Library/Frameworks/AudioToolbox.framework/Versions/A/AudioToolbox
+       0x1b3afa000 -        0x1b3b64fe3  com.apple.audio.AudioSession (1.0 - 449.108) <51EBB45A-C823-3BCA-8A5B-5321EA1D636A> /System/Library/PrivateFrameworks/AudioSession.framework/Versions/A/AudioSession
+       0x1b3b65000 -        0x1b3b6723b  libAudioStatistics.dylib (300) <E5F218A4-4EC6-3334-9EE3-F63E737AB26C> /usr/lib/libAudioStatistics.dylib
+       0x1b3b93000 -        0x1b3baec23  libresolv.9.dylib (96) <7D890D7A-3C34-3E74-BBB6-83FA14A6BE0A> /usr/lib/libresolv.9.dylib
+       0x1b3baf000 -        0x1b3bc157f  libsasl2.2.dylib (219) <ED27922C-C85D-3FE9-B7B6-41B5B7B4084E> /usr/lib/libsasl2.2.dylib
+       0x1b3d77000 -        0x1b3e56eaf  libSMC.dylib (40) <EAF84B62-8A69-395A-9E31-DAE0F74E6A14> /usr/lib/libSMC.dylib
+       0x1b3eb5000 -        0x1b3ec1db7  com.apple.NetAuth (6.2 - 6.2) <6C13E8AF-2D7F-33FF-9BCB-D23227F8ADD8> /System/Library/PrivateFrameworks/NetAuth.framework/Versions/A/NetAuth
+       0x1b3ed0000 -        0x1b3eda6f3  com.apple.perfdata (1.0 - 135.0.1) <5F510E06-26BE-33D3-8072-B516312A9FE4> /System/Library/PrivateFrameworks/perfdata.framework/Versions/A/perfdata
+       0x1b3edb000 -        0x1b3ee7977  libperfcheck.dylib (46) <BE4BD34C-951A-3CB4-A9E8-C46E38E62E02> /usr/lib/libperfcheck.dylib
+       0x1b3ee8000 -        0x1b3ef83f7  com.apple.Kerberos (3.0 - 1) <B9E15097-7F2A-33AA-B86A-8942EB8F69BD> /System/Library/Frameworks/Kerberos.framework/Versions/A/Kerberos
+       0x1b3ef9000 -        0x1b3f48b6f  com.apple.GSS (4.0 - 2.0) <E935474F-DCEA-30FF-92C2-C3722F95E8ED> /System/Library/Frameworks/GSS.framework/Versions/A/GSS
+       0x1b3f49000 -        0x1b3f59a1f  com.apple.CommonAuth (4.0 - 2.0) <08F95713-D604-382B-B59F-0BD5D92E72E6> /System/Library/PrivateFrameworks/CommonAuth.framework/Versions/A/CommonAuth
+       0x1b3f5a000 -        0x1b401caa7  com.apple.MobileAssets (1.0 - 2215.0.20) <242D2797-AA04-34DF-9308-70C298E0778A> /System/Library/PrivateFrameworks/MobileAsset.framework/Versions/A/MobileAsset
+       0x1b409c000 -        0x1b40aaef7  com.apple.CorePhoneNumbers (1.0 - 1) <696A225A-F3BC-383E-A1DB-F8B793B1AA9A> /System/Library/PrivateFrameworks/CorePhoneNumbers.framework/Versions/A/CorePhoneNumbers
+       0x1b5ad0000 -        0x1b5bbc367  com.apple.combine (1.0 - 3023) <1D189755-83EB-3FC1-A86A-23A60CDAB34A> /System/Library/Frameworks/Combine.framework/Versions/A/Combine
+       0x1b5f3b000 -        0x1b5f3c73f  libpanel.5.4.dylib (81) <ED104AF3-AD7C-31F3-A7BC-9BF10E6A6449> /usr/lib/libpanel.5.4.dylib
+       0x1b5f75000 -        0x1b5f7586f  com.apple.Accelerate.vecLib (3.11 - vecLib 3.11) <A85314AD-5F04-353C-B6FD-9CBDB885CF75> /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/vecLib
+       0x1b5f92000 -        0x1b5f9298f  com.apple.CoreServices (1226 - 1226) <92E25F67-1006-322C-B4B8-9F3840F8D9B3> /System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices
+       0x1b619f000 -        0x1b619f417  com.apple.Accelerate (1.11 - Accelerate 1.11) <A697E7B9-8FF4-356C-A507-64B38AF1CCAA> /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate
+       0x1b64ac000 -        0x1b64acf2f  libobjcMsgSend2.dylib (973.1) <BD27A84B-C9AE-3282-BBEA-3B6119837B5A> /usr/lib/objc/libobjcMsgSend2.dylib
+       0x1ba739000 -        0x1ba745afb  com.apple.SymptomDiagnosticReporter (1.0 - 469) <049798AF-EDA0-3108-9CF8-373B605AB558> /System/Library/PrivateFrameworks/SymptomDiagnosticReporter.framework/Versions/A/SymptomDiagnosticReporter
+       0x1ba746000 -        0x1ba76b443  com.apple.PowerLog (1.0 - 1) <5AE600A4-1463-3080-A50C-33517AA61B91> /System/Library/PrivateFrameworks/PowerLog.framework/Versions/A/PowerLog
+       0x1ba777000 -        0x1ba8208b3  com.apple.DiscRecording (9.0.3 - 9030.4.5) <B1B79268-6DC3-3611-9323-C0A14FDF44B3> /System/Library/Frameworks/DiscRecording.framework/Versions/A/DiscRecording
+       0x1ba821000 -        0x1ba851687  com.apple.MediaKit (16 - 944) <B378DAE0-A2AF-3F1C-8AB3-E1EAB5B26E7A> /System/Library/PrivateFrameworks/MediaKit.framework/Versions/A/MediaKit
+       0x1bb242000 -        0x1bb25821f  libswiftDispatch.dylib (1605.0.2) <C01F5E48-7D6C-3663-A336-0F66AC49B65D> /usr/lib/swift/libswiftDispatch.dylib
+       0x1bb52f000 -        0x1bb5d764f  com.apple.BoardServices (1.0 - 827) <C248C55D-D69D-3D61-A345-443BA92B3F36> /System/Library/PrivateFrameworks/BoardServices.framework/Versions/A/BoardServices
+       0x1bb607000 -        0x1bb613c0f  com.apple.GraphicsServices (1.0 - 1.0) <B54AC2CC-7FBD-3302-91EA-6048A79CBA5B> /System/Library/PrivateFrameworks/GraphicsServices.framework/Versions/A/GraphicsServices
+       0x1bb8b4000 -        0x1bb8d46a7  com.apple.DebugSymbols (219 - 219) <AE8A54B1-9840-3582-8480-45B38C2F4C30> /System/Library/PrivateFrameworks/DebugSymbols.framework/Versions/A/DebugSymbols
+       0x1bb8d5000 -        0x1bba3ce0b  com.apple.CoreSymbolication (16.0 - 64578.82.2) <D4672F79-1DDE-3AAE-95AC-C199B84B9355> /System/Library/PrivateFrameworks/CoreSymbolication.framework/Versions/A/CoreSymbolication
+       0x1bba3d000 -        0x1bba46a73  com.apple.CoreTime (340.0.14 - 340.0.14) <090BF232-5377-30C2-A128-C72DC9152EBB> /System/Library/PrivateFrameworks/CoreTime.framework/Versions/A/CoreTime
+       0x1bd2ea000 -        0x1bd35c76f  com.apple.BackBoardServices (1.0 - 1.0) <A4C4201B-02FD-3B1B-B58A-A60BB4023B8C> /System/Library/PrivateFrameworks/BackBoardServices.framework/Versions/A/BackBoardServices
+       0x1bd35d000 -        0x1bd397a4f  com.apple.LDAPFramework (2.4.28 - 194.5) <DF9EF86F-9E46-3DC5-8C25-31697C7AC19E> /System/Library/Frameworks/LDAP.framework/Versions/A/LDAP
+       0x1bd398000 -        0x1bd399637  com.apple.TrustEvaluationAgent (2.0 - 38) <8CB2434F-FFBE-3D9F-ABB0-24FA33527AB6> /System/Library/PrivateFrameworks/TrustEvaluationAgent.framework/Versions/A/TrustEvaluationAgent
+       0x1bd4c6000 -        0x1bd57bf87  com.apple.DiskImagesFramework (704 - 704) <6FC7DD54-CE06-30B3-9231-123022BF8CF8> /System/Library/PrivateFrameworks/DiskImages.framework/Versions/A/DiskImages
+       0x1bd5b9000 -        0x1bd5ce093  com.apple.RemoteServiceDiscovery (1.0 - 245.0.7) <BCC760CB-6667-3798-8E4C-EEFC5F9130CD> /System/Library/PrivateFrameworks/RemoteServiceDiscovery.framework/Versions/A/RemoteServiceDiscovery
+       0x1bd5cf000 -        0x1bd5e2807  com.apple.xpc.RemoteXPC (1.0 - 3298.1.1) <1C3FDABA-4DCB-3557-8126-5B437D640F24> /System/Library/PrivateFrameworks/RemoteXPC.framework/Versions/A/RemoteXPC
+       0x1bd667000 -        0x1bd6e696b  libcurl.4.dylib (168.0.2) <C067B2C6-DD0E-3BEA-BCC0-F048B2A17545> /usr/lib/libcurl.4.dylib
+       0x1bd6ed000 -        0x1bd7271f3  com.apple.AppSupport (1.0.0 - 29) <10780E13-654E-39C1-879A-B994F5B2990F> /System/Library/PrivateFrameworks/AppSupport.framework/Versions/A/AppSupport
+       0x1bd999000 -        0x1bd99b943  com.apple.InternationalTextSearch (1.0 - 1) <5B798ABD-BB61-3D16-BB42-0167B3C55A0A> /System/Library/PrivateFrameworks/InternationalTextSearch.framework/Versions/A/InternationalTextSearch
+       0x1bdfe5000 -        0x1bdfe53f7  libHeimdalProxy.dylib (88) <6341E9AF-9CD5-3A7A-ACD4-829EE3E79A6D> /System/Library/Frameworks/Kerberos.framework/Versions/A/Libraries/libHeimdalProxy.dylib
+       0x1be008000 -        0x1be024973  com.apple.StreamingZip (1.0 - 1) <5651DFE8-5C8C-3921-8CC7-A62F564577C9> /System/Library/PrivateFrameworks/StreamingZip.framework/Versions/A/StreamingZip
+       0x1be074000 -        0x1be077397  libswiftObjectiveC.dylib (973.1) <3143A5EB-68CA-37E3-B414-98792711FF44> /usr/lib/swift/libswiftObjectiveC.dylib
+       0x1be078000 -        0x1be094257  libswiftos.dylib (1090) <010A7F00-D6F4-3E94-918D-39EF4E33EF95> /usr/lib/swift/libswiftos.dylib
+       0x1be123000 -        0x1be17cb3b  com.apple.ANEServices (10.19 - 10.19) <A5530A99-742B-3010-8486-8047696F1089> /System/Library/PrivateFrameworks/ANEServices.framework/Versions/A/ANEServices
+       0x1be17d000 -        0x1be1f3f2f  com.apple.proactive.support.ProactiveSupport (1.0 - 423.0.1) <620CAB1D-5B4C-3449-AF3B-5D18989B8D76> /System/Library/PrivateFrameworks/ProactiveSupport.framework/Versions/A/ProactiveSupport
+       0x1be2bf000 -        0x1be2e6e6f  com.apple.ASEProcessing (1.59.0 - 1.59.0) <6A028F2D-5B7E-324E-BE22-B589F34B1925> /System/Library/PrivateFrameworks/ASEProcessing.framework/Versions/A/ASEProcessing
+       0x1be4ac000 -        0x1be4acf2f  libobjcMsgSend3.dylib (973.1) <C0860D68-DDFC-3BD7-8B06-DB0645CBBED4> /usr/lib/objc/libobjcMsgSend3.dylib
+       0x1c054e000 -        0x1c05ca5d7  com.apple.CoreML.AppleNeuralEngine (1.0 - 1) <6DE5C17F-81DE-3F51-AAE5-94F42E25A513> /System/Library/PrivateFrameworks/AppleNeuralEngine.framework/Versions/A/AppleNeuralEngine
+       0x1c06ce000 -        0x1c0794353  com.apple.audio.midi.CoreMIDI (2.0 - 88) <DA3E2CF1-D70C-3055-BF59-0F604DA694A9> /System/Library/Frameworks/CoreMIDI.framework/Versions/A/CoreMIDI
+       0x1c1348000 -        0x1c134c59f  com.apple.IOSurfaceAccelerator (1.0.0 - 1.0.0) <0499772A-AB15-393F-B655-6DB5E6D24755> /System/Library/PrivateFrameworks/IOSurfaceAccelerator.framework/Versions/A/IOSurfaceAccelerator
+       0x1c63f9000 -        0x1c64131ef  com.apple.HID (1.0 - 1) <EDB0E5D5-3547-3681-8291-DC8129EF0E41> /System/Library/PrivateFrameworks/HID.framework/Versions/A/HID
+       0x1c6414000 -        0x1c644f137  com.apple.IOGPU (162.11 - 162.11) <3959324F-D63D-3387-8E97-238F27A76B74> /System/Library/PrivateFrameworks/IOGPU.framework/Versions/A/IOGPU
+       0x1c64ac000 -        0x1c64acf2f  libobjcMsgSend4.dylib (973.1) <A6153BF5-622B-3B01-81B6-F64A365EF613> /usr/lib/objc/libobjcMsgSend4.dylib
+       0x1cbb73000 -        0x1cbb80d1b  com.apple.NetFS (6.0 - 4.0) <E3E650E1-6780-3A10-980D-3A7FACCB7288> /System/Library/Frameworks/NetFS.framework/Versions/A/NetFS
+       0x1cc033000 -        0x1cc035807  libswiftDarwin.dylib (428.0.10) <B4F37828-524C-32F7-94FD-63CB8177AEEC> /usr/lib/swift/libswiftDarwin.dylib
+       0x1ce2f5000 -        0x1ce3e29e3  libquic.dylib (6681.1.1) <E55B3940-F54E-35A0-9C42-345155D8E76F> /usr/lib/libquic.dylib
+       0x1ce3ec000 -        0x1ce40b953  com.apple.private.SystemPolicy (1.0 - 1) <DF086382-D2C6-3905-B921-2196A77E9180> /System/Library/PrivateFrameworks/SystemPolicy.framework/Versions/A/SystemPolicy
+       0x1ce4ac000 -        0x1ce4acf2f  libobjcMsgSend5.dylib (973.1) <3913A71C-B29A-3AEA-820B-BEC40AC1861A> /usr/lib/objc/libobjcMsgSend5.dylib
+       0x1cf7b5000 -        0x1cf82e39b  com.apple.LoggingSupport (1.0 - 1966.1.1) <1F7476AA-2F22-3C20-8FCA-C8B0E47ABB21> /System/Library/PrivateFrameworks/LoggingSupport.framework/Versions/A/LoggingSupport
+       0x1cf82f000 -        0x1cf83b437  com.apple.MallocStackLogging (1.0 - 65000) <FF92B432-827A-36CD-A3CB-7BAAA6581179> /System/Library/PrivateFrameworks/MallocStackLogging.framework/Versions/A/MallocStackLogging
+       0x1cf857000 -        0x1cf8b8ea3  libmis.dylib (487.0.2) <4A873AE2-BD1A-38D5-B98E-AAF4039D4133> /usr/lib/libmis.dylib
+       0x1cf8b9000 -        0x1cf8bb88f  com.apple.gpusw.GPURawCounter (35 - 35) <2383C07B-9F0E-3CAC-9C5A-5272664B255C> /System/Library/PrivateFrameworks/GPURawCounter.framework/Versions/A/GPURawCounter
+       0x1cf8bc000 -        0x1cf8dac13  libswiftCoreAudio.dylib (482.102.10) <2F5D4013-D077-34C3-821E-9A376638588D> /usr/lib/swift/libswiftCoreAudio.dylib
+       0x1cf8db000 -        0x1cf8e0caf  libswiftCoreFoundation.dylib (2412) <45079B74-1B3F-3EE0-8331-5A36B71C3530> /usr/lib/swift/libswiftCoreFoundation.dylib
+       0x1cf8ea000 -        0x1cf933a9f  libswiftXPC.dylib (167.0.2) <A4ABDA3A-3856-3607-AC51-9229FA1D5777> /usr/lib/swift/libswiftXPC.dylib
+       0x1cf934000 -        0x1cf9347f7  libswiftCoreImage.dylib (3) <1524539F-9544-3DBC-9EAB-EB37B5EDA806> /usr/lib/swift/libswiftCoreImage.dylib
+       0x1cf935000 -        0x1cf9358a3  libswiftIOKit.dylib (1) <125C8CC5-3CFC-3F43-9C25-5DD08C2E4BBD> /usr/lib/swift/libswiftIOKit.dylib
+       0x1d168d000 -        0x1d16d42cf  libbootpolicy.dylib (304) <528B381C-8756-328F-BE20-8B9573A7EC3A> /usr/lib/libbootpolicy.dylib
+       0x1d304f000 -        0x1d30664a3  libswiftsimd.dylib (25) <BE72A6EC-6A5C-30D2-BBA0-44111D3F604C> /usr/lib/swift/libswiftsimd.dylib
+       0x1d4552000 -        0x1d458e77b  libncurses.5.4.dylib (81) <0DF50E07-5220-3B89-BBC1-967D9225A75F> /usr/lib/libncurses.5.4.dylib
+       0x1d458f000 -        0x1d45969fb  com.apple.IOAccelMemoryInfo (1.0 - 1) <3E60AA32-713B-3346-B95D-E97E10193F0F> /System/Library/PrivateFrameworks/IOAccelMemoryInfo.framework/Versions/A/IOAccelMemoryInfo
+       0x1d5d9f000 -        0x1d5da7dc7  libswiftCoreMIDI.dylib (6) <BB0B90A6-1AAF-3A9C-998C-D4822F79B050> /usr/lib/swift/libswiftCoreMIDI.dylib
+       0x1d64ac000 -        0x1d64acf2f  libobjcMsgSend6.dylib (973.1) <9BC523A3-E167-3F6C-8CAE-0F3EBA671791> /usr/lib/objc/libobjcMsgSend6.dylib
+       0x1d69a7000 -        0x1d69ac71b  com.apple.MSUDataAccessor (1.0 - 1) <B575CE52-8A1C-35C6-B1EC-281FBF18E16E> /System/Library/PrivateFrameworks/MSUDataAccessor.framework/Versions/A/MSUDataAccessor
+       0x1d6e52000 -        0x1d6e9dbcb  com.apple.SoftwareUpdateCoreSupport (1.0 - 1) <ED2DBB36-9A42-3A54-958C-93F2B1D34546> /System/Library/PrivateFrameworks/SoftwareUpdateCoreSupport.framework/Versions/A/SoftwareUpdateCoreSupport
+       0x1da847000 -        0x1da88ea7b  com.apple.biome.BiomeFoundation (1.0 - 250.0.0.3) <85B9EA77-DAE9-3AAD-BD96-D90DE71BE680> /System/Library/PrivateFrameworks/BiomeFoundation.framework/Versions/A/BiomeFoundation
+       0x1dd12b000 -        0x1dd132f5f  libswiftMetal.dylib (382.5.3) <FAE1B768-4D95-3EB2-BEF3-6D845C38988C> /usr/lib/swift/libswiftMetal.dylib
+       0x1dd133000 -        0x1dd1396df  libswiftCompression.dylib (18) <A3677B2C-332E-3E7E-ACFF-F6DD4E6613F8> /usr/lib/swift/libswiftCompression.dylib
+       0x1ddf63000 -        0x1de015bf3  libFDR.dylib (1636.0.17) <921820A7-BFA7-3D97-A82D-4276C08554C0> /usr/lib/libFDR.dylib
+       0x1de016000 -        0x1de08a8ef  com.apple.TimeSync (1.0 - 1501.7) <04424CE0-D831-3898-81A1-1E7E4FF2FE92> /System/Library/PrivateFrameworks/TimeSync.framework/Versions/A/TimeSync
+       0x1de4ac000 -        0x1de4acf2f  libobjcMsgSend7.dylib (973.1) <248B7BCE-5B4C-34C7-A340-43D5228628C5> /usr/lib/objc/libobjcMsgSend7.dylib
+       0x1de8b0000 -        0x1dedfbe37  com.apple.biome.BiomeStreams (1.0 - 250.0.0.3) <C751108F-893C-3D25-A648-222D9E14F46A> /System/Library/PrivateFrameworks/BiomeStreams.framework/Versions/A/BiomeStreams
+       0x1defcc000 -        0x1defdc05b  com.apple.SoftwareUpdateCoreConnect (1.0 - 1) <DF7BE13C-A22A-3EBB-9E5A-85DEB5C3E193> /System/Library/PrivateFrameworks/SoftwareUpdateCoreConnect.framework/Versions/A/SoftwareUpdateCoreConnect
+       0x1e02ed000 -        0x1e02f42bb  com.apple.audio.IOKitten (300.1 - 300.1) <6B3DA7ED-00EF-31BB-894E-48B53F7C4593> /System/Library/PrivateFrameworks/IOKitten.framework/Versions/A/IOKitten
+       0x1e1b4d000 -        0x1e1baad7f  com.apple.osanalytics.OSAnalytics (1.0 - 1) <FC435AAF-0915-3FEE-A21E-D5F8465C7605> /System/Library/PrivateFrameworks/OSAnalytics.framework/Versions/A/OSAnalytics
+       0x1e2f34000 -        0x1e2f35deb  libswiftQuartzCore.dylib (5) <303BA471-C8BD-3A89-B8AD-A54C26D39328> /usr/lib/swift/libswiftQuartzCore.dylib
+       0x1e327c000 -        0x1e328166f  com.apple.kperf (1.0 - 1) <D72F399E-388F-3C1E-8270-7208346C0088> /System/Library/PrivateFrameworks/kperf.framework/Versions/A/kperf
+       0x1e338e000 -        0x1e3391ebf  com.apple.MobileSystemServices (1.0 - 1) <A415AF41-E605-36EA-AD1B-01200B7E1FCE> /System/Library/PrivateFrameworks/MobileSystemServices.framework/Versions/A/MobileSystemServices
+       0x1e4894000 -        0x1e48b96bb  libamsupport.dylib (475.0.9) <53C7DA2C-3ACC-36FE-863A-2FC6D5902000> /usr/lib/libamsupport.dylib
+       0x1e4c72000 -        0x1e4cc28c7  com.apple.biome.BiomePubSub (1.0 - 250.0.0.3) <3A1E7EDF-3D89-362E-876E-53D841BCB6BC> /System/Library/PrivateFrameworks/BiomePubSub.framework/Versions/A/BiomePubSub
+       0x1e4cc3000 -        0x1e4cf8d97  com.apple.biome.BiomeStorage (1.0 - 250.0.0.3) <34109228-69B3-359F-A58D-2930545A9651> /System/Library/PrivateFrameworks/BiomeStorage.framework/Versions/A/BiomeStorage
+       0x1e64ac000 -        0x1e64acf2f  libobjcMsgSend8.dylib (973.1) <3E041BAD-A8E8-3069-B741-78CD1A45B176> /usr/lib/objc/libobjcMsgSend8.dylib
+       0x1e771c000 -        0x1e77294f7  libswiftUniformTypeIdentifiers.dylib (917.0.1.403) <9C27643C-CAC9-3687-A19B-0F3F40F9CAB1> /usr/lib/swift/libswiftUniformTypeIdentifiers.dylib
+       0x1e772a000 -        0x1e77ea0bb  libswiftAccelerate.dylib (82) <A57EBF98-4C09-3A2A-8266-6336537116C1> /usr/lib/swift/libswiftAccelerate.dylib
+       0x1e792a000 -        0x1e7938f03  libpartition2_dynamic.dylib (3696.0.12.0.3) <25AEE4A8-7C62-3A7F-A279-A3BB6F14E569> /usr/lib/libpartition2_dynamic.dylib
+       0x1e7ddf000 -        0x1e7de894f  com.apple.AFKUser (1) <43A2F367-7736-3AE3-AA92-118D27D4DACF> /System/Library/PrivateFrameworks/AFKUser.framework/Versions/A/AFKUser
+       0x1ed4bb000 -        0x1ed4bc8e7  libswiftOSLog.dylib (10) <2243B3A2-A831-3F96-8D1B-29ACF2FD7FDE> /usr/lib/swift/libswiftOSLog.dylib
+       0x1ede65000 -        0x1edf509bf  com.apple.Symbolication (16.0 - 64578.100.1) <8797C0C4-4EB6-3BA7-BA93-4F41FFAC09F7> /System/Library/PrivateFrameworks/Symbolication.framework/Versions/A/Symbolication
+       0x1ee4ac000 -        0x1ee4acf2f  libobjcMsgSend9.dylib (973.1) <34A67969-21A0-39D6-BB81-8FDA5A2409DB> /usr/lib/objc/libobjcMsgSend9.dylib
+       0x1f623d000 -        0x1f624ab8f  com.apple.OSLog (1.0 - 1966.1.1) <21AB9089-83D7-3BAC-8191-B2694336154A> /System/Library/Frameworks/OSLog.framework/Versions/A/OSLog
+       0x1f630d000 -        0x1f641476f  com.apple.InternalSwiftProtobuf (1.0 - 1.26.0) <48D97BB1-9659-3732-94E3-AE6A574300CC> /System/Library/PrivateFrameworks/InternalSwiftProtobuf.framework/Versions/A/InternalSwiftProtobuf
+       0x1f6416000 -        0x1f641f15f  com.apple.HIDDisplay (1.0 - 1) <3494AB7C-6C5A-3B1A-AA34-E93D7EF29852> /System/Library/PrivateFrameworks/HIDDisplay.framework/Versions/A/HIDDisplay
+       0x1f64ac000 -        0x1f64acf2f  libobjcMsgSend10.dylib (973.1) <678186C0-8EAD-3B35-8CBB-00285B41E4A0> /usr/lib/objc/libobjcMsgSend10.dylib
+       0x1fcfc9000 -        0x1fcfe6987  libedit.3.dylib (65) <9FB32838-0CCE-3870-97EE-B704D6CD28DD> /usr/lib/libedit.3.dylib
+       0x1fe4ac000 -        0x1fe4acf2f  libobjcMsgSend11.dylib (973.1) <E05CB08C-E956-36FA-8967-AE8E346A8D2C> /usr/lib/objc/libobjcMsgSend11.dylib
+       0x21f1bd000 -        0x21f1bdae3  com.apple.FeatureFlags (1.0 - 108) <6A89074E-FDB5-3D09-8E6B-349D0EC61D9D> /System/Library/PrivateFrameworks/FeatureFlags.framework/Versions/A/FeatureFlags
+       0x2264ac000 -        0x2264acf2f  libobjcMsgSend12.dylib (973.1) <10AB03AA-FF1F-3FDC-9DFB-BFC40042C501> /usr/lib/objc/libobjcMsgSend12.dylib
+       0x2287b4000 -        0x2287b6067  com.apple.ConfigProfileHelper (18.0 - 1800) <EDEA7AD5-09E2-3FF0-8DAA-6603FA706017> /System/Library/PrivateFrameworks/ConfigProfileHelper.framework/Versions/A/ConfigProfileHelper
+       0x228cfc000 -        0x22ac8dc13  com.apple.ANECompiler (10.26.6 - 10.26.6) <88B82F44-7542-32CC-89DD-9F437E884E22> /System/Library/PrivateFrameworks/ANECompiler.framework/Versions/A/ANECompiler
+       0x22cab9000 -        0x22cabfc43  libCoreFSCache.dylib (404) <DFF19406-D7F3-3D45-937A-042FA0AA5BA8> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libCoreFSCache.dylib
+       0x22cac0000 -        0x22cac5627  libCoreVMClient.dylib (404) <C262ADF6-0E9A-3D9D-B18D-8525CB90B0DC> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libCoreVMClient.dylib
+       0x22cac6000 -        0x22cad5857  com.apple.opengl (24.0.2 - 24.0.2) <1DD82D16-39F7-3822-998C-F8DE41F9BD6A> /System/Library/Frameworks/OpenGL.framework/Versions/A/OpenGL
+       0x22cad6000 -        0x22cad869f  libCVMSPluginSupport.dylib (24.0.2) <A84E529F-47DE-35EE-8222-64A7EE00A1F3> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libCVMSPluginSupport.dylib
+       0x22cad9000 -        0x22cae117f  libGFXShared.dylib (24.0.2) <B475FA8D-63EF-369E-ADAC-37EEA94CF2BE> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGFXShared.dylib
+       0x22cae2000 -        0x22cb1578b  libGLImage.dylib (24.0.2) <3D0C3F87-6ECC-390D-B26B-5BB17F8EE6C0> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGLImage.dylib
+       0x22cb16000 -        0x22cb4f26f  libGLU.dylib (24.0.2) <4B9B9DFD-36B5-3E59-A0F7-9711B7FF0961> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGLU.dylib
+       0x22cca5000 -        0x22ccaebc7  libGL.dylib (24.0.2) <DC2FA229-1380-385E-AECD-C2881AD085A5> /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib
+       0x22e4ac000 -        0x22e4acf2f  libobjcMsgSend13.dylib (973.1) <ABF53427-FA6F-3D0D-8F9D-7AD795CA5C92> /usr/lib/objc/libobjcMsgSend13.dylib
+       0x23352c000 -        0x23407eee3  com.apple.AGXMetalG16X (360.34.5 - 360.34.5) <C4462561-E63C-35BC-8A45-A6B4BAA4C025> /System/Library/Extensions/AGXMetalG16X.bundle/Contents/MacOS/AGXMetalG16X
+       0x2364ac000 -        0x2364acf2f  libobjcMsgSend14.dylib (973.1) <9A844C46-A6DA-34D4-8EBF-2AD775C30684> /usr/lib/objc/libobjcMsgSend14.dylib
+       0x23af0e000 -        0x23b05e2f7  com.apple.ExtensionFoundation (97 - 97) <231850D6-9680-3AED-890A-484D2BBEFC28> /System/Library/Frameworks/ExtensionFoundation.framework/Versions/A/ExtensionFoundation
+       0x23cd6d000 -        0x23cdad387  com.apple.LightweightCodeRequirements (1.0 - 1) <C90102A4-551F-3EFC-9F72-2CE1D702E358> /System/Library/Frameworks/LightweightCodeRequirements.framework/Versions/A/LightweightCodeRequirements
+       0x23dc82000 -        0x23dc93207  com.apple.MPSBenchmarkLoop (1.0 - 130.0.19) <00087510-13F7-342F-B967-49761B4306C8> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSBenchmarkLoop.framework/Versions/A/MPSBenchmarkLoop
+       0x23dc94000 -        0x23dca66bf  com.apple.MPSFunctions (1.0 - 130.0.19) <18D723C8-6584-3F46-AD20-843C1FD0CCB9> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSFunctions.framework/Versions/A/MPSFunctions
+       0x23dca7000 -        0x23dcab813  com.apple.MPSHost (1.0 - 130.0.19) <EEB725E7-28BB-3F1A-A100-203078BB7B88> /System/Library/Frameworks/MetalPerformanceShaders.framework/Versions/A/Frameworks/MPSHost.framework/Versions/A/MPSHost
+       0x23e4ac000 -        0x23e4acf2f  libobjcMsgSend15.dylib (973.1) <7C995666-2B2D-3284-AA0A-EBF7C922838E> /usr/lib/objc/libobjcMsgSend15.dylib
+       0x23e8b0000 -        0x240de4b7b  com.apple.MetalPerformanceShadersGraph (7.0.80 - 7.0.80) <A252F834-C1C3-3C70-8010-ACD5410024C2> /System/Library/Frameworks/MetalPerformanceShadersGraph.framework/Versions/A/MetalPerformanceShadersGraph
+       0x2426e7000 -        0x24289197b  com.apple.SwiftData (1.0 - 180) <80467BD4-1405-3400-9475-B5BFCE896E12> /System/Library/Frameworks/SwiftData.framework/Versions/A/SwiftData
+       0x2464ac000 -        0x2464acf2f  libobjcMsgSend16.dylib (973.1) <B6C0E14B-53AE-3E22-9ED5-1729C49F46F2> /usr/lib/objc/libobjcMsgSend16.dylib
+       0x24a1a7000 -        0x24a1b98f7  com.apple.AppleDeviceQuerySupport (1.0 - 459.0.15) <5E705AD8-327F-3FE0-9A83-173570CE79AC> /System/Library/PrivateFrameworks/AppleDeviceQuerySupport.framework/Versions/A/AppleDeviceQuerySupport
+       0x24a9cf000 -        0x24aa5c83f  com.apple.AppleKeyStore (1.0 - 1.0) <7965DCDE-5074-391F-A878-324D84651857> /System/Library/PrivateFrameworks/AppleKeyStore.framework/Versions/A/AppleKeyStore
+       0x24b510000 -        0x24b524be3  com.apple.private.AppleMobileFileIntegrity-fmk (1.0 - 1) <76DA48C4-9F86-3D4B-BAE4-82B436938ABD> /System/Library/PrivateFrameworks/AppleMobileFileIntegrity.framework/Versions/A/AppleMobileFileIntegrity
+       0x24b525000 -        0x24b53e633  com.apple.AppleMSG (1.0 - 1) <41BF3334-137D-3619-B482-1FB98C162FDA> /System/Library/PrivateFrameworks/AppleMSG.framework/Versions/A/AppleMSG
+       0x24d277000 -        0x24d288b9f  com.apple.AtomicsInternal (1.1.0 - 5027.0.64) <3B48B13C-EC92-3B98-A685-E7AF32FD42F3> /System/Library/PrivateFrameworks/AtomicsInternal.framework/Versions/A/AtomicsInternal
+       0x24d320000 -        0x24d33dfef  com.apple.imgaudio.AudioAnalytics (1.0 - 1) <B01007F1-B7AF-3FFF-BDE2-8DF9913CCC84> /System/Library/PrivateFrameworks/AudioAnalytics.framework/Versions/A/AudioAnalytics
+       0x24dc49000 -        0x24dc997a7  com.apple.BackBoardHIDEventFoundation (1.0 - 1) <E43C4333-66A6-3453-84F6-B2EEFCFFEDD2> /System/Library/PrivateFrameworks/BackBoardHIDEventFoundation.framework/Versions/A/BackBoardHIDEventFoundation
+       0x24dc9a000 -        0x24dce578f  com.apple.BackBoardHIDTouchEventProcessor (1.0 - 1) <CAB22CCA-C972-3E18-B0D5-5923BDDC9A55> /System/Library/PrivateFrameworks/BackBoardHIDTouchEventProcessor.framework/Versions/A/BackBoardHIDTouchEventProcessor
+       0x24dd90000 -        0x24dda3933  com.apple.biome.BiomeDSL (1.0 - 250.0.0.3) <F8DCC3F9-5846-35F6-BEF1-FBDDBFC389B1> /System/Library/PrivateFrameworks/BiomeDSL.framework/Versions/A/BiomeDSL
+       0x24dda4000 -        0x24dda963b  com.apple.biome.BiomeSync (1.0 - 250.0.0.3) <FE07B092-2187-38FC-A475-D904C6A2A45D> /System/Library/PrivateFrameworks/BiomeSync.framework/Versions/A/BiomeSync
+       0x24e4ac000 -        0x24e4acf2f  libobjcMsgSend17.dylib (973.1) <07B4CF85-251B-301B-832B-20B315A59E19> /usr/lib/objc/libobjcMsgSend17.dylib
+       0x24e8b0000 -        0x24f10862f  com.apple.BiomeLibrary (436.6) <0042911B-273E-30D9-B87D-8F143EF1EBE6> /System/Library/PrivateFrameworks/BiomeLibrary.framework/Versions/A/BiomeLibrary
+       0x2500cb000 -        0x2501a4957  com.apple.biome.CascadeSets (1.0 - 250.0.0.3) <A0246CBA-8AEE-3A2A-9932-804EE71D5290> /System/Library/PrivateFrameworks/CascadeSets.framework/Versions/A/CascadeSets
+       0x2521cc000 -        0x25231d2c3  com.apple.CollectionsInternal (1.2.0 - 5027.0.64) <42FFA870-2B08-331F-9B93-8D67E4A9AA1E> /System/Library/PrivateFrameworks/CollectionsInternal.framework/Versions/A/CollectionsInternal
+       0x2526b2000 -        0x2526bf7a7  com.apple.ConnectedMode (1.0 - 1) <D390876B-3179-3BEC-9CF0-C8F57CCB3B76> /System/Library/PrivateFrameworks/ConnectedMode.framework/Versions/A/ConnectedMode
+       0x2564ac000 -        0x2564acf2f  libobjcMsgSend18.dylib (973.1) <43E575B7-04DB-3999-A633-1A3B638BA6E3> /usr/lib/objc/libobjcMsgSend18.dylib
+       0x25df52000 -        0x25df66f4b  com.apple.DeviceRecovery (1.0 - 1) <1A71D6DD-CAEC-393C-A79A-8CB6FB1A7E6E> /System/Library/PrivateFrameworks/DeviceRecovery.framework/Versions/A/DeviceRecovery
+       0x25e4ac000 -        0x25e4acf2f  libobjcMsgSend19.dylib (973.1) <736F4D85-76F7-3B28-8D87-C07E8F7A0EF4> /usr/lib/objc/libobjcMsgSend19.dylib
+       0x264782000 -        0x264890a3f  libXTFontStaticRegistryData.dylib (351) <5EB06DF3-EA80-3B1A-9EE4-87170C7D2EC9> /System/Library/PrivateFrameworks/FontServices.framework/libXTFontStaticRegistryData.dylib
+       0x264891000 -        0x264893baf  com.apple.FontServices (1.0 - 1) <1095A112-9900-3801-AE96-12DDB7CBE5EC> /System/Library/PrivateFrameworks/FontServices.framework/Versions/A/FontServices
+       0x264895000 -        0x2648d16b7  com.apple.FramePacing (1.0 - 1) <7E7531CC-3812-331E-BC31-4FD430AC45DA> /System/Library/PrivateFrameworks/FramePacing.framework/Versions/A/FramePacing
+       0x2664ac000 -        0x2664acf2f  libobjcMsgSend20.dylib (973.1) <74E67C8B-6BCA-3184-A18E-A97F370052C6> /usr/lib/objc/libobjcMsgSend20.dylib
+       0x26898c000 -        0x268ece7b7  com.apple.Gestures (9127.0.84 - 9127.0.84) <722C0EA0-8210-3433-8D57-B9092BE776E2> /System/Library/PrivateFrameworks/Gestures.framework/Versions/A/Gestures
+       0x269d56000 -        0x269d5bfb7  libGPUCompilerUtils.dylib (32023.921.5) <FFFE6EBE-FB56-3144-9F59-E6ECCA97D0C2> /System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/libGPUCompilerUtils.dylib
+       0x269d5c000 -        0x269d9c6ff  libllvm-flatbuffers.dylib (32023.921.5) <613BEB0E-CB65-30BB-AF95-50F06C817D39> /System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/libllvm-flatbuffers.dylib
+       0x26e4ac000 -        0x26e4acf2f  libobjcMsgSend21.dylib (973.1) <CC0D732F-98E7-3888-9E15-70984DA2FB04> /usr/lib/objc/libobjcMsgSend21.dylib
+       0x2764ac000 -        0x2764acf2f  libobjcMsgSend22.dylib (973.1) <85A60286-5DE3-32BA-B18C-2A498B065C88> /usr/lib/objc/libobjcMsgSend22.dylib
+       0x277937000 -        0x277a2a00f  com.apple.InstalledContentLibrary (1.0 - 1.0) <271E80B3-4E8C-3652-9B73-EF9CBEF8D7F7> /System/Library/PrivateFrameworks/InstalledContentLibrary.framework/Versions/A/InstalledContentLibrary
+       0x27c792000 -        0x27d0254bf  com.apple.IntelligencePlatformLibrary (436.6) <9431DC2E-DC4F-3A48-BEE1-4BACF5B13FEE> /System/Library/PrivateFrameworks/IntelligencePlatformLibrary.framework/Versions/A/IntelligencePlatformLibrary
+       0x27e4ac000 -        0x27e4acf2f  libobjcMsgSend23.dylib (973.1) <5452A0D2-6B19-39BE-ADDD-80B7BCDE3A98> /usr/lib/objc/libobjcMsgSend23.dylib
+       0x282ef2000 -        0x282f4ebb7  com.apple.MessageSecurity (1.0 - 341.0.17) <030ECE37-158D-3E06-89F2-9D3CC3A18D39> /System/Library/PrivateFrameworks/MessageSecurity.framework/Versions/A/MessageSecurity
+       0x28360d000 -        0x283cca107  com.apple.MIL (3600.16 - 3600.16.1) <C53AA54F-53DF-30A7-A411-1D4EB634EA5D> /System/Library/PrivateFrameworks/MIL.framework/Versions/A/MIL
+       0x286252000 -        0x28625d32b  com.apple.gpusw.MTL3On4 (1.0 - 1) <5738514A-41DE-3AEB-A3FE-767D60C8B457> /System/Library/PrivateFrameworks/MTL3On4.framework/Versions/A/MTL3On4
+       0x2864ac000 -        0x2864acf2f  libobjcMsgSend24.dylib (973.1) <94BBF2D6-722B-350D-8557-4D25A8E8D53A> /usr/lib/objc/libobjcMsgSend24.dylib
+       0x28d081000 -        0x28d08af6b  com.apple.sear.NSPredicateSecurityPolicy (1.0 - 1) <031A156F-8BB6-36B2-96D2-4CCFF1D3174C> /System/Library/PrivateFrameworks/NSPredicateSecurityPolicy.framework/Versions/A/NSPredicateSecurityPolicy
+       0x28de81000 -        0x28e287de7  com.apple.mlpt.ODIE (1.0 - 1) <4769806A-60B1-362E-B829-5B119FA5DD55> /System/Library/PrivateFrameworks/ODIE.framework/Versions/A/ODIE
+       0x28e432000 -        0x28e45d067  com.apple.OSEligibility (446.1.3) <B05AB25F-83C0-3574-B5F3-A4E373624E77> /System/Library/PrivateFrameworks/OSEligibility.framework/Versions/A/OSEligibility
+       0x28e4ac000 -        0x28e4acf2f  libobjcMsgSend25.dylib (973.1) <35481387-5A8E-3AE4-86A6-94CEB3CC8726> /usr/lib/objc/libobjcMsgSend25.dylib
+       0x29f402000 -        0x29f45a357  com.apple.ParsingInternal (0.0.1 - 5027.0.64) <408A4BEF-67E6-3328-8017-54F85C8B6C74> /System/Library/PrivateFrameworks/ParsingInternal.framework/Versions/A/ParsingInternal
+       0x2a1f76000 -        0x2a1f893af  com.apple.accessibility.PhotosensitivityProcessing (1.0 - 1) <5378D4F0-1832-3522-8FE3-25D775DF12BA> /System/Library/PrivateFrameworks/PhotosensitivityProcessing.framework/Versions/A/PhotosensitivityProcessing
+       0x2a364f000 -        0x2a36ce00f  com.apple.PoirotSchematizer (1.0 - 1) <8F63B1C9-E53A-3D4F-8B12-665FCF11937E> /System/Library/PrivateFrameworks/PoirotSchematizer.framework/Versions/A/PoirotSchematizer
+       0x2a36cf000 -        0x2a370babf  com.apple.PoirotSQLite (1.0 - 1) <C14FEE63-4DFB-3C71-BB15-892F2BFEEF7B> /System/Library/PrivateFrameworks/PoirotSQLite.framework/Versions/A/PoirotSQLite
+       0x2a370c000 -        0x2a373f6e7  com.apple.PoirotUDFs (1.0 - 1) <B0AA646F-EDC3-3B2E-B85E-56C9BCFB77D2> /System/Library/PrivateFrameworks/PoirotUDFs.framework/Versions/A/PoirotUDFs
+       0x2a50ec000 -        0x2a524a29b  com.apple.ProDisplayLibrary (11.0.21 - 11.0.21) <A1059C52-147F-3275-BE00-CA7CA60D4980> /System/Library/PrivateFrameworks/ProDisplayLibrary.framework/Versions/A/ProDisplayLibrary
+       0x2a5dba000 -        0x2a5dc2023  com.apple.ReflectionInternal (1.0.0 - 5027.0.64) <84A8F5C2-03F0-378B-BDA5-7670124DCA98> /System/Library/PrivateFrameworks/ReflectionInternal.framework/Versions/A/ReflectionInternal
+       0x2a6465000 -        0x2a64783c7  com.apple.RuntimeInternal (1.0.0 - 5027.0.64) <4E29AB5B-73BC-35D0-942E-066A3B19ABC6> /System/Library/PrivateFrameworks/RuntimeInternal.framework/Versions/A/RuntimeInternal
+       0x2a64ac000 -        0x2a64acf2f  libobjcMsgSend26.dylib (973.1) <9E0C8664-E7F4-39D1-AAFC-BD92B255E4E8> /usr/lib/objc/libobjcMsgSend26.dylib
+       0x2aa81a000 -        0x2aa88e21f  com.apple.SILManager (67.13 - 67.13) <42D7A7C9-BB41-3A05-BD71-72D9809D1002> /System/Library/PrivateFrameworks/SILManager.framework/Versions/A/SILManager
+       0x2ae4ac000 -        0x2ae4acf2f  libobjcMsgSend27.dylib (973.1) <FD424935-55A9-3650-955A-EED3441A1D19> /usr/lib/objc/libobjcMsgSend27.dylib
+       0x2b64ac000 -        0x2b64acf2f  libobjcMsgSend28.dylib (973.1) <09BA7B97-7DF7-3C7F-932A-B6847662FC49> /usr/lib/objc/libobjcMsgSend28.dylib
+       0x2b7503000 -        0x2b7532cbf  com.apple.security.SwiftASN1Internal (1.0 - 1) <D96B3E7B-6235-3989-ACCF-1B77C7BD3295> /System/Library/PrivateFrameworks/SwiftASN1Internal.framework/Versions/A/SwiftASN1Internal
+       0x2badac000 -        0x2badfc76f  com.apple.tightbeam (1.0 - 631.0.5) <1B7DA405-96F3-3EFA-9653-3DE645E0E097> /System/Library/PrivateFrameworks/Tightbeam.framework/Versions/A/Tightbeam
+       0x2be4ac000 -        0x2be4acf2f  libobjcMsgSend29.dylib (973.1) <36D5BA3F-2139-30B0-8558-556764BE9813> /usr/lib/objc/libobjcMsgSend29.dylib
+       0x2c0f35000 -        0x2c0f360ff  com.apple.VideoToolboxParavirtualizationSupport (71.0.14 - 71.0.14) <310A3A22-A78C-3557-8CCE-A975490C1D02> /System/Library/PrivateFrameworks/VideoToolboxParavirtualizationSupport.framework/Versions/A/VideoToolboxParavirtualizationSupport
+       0x2c64ac000 -        0x2c64acf2f  libobjcMsgSend30.dylib (973.1) <9F05564A-9D12-372C-98FC-E9F0E6BE4F04> /usr/lib/objc/libobjcMsgSend30.dylib
+       0x2c820f000 -        0x2c822e807  com.apple.ggml.CoreAICommon (1.0 - 3600.83.2.14.1) <357D6BFA-CB9C-3A0E-81A4-D0DA7A41D651> /System/Library/SubFrameworks/CoreAICommon.framework/Versions/A/CoreAICommon
+       0x2c822f000 -        0x2c82507ff  com.apple.ggml.CoreAICompiler (1.0 - 3600.83.2.14.1) <B3BCD479-1864-3FBB-B1BF-85CA975762D0> /System/Library/SubFrameworks/CoreAICompiler.framework/Versions/A/CoreAICompiler
+       0x2c8fc6000 -        0x2c955ec9f  com.apple.CoreAIRuntime (1.0 - 3600.83.2.14.1) <E2B84906-28D2-39A3-AEF3-9E1AAE1363D7> /System/Library/SubFrameworks/CoreAIRuntime.framework/Versions/A/CoreAIRuntime
+       0x2c9a0d000 -        0x2c9aa7033  libAppleArchive.dylib (469) <D62616FF-0C2C-343D-AD67-0FDEEFCF52B9> /usr/lib/libAppleArchive.dylib
+       0x2ca197000 -        0x2ca1a100b  libCoreEntitlements.dylib (94) <8F204F37-23D4-3AAB-AD38-57B3D8CB73EC> /usr/lib/libCoreEntitlements.dylib
+       0x2ca2fa000 -        0x2ca40c26f  libcrypto.46.dylib (111.0.5) <E2D5A8B9-C4E6-38A5-91F5-450D4A4152FD> /usr/lib/libcrypto.46.dylib
+       0x2ca6a6000 -        0x2ca6c0aff  libhvf.dylib (14) <EB152559-8134-3C36-AB2F-446A5A909BD1> /usr/lib/libhvf.dylib
+       0x2cb1bd000 -        0x2cb1bd43f  librdma.dylib (112.1.1) <4F9EA5F0-6C7A-357C-B4E1-8DC2F2B2F028> /usr/lib/librdma.dylib
+       0x2cb1bf000 -        0x2cb1c52bb  libReverseProxyDevice.dylib (114) <9227B01D-28CA-380B-B95A-8C1B10AEAC73> /usr/lib/libReverseProxyDevice.dylib
+       0x2cb1c6000 -        0x2cb1ccfe5  libRosetta.dylib (385) <E359944B-D230-33F9-A04E-0C3B17C3326E> /usr/lib/libRosetta.dylib
+       0x2cb2b1000 -        0x2cb2e800f  libssl.48.dylib (111.0.5) <563A2AF9-97E5-3D1E-80B8-954B9DC97E59> /usr/lib/libssl.48.dylib
+       0x2cb322000 -        0x2cb35a007  libswiftPrespecialized.dylib (0) <13BA7326-3B46-3349-A093-3FA9E6F00CF2> /usr/lib/libswiftPrespecialized.dylib
+       0x2cb3a7000 -        0x2cb3afad3  libTLE.dylib (94) <6968082F-CBF6-356D-9B29-82B9FEC2FC2D> /usr/lib/libTLE.dylib
+       0x2cb5b3000 -        0x2cb5b386f  libccan.dylib (112.1.1) <99FF6BF7-CDC5-3B54-A90B-B3279F289D1B> /usr/lib/rdma/libccan.dylib
+       0x2cb5b4000 -        0x2cb5bc763  libibmad.dylib (112.1.1) <90C91DCF-D33E-3A4B-AFF7-95B1C42706BD> /usr/lib/rdma/libibmad.dylib
+       0x2cb5bd000 -        0x2cb5c2413  libibumad.dylib (112.1.1) <CF4F1F83-1EC5-36E7-A6F9-923801087500> /usr/lib/rdma/libibumad.dylib
+       0x2cb5c3000 -        0x2cb5d2847  libibverbs.dylib (112.1.1) <A71D7EBC-5D0C-3737-85F5-C73510AE01EC> /usr/lib/rdma/libibverbs.dylib
+       0x2cb5d3000 -        0x2cb6175df  libmlx5.dylib (112.1.1) <7BB50D4A-C04C-3EFF-A16D-106A2B3FCD9D> /usr/lib/rdma/libmlx5.dylib
+       0x2cb618000 -        0x2cb61e78f  librdmacm.dylib (112.1.1) <648F37F5-FE34-3AAB-87EE-479972F3ADAB> /usr/lib/rdma/librdmacm.dylib
+       0x2cb61f000 -        0x2cb6221e7  librxe.dylib (112.1.1) <23F40387-D9C8-30E7-96CE-3585BBF03C52> /usr/lib/rdma/librxe.dylib
+       0x2cb623000 -        0x2cb627efb  libthunderboltrdma.dylib (58.0.1) <98D726BB-C568-3893-8754-6B3F5039230C> /usr/lib/rdma/libthunderboltrdma.dylib
+       0x2cb628000 -        0x2cb628669  libswift_Builtin_float.dylib (6.4.0.31.5) <9CB6F7D2-F14F-3C51-9E30-EDCB674B970E> /usr/lib/swift/libswift_Builtin_float.dylib
+       0x2cb629000 -        0x2cb6b59c7  libswift_Concurrency.dylib (6.4.0 - 6.4.0.31.5) <F2F652DD-14B0-35E2-BC9D-47FE153D579E> /usr/lib/swift/libswift_Concurrency.dylib
+       0x2cb6b6000 -        0x2cb6b8ab3  libswift_DarwinFoundation1.dylib (428.0.10) <8C802776-95AE-3ED7-BF1C-D9EB9A7DB358> /usr/lib/swift/libswift_DarwinFoundation1.dylib
+       0x2cb6b9000 -        0x2cb6b9d2b  libswift_DarwinFoundation2.dylib (428.0.10) <A659D9FC-0554-33A6-9F7A-479B268F8993> /usr/lib/swift/libswift_DarwinFoundation2.dylib
+       0x2cb6ba000 -        0x2cb6ba79f  libswift_DarwinFoundation3.dylib (428.0.10) <48A04494-256B-3CE1-88A6-79E4B8E9E7B8> /usr/lib/swift/libswift_DarwinFoundation3.dylib
+       0x2cb6bd000 -        0x2cb7558b7  libswift_RegexParser.dylib (6.4.0 - 6.4.0.31.5) <1E7009E2-B2B6-3A40-99BC-4C2D9DF18C76> /usr/lib/swift/libswift_RegexParser.dylib
+       0x2cb758000 -        0x2cb7e64ef  libswift_StringProcessing.dylib (6.4.0 - 6.4.0.31.5) <DA701840-2499-3238-AF4F-4AD3C96C6C55> /usr/lib/swift/libswift_StringProcessing.dylib
+       0x2cb849000 -        0x2cb85a837  libswiftDistributed.dylib (6.4.0 - 6.4.0.31.5) <E5CE2297-9720-3FC8-BD0E-647F8C4F6AF0> /usr/lib/swift/libswiftDistributed.dylib
+       0x2cb86f000 -        0x2cb88812f  libswiftObservation.dylib (6.4.0 - 6.4.0.31.5) <01EDB949-A7D9-361F-812D-4C21E3F6537E> /usr/lib/swift/libswiftObservation.dylib
+       0x2cb894000 -        0x2cb89e427  libswiftRegexBuilder.dylib (6.4.0 - 6.4.0.31.5) <C15CF9E4-1D44-3567-A47E-07340F9F95A7> /usr/lib/swift/libswiftRegexBuilder.dylib
+       0x2cba18000 -        0x2cba2af0f  libswiftSynchronization.dylib (6.4.0 - 6.4.0.31.5) <523DD911-05CA-39CE-A98A-27EAB3BA63A4> /usr/lib/swift/libswiftSynchronization.dylib
+       0x2cba2c000 -        0x2cba49ea7  libswiftSystem.dylib (5027.0.67) <8131BBA8-DF06-3EA3-97AE-E7A0646F18BB> /usr/lib/swift/libswiftSystem.dylib
+       0x2cbbb5000 -        0x2cbbb875b  libsystem_darwindirectory.dylib (129.0.1) <61264923-2AA5-3658-B8C4-550C71E9D4B3> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x2cbbb9000 -        0x2cbbc3d9b  libsystem_eligibility.dylib (446.1.3) <EDDE8E9C-A2CF-3931-BBB3-321CB852EB30> /usr/lib/system/libsystem_eligibility.dylib
+       0x2cbbc4000 -        0x2cbbcd42b  libsystem_sanitizers.dylib (32) <7138ED99-7AA0-34EA-B35B-20EF6ADB1EED> /usr/lib/system/libsystem_sanitizers.dylib
+       0x2cbbce000 -        0x2cbbcea13  libsystem_trial.dylib (511) <6AE48824-EC44-3A8C-B501-BE57DBE892E7> /usr/lib/system/libsystem_trial.dylib
+       0x2ce4ac000 -        0x2ce4acf2f  libobjcMsgSend31.dylib (973.1) <0985E20F-78C3-3466-A2B2-DBB95F7104A3> /usr/lib/objc/libobjcMsgSend31.dylib
+       0x2d64ac000 -        0x2d64acf2f  libobjcMsgSend32.dylib (973.1) <0D309D58-D576-3E5D-AD4B-6D55AB491702> /usr/lib/objc/libobjcMsgSend32.dylib
+       0x2de4ac000 -        0x2de4acf2f  libobjcMsgSend33.dylib (973.1) <346E0484-48FA-369B-8A64-93B5F5341CFE> /usr/lib/objc/libobjcMsgSend33.dylib
+       0x2e64ac000 -        0x2e64acf2f  libobjcMsgSend34.dylib (973.1) <6A31F809-BCBE-3E01-A367-E91FDACCE324> /usr/lib/objc/libobjcMsgSend34.dylib
