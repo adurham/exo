@@ -491,3 +491,138 @@ def test_load_own_requests_tolerates_missing_and_garbage(tmp_path):
     p = tmp_path / "r.jsonl"
     p.write_text('\n{"t": 1.5}\n{bad\n{"label": "no-t"}\n{"t": "2.5"}\n')
     assert gb.load_own_requests(str(p)) == [1.5, 2.5]
+
+
+# --------------------------------------------------------------------------- #
+# FIX 2 — non-blocking samplers + consistent first-token callback signature
+# --------------------------------------------------------------------------- #
+def _install_fake_guard(monkeypatch):
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "phase20_guard", _fake_guard_module())
+
+
+def _run_decode_with_fakes(tmp_path, monkeypatch, fake_stream, *,
+                           ssh_sleep=0.5,
+                           pm_windows=None):
+    """Drive the real cmd_decode with a fake guard + fake ssh captures.
+
+    ``fake_stream`` stands in for stream_once; it calls the callback exactly
+    as the real one does (``on_first_token(now, resp)`` -- TWO args).
+    Returns ``(rc, rec, capture_calls)`` where ``rec`` is the written JSON.
+    """
+    pm_windows = pm_windows or {"studio1": (1234.6, 1235.4),
+                                "studio2": (1234.6, 1235.4)}
+    syn_pm = open(SYN_PM).read()
+    syn_sample = open(SYN_SAMPLE).read()
+    capture_calls: list[str] = []
+
+    def fake_ssh(node, remote_cmd, out_path, timeout):
+        capture_calls.append(node)
+        time.sleep(ssh_sleep)                     # a slow window capture
+        content = syn_pm if out_path.endswith("powermetrics.txt") else syn_sample
+        open(out_path, "w").write(content)
+        start, end = pm_windows.get(node, (1234.6, 1235.4))
+        return {"node": node, "cmd": remote_cmd, "out": out_path,
+                "start_epoch": start, "end_epoch": end,
+                "returncode": 0, "stderr": ""}
+
+    monkeypatch.setattr(gb, "stream_once", fake_stream)
+    monkeypatch.setattr(gb, "_ssh_capture", fake_ssh)
+    monkeypatch.setattr(gb, "_runner_pid", lambda node, timeout=30: 4321)
+    monkeypatch.setattr(gb, "RAW_DIR", str(tmp_path / "raw_out"))
+    _install_fake_guard(monkeypatch)
+
+    outdir = tmp_path / "out"
+    rc = gb.main(["decode", "--workload", "benign", "--depth", "1000",
+                  "--secs", "50", "--outdir", str(outdir)])
+    jpath = tmp_path / "raw_out" / "gpu_busy.benign.json"
+    rec = json.loads(jpath.read_text()) if jpath.exists() else None
+    return rc, rec, capture_calls
+
+
+def test_decode_first_token_callback_two_args_nonblocking(tmp_path, monkeypatch,
+                                                           capsys):
+    """Pre-fix, stream_once calls ``on_first_token(now, resp)`` (2 args) but the
+    callback took 1 -> TypeError.  Post-fix the callback accepts
+    ``(first_epoch, resp)``, records the epoch, spawns the capture thread(s) and
+    RETURNS PROMPTLY -- it does not join the slow ssh capture inline."""
+    cb_elapsed = {}
+
+    def fake_stream(prompt, max_tokens, on_first_token=None, stop_event=None,
+                    **kw):
+        if on_first_token is not None:            # None == the warmup feed
+            t0 = time.perf_counter()
+            on_first_token(1234.5, object())      # exactly what stream_once does
+            cb_elapsed["s"] = time.perf_counter() - t0
+        return {"wall_s": 1.0, "ttft_s": 0.1, "first_token_epoch": 1234.5,
+                "last_token_epoch": 1235.5, "decode_s": 1.0,
+                "content_chars": 10, "usage": None, "stats": None}
+
+    rc, rec, calls = _run_decode_with_fakes(tmp_path, monkeypatch, fake_stream,
+                                            ssh_sleep=0.5)
+    capsys.readouterr()
+    assert rc == 0
+    assert "s" in cb_elapsed, "callback was never invoked"
+    # the slow capture takes 0.5 s; a non-blocking callback must be far under it
+    assert cb_elapsed["s"] < 0.2, \
+        f"first-token callback blocked the read loop for {cb_elapsed['s']:.3f}s"
+    # BOTH node samplers were spawned from the single inline callback
+    # (two captures per node: powermetrics + sample)
+    assert sorted(set(calls)) == ["studio1", "studio2"]
+    assert len(calls) == 4
+    assert rec is not None
+
+
+def test_decode_background_samplers_collected_after_stream(tmp_path, monkeypatch,
+                                                            capsys):
+    """The ssh captures run in the BACKGROUND; their results are joined and
+    attached to the record only after the stream ends, before parsing."""
+    released = {"stream_done": False}
+
+    def fake_stream(prompt, max_tokens, on_first_token=None, stop_event=None,
+                    **kw):
+        if on_first_token is not None:            # None == the warmup feed
+            assert not released["stream_done"]
+            on_first_token(1234.5, object())
+            released["stream_done"] = True        # stream returns -> join happens next
+        return {"wall_s": 1.0, "ttft_s": 0.1, "first_token_epoch": 1234.5,
+                "last_token_epoch": 1235.5, "decode_s": 1.0,
+                "content_chars": 10, "usage": None, "stats": None}
+
+    rc, rec, calls = _run_decode_with_fakes(tmp_path, monkeypatch, fake_stream,
+                                            ssh_sleep=0.3)
+    capsys.readouterr()
+    assert rc == 0
+    # background captures were collected and parsed into the record
+    # (node_out / parsed are keyed by the node TAG: m4-1, m4-2)
+    for tag in ("m4-1", "m4-2"):
+        entry = rec["parsed"][tag]
+        assert entry["powermetrics"]["n_blocks"] == 3
+        assert entry["sample"]["total_samples"] == 260
+    # recorded JSON schema keys stay stable
+    assert set(rec["decode"]) == {"wall_s", "ttft_s", "first_token_epoch",
+                                  "last_token_epoch", "decode_s",
+                                  "content_chars", "usage", "stats"}
+
+
+def test_decode_window_validity_end_to_end(tmp_path, monkeypatch, capsys):
+    """Window-validity is still computed from each node's powermetrics
+    [start,end] against [first_token,last_token]: inside -> True, a window that
+    starts before the first token -> False ('before')."""
+    def fake_stream(prompt, max_tokens, on_first_token=None, stop_event=None,
+                    **kw):
+        if on_first_token is not None:            # None == the warmup feed
+            on_first_token(1234.5, object())
+        return {"wall_s": 1.0, "ttft_s": 0.1, "first_token_epoch": 1234.5,
+                "last_token_epoch": 1235.5, "decode_s": 1.0,
+                "content_chars": 10, "usage": None, "stats": None}
+
+    rc, rec, _ = _run_decode_with_fakes(
+        tmp_path, monkeypatch, fake_stream, ssh_sleep=0.05,
+        pm_windows={"studio1": (1234.6, 1235.4),   # fully inside
+                    "studio2": (1230.0, 1235.4)})  # starts in prefill
+    capsys.readouterr()
+    assert rc == 0
+    assert rec["window_valid"] == {"m4-1": True, "m4-2": False}
+    valid, why = gb.window_inside_stream(1230.0, 1235.4, 1234.5, 1235.5)
+    assert valid is False and "before" in why

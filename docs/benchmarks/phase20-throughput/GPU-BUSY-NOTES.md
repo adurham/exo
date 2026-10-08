@@ -226,3 +226,55 @@ shipped without it), so `decode` exits 2 with `phase20_guard unavailable` before
 any cluster contact.  The PM's worktree (which has the guard) must run the smoke.
 The registry wiring is asserted only against a fake guard; the real
 `ChunkGuard(own_requests=…, registry_path=…)` call path is exercised by the PM.
+
+## FIX 2 — non-blocking samplers + first-token callback signature (branch `p20/gpubusy`)
+
+Two defects root-caused by the PM from the first live `decode` run; both fixed,
+offline-tested.
+
+**FIX 2a — callback signature mismatch (live crash).** `stream_once()` invokes
+its callback as `on_first_token(now, resp)` (two args), but `cmd_decode`'s
+`start_samplers(first_epoch)` accepted **one** → `TypeError:
+cmd_decode.<locals>.start_samplers() takes 1 positional argument but 2 were
+given`, raised at the first SSE token (gpu_busy.py ≈992/1013).  The contract is
+now uniform: **`on_first_token(first_epoch, resp)`** at the call site and in
+every callback; `start_samplers` is defined `def start_samplers(first_epoch,
+resp=None)` (the `resp` is accepted and unused — kept `None`-default so an
+internal 1-arg call would still work, but `stream_once` always passes both).
+
+**FIX 2b — samplers blocked the SSE read loop.** `start_samplers` ran the
+blocking ssh `powermetrics`/`sample` captures **inline** (it started the per-node
+threads and immediately `join()`ed them, waiting `secs + 60` s) — but it is
+called from *inside* the SSE read loop, so it stalled token reading for the
+whole sampler window and corrupted the decode timing / window-validity.  Now the
+inline callback does only the cheap, non-blocking work: it records the
+first-token epoch into `node_out` for both node tags and **spawns** one
+background `_sampler_one` thread per node (daemon; captures + writes the raw
+files).  The callback returns immediately so `stream_once` keeps reading at full
+rate.  After the stream ends (still inside the guard, before parsing) the main
+thread **joins the background threads with a bounded timeout**
+(`secs * 3 + 120` s) and only then computes window-validity and parses.  A
+capture that overran its bound is left `_pending` and simply contributes no
+parsed entry — the old per-node results dict / recorded JSON schema are
+unchanged (`node_out[tag]` keys: `first_token_epoch`, `_pending`, `pid`,
+`powermetrics`, `sample`; `rec["decode"]` key set unchanged).
+
+Window-validity is still `window_inside_stream(pm.start_epoch, pm.end_epoch,
+first_token_epoch, last_token_epoch)` per node → `window_valid[tag]`, i.e. the
+sampler window must lie inside `[first token, last token]`.
+
+Tests added (3, all driving the real `cmd_decode` with a fake guard + fake ssh):
+(a) `stream_once`-style callback called with **two args** does not raise, records
+the epoch and returns promptly (`< 0.2 s` while the faked capture sleeps `0.5 s`),
+with both nodes' captures spawned; (b) background sampler results are collected
+after the stream ends and parsed into `rec["parsed"]`, and `rec["decode"]`'s key
+set is unchanged; (c) window-validity end-to-end (inside → True, starts-in-prefill
+→ False).  Suite: **33 passed** (was 30).  Pre-fix at HEAD the same three fail
+(the signature one reproduces the exact live `TypeError`).
+
+**NOT verified**: the same caveat as FIX 1 — the live window needs
+`bench/phase20_guard.py`, which this worktree lacks, so the real cluster window
+(SSE trigger against a live decode, real ssh capture, real window timing) is run
+by the PM; the callback/threading/join logic is exercised only against fakes.
+Note the join is best-effort: a capture that overruns its bound leaves that
+node's entry `_pending` (no parsed data) rather than corrupting the record.

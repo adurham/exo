@@ -1076,29 +1076,60 @@ def cmd_decode(args) -> int:
         warm = stream_once(prompt, args.warm_tokens, stop_event=getattr(g, "cancel_event", None))
         rec["warmup"] = {"usage": warm.get("usage")}
 
-        def start_samplers(first_epoch):
-            def one(node: str, tag: str):
-                pid = _runner_pid(node)
-                pm_out = os.path.join(args.outdir, f"{arm}.{tag}.powermetrics.txt")
-                sm_out = os.path.join(args.outdir, f"{arm}.{tag}.sample.txt")
-                pm_cmd = f"sudo -n powermetrics --samplers gpu_power -i 500 -n {pm_n}"
-                sm_cmd = (f"/usr/bin/sample {pid or 0} {args.secs + 5} 1 -mayDie "
-                          f"-file /tmp/{arm}.{tag}.sample.txt; "
-                          f"cat /tmp/{arm}.{tag}.sample.txt")
-                node_out[tag] = {"first_token_epoch": first_epoch, "_pending": True}
+        # FIX 2: the samplers must NOT block the SSE read loop.  The inline
+        # first-token callback therefore does two cheap things only -- record
+        # the first-token epoch into ``node_out`` and SPAWN the per-node
+        # capture thread(s) -- then returns immediately so ``stream_once`` can
+        # keep reading tokens at full rate.  The blocking ssh captures
+        # (powermetrics + sample) run in the background; we join them (bounded)
+        # AFTER the stream ends and only then parse.
+        sampler_threads: list[threading.Thread] = []
+
+        def _sampler_one(node: str, tag: str, first_epoch):
+            pid = _runner_pid(node)
+            pm_out = os.path.join(args.outdir, f"{arm}.{tag}.powermetrics.txt")
+            sm_out = os.path.join(args.outdir, f"{arm}.{tag}.sample.txt")
+            pm_cmd = f"sudo -n powermetrics --samplers gpu_power -i 500 -n {pm_n}"
+            sm_cmd = (f"/usr/bin/sample {pid or 0} {args.secs + 5} 1 -mayDie "
+                      f"-file /tmp/{arm}.{tag}.sample.txt; "
+                      f"cat /tmp/{arm}.{tag}.sample.txt")
+            try:
                 ri = _ssh_capture(node, pm_cmd, pm_out, timeout=args.secs + 60)
                 ri2 = _ssh_capture(node, sm_cmd, sm_out, timeout=args.secs + 60)
-                node_out[tag].update({"pid": pid, "powermetrics": ri, "sample": ri2})
+                node_out[tag].update({"pid": pid, "powermetrics": ri,
+                                      "sample": ri2, "_pending": False})
+            except Exception as exc:  # pragma: no cover - network
+                node_out[tag].update({"_pending": False, "error": repr(exc)})
 
-            ths = [threading.Thread(target=one, args=(n, t)) for n, t in NODES.items()]
-            for t in ths:
-                t.start()
-            for t in ths:
-                t.join()
+        def start_samplers(first_epoch, resp=None):
+            """``stream_once`` callback: ``on_first_token(first_epoch, resp)``.
+
+            Invoked INLINE from inside the SSE read loop, so it must return
+            promptly -- record the epoch for every node, then spawn the
+            background capture thread(s).  It never joins/blocks.
+            """
+            # record the first-token epoch for both nodes up front, so a
+            # capture that later errors still leaves a labelled entry.
+            for tag in NODES.values():
+                node_out[tag] = {"first_token_epoch": first_epoch,
+                                 "_pending": True}
+            for node, tag in NODES.items():
+                th = threading.Thread(target=_sampler_one,
+                                      args=(node, tag, first_epoch),
+                                      name=f"p20-sampler-{tag}", daemon=True)
+                sampler_threads.append(th)
+                th.start()
 
         g.register_own_request()
         dec = stream_once(prompt, args.max_tokens, on_first_token=start_samplers,
                           stop_event=getattr(g, "cancel_event", None))
+
+        # the stream has ended -> collect the background captures (bounded)
+        # BEFORE parsing.  A capture that overran its bound is left pending;
+        # the parse step below simply finds no file for it.
+        sampler_join_s = args.secs * 3 + 120
+        for th in sampler_threads:
+            th.join(timeout=sampler_join_s)
         rec["decode"] = {k: dec.get(k) for k in
                          ("wall_s", "ttft_s", "first_token_epoch", "last_token_epoch",
                           "decode_s", "content_chars", "usage", "stats")}
