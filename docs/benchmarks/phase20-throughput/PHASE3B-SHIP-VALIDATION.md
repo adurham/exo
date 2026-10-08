@@ -151,7 +151,32 @@ with prose detectors clean and the advisory count identical. **R8a gate: PASS.**
 regression (−27.19 ms), R8a clean. The staged fix beat production and its output is
 quality-identical. **Recommendation: SHIP `deploy/next17-levers` as the production line** (§8).
 
-## 5. Lever-2 split — SPENT (relaunch #2)
+## 5. Lever-2 split — DONE (relaunch #2)
+
+| arm (agentic 91K g3, 800 tok) | reps | ms/round median | decode t/s | mean_accepted |
+|---|---|---|---|---|
+| production (HIER=1, no levers) | 6 | 157.10 | 19.46 | 2.050 |
+| next17-defaults (HIER=1, lever-1 code) | 6 | 130.07 | 23.72 | 2.077 |
+| **next17 + `DSV41_INDEXER_HIER=0`** (lever-1 code, HIER off) | 4 | **101.06** (101.06,101.07,100.67) | **30.24** (29.62–31.23) | 2.027 |
+
+### Split (same-build, clean)
+
+```
+total win vs production  = 157.10 − 101.06 = 56.04 ms/round   (35.7%)
+  lever 1 (code guard)   = 157.10 − 130.07 = 27.03 ms/round  (48% of total)
+  lever 2 (indexer HIER) = 130.07 − 101.06 = 29.01 ms/round  (52% of total)
+  sum of parts           = 56.04 ms  ==  total ✓ (cleanly additive, no interaction term)
+```
+
+**Lever-2 is NOT small** — it is ~29 ms/round, **5–8× M3 §3's assumed "small, context-flat"
+contribution**, and it is marginally *the larger* lever. M3's assumption was wrong; this is the
+load-bearing correction of this round. The same-build HIER=0 point (101.06) reproduces M3's
+**cross-build** both-off number (101.3) to 0.24 ms — so the cross-build confound in M3 §2b was real
+but small, and the ~29 ms lever-2 share is robust. `mean_accepted` held (2.03 vs next17-def 2.08 vs
+prod 2.05) → the split is a latency effect, not an acceptance artefact.
+
+**Consequence:** the lever-2 code fix (§7) is worth a relaunch-sized investment — 29 ms/round at
+91K, and larger at deeper context (the same ctx-scaling that made lever-1 bigger on agentic).
 
 ## 7. Lever-2 code-fix spec — PENDING (only if worth >=3 ms/round)
 
