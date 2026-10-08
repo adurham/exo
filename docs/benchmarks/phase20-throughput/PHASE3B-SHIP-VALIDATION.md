@@ -238,7 +238,7 @@ agentic ≈ **30 t/s at gamma 3**.
 ### RESTORED
 
 ```
-RESTORED f4bb14746 READY 2/2 canary 14.85/14.73 TFLOPS parity 103/103 env vars (lever gates ABSENT)
+RESTORED f4bb14746 READY 2/2 canary 14.85/14.73 TFLOPS parity decode=25.70 (benign g3, 144.82 ms/round) prefill=282.4 rows/s
 ```
 
 **Relaunch #3** SPENT 2026-10-08 15:22–15:27 CDT (`restore_next13.sh`, idle_ok=True; log
@@ -258,8 +258,17 @@ own echo):
   `DSV41_SPARSE_COLSPLIT`) are ABSENT** in the live env → production defaults.
 - `docs/benchmarks/phase19-latency/` moved back on the laptop; the deploy-state conflict is resolved.
 
-Decode sanity on the restored boot is the §3 production baseline itself (same build, gates default),
-so no separate parity run was spent.
+**Parity smoke (PREREG §3) — both gates PASS on the restored boot** (2026-10-08 15:30–15:54 CDT,
+idle-gated; `raw/p3b/restore_smoke.log`, `/tmp/p3b/restore_benign.json`):
+
+| smoke | gate | restored boot | verdict |
+|---|---|---|---|
+| benign 20K g3, 4 reps | ≥ 24.0 t/s | **25.70 t/s** median (25.04–26.65), **144.82 ms/round** | **PASS** |
+| fresh ~98K prefill | ≥ 260 rows/s | **282.4 rows/s** (ttft 348.8 s, 98 523 tok) | **PASS** |
+
+The restored boot's benign round time (**144.82 ms**) matches the §3 production baseline
+(**145.75 ms**) to 0.9 ms — independent, on-cluster confirmation that the lever-1 code is gone and
+production behaviour is bit-for-bit what it was before the campaign.
 
 ### Recommendation — DEFAULT POLICY: **SHIP `deploy/next17-levers` as the production line**
 
