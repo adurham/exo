@@ -91,23 +91,40 @@ post-boot canary. Run 13:04 CDT by the resuming PM:
 - Guard verified present in the installed module on both nodes
   (`and m > _FENCE_MIN_ROWS`, `site-packages/mlx_lm/models/deepseek_v41/sparse_attention.py`).
 
-## 4. next17-at-defaults — BENIGN DONE, AGENTIC RUNNING
+## 4. next17-at-defaults — DONE (both arms)
 
-Run 2026-10-08 13:03:53–13:17 CDT on the live relaunch-#1 boot (`576e9d279`, mlx-lm `3bf8316`,
+Run 2026-10-08 13:03:53–14:15 CDT on the live relaunch-#1 boot (`576e9d279`, mlx-lm `3bf8316`,
 gates default; post-deploy canary healthy §3b). Symmetric protocol to the §3 baseline
 (same flags, same harness, no round_prof; unique salt per rep ⇒ cold prefill each rep).
-Raw artifacts: `/tmp/p3b/next17_benign.json` (+ `.jsonl`), `/tmp/p3b/next17_agentic.json`.
+Raw artifacts: `/tmp/p3b/next17_benign.json` (+`.jsonl`), `/tmp/p3b/next17_agentic.json`.
 
 | workload | reps | ms/round median | decode t/s | mean_accepted |
 |---|---|---|---|---|
 | benign 20K g3, 800 tok | 8 | **118.56** (118.50,118.83,118.75,118.56,118.39,118.86,118.23) | **31.47** (30.42–33.08) | **2.769** |
+| agentic 91K g3, 800 tok | 6 | **130.07** (130.20,130.07,130.05,129.81,130.27) | **23.72** (23.07–25.11) | **2.077** |
 
-**Benign vs production:** 118.56 vs 145.75 ms/round → **−27.19 ms/round (−18.7%)**;
-decode 31.47 vs 25.55 t/s (+23.2%). `mean_accepted` is **identical (2.7689)** between arms ⇒
-the acceptance behaviour is unchanged, so the win is a pure per-round latency reduction
-(NOT a spec-decode/acceptance effect). No benign regression — large benign improvement.
+### 3-gate check (pre-registered §2 vs production §3)
 
-Agentic arm: 3×2-rep chunks, running at 13:18 CDT.
+| gate | production | next17 | Δ | verdict |
+|---|---|---|---|---|
+| **agentic ≥5 ms/round faster** | 157.10 | 130.07 | **−27.03 ms (−17.2%)** | **PASS** (5.4× the bar) |
+| **no benign regression** | 145.75 | 118.56 | **−27.19 ms (−18.7%)** | **PASS** (large improvement) |
+| **mean_accepted unconfounded** | 2.7689 / 2.0496 | 2.7689 / 2.0769 | identical / +0.027 | **clean** |
+
+`mean_accepted` is **identical to 4 decimals on benign** (2.7689) and marginally *higher* on
+agentic (2.0769 vs 2.0496) — so the ms/round win is a pure per-round latency reduction, not a
+spec-decode/acceptance artefact. The staged fix (`deploy/next17-levers`) **beats production on both
+arms**; the falsifier (next17 inert) is **not** triggered. Decode t/s: benign +23%, agentic +22%.
+
+### Residual vs the M3 lever measurement (why the split is worth spending)
+
+M3 (`PHASE3-M3.md`, next16-instr, **both** levers OFF) measured benign **94.9** / agentic **101.3**
+ms — i.e. the *full* both-levers win. next17-at-defaults (lever-1 code shipped, **lever-2 still
+ON**) sits at 118.56 / 130.07, ≈27 ms *above* the both-off build and ≈ M3's same-build levers-ON
+baseline (119.16 benign). So the ~27 ms next17 recovered ≈ **lever-1's share**, and the residual
+next17-defaults − M3-OFF ≈ **24 ms benign / 29 ms agentic** is (by subtraction) lever-2's share.
+That is far larger than M3 §3's *assumed* "small, context-flat" lever-2 — a load-bearing
+contradiction, and the reason the optional lever-2 split (§5) is judged **worth relaunch #2**.
 
 ## 5. Lever-2 split — PENDING / maybe skipped
 
