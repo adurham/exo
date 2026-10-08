@@ -138,3 +138,36 @@ correct; `/state` shows both runners `RunnerReady`, zero active tasks.)
 | `real_idle_window.log` | 338 real raw lines, 10:00:00–10:01:00 (zero guard markers) |
 | `real_post_routes.log` | POST path → count over the whole boot (`/v1/chat/completions 75`, `/instance 1`) |
 | `real_turn_42calls.json` | the 42 real `api_calls` (started_at, ended_at) of session `20261007_092009_9a2ed7` + all real runner running/ready markers |
+
+## 8. Test-teeth proof (sabotage)
+
+Sabotage: `is_generation_post()` forced to `return False` (disables S2 route matching).
+Result — **5 tests fail** (exactly the S2-dependent ones):
+
+```
+FAILED bench/phase20_tests/test_phase20_guard.py::test_real_post_routes_only_generation_and_control
+FAILED bench/phase20_tests/test_phase20_guard.py::test_generation_route_table
+FAILED bench/phase20_tests/test_phase20_guard.py::test_own_request_excluded_within_2s
+FAILED bench/phase20_tests/test_phase20_guard.py::test_s2_aborts_on_extra_post
+FAILED bench/phase20_tests/test_phase20_guard.py::test_watch_arrival_exit_75_and_sigint
+5 failed, 21 passed in 8.47s
+```
+
+The CLI integration line, verbatim:
+
+```
+E       assert 76 == 75
+E        +  where 76 = CompletedProcess(...).returncode
+bench/phase20_tests/test_phase20_guard.py:476: AssertionError
+```
+
+Restored (`return path in _GENERATION_POST_SET` at line 249) → **26 passed**.
+
+## 9. CLI exit codes (all exercised live except the aborts, which need a live POST)
+
+| command | exit |
+|---|---|
+| `idle` | 0 idle / 1 busy (live: 0) |
+| `canary` | 0 healthy / 1 marginal / 2 degraded (live: 0) |
+| `watch --label L -- <cmd>` | command's exit code on clean finish (live: 0 and 7 both passed through); 75 `ABORTED_USER_ARRIVED`; 76 `ABORTED_WALL_CAP` (both proven in the subprocess integration test) |
+
