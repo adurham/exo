@@ -147,3 +147,40 @@ fail the mutated source).
   against a node here; only `LocalFileLog` was.
 * **Wall model** `rows/200*1.3+15` — a PREREG formula, not measured; real per-step
   walls may differ, which is why the runtime wall pre-check charges actual wall.
+
+## FIX 1 — persistent own-request registry (survive aborted chunks)
+
+**Symptom.** `ChunkGuard.__enter__` runs the entry idle-check, which refuses to start
+if any generation POST is on a node's log newer than `min_idle_s` (600 s) that is *not*
+one of our own registered requests (within ±2 s). The tool only ever registered its own
+requests **in memory**, so a chunk that was aborted or killed mid-run left its POSTs in
+the node logs with no surviving registration. The *next* run's entry check then treated
+those POSTs as foreign and refused to start for up to 10 minutes — and every subsequent
+chunk would stall the same way.
+
+**Fix.** `run_chunk` now loads a **persistent** own-request registry before entering
+`ChunkGuard` (and before the standalone pre-chunk canary) and passes **both**
+`own_requests=<loaded list>` and `registry_path=<registry file>` into the constructor.
+`ChunkGuard.register_own_request()` already appends a `{"label":…, "t":…}` JSONL line to
+`registry_path`, so the tool now remembers its own registrations **across runs and across
+chunks**.
+
+* New helper `load_own_requests(path)` reads that JSONL and returns the `t` epochs as
+  floats; a missing file (first run) or a malformed/blank line is tolerated and skipped
+  (never fails a chunk). Registrations are made *immediately before* each POST, so an
+  epoch read back can only correspond to a POST already on a node.
+* Default registry path: `<out-dir>/raw/own_requests.jsonl` — beside the chunk JSONL and
+  the `<label>.guard.json` the guard already writes.
+* New CLI flag `--own-registry PATH` overrides it.
+* No request/measurement logic, JSONL record schema, or decision rule was changed.
+
+**Tests** (`bench/phase20_tests/test_phase20_delta_ladder.py`, 36 → 39):
+`test_load_own_requests_roundtrips_guard_registry` (round-trips what the real
+`ChunkGuard.register_own_request` writes, plus missing/malformed tolerance);
+`test_registry_survives_restart_entry_idle_check_passes` (two sequential chunk-like
+passes sharing one registry path over the fake-ssh/fake-clock seam: pass 1 registers and
+is killed; pass 2 builds a **fresh** guard that *loads* the registry → entry idle-check
+`ok True`; a genuinely non-own POST still refuses);
+`test_run_chunk_loads_and_persists_default_registry` (run_chunk wires the default path
+and persists 3 registrations). All three FAIL without the change and pass with it.
+
