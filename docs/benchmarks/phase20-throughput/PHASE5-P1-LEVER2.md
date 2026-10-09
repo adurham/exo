@@ -341,3 +341,76 @@ no exo-side change needed.**
 
 **Production**: unchanged — `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset.
 **RESTORE target intact. 0 relaunches spent.**
+
+---
+
+## 14. RATIFIED AMENDMENT (plan owner / Fable adjudication, 2026-10-08 ~21:00 CDT) — recorded verbatim, evidence-ID'd, then RE-FROZEN
+
+**Correction applied (requirement 1).** §6's table row labelled "64 (production)" is WRONG:
+production `index_n_heads` = **32**, not 64. Verified two ways — `mlx_lm/models/deepseek_v41/config.py:82`
+(`index_n_heads: int = 32`) and the SERVED checkpoint's real `config.json` on the node
+(`ssh studio1 'grep index_n_heads ~/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw/config.json'`
+→ `"index_n_heads": 32`). The conclusion is unchanged: the H-sweep gives **0 diffs at H=8, 32 AND 64**
+(258,048 slots each), so H=32 (production) is in the clean regime. The amendment's gate is evaluated at
+the SERVED checkpoint's ACTUAL H, **re-verified from `config.json` at EVERY promotion**.
+
+**Ratified amendment (verbatim requirements):**
+1. The identity gate is evaluated at the served checkpoint's actual head count `H`, re-verified from
+   `config.json` at EVERY promotion. Production H = **32** (corrected from the memo's H=64 claim).
+   Threshold evidence: H≥8 → 0 diffs; actual 32.
+2. **"Ties count as divergence" RETAINED IN FULL at production H.** The amendment narrows the
+   *parameter axis*, not the strictness.
+3. The small-H cohort (H∈{2,4}) is accepted via **PER-DIFF-SLOT ATTRIBUTION**: a cell-level artifact
+   asserting every diff in all 251 residual cells sits in an exact-zero column, and that the 262
+   loss-checked cells are a **superset** of the 251 divergent cells. "Mechanism fits" becomes a
+   per-cell artifact, not a correlation.
+4. **ONE-AMENDMENT RULE:** any second amendment requires new mechanistic evidence, never a failed check.
+5. **Identity story phrasing (exact):** *"bitwise-identical at production H; strictly more precise than
+   shipped at small H (0 vs 48 value-loss slots vs truth)"*. Never claim "identical everywhere".
+   Census arithmetic note: at H=32 the expected zero-column count ≈ 7.6e-6 (2.3e-10 × 32768) —
+   essentially zero; the earlier "0.25" figure was H=2's.
+
+**Added required legs (in R1):**
+- **A.** END-TO-END GREEDY TOKEN-IDENTITY DIFF vs current production on fixed replay (greedy-only =
+  exact), WITH a **production-vs-production determinism CONTROL arm** (TP2 reduction order can break
+  bitwise reproducibility — prove "0 token diffs" is even achievable before interpreting). If the
+  prod-vs-prod control shows token diffs → **STOP, root-cause determinism first**. Never substitute
+  "statistically close".
+- **B.** ADVERSARIAL CELLS AT PRODUCTION H — assertion level shifts from "no ties" to "identical row +
+  identical op + identical order", with **ROW-LEVEL BITWISE asserts** (full score rows, not just top-k
+  indices): (i) duplicate keys (repeated tokens/spans, padding sinks, quantized collisions) — tie
+  frequency is H-independent and harmless GIVEN row-identity; (ii) ulp-boundary cells
+  (accumulation-order 1-ulp row diffs → top-k flips); (iii) RoPE phase-aliasing (period-aligned
+  positions); (iv) candidate-order cells at n>16 (coarse-pass order vs fallback order into the shared
+  top-k op); (v) guard off-by-one: n ∈ {15,16,17} explicit at production H.
+- **C.** 91K REAL-TENSOR CAPTURE REPLAY = **HARD R2 PRECONDITION** (not waivable). ALSO re-measure the
+  fp32-row cost at 91K (0.063 ms was 20K; scales with ctx).
+- **D.** Per-cell attribution artifact + superset check (see 3).
+
+**R1 PRE-REGISTERED FAILURE BRANCHES:** ABORT (no ship, no re-amendment) on ANY of — any index diff at
+production H on 20K OR 91K captures; any tie-classified diff at production H; any token diff vs
+production on fixed replay; nondeterminism in the prod-vs-prod control; measured retention < 15 ms.
+*Attribution:* benign arm HIER=0-without-L2-full **dirty** + L2-full **clean** → L2-full load-bearing,
+proceed; both clean → cheap insurance, proceed; **L2-full dirty → STOP, root-cause OFFLINE** before
+more cluster spend.
+
+**R2 GATES:** 91K clean; token-identity clean WITH clean control; adversarial cells clean at production
+H; `SMALLN_ROW_BF16=1` reproduces the old path bit-for-bit; default-ON verified in the DEPLOYED build
+(installed-module grep both nodes); fresh boot + canary + battery + parity smoke; `known-good` tag.
+**R3 = reserve only** (one pre-named retry).
+
+**Evidence IDs (stable):**
+| ID | artifact |
+|---|---|
+| E-H | production `index_n_heads=32` — `config.py:82` + node `config.json` |
+| E-CENSUS | `scratch/p5/prodgate_full.log` — zero-col frac 0.2455/0.0594/0.00415 vs 2^-H 0.25/0.0625/0.00391 |
+| E-STAB | `scratch/p5/prodgate_full.log` — L2-full vs HIER = 0 diffs @ H∈{8,32,64}, 258,048 slots |
+| E-DET | `scratch/p5/prodgate_full.log` / `determinism.log` — self 0 / cross 0, 6 shapes |
+| E-CLASS | `scratch/p5/classify_all_fixed.log` — fb 0 / hier 48 value-loss slots; max 9.73e-6 |
+| E-SUITE | `scratch/p5/l2full_run{1,2}.log` (1794/251); ablations `suite_bf16_{0,1}.log` (939) |
+| E-HEAD | `scratch/p5/headcount.log` |
+| E-REPLAY | `scratch/p5/*` — `next18_functional.npz` replay 0/0 diffs, 320 slots |
+| E-AMEND | `PHASE5-P1-AMENDMENT.md` @ `c4eedcb63` (head-count class table, value-loss matrix, determinism, amendment text) |
+| E-KIT | `PHASE5-R1-KIT.md` @ `230ba71` (R1 runbook, all sections) |
+
+**Status: the gate is RE-FROZEN under this amendment. Execution of R1 → R2 → R3 follows.**

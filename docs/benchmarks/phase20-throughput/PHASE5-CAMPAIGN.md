@@ -112,24 +112,37 @@ below → write 'feature-blocked' WITH closing evidence. TIMEBOX. Bench-only on 
 - **R3** reserve only (relaunch #3): one pre-named retry. Nothing else.
 - MoE expert differential: NO dedicated relaunch (attribution-only unless the hook rides R1 free).
 
-## 7. GATE-REVIEW HOLD (2026-10-08 ~19:45 CDT) — no cluster phase may start
+## 7. GATE DECISION — AMENDMENT RATIFIED (2026-10-08 ~21:00 CDT); R1→R2→R3 EXECUTE
 
-The plan owner is reviewing the lever-2 gate decision. **R1/R2/R3 are HELD** (no relaunch, no deploy,
-no cluster contact) until a decision lands. Offline work continues per the owner's instruction:
-(1) finish the amendment evidence package in the P1 memo (`PHASE5-P1-AMENDMENT.md`), and
-(2) prepare (but do NOT execute) the R1 kit (`PHASE5-R1-KIT.md`).
+The plan owner (Fable adjudication, max effort) **RATIFIED the amendment**. Recorded verbatim + with
+evidence IDs in `PHASE5-P1-LEVER2.md` §14; the gate is **RE-FROZEN** under it. Key points:
+- Gate evaluated at the served checkpoint's actual `H`, re-verified from `config.json` at every
+  promotion. **Production H = 32** (memo's H=64 corrected; 0 diffs at H∈{8,32,64}).
+- "Ties count as divergence" retained in full at production H; small-H cohort accepted via per-diff-slot
+  attribution; one-amendment rule; exact phrasing fixed.
+- Added R1 legs: end-to-end greedy token-identity diff WITH a prod-vs-prod determinism CONTROL; adversarial
+  cells at production H with ROW-LEVEL bitwise asserts; 91K capture replay = HARD R2 precondition; per-cell
+  attribution artifact. Pre-registered failure branches + R2 gates in the memo §14.
 
-**PM-verified corrections / reproductions (independent of the children):**
-- The P1 memo's headline "production `index_n_heads=64`" is a **mislabel**: production is
-  `index_n_heads=32` (verified from `config.py:82` default AND the node's real `config.json`). The
-  conclusion is unchanged — the H-sweep gives **0 diffs at H=8, 32, AND 64** (258,048 slots each).
-- Reproduced by the PM: `tests/test_dsv41_indexer_smallm_hier.py` fresh process → 251 divergent
-  (shipped: 939); `bench/next18_prodgate.py` → census `2^-H` law confirmed (0.2455/0.0594/0.00415 vs
-  0.25/0.0625/0.00391) + stability H∈{8,32,64} = **0** + determinism replicate **0/0/0**;
-  `bench/next18_classify_all.py` → fallback (L2-full) 0 value-loss slots vs fp32 truth, HIER 48
-  slots lost (1 cell), max |fb−hier| 9.73e-6.
-- P2 raw JSON verified: real trellis **k=5 → 5.0 bpw** (not the "2.9" label); m=1 = **69.3 GB/s**,
-  m=4 = **53.4 GB/s** (whole-slice single-eval); kernel-parity `prod ≡ fused` on every shape.
+### Execution ledger (declare-before-spend)
+
+| # | phase | deploy | purpose | status |
+|---|---|---|---|---|
+| R1 | P3 | exo `576e9d279` + mlx-lm `deploy/next18-lever2 @ cd68bf4` | fixed-replay A/B baseline-vs-lever; 91K capture replay; greedy token-identity + control; adversarial cells; battery both arms; `HIER=0` benign | **EXECUTING (relaunch #1)** |
+| R2 | P3 | next18 (L2-full default-on) | ship: retire env, fresh boot, canary+battery+parity, tag | CONTINGENT on R1 gates |
+| R3 | P3 | restore best SHIPPED | **RESERVE ONLY** — one pre-named retry | HELD |
+
+**Budget: ≤3 relaunches total. R1 = 1/3.** Blockers known before R1 (from `PHASE5-R1-KIT.md` §J): (1) the
+91K capture env `DSV41_NEXT18_CAPTURE*` is NOT forwarded by `start_cluster.sh` (verified: it forwards an
+explicit `DSV41_*` allow-list, that var absent) → a launcher patch is required or R2's hard precondition
+cannot be met; (2) `deploy/next18-identity` is unpushed so R1 deploys the mlx-lm branch + base exo rev.
+
+**PM-verified reproductions (independent of the children):**
+- Reproduced: suite fresh → 251 divergent (shipped: 939); `next18_prodgate.py` → census `2^-H` law +
+  stability H∈{8,32,64} = **0** + determinism **0/0/0**; `next18_classify_all.py` → fb 0 / hier 48 value-loss
+  slots, max |fb−hier| 9.73e-6.
+- P2 raw JSON verified: real trellis **k=5 → 5.0 bpw**; m=1 = **69.3 GB/s**, m=4 = **53.4 GB/s**; kernel-parity
+  `prod ≡ fused` on every shape.
 
 ## 8. End state / resume pointer
 
