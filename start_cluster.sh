@@ -2698,14 +2698,25 @@ for NODE in "${NODES[@]}"; do
   [ -n "${DSV41_INDEXER_SMALLN_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_ROW_BF16=$DSV41_INDEXER_SMALLN_ROW_BF16"
   # DSV41_NEXT18_CAPTURE*: the next18 real-tensor capture hook (R1 ship precondition
   # A2 / R2 hard gate). bench/next18_capture.py auto-installs its Indexer.__call__
-  # wrapper only when DSV41_NEXT18_CAPTURE names an output path; the four vars are the
-  # harness contract (path / row-counts to record / ring size). Forwarded here as
+  # wrapper only when DSV41_NEXT18_CAPTURE names an output path; the three vars are
+  # the harness contract (path / row-counts to record / ring size). Forwarded here as
   # documented. The auto-install itself is wired by the env-gated import in the
-  # dsv41 engine module (exo.worker.engines.mlx.dsv41.engine), NOT by a code path that
-  # runs in production -- see that module's _maybe_install_next18_capture(). With the
-  # env unset the import is inert (bench/next18_capture's own top-level guard), so the
-  # production path is byte-for-byte unchanged.
-  [ -n "${DSV41_NEXT18_CAPTURE:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE=$DSV41_NEXT18_CAPTURE"
+  # dsv41 engine module (exo.worker.engines.mlx.dsv41.engine), which imports the
+  # operator-staged 'next18_capture' module IFF the env names a path. With the env
+  # unset that import never runs, so the production path is byte-for-byte unchanged.
+  #
+  # ONE-VAR OPERATION. If the hook module path is staged NEXT TO the capture output
+  # (the documented R1 staging: copy bench/next18_capture.py to the same dir as the
+  # npz), the launcher derives PYTHONPATH from DSV41_NEXT18_CAPTURE so a single
+  # `DSV41_NEXT18_CAPTURE=... ./start_cluster.sh` is enough. An explicit
+  # EXO_PYTHONPATH_DIAG (above) is respected and used when already set.
+  if [ -n "${DSV41_NEXT18_CAPTURE:-}" ]; then
+    EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE=$DSV41_NEXT18_CAPTURE"
+    if [ -z "${EXO_PYTHONPATH_DIAG:-}" ]; then
+      _next18_hook_dir="$(dirname "$DSV41_NEXT18_CAPTURE")"
+      EXO_ENV="$EXO_ENV PYTHONPATH=$_next18_hook_dir"
+    fi
+  fi
   [ -n "${DSV41_NEXT18_CAPTURE_NS:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_NS=$DSV41_NEXT18_CAPTURE_NS"
   [ -n "${DSV41_NEXT18_CAPTURE_MAX:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_MAX=$DSV41_NEXT18_CAPTURE_MAX"
   [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
