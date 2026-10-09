@@ -11764,3 +11764,17 @@ spent** (control + treatment + restore), 1 reserve unused; eval closed.
 **Next menu:** root-cause the affine world=2 first-forward collective stall (the sharded-affine path is the
 prime suspect; the replicated path was numerically fine); the EXL3 experts arm stays PARKED (~27 GB
 materialize); Q4 MoE-expert reduction remains priced/untaken (~18 ms/round standalone, quality-gated).
+
+---
+
+## 2026-10-09 - Q1b dense affine6 re-quant: live win real but battery DIRTY -> NO SHIP (restore pending owner)
+
+**Build:** exo `a62a001c6` + mlx-lm `cb163da` (`deploy/q1-dense-qn`, both forks). The Q1 'world=2 stall' root cause: the 45s hang-watchdog killing the EVENT-FREE slow warmup of the affine6 build (not a deadlock - collective parity identical; exl3 path byte-identical). Fix: load warmup emits fence-backed liveness beats.
+
+**Perf (same-boot A/B, sigma<=0.15ms):** benign 80.97ms / 46.1 t/s vs control 94.56 (-13.59ms); agentic 87.28ms / 35.3 t/s vs 101.07 (-13.79ms). Acceptance unchanged. CONFIRMED narrow miss of the 15ms G-B floor (~1.3ms short) and well short of the offline 2.32x projection (~19ms): full-depth realized win = ~13.6-13.8ms.
+
+**Quality (governing gate): DIRTY** - tools 9/10: `t2_forecast_tokyo` deterministic FAIL (correct call emitted as XML text inside reasoning_content; no structured tool_calls; empty content; 2/2 reproducible; never seen on any prior battery incl. current production). Prime suspect: q6 dense perturbation flipped a knife-edge tool-formatting decision.
+
+**Verdict: NO SHIP.** Eval branches preserved for a future variant (q5/affine5 or a format fix). Restore to `fb4f9290b`/`16830e1` attempted per protocol; command denied (no owner consent) - cluster left on eval build pending owner decision. Budget: 1/3 boots (+1 reserve).
+
+**Lessons:** (1) offline per-layer ratios overstate full-depth wins (~2.3x offline -> -13.7ms live vs ~19ms projected); price quant-format changes at full depth. (2) The battery's tool-format assertions catch formatting-level quant side-effects that per-layer cosine cannot.
