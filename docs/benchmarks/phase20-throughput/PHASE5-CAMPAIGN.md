@@ -133,9 +133,24 @@ evidence IDs in `PHASE5-P1-LEVER2.md` §14; the gate is **RE-FROZEN** under it. 
 | R3 | P3 | restore best SHIPPED | **RESERVE ONLY** — one pre-named retry | HELD |
 
 **Budget: ≤3 relaunches total. R1 = 1/3.** Blockers known before R1 (from `PHASE5-R1-KIT.md` §J): (1) the
-91K capture env `DSV41_NEXT18_CAPTURE*` is NOT forwarded by `start_cluster.sh` (verified: it forwards an
-explicit `DSV41_*` allow-list, that var absent) → a launcher patch is required or R2's hard precondition
-cannot be met; (2) `deploy/next18-identity` is unpushed so R1 deploys the mlx-lm branch + base exo rev.
+91K capture env `DSV41_NEXT18_CAPTURE*` is NOT forwarded by `start_cluster.sh` — **RESOLVED**: launcher
+patch landed at `deploy/next18-identity @ ff676b3ca` (env forwarded + env-gated import in
+`dsv41/engine.py`, verified inert when unset); (2) `deploy/next18-identity` unpushed → now pushed, R1
+deploys exo `576e9d279` + mlx-lm `deploy/next18-lever2 @ 17bbd98`.
+
+**Offline prep (all landed + pushed):** `PHASE5-R1-KIT.md` @ `230ba71`; adversarial suite
+`tests/test_dsv41_indexer_adversarial_prodh.py` @ mlx-lm `17bbd98` (**45/45 identity, 0 row-bitwise
+mismatch, 0 ulp flips at H∈{8,32,64}`); attribution artifact `scratch/p5/prep/attribution_251.json`;
+91K fp32-row cost `+0.005 ms/call → ≈0.04 ms/round`.
+
+**⚠ req-3 DEVIATION (owner action needed — R2 hard-blocked):** the ratified req-3 ("every diff in an
+exact-zero column") is **NOT MET as worded** → recorded **FAILED-as-worded, pending owner
+reconciliation** in `PHASE5-REQ3-DEVIATION.md`. Of 22,740 diff slots: 10,406 exact-zero-column +
+12,288 masked/-inf padding (value-null) + **46 non-zero-column 1-ulp** diffs in one cell; superset check
+TRUE. Intent holds (L2-full loses 0 vs shipped 48 value slots in that cell), but a verbatim requirement
+is not satisfied by intent. **A draft SECOND AMENDMENT (slot taxonomy a/b/c + precision-dominance) is in
+`PHASE5-REQ3-DEVIATION.md` §4 for owner sign-off.** R1 proceeds (non-shipping, production-H, required for
+R2); **R2 requires explicit re-ratification.**
 
 **PM-verified reproductions (independent of the children):**
 - Reproduced: suite fresh → 251 divergent (shipped: 939); `next18_prodgate.py` → census `2^-H` law +
