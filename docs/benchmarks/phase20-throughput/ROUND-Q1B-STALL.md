@@ -196,14 +196,87 @@ measured.
 
 ## 5. R1 — MINIMAL FIX
 
-_(filled by R0/R1 worker — see below)_
+The fix targets the actual mechanism (§4.3). It does **not** change the collective sequence, which was already
+correct. **No timeout was widened:** the supervisor doc requires that *"long-but-legitimate native work must
+signal progress rather than have HANG_TIMEOUT_SECONDS raised"*, and this fix follows that rule.
+
+| repo | branch | new commit (parent) | change |
+|---|---|---|---|
+| mlx-lm | `deploy/q1-dense-qn` | **`cb163da64cdfaa562dce2f154d9ad9ed98fd4cdd`** (← `e444cbd`) | `prefill.load_warmup(..., fence_hook=None)` forwards the hook to `warmup()`, which already installs and restores it. `AffineProj._set_weight`: `mx.clear_cache()` after quantize (releases the ~1.5 GiB-per-layer-roster fp16 build residue; affine-only). New test file. |
+| exo | `deploy/q1-dense-qn` | **`a62a001c661d73c2559bfa193b3461ddbad29a78`** (← `e4c2cb460`) | `Dsv41Builder.load` passes a heartbeat to `load_warmup`. The heartbeat re-sends `RunnerStatusUpdated(RunnerLoading all-loaded)` from the warmup's per-2-layer fence. The first beat is unthrottled, later beats are throttled to 15 s. Any event resets the supervisor clock (`_forward_events`). Feature-detects `fence_hook`, so an older mlx-lm keeps the old call and gets a loud WARNING. Tests updated and added. |
+
+**Why the beat cannot mask a real hang:**
+
+- It fires only after `model._forward`'s fence `mx.eval(h, pre_mix)`, i.e. after 2 layers of committed compute.
+  Inside `sync_collectives` that also means every collective up to that point was host-paired with the peer.
+- A wedged collective blocks that eval, so the rank emits no beat and is killed exactly as before.
+- MLX's own 20 s `Event::wait` self-abort still applies.
+- Decode/verify (≤16 rows) and serving prefill paths are untouched (`warmup` only).
+
+**exl3 byte-identity (proof):**
+
+1. **Weights and forward numerics.** The fix touches exl3 nowhere in the forward. The hook is observation-only,
+   and `tests/test_dsv41_fence_hook.py::test_bit_identity_with_and_without_hook` (15/15 pass) asserts a hooked
+   forward is byte-identical. `mx.clear_cache()` lives in `AffineProj._set_weight`, which is constructed only
+   by `_dense` / `_dense_slice` under `DENSE_MODE.startswith("affine")` (grep: the only constructors are
+   `exl3_build.py:380` and `:557`, both inside affine branches).
+2. **Same exl3 TP slices as production.** `raw/pricing/q1/q1b/exl3_ident.py` builds rank 0/1 wq_b (out) and
+   wo_b (in) slices with prod `16830e1`'s inline `Exl3Proj(EXL3Linear(_slice_dense(...)))` and with
+   `cb163da`'s `_dense_slice` in exl3 mode, then hashes the outputs at M=1/4/512. Both give **sha256
+   `508d2a111ccdb15edc79ac191207f51acee2e89d21959d541af991e485714f1d`**.
+3. **Default call unchanged.** With no hook, `load_warmup` calls `warmup(..., fence_hook=None)`, which is
+   `warmup`'s own default (`test_load_warmup_default_is_unchanged`).
+
+**Tests (single-file runs, laptop, exo venv):**
+
+- mlx-lm `tests/test_dsv41_q1b_warmup_liveness.py`: **6 passed**. RED on the pre-fix tree (`git stash`):
+  4 failed (hook plumbing ×3 + cache residue), 2 passed (the parity tests, which are expected to pass
+  pre-fix because parity held all along).
+- `tests/test_dsv41_dense_affine_shard.py`: **12 passed** (affine slice geometry and quantization unchanged).
+- `tests/test_dsv41_fence_hook.py`: **15 passed**.
+- exo `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_load_warmup_liveness.py`: **5 passed** with
+  `cb163da`. Against `e444cbd`'s `prefill.py`: 4 passed, 1 skipped (`installed mlx-lm predates the Q1B
+  fence_hook`). This proves the fallback path.
+- `test_dsv41_dispatch.py`: **13 passed** (now also asserts `load()` hands a callable beat to the warmup).
+
+**Deploy note:** exo `deploy/q1-dense-qn`'s `mlx-lm` gitlink is still `6cc9c1e` (unchanged by `e4c2cb460`,
+same as before). Per §8 of ROUND-Q1-QUANT, the deploy moves **both** trees: `git checkout --detach a62a001c6`
+plus `git -C mlx-lm checkout cb163da`. Then verify that the INSTALLED `prefill.py` has `fence_hook=None` in
+`load_warmup`'s signature and that `builder.py` has `_load_heartbeat`, on BOTH nodes.
+
+### 5.1 Smoke expectation for boot #1 (pre-registered)
+
+**PASS signature (affine6):**
+
+- After `hier geometry`, each rank logs `[DSV41] load warmup liveness: fence N at Xs (rank r/2)`. The first
+  appears within a few seconds of warmup start, then roughly every 15 s.
+- The synchronized `Event::wait slow wait` lines may still appear. They are harmless.
+- There is **no** `silent for …s; liveness probe` line during the warmup.
+- Then `[DSV41] load warmup (kernel compile): {chunk512_a: …}`. **Record the affine `chunk512_a`**: the
+  expected range is 48-~90 s, and a value over 66 s confirms the mechanism.
+- Then `engine built`, READY, canary, and the Paris probe.
+- Pre-warmup footprint in any probe line should drop toward the exl3 ~105.5 GB (`clear_cache` effect).
+
+**FALSIFIERS:**
+
+- (i) `Event::wait … Timed out` or `wait_for_one Timed out` appears. That is a genuine wedge, and §4 is wrong.
+- (ii) A hang-kill fires AFTER at least one `load warmup liveness` line, with no further beats for >45 s. That
+  means a stall inside a forward, which would require layer-indexed fence logging (beat count ÷ 20 per
+  512-row forward).
+- (iii) There are no `load warmup liveness` lines at all. That is a deploy defect: stale mlx-lm installed.
+  Look for the WARNING line.
+
+Any falsifier means stop per the §0 rule.
+
+**Open (not blocking the smoke):** the source of the extra affine warmup time (§4.3 b). It is worth one
+measurement: the beat log gives per-15 s fence counts for both arms on the same boot.
 
 ## 6. EXECUTION LEDGER (declare-before-spend)
 
 | # | phase | deploy | purpose | status |
 |---|---|---|---|---|
-| R0 | offline | — | parity table + hypothesis + pre-reg | IN PROGRESS |
-| R1 | offline | — | minimal fix + unit test (exl3 byte-identical) | PENDING |
+| R0 | offline | — | parity table + hypothesis + pre-reg | ✅ DONE — parity identical; ordering-divergence REFUTED; root cause = supervisor silence-kill of event-free load warmup (`55c12ce8e`) |
+| R1 | offline | — | minimal fix + unit test (exl3 byte-identical) | ✅ DONE — mlx-lm `cb163da`, exo `a62a001c6`; tests green; exl3 sha256-identical |
 | R2 | boot #1 | fixed build | smoke-first → same-boot control re-anchor + treatment A/B (salt q1b) + deep path | HELD |
 | R3 | same boot | treatment | R8a battery + logit drift | HELD |
 | R4 | boot #2/#3 | affine6 default | ship (or affine5 retry) | HELD |
