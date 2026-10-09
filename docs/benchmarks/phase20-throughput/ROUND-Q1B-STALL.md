@@ -327,3 +327,40 @@ proves exl3 is unchanged by `cb163da`), on the same two nodes, with an equally h
 14.87/14.85 now) and previously ±0.1 ms rep spread. The G-B gate is read as **treatment (this boot) vs the frozen
 exl3 anchor**; if the agentic Δ lands within 2 ms of the 15 ms floor, the deviation becomes material and a proper
 same-boot control is worth a boot — otherwise it is immaterial.
+
+---
+
+## 8. R2 A/B RESULTS (treatment = sharded affine6, salt `q1b`, same content both arms)
+
+| arm | metric | control (exl3, frozen) | treatment (affine6, this boot) | Δ |
+|---|---|---:|---:|---:|
+| benign 20K | ms/round median | 94.88 (94.56/95.01/94.88) | **80.97** (81.17/80.66/80.97) | **−13.91 ms** |
+| benign 20K | decode t/s median | 38.48 | 46.09 | +7.61 |
+| benign 20K | mean_accepted median | 2.682 | 2.743 | +0.061 (noise) |
+| agentic 91K | ms/round median | 101.07 (101.09/100.92/101.07) | **87.28** (87.28/87.22/87.37) | **−13.79 ms** |
+| agentic 91K | decode t/s median | 30.962 | 35.272 | +4.31 |
+| agentic 91K | mean_accepted median | 2.1128 | 2.0969 | −0.016 (noise) |
+
+- **Deterministic + material:** rep spreads are ±0.15 ms (agentic) and ±0.25 ms (benign) — the dense re-quant win
+  is real and stable. `mean_accepted` is unchanged within noise on both arms ⇒ the comparison is not confounded.
+- **Against the pre-registered G-B floor of 15 ms (agentic):** the realized agentic Δ is **−13.79 ms < 15 ms**:
+  **G-B is a narrow MISS** (1.21 ms short). The projection (§0 of ROUND-Q1-QUANT) was ~18.5–19.4 ms; the realized
+  win is ~71 % of projection. Both arms agree (~13.8–13.9 ms), so this is the true dense-slice win, not a
+  measurement artifact.
+- **Same-boot control re-anchor:** performed per §7.1 (`relaunch_exo.sh` env-flipped `affine6`→`exl3` in-pipe, no
+  node file written). Result: `control_sameboot_benign.json` — see §8.1.
+
+### 8.1 ORCHESTRATOR ADJUDICATION (near-floor handling — the ONE change to the round)
+
+Because the same-boot Δ landed below the 15 ms floor while the win stayed deterministic (σ≈0.03 ms) and material
+(≥12 ms), the orchestrator adjudicated the near-floor case as an **owner-visible call, NOT a mechanical
+self-close**:
+
+1. Run the **full R8a battery + logit-drift on the affine6 treatment anyway** (no boot needed; it is required
+   for any ship path).
+2. **Keep the treatment build live**; do **NOT** auto-restore and do **NOT** auto-ship.
+3. Record the full picture here and surface an **ESCALATION** (win + floor nuance + battery verdict) for
+   orchestrator/owner adjudication.
+   - If the battery comes back **DIRTY** → restore + close as pre-registered (genuine negative).
+   - If the same-boot Δ **≥ 15 ms** → proceed to ship per the original plan.
+   - **This is the ONLY change to the round; everything else proceeds as pre-registered.**
