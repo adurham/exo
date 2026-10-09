@@ -44,6 +44,13 @@ Layer-20 dense slice, whole-slice single-eval + K=8-batched per-call p95, REPS=9
   decode-free matmul streams **5.1× the bytes at only 1.19× the wall-clock** → a native stream of
   **279 GB/s** (339.9 MB / 1.216 ms) — i.e. **59 % of the 477 GB/s read roof** and it *still loses*.
   So the small-M `x@W` matmul itself is latency/occupancy-limited at these tiny shapes.
+- **The pre-registered `< 100 GB/s` PROCEED trigger was a NORMALIZATION ARTIFACT, not evidence of
+  harvestable latency** (2nd-opinion correction, 2026-10-09). The native arm's 54.5 GB/s is
+  *trellis-equivalent* (native bytes ÷ 5.1). In its **own** bytes it streams 279 GB/s. Even a
+  **perfectly memory-saturated** native kernel — at the full 477 GB/s read roof — maps to only
+  `477 / 5.1 = 93.5` trellis-equiv GB/s, i.e. **the `< 100 → PROCEED` branch would fire even for a
+  perfect stream.** The trigger's units were flawed, so the PROCEED it printed carries no signal;
+  the decode-free arm's *absolute* result (slower than fused) is the real evidence.
 - **The bulk decode cost ≈ the whole fused cost** (decode-only m4 = 1.45 ms ≥ prod 1.05 ms). Decode
   writes 5× W (=5.1× bytes) so as a *bandwidth* number it is not directly comparable, but as a
   *timing floor* it says the decode+write path alone already accounts for the fused kernel's time.
@@ -98,6 +105,10 @@ source is not recompiled — `n_splits` is a runtime `dims[3]` value). `P20_XSPL
   numerics). The kernel is **already at the launch-parallelism optimum**; the plateau is not
   "too few threadgroups / under-filled GPU." A split-K *win* required the opposite result.
 - This is the decisive refutation of the "latency/occupancy-bound → split-K harvests" hypothesis.
+- **Caveat (2nd-opinion):** this is an `n_splits` **override on the existing kernel**, not a clean
+  from-scratch split-K implementation, so "split-K is fully ruled out" is too strong. It is however
+  sufficient for the go/no-go: a *real* split-K is scope-closed (NOT-FUNDED), and the gate is ~5×
+  unmet (+0.03 ms best vs the 5 ms bar), so no split-K variant could clear it by tuning.
 
 ## 4. Decode-mechanism env arms (Exp 4) — no decode lever moves the plateau
 

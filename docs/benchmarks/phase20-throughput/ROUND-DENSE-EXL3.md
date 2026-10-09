@@ -230,6 +230,11 @@ chosen mechanism needs a **new custom kernel → CLOSE the dense track here** wi
   floor; no tune-existing mechanism clears ≥5 ms/round. **Promotions spent 0/3(+1).** Cluster
   untouched (production `fb4f9290b`/`16830e1`, gates unset, canary 14.86/14.84). Written:
   `MECHANISM.md`. Phases 2–6 NOT entered (nothing to ship; falsifier fired).
+- **[6]** 03:28 — **2nd opinion** (`deepseek-v4-pro` @ ollama-cloud) on the CLOSE override:
+  **"Sound… this is not rationalizing a premature close."** It added the decisive correction —
+  the `<100 GB/s → PROCEED` trigger that fired is a **normalization artifact**: even a perfectly
+  memory-saturated native stream (477 GB/s) maps to only 477/5.1 = 93.5 trellis-equiv GB/s, so the
+  branch would fire for a perfect kernel. Folded into `MECHANISM.md` §1 + the split-K caveat.
 
 ## 10. FINAL STATE (2026-10-09 ~03:25 CDT)
 
