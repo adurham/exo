@@ -79,7 +79,31 @@ decoded then re-quantized in-memory g64). Script `bench/p20_pricing_q1_dense.py`
 - Caveat: the sharded per-rank dense slice measured **37.8 ms/round**, not the older "~51 ms" (that
   was unsharded/heavier-load).
 
-## Q2 — Gamma re-pricing on the current build  [STATUS: pending — 1 boot]
+## Q2 — Gamma re-pricing on the current build  [STATUS: DONE — 0 BOOTS; BLOCKED — no gamma surface on production]
+
+Pivoted during pre-boot source verification: **the declared 1 boot was not spent** (it would have changed
+nothing). Source-verified at `fb4f9290b` + live log, **0 boots**.
+
+- **The deployed engine is `Dsv41Engine`** (`dsv41/dispatch.py` → `Dsv41Builder` → `Dsv41Engine`; the
+  `batch_generate.py` / `speculative/dsv4_mtp.py` path is NOT imported by it — Q3's source-read, PM-verified).
+- **γ is a plain dataclass field `gamma: int = 3`** (`dsv41/engine.py:333`). `_engine_kwargs_from_instance`
+  (`dsv41/builder.py:140-178`) injects only `max_kv_tokens` / `prefill_step_size` / `transient_budget` —
+  **not γ**. There is **no** γ env on this path (`grep environ dsv41/` → no γ), **no** per-request γ field in
+  the deployed `ChatCompletionRequest`, and **no** instance-level γ field.
+- `EXO_SPECULATIVE_GAMMA` is read **only** by the dormant batched/PP path (`batch_generate.py:845`,
+  `dsv4_mtp.py:3969`), which does not run in production → **a boot setting it would be a no-op.**
+- Live log (studio2): `[DSV41] engine built: 40/40 layers, rank 0/2, speculative=True (gamma=3)`.
+- The adaptive `GammaPolicy` is present but **dead** — `policy.update()` is never called (only `policy.next()`),
+  so even the in-engine policy cannot move γ off 3.
+- **CONCLUSION: γ is hard-pinned at 3 on production with no runtime/config/request/instance surface.** The prior
+  γ matrix (γ3/4/5, incl. the +13.4 % γ5-benign) was measured on the **divergent `deploy/next14-gamma` branch**
+  (which had the per-request `spec_gamma` field), not on the deployed engine. Re-pricing γ — including the
+  never-tested **agentic γ2** — **requires implementing a γ surface first → a CODE round, not a pricing round.**
+- **OWNER DECISION (recommendation):** do not spend a boot; treat "gamma re-price" as an owner decision to fund a
+  small γ-config surface + a same-engine re-price round. Qualitatively: the **−35 % economics** (round
+  154 → 99 ms) shrinks the absolute cost of an extra verify row while per-position acceptance (a model/draft
+  property) is unchanged by the indexer lever → a higher static γ is *more* likely favorable benign-side
+  post-lever, but this is **UNMEASURED** and gated on the surface existing. **Not actioned.**
 
 ## Q3 — The 7.26 ms client↔server boundary  [STATUS: DONE — ARTIFACT]
 
@@ -149,7 +173,47 @@ Offline read of `~/repos/mlx` @ `ac73d0c9` + a live prototype on studio2. **0 bo
 
 ---
 
+## SYNTHESIS — what this round priced, and the ranked next-round menu
+
+**What changed vs the prior closures.** Two prior closures are *corrected in their attribution* (not overturned
+in their numbers), and one new lever is *priced and opens an owner decision*. Nothing is shipped.
+
+| item | prior claim | this round's price |
+|---|---|---|
+| Dense/EXL3 "structurally bound" | CLOSE (decode-ALU + small-M) | **Partly right, wrongly generalized.** Tune-existing levers are dead, BUT a *different kernel* (native q4/q5 g64) is **2.47× faster at m=4** → **~18.5 ms/round** off the dense slice. Quality-gated **OWNER DECISION.** |
+| Q3 7.26 ms boundary | "client↔server per-round cost" | **ARTIFACT.** Cross-build/shape arithmetic; the real boundary is ~0.3–0.5 ms. **~0 ms addressable.** |
+| Q4 "~40 % of verify_block unattributed" | possibly comm/drain | **MoE expert COMPUTE** (43.08 ms standalone × 40 layers = 1.16× the ~37 ms). Not comm. **MoE path re-opens: −18 ms/round by halving experts at the verify shape.** |
+| Q2 gamma | +13.4 % γ5-benign on pre-lever build | **No surface exists** on production (γ hard-pinned at 3) → a **CODE** prerequisite, not a boot. |
+| Q5 instrument | none | **GO (per-op-class today, ~2–4 h); per-kernel needs a small patch (~1 round).** The gate for any future wall/MoE closure. |
+
+**THE OWNER-DECISION ITEM (explicit):** **Q1 quant format** — re-quantize the dense slice (and possibly experts)
+to native **q4/q5 group_size=64** instead of the EXL3 2.9bpw trellis. Priced at **≥2× the fused kernel at m=4,
+~18.5 ms/round** on the dense slice alone. **Quality-gated:** cosine to the bf16-EXL3 reference is 0.996 (q4) but
+the true gate is end-task quality against the **original** weights + a full-model two-node run. **Owner ruling
+required; not acted on.**
+
+### Ranked next-round menu (by priced value ÷ risk)
+1. **Q1 follow-through — quant-format evaluation** (OWNER DECISION first). If funded: a quality-gated
+   evaluation round (original weights + R8a battery + full-model two-node A/B). Priced upside ≈18.5 ms/round
+   dense (and ~ more if experts follow). **Highest value; quality-gated; the one item that needs the owner.**
+2. **Q4 MoE-expert reduction** — the MoE expert GEMM is the ~37 ms; halving activated experts at the verify
+   shape is **−18 ms/round standalone** (1.75× the block). Risk: routing/acceptance change → quality-gated;
+   needs a real-engine (two-node) A/B with acceptance + battery. **Second-highest, also quality-gated.**
+3. **Q5 instrument, Path 2** — build the per-buffer label→time ring buffer (~1 round, node wheel rebuild) to
+   finally attribute the round per-kernel; prerequisite for trusting any further wall/MoE claim. **Cheap,
+   low-risk, unblocks the rest.**
+4. **Q2 gamma surface + re-price** — implement a γ config surface **on the Dsv41Engine** (small code), then a
+   same-engine γ sweep (γ2/3/4 × benign/agentic). Value unknown but bounded (~±5–13 % t/s historically);
+   needs a code round first. **Medium value, code-gated.**
+5. **Q1 experts arm** — its own microbench (needs ~27 GB materialization / a streaming re-quant); park until
+   item 1 decides the dense question.
+
+*(Deprioritized/closed by pricing: the client↔server boundary is an artifact — do not spend on it.)*
+
+---
+
 ## End state
 Production `fb4f9290b` + mlx-lm `16830e1` live on BOTH nodes, gates unset, canary healthy, no stray
-processes. Budget spent: **1 boot (Q2)** of ≤2; Q1/Q3/Q4/Q5 all offline (0 boots). Nothing shipped.
+processes. **Budget spent: 0 boots of ≤2** (Q2 pivoted to a source finding before spending its boot; Q1/Q3/Q4/Q5
+all offline). **Nothing shipped.** All artifacts committed to `deploy/phase20-campaign`.
 
