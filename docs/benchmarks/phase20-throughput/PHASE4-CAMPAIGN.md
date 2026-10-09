@@ -234,10 +234,40 @@ identity/quality gate; it is **not** the exact lever the brief describes and is 
 
 ## 6. P5 — roofline close-out (bench-only, last)
 
-See its own section, appended below.
+Full report: `PHASE4-P5-ROOFLINE.md` (same dir). Summary of the verdicts:
 
+- **(A) round accounting reconciled.** `verify_block 92.4 / round_total 93.8 = 98.5%` (server-internal)
+  vs `92.4 / 101.06 = 91.4%` (client). The 8.66 ms splits MECE into **1.40 ms in-round server residual**
+  (measured: draft 0.55 + tail 0.09 + 0.76 host) + **7.26 ms client↔server per-round boundary** (bounded,
+  not measured — no PROF-capable build deployed). New finding: the raw OFF PROF is **bimodal** — the
+  frozen 92.4 is the *benign* component (agentic component 97.81/99.27) — so the brief's "8.7 ms" is
+  dominated by a benign-vs-agentic mismatch, not in-round overhead; the 98.5% ratio is arm-robust.
+- **(B) bytes-roofline = NOT near-floor; ~79 ms headroom.** One verify round at 91K m=4 = **6.65 GB/rank**
+  (routed-expert 4.46 + dense EXL3 2.04 + KV 0.15 + collectives 0.003). FLOPs floor 3.8 ms ≪ bytes floor
+  → memory-bound. **Read bandwidth MEASURED at 497 GB/s** (pure-read/GEMV canary, both nodes; the old 450
+  was a triad figure — read+write ≈304 here) → floor **13.4 ms**; verify **92.4 ms = 6.9× the floor**.
+  Largest slice = **dense/shared EXL3 (≈34 ms, 8.5× its floor, decode-ALU/issue-bound)** → the lever;
+  experts second (~1.5-3×). Localizing differential (design, not run): force top-k routing down; KV
+  cannot move ms/round (0.2% of bytes). Read-bw canary retained: `read_bw_canary.py`.
 
-## 7. Resume pointer
+## 7. RESTORE + end state
+
+```
+RESTORED deploy/next13 @ 576e9d279 (exo) + mlx-lm 3bf8316, gates UNSET, canary healthy
+```
+- Final restore (relaunch R3) 2026-10-08 18:48–18:58 CDT (`p4/restore_final.sh`). "Nodes synchronized on
+  commit 576e9d279" → READY (2/2). **Both nodes** `git rev-parse HEAD` = `576e9d27994b…`; lever-1 guard
+  present in the installed module (`grep -c` = 1 both). **All lever gates UNSET** on both runners
+  (`DSV41_MOE_ALLSUM_BF16`, `DSV41_INDEXER_HIER`, `DSV41_SPARSE_COLSPLIT`, `DSV41_SPARSE_FENCE_MIN_ROWS`
+  all absent → build defaults). Post-boot matmul canary **14.86/14.85** healthy.
+- **Parity smoke** (benign 20K g3, 4 reps, restored boot): **118.69 ms/round / 31.73 t/s** median —
+  matches the pre-Phase-4 production benign (118.56 ms) to **0.13 ms**. Production behaviour is
+  bit-for-bit what it was before the campaign.
+- No new tag: nothing shipped this round; the existing `known-good-decode-next17-20261008-160746`
+  (exo `576e9d279` + mlx-lm `3bf8316`, both forks) remains the production tag.
+- PERFORMANCE_HISTORY.md on main: entry committed + pushed (`f9f6c36ed`).
+
+## 8. Resume pointer
 
 Last commit on this doc says where we are. If resuming: read §3c / §4 checkboxes, `git log` this
 branch, re-verify live state against §0, continue from the first unchecked box.
