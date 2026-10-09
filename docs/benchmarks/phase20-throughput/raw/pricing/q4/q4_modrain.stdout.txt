@@ -1,0 +1,14 @@
+[load] E=384 D=5120 H=1152 (world=2 rank=0) in 0.7s; gate (384, 5120)
+[R1_k3_correlated] uniqueE~3.0 sync=0.5297ms dispatch=0.0098ms exposed_bound=0.5199ms
+[R1_k3_uniform] uniqueE~3.0 sync=0.5296ms dispatch=0.0097ms exposed_bound=0.5199ms
+[R1_k6_correlated] uniqueE~6.0 sync=0.4545ms dispatch=0.0099ms exposed_bound=0.4446ms
+[R1_k6_uniform] uniqueE~6.0 sync=0.4540ms dispatch=0.0098ms exposed_bound=0.4442ms
+[R4_k3_correlated] uniqueE~8.0 sync=0.6152ms dispatch=0.0090ms exposed_bound=0.6062ms
+[R4_k3_uniform] uniqueE~12.0 sync=0.6795ms dispatch=0.0090ms exposed_bound=0.6705ms
+[R4_k6_correlated] uniqueE~14.0 sync=1.0770ms dispatch=0.0090ms exposed_bound=1.0680ms
+[R4_k6_uniform] uniqueE~24.0 sync=1.0777ms dispatch=0.0089ms exposed_bound=1.0688ms
+[R4_k6_hot24] uniqueE=6 sync=1.0604ms
+[R4_k6_hot12] uniqueE=6 sync=1.0762ms
+[S512_k6_correlated] uniqueE=74 sync=17.7429ms
+[TOTALS] standalone R4/topk6=1.0770ms x40 = 43.08ms vs 37.0ms unattributed -> ratio 1.16x (range [1.163, 1.167])
+wrote /tmp/pricing/q4_modrain.json

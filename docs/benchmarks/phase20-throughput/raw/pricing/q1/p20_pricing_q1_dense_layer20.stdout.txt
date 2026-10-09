@@ -1,0 +1,28 @@
+[q1] mlx 0.32.3.dev20260918+603f16eb7 loadavg=(2.03, 2.2, 2.46)
+[q1] 18 dense linears; trellis full=101.8 MB rank0=66.7 MB
+[q1] decoding W + building native-quant arms
+[q1] decoded W total=220.6 MB ; quant(q4)=62.0 MB q5=75.8 MB q6=89.6 MB ; skipped=0
+[q1] prod_m1              whole   1.165 ms ( 57.3 GB/s eff) | K/call med   0.569 p95   0.583 ms (tB 114.5 GB/s)
+[q1] prod_m4              whole   0.945 ms ( 70.7 GB/s eff) | K/call med   0.774 p95   0.780 ms (tB  85.6 GB/s)
+[q1] native_m1_B4         whole   0.298 ms (208.0 GB/s eff) | K/call med   0.159 p95   0.168 ms (tB 397.6 GB/s)
+[q1] nativehad_m1_B4      whole   0.409 ms (151.8 GB/s eff) | K/call med   0.217 p95   0.231 ms (tB 289.5 GB/s)
+[q1] native_m1_B5         whole   0.366 ms (207.3 GB/s eff) | K/call med   0.179 p95   0.182 ms (tB 366.9 GB/s)
+[q1] nativehad_m1_B5      whole   0.403 ms (188.1 GB/s eff) | K/call med   0.247 p95   0.259 ms (tB 257.4 GB/s)
+[q1] native_m1_B6         whole   0.366 ms (244.6 GB/s eff) | K/call med   0.202 p95   0.202 ms (tB 329.8 GB/s)
+[q1] nativehad_m1_B6      whole   0.482 ms (186.0 GB/s eff) | K/call med   0.277 p95   0.279 ms (tB 238.9 GB/s)
+[q1] native_m4_B4         whole   0.374 ms (165.7 GB/s eff) | K/call med   0.229 p95   0.240 ms (tB 277.8 GB/s)
+[q1] nativehad_m4_B4      whole   0.483 ms (128.4 GB/s eff) | K/call med   0.314 p95   0.317 ms (tB 210.6 GB/s)
+[q1] native_m4_B5         whole   0.375 ms (202.3 GB/s eff) | K/call med   0.249 p95   0.250 ms (tB 267.0 GB/s)
+[q1] nativehad_m4_B5      whole   0.482 ms (157.2 GB/s eff) | K/call med   0.338 p95   0.341 ms (tB 195.6 GB/s)
+[q1] native_m4_B6         whole   0.375 ms (238.9 GB/s eff) | K/call med   0.251 p95   0.252 ms (tB 264.7 GB/s)
+[q1] nativehad_m4_B6      whole   0.482 ms (185.8 GB/s eff) | K/call med   0.336 p95   0.339 ms (tB 196.8 GB/s)
+[q1] cosine fidelity (qN output vs bf16 x@W_decoded; NOT model quality)
+[q1]   cos m1 B4: mean 0.99589 min 0.99514 max 0.99645
+[q1]   cos m1 B5: mean 0.99903 min 0.99892 max 0.99915
+[q1]   cos m1 B6: mean 0.99976 min 0.99972 max 0.99978
+[q1]   cos m4 B4: mean 0.99588 min 0.99550 max 0.99606
+[q1]   cos m4 B5: mean 0.99903 min 0.99892 max 0.99910
+[q1]   cos m4 B6: mean 0.99976 min 0.99975 max 0.99978
+[q1] rate ratios + projected ms/round
+[q1] OWNER-DECISION: triggered=True (max ratio m4 raw=3.38x hadamard=2.47x)
+[q1] JSON -> /tmp/pricing/p20_pricing_q1_dense_layer20.json
