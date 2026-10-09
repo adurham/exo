@@ -112,6 +112,25 @@ below → write 'feature-blocked' WITH closing evidence. TIMEBOX. Bench-only on 
 - **R3** reserve only (relaunch #3): one pre-named retry. Nothing else.
 - MoE expert differential: NO dedicated relaunch (attribution-only unless the hook rides R1 free).
 
+## 7. GATE-REVIEW HOLD (2026-10-08 ~19:45 CDT) — no cluster phase may start
+
+The plan owner is reviewing the lever-2 gate decision. **R1/R2/R3 are HELD** (no relaunch, no deploy,
+no cluster contact) until a decision lands. Offline work continues per the owner's instruction:
+(1) finish the amendment evidence package in the P1 memo (`PHASE5-P1-AMENDMENT.md`), and
+(2) prepare (but do NOT execute) the R1 kit (`PHASE5-R1-KIT.md`).
+
+**PM-verified corrections / reproductions (independent of the children):**
+- The P1 memo's headline "production `index_n_heads=64`" is a **mislabel**: production is
+  `index_n_heads=32` (verified from `config.py:82` default AND the node's real `config.json`). The
+  conclusion is unchanged — the H-sweep gives **0 diffs at H=8, 32, AND 64** (258,048 slots each).
+- Reproduced by the PM: `tests/test_dsv41_indexer_smallm_hier.py` fresh process → 251 divergent
+  (shipped: 939); `bench/next18_prodgate.py` → census `2^-H` law confirmed (0.2455/0.0594/0.00415 vs
+  0.25/0.0625/0.00391) + stability H∈{8,32,64} = **0** + determinism replicate **0/0/0**;
+  `bench/next18_classify_all.py` → fallback (L2-full) 0 value-loss slots vs fp32 truth, HIER 48
+  slots lost (1 cell), max |fb−hier| 9.73e-6.
+- P2 raw JSON verified: real trellis **k=5 → 5.0 bpw** (not the "2.9" label); m=1 = **69.3 GB/s**,
+  m=4 = **53.4 GB/s** (whole-slice single-eval); kernel-parity `prod ≡ fused` on every shape.
+
 ## 8. End state / resume pointer
 
 End: best SHIPPED build live, gates unset, canary healthy, RESTORED/SHIPPED line + parity smoke in doc, no stray processes,
