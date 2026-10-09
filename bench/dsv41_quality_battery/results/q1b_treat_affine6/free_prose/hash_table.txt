@@ -1,0 +1,20 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Think of a hash table as a giant wall of numbered lockers. You want to store things by a “key,” like a username. You have a rule called a **hash function** that turns the username into a locker number.
+
+Example: add up letter positions and take the remainder after dividing by 10.  
+“Ada” → A=1, d=4, a=1 → 6, so locker 6.  
+“Bob” → B=2, o=15, b=2 → 19, remainder 9, so locker 9.
+
+To save her stuff, you go to locker 6. To find it later, you run the same rule and go straight to locker 6. You don’t check every locker. That’s the whole trick:** turn a key into a location.**
+
+**Collisions:** Two keys can map to the same locker. That’s normal. One fix is to let each locker hold a small list. If “Ada” and “Daa” both map to 6, locker 6 holds both. To find “Daa,” you go to 6 and check the names there. Another fix is: if locker 6 is taken, try 7, 8, etc. until you find an empty spot. Lookups follow the same path.
+
+The hash function must be consistent: the same key always gives the same number. A good hash spreads keys out. A bad hash piles everything into one locker, and then it’s basically a slow list.
+
+**Speed:** On average, lookup, insert, and delete are O(1) — roughly constant time, because you jump near the right spot and only check a few items. Worst case is O(n) if every key collides. To stay fast, the table resizes when it gets too full. Resizing makes a bigger locker wall and rehashes everything.
+
+**Tradeoffs:** Hash tables use extra memory and are not sorted. They’re great for “find value by key” things like dictionaries, phone contacts, or usernames → profiles. They’re not great if you need ordered data or range searches.
+
+Also, keys need to be stable/hashable. If you change a key after inserting it, its locker number changes, and you might lose it.

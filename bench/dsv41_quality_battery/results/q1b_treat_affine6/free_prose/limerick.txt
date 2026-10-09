@@ -1,0 +1,8 @@
+# limerick [prose]
+PROMPT: Write a limerick about the moon.
+
+There once was a moon in the sky,  
+Who winked at the world from on high.  
+When the sun went to bed,  
+She shone overhead,  
+And whispered a lullaby.

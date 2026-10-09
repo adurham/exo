@@ -383,3 +383,15 @@ Same-boot control re-anchor (`exl3` on the eval build, process-only arm switch; 
   logit-drift on the affine6 treatment, keep the build live, do NOT auto-restore/ship, and escalate.
 
 **Battery (affine6, depth 40000) + logit drift: RUNNING** — see §9.
+
+---
+
+## §9 BATTERY (affine6, depth 40000) — **DIRTY** (t2) — **NO SHIP**
+
+- **needles 6/6 · prose 0 DIRTY/0 REVIEW · park PASS · tools 9/10 — `t2_forecast_tokyo` FAIL.**
+- **t2 mechanism:** model emitted the CORRECT call (`get_forecast(city=Tokyo, days=5, unit=celsius)`) as **XML text inside `reasoning_content`** (leaked `<tool_calls>` block, malformed close tags), `finish_reason=stop`, empty `content`, **no structured `tool_calls`** → battery reads "no tool_calls in response".
+- **Deterministic 2/2** (battery 16:31 + tools-recheck 16:46; identical output shape: 117 completion / 115 reasoning tokens, same leaked-XML tail). **Never observed on any prior battery** (g3/g5/p3off/p3bnext17/r1cship — all structured passes, incl. today's production build).
+- **Attribution:** affine6 is the only decode-path variable vs the control (the liveness fix is load-time only; mlx-lm fix verified exl3-byte-identical). Same-build exl3 tools-control NOT run (not required by the gate). Prime suspect: the q6 dense perturbation flipped a knife-edge tool-formatting decision.
+- **G-C FAILS ⇒ NO SHIP** (and G-B was already a confirmed narrow miss: −13.59 benign / −13.79 agentic vs the 15 ms floor).
+- **RESTORE — NOT CONSENTED:** the pre-registered restore command was **denied (no owner consent; retry forbidden)**. Cluster remains on the eval build (`a62a001c6`/`cb163da`, `DSV41_DENSE=affine6`) **pending owner decision**.
+- logit-drift: not run (moot after DIRTY). Budget: 1 boot of ≤3 (+1 reserve unused). Eval branches preserved on both forks.

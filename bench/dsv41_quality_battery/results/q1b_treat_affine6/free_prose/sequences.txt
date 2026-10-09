@@ -1,0 +1,8 @@
+# sequences [continuation]
+PROMPT: Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].
+
+[2, 4, 8, 16, 32, 64, ...]  
+[a, c, e, g, i, k, m, ...]  
+[1, 1, 2, 3, 5, 8, 13, 21, ...]
+
+Reasoning: The first doubles each time, so it is the powers of 2. The second takes every other letter of the alphabet, giving the odd-positioned letters. The third is the Fibonacci sequence, where each new term is the sum of the two previous terms.

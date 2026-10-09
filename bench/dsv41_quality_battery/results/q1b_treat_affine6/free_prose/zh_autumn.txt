@@ -1,0 +1,6 @@
+# zh_autumn [multilingual]
+PROMPT: 先用一句中文描写秋雨的声音，然后用英文解释这句话的意思。(Write one Chinese sentence describing the sound of autumn rain, then explain it in English.)
+
+秋雨淅淅沥沥地敲打着窗棂，像无数细小的指尖在玻璃上轻轻弹奏。
+
+English explanation: The autumn rain patters against the window lattice with a soft, continuous rhythm, like countless tiny fingertips gently tapping and playing on the glass.

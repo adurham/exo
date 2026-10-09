@@ -1,0 +1,22 @@
+# zh_en_teapot [multilingual]
+PROMPT: Write a bilingual product description for a handmade ceramic teapot: the first half in English, the second half in Chinese (中文).
+
+**English**
+
+This handmade ceramic teapot is a quiet celebration of craft and calm. Thrown by hand on the potter's wheel, each piece carries the subtle irregularities that make it truly one of a kind—gentle ridges, a softly textured glaze, and a form shaped by patient fingers rather than machines.
+
+Fired at high temperature for strength and durability, the teapot is designed to hold heat beautifully and pour cleanly. Its balanced body and well-fitted lid make every pour smooth, while the natural finish invites you to slow down and savor the ritual of tea.
+
+Perfect for daily use or as a thoughtful gift, this teapot pairs timeless beauty and function in equal measure. Because it is handmade, slight variations in color and detail make your piece entirely your own.
+
+Capacity: approximately 500 ml. Food-safe glaze. Hand wash recommended.
+
+**中文**
+
+这款手工陶瓷茶壶，是对匠心与静谧的温柔致敬。每一只都由陶艺师在拉坯机上精心塑形，带着细微而自然的手作纹理、温润的釉面，以及机器无法复制的独特形态——每一把都是独一无二的存在。
+
+经高温烧制，壶身坚固耐用，保温性佳，出水流畅，壶盖贴合紧密，倾倒时手感平衡顺滑。天然的釉色与质感，让人不自觉放慢节奏，细细体会泡茶的仪式感。
+
+无论是日常使用，还是作为一份用心的礼物，这款茶壶都将恒久之美与实用功能完美融合。由于是纯手工制作，颜色与细节上的微小变化，让你的这一把更显专属与珍贵。
+
+容量：约500毫升。釉面安全可食用。建议手洗。
