@@ -11720,3 +11720,47 @@ filter drops RDMA/CPU-only buffers → JACCL collective transport GPU cost is NO
 dense; (2) Q4 MoE-expert reduction — quality-gated, −18 ms/round standalone at the verify shape; (3) Q5
 instrument Path 2 — cheap, unblocks attribution; (4) Q2 γ surface (code) + re-price; (5) Q1 experts arm (parked).
 Closed by pricing: the client↔server boundary (artifact) — do not spend on it.
+
+## 2026-10-09 — Q1 dense quant-format eval: native affine q6 was 2.3x offline but FAILED to serve (world=2 first-forward collective stall) → RESTORED (negative)
+
+**Decision evaluated:** re-quantize the DENSE/shared EXL3 slice to native MLX affine q6 group_size=64
+(experts stay EXL3), env toggle `DSV41_DENSE=affine6`, priced at ~18.5 ms/round off the dense slice
+(2.47x at m=4). Owner-approved evaluation round.
+
+**Offline (G-A PASS).** Converted-tensor microbench, layer-20 dense roster, TP=2 rank-0 sharded shapes
+(14 linears): affine q6 (the engine path: `reconstruct_public_mlx` → slice on 128-blocks → `mx.quantize(gs=64)`
+→ plain `quantized_matmul`) = **2.32x whole / 2.97x K-batched** vs the fused EXL3 kernel; affine q5 =
+2.36x / 3.06x; cos 0.99976 (q6). Source = **EXL3-reconstruction** (labeled: fidelity measured from the
+EXL3-decoded source, not the original model; treatment dense ≈ the current deployed dense + a q6 rounding).
+Artifacts: `docs/benchmarks/phase20-throughput/raw/pricing/q1/recheck/`.
+
+**Found before spending a boot: affine mode was UN-sharded.** `attn_tp`/`shared_tp` were gated on
+`DENSE_MODE == "exl3"`, so affine loaded every dense group FULL → each rank computed the full slice →
+~break-even, not the priced 2.4x. Fixed (branches `deploy/q1-dense-qn` in both forks: mlx-lm `e444cbd`,
+exo `e4c2cb4`, + the `DSV41_DENSE` launcher forward, which was a silent no-op). Affine now TP-shards on the
+same 128-wide block boundaries; unit test 12/12. Correctness trace: replicated affine was already
+numerically correct — the fix is perf, not correctness.
+
+**Cluster boot #1 (control, PASS).** Eval build live on both nodes (exo e4c2cb460 / mlx-lm e444cbd; installed
+module + runner env verified). `DSV41_DENSE` unset = exl3. Fixed-replay A/B (salt-fixed, 4 reps/arm):
+**benign 20K 94.88 ms/round** (94.56/95.01/94.88, 38.5 t/s, mean_acc 2.682); **agentic 91K 101.07 ms/round**
+(101.09/100.92/101.07, 31.0 t/s, mean_acc 2.1128). Ranges ±0.1 ms.
+
+**Cluster boot #2 (treatment, FAIL).** `DSV41_DENSE=affine6`: the DSv4 body loaded on every attempt
+(`built=40/40 layers, active=104.6 GB`) then `DSpark draft head` → `hier geometry`, and the runner
+**stalled on the FIRST (warmup) forward**; the 45 s hang watchdog SIGKILLed + respawned it —
+**4/4 deterministic cycles**, never READY. Hang stack (both nodes): `mlx::core::eval → Event::wait() →
+metal::EventImpl::wait → __psynch_cvwait` (+ a `jaccl::MeshGroup::all_sum → reliable_all_reduce_v2<bfloat16>` thread)
+— a cross-rank collective + GPU-event wait. **Not** the known 2026-08-18 `MLX_JACCL_DATA_RECV_POOL` rank-0
+hang (no `allocate_buffers`/`unordered_map::at` frame). exl3 on the SAME build boots clean, and a fresh
+exl3 restore boots clean → the stall is specific to the **sharded-affine** path.
+
+**VERDICT: RESTORED — CLOSED NEGATIVE (falsifier fired).** The offline win did not survive full-model: the
+sharded-affine build cannot serve a forward. Production `fb4f9290b` + mlx-lm `16830e1` restored on BOTH nodes,
+gates unset, canary **14.86 / 14.86**, serving probe 'Paris' (finish=stop). Round doc:
+`docs/benchmarks/phase20-throughput/ROUND-Q1-QUANT.md` (branch `deploy/phase20-campaign`). Budget: **3 boots
+spent** (control + treatment + restore), 1 reserve unused; eval closed.
+
+**Next menu:** root-cause the affine world=2 first-forward collective stall (the sharded-affine path is the
+prime suspect; the replicated path was numerically fine); the EXL3 experts arm stays PARKED (~27 GB
+materialize); Q4 MoE-expert reduction remains priced/untaken (~18 ms/round standalone, quality-gated).
