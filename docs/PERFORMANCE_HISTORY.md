@@ -11657,3 +11657,66 @@ the m=1 collective/comm slice.
 - **Consumer layers resolved:** all **12/12** `uses_candidates` (consumer-layer 24/28/32/36) records diverge identically (pure tie-break) — the half the offline capture could not replay.
 - **NOT shown:** propagation to token 63. The single captured logits step (wrel=60) shows LARGE margins (margin12 9.23/9.20/1.875/4.72) — no near-tie there; no logits at the first divergent token; the sequential path 53→63 is unobserved. nrounds=0. The lever is mechanistically sufficient to drive a greedy divergence via a DOWNSTREAM near-tie flip, but token-63 propagation is NOT pinned.
 - **Takeaway:** the shipped lever's indexer effect is a pure bf16-boundary coin-flip (margin 0.0, zero genuine re-rank). Identity/quality claims must rest on the R8a battery — not on a "diff is null" claim, nor on a claim it is proven to have caused token 63. **No output-affecting change ships from this round.**
+
+## 2026-10-09 — PRICING round (Fable-contested levers): Q1 quant-format = OWNER DECISION (native q4/q5 g64 2.47x at m=4, ~18.5 ms/round, quality-gated); Q3 7.26 ms boundary = ARTIFACT (~0 ms addressable); Q4 re-attributes the ~37 ms verify_block residual to MoE COMPUTE (43.08/37=1.16x); Q5 GPU-time instrument GO (per-op-class); Q2 gamma = no production surface
+
+Round doc: `ROUND-PRICING.md` on `deploy/phase20-campaign` (commits `b3e7a741c` budget, `13d9a67f3`
+Q1/Q3/Q4/Q5, `9b0309f65` Q2+synthesis). **Budget: 0 boots of ≤2 spent** (Q2 pivoted to a source finding
+before its boot; Q1/Q3/Q4/Q5 all offline). **No ship.** Cluster stayed production `fb4f9290b`/`16830e1`,
+gates unset, canary healthy; 2nd-opinion (auxiliary.consult) folded in before dispatch.
+
+**Q1 — EXL3-fused vs native `mx.quantized_matmul` (g64) at real dense shapes. OWNER DECISION TRIGGERED.**
+Offline microbench on studio2, real layer-20 dense roster, TP=2 rank-0 sharded, real EXL3 weights decoded then
+re-quantized in-memory (whole-18-linear chain, one eval; also K-batched). EXL3 prod m=4 = **0.945 ms/layer**
+(0.774 K/call) → **37.8 ms/round**; native **q4 +Hadamard (fair drop-in) = 0.483 ms (2.47×)** → **19.3 ms/round**;
+q5/q6 +Had = 2.29–2.30×; raw-q4 3.38× (drops EXL3's input Hadamard → not bit-fair). **A quant-format change
+(EXL3 2.9bpw trellis → native q4/q5 g64) prices ~18.5 ms/round off the dense slice — QUALITY-GATED, owner
+ruling required, NOT acted on.** Quality is UNMEASURED: cosine to the **bf16 EXL3-decoded W** is q4 0.9959 /
+q5 0.9990 / q6 0.9998 (fidelity to EXL3, not to the original model). The win is **ALU/issue, not bandwidth**
+(q4 streams 62 MB vs EXL3's 66.7 MB trellis) — the fused trellis decode (k=7 SWAR) is the cost; a *different
+kernel* escapes the decode-ALU wall that tune-existing levers could not. Experts arm PARKED (384 experts ×
+~71 MB = ~27 GB to re-quantize). Caveat: sharded per-rank dense slice = 37.8 ms/round, not the older "~51 ms".
+
+**Q2 — gamma re-pricing: NO PRODUCTION SURFACE (0 boots).** The deployed instance is served by **`Dsv41Engine`**;
+γ is a plain dataclass field `gamma: int = 3` (`dsv41/engine.py:333`) with **no** env (no `environ` in `dsv41/`),
+**no** per-request field, and **no** instance-level field (`_engine_kwargs_from_instance` injects only
+max_kv_tokens/prefill_step/transient_budget). `EXO_SPECULATIVE_GAMMA` is read **only** by the dormant
+batched/PP path (`batch_generate.py:845`, `dsv4_mtp.py:3969`) → **a boot setting it is a no-op.** Live log:
+`engine built: 40/40 layers, speculative=True (gamma=3)`. The prior γ3/4/5 matrix (+13.4 % γ5-benign) ran on the
+divergent `deploy/next14-gamma` branch (per-request `spec_gamma`), NOT this engine. The adaptive `GammaPolicy` is
+dead (`policy.update()` never called). → Re-pricing γ (incl. never-tested agentic γ2) needs a **CODE round first.**
+
+**Q3 — the 7.26 ms client↔server boundary = ARTIFACT, ~0 ms addressable.** `101.06 − 93.8` subtracts a
+**next17-HIER0 client, agentic-shaped** number minus a **next16-instr server, benign** number. Same-boot,
+same-request (raw/p3): client ms/round sits only **+0.23…+0.51 ms** above the server loop's own per-round wall
+(both shapes); the dominant term of the doc's 7.26 is **agentic-vs-benign shape** (~5.5 ms). Loop mechanism
+(PM-verified): `engine.py:_rounds` is a **yield-based streaming generator**; round N+1 is gated only on the
+in-process consumer drain + the cross-rank cancel collective, **never on the client** (one request → one long SSE
+stream). The doc's 1.40 ms in-round residual is real (inside-round bracket); the corrected split is ~1.5 ms
+in-round + ~0.65 ms inter-round in-engine gap + ~0.3–0.5 ms client-statistic delivery offset.
+
+**Q4 — MoE-expert drain differential: re-attributes the ~37 ms unattributed to MoE COMPUTE.** Bench-only offline
+microbench on studio2, real layer-20 `EXL3SwitchGLU` (E=384, rank0/world2), **0 boots**. Halving experts at the
+**verify shape (R=4)**: 1.077 → 0.615 ms/layer = **−0.462 ms (−43 %), 1.75×**; at the draft shape (R=1) it barely
+moves. **Totals: 1.077 ms × 40 MoE layers = 43.08 ms vs the ~37 ms unattributed → ratio 1.16×** — the MoE expert
+GEMM **alone** is the right order of magnitude to be the *entire* unattributed slice. So the residual is **MoE
+compute, not comm/drain**; Lead-A's ≤5.25 ms exposed-non-compute is not contradicted (compute ≠ non-compute) but
+its comm premise is **weakened**, and the **MoE path re-opens with numbers** (~18 ms/round standalone from
+halving at R=4). Honest boundary: a 1-node bench cannot show cross-rank overlap/exposure; cost is **slot-bound,
+routing-distribution-independent** (14 vs 24 unique experts → identical ms).
+
+**Q5 — GPU-time instrument: GO (per-op-class), not a flag-flip to per-kernel.** MLX already measures
+**per-command-buffer** GPU-busy time — `MLX_GPU_TIME=1` → `mx.metal.gpu_time_ns()` = Σ(GPUEndTime−GPUStartTime)
+per completed `MTL::CommandBuffer` (`mlx/backend/metal/eval.cpp:94-109`, `device.cpp:896-916`, `metal.h:32-43`;
+Python `python/src/metal.cpp:118-139`). **PM verified the env var + `gpu_time_ns`/`accumulate_gpu_time_ns`
+symbols exist in the node's `libmlx.dylib`.** Prototype RAN on studio2 (offline): nonzero per-op GPU ms
+(matmul 1024³ gpu 0.447/wall 0.611; 4096³ 13.285/13.482 GPU-bound); `MLX_MAX_OPS_PER_BUFFER=1` gives ≈per-kernel;
+compiled + custom kernels are counted (closes the compiled-prefill "not in spans" gap). Effort: Path 1
+(per-op-class, no rebuild) **~2-4 h**; Path 2 (per-buffer label→time ring buffer + `mx.metal.gpu_time_records()`,
+~1 round incl. node wheel rebuild); Path 3 (true per-dispatch `MTLCounterSampleBuffer`) 2-4 rounds. Caveat: the
+filter drops RDMA/CPU-only buffers → JACCL collective transport GPU cost is NOT attributed.
+
+**Ranked next-round menu:** (1) Q1 quant-format evaluation — **OWNER DECISION**, quality-gated, ≈18.5 ms/round
+dense; (2) Q4 MoE-expert reduction — quality-gated, −18 ms/round standalone at the verify shape; (3) Q5
+instrument Path 2 — cheap, unblocks attribution; (4) Q2 γ surface (code) + re-price; (5) Q1 experts arm (parked).
+Closed by pricing: the client↔server boundary (artifact) — do not spend on it.
