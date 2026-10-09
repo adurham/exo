@@ -11611,3 +11611,37 @@ LIVE as production, gates unset; tag `known-good-decode-next18-20261009-001052` 
 contingency restore not needed). Open item unchanged: the token-63 divergence root cause is not
 fully explained (harness replay replayed only 64/128 records) — harden the capture/replay harness so
 it models the live path next round.
+
+## 2026-10-09 — DENSE/EXL3 track CLOSED: structurally bound (decode-ALU + small-M floor); falsifier fired, 0 promotions spent
+
+Four offline experiments (real weights, production kernel, layer-20 dense roster, TP=2 per-rank shapes,
+studio2; 0 relaunches, servers untouched) settle the 9.3x gap to the 497 GB/s read roof. Verdict doc:
+`MECHANISM.md` on `deploy/phase20-campaign` (commits `cf4c09313` pre-reg, `f4e6ebae2` close, `f0c59e16c`
+2nd-opinion fold-in).
+
+**THE FORK (decode-free isolation):** the decode-free native bf16 `x@W` arm is **1.19x SLOWER** than the
+fused production kernel (m=4: 1.225 vs 1.048 ms/call). Native streams 5.1x the bytes at only 1.19x wall ->
+279 GB/s in its own bytes = 59% of the read roof, and it still loses. The bulk decode-only arm (1.45 ms)
+already >= the whole fused cost. **The pre-registered "<100 GB/s -> PROCEED" trigger was a normalization
+artifact** (native 54.5 was trellis-equivalent; even a perfect 477 GB/s stream maps to 93.5 trellis-equiv
+GB/s, so that branch fires for a perfect stream — units flaw, PROCEED carried no signal; 2nd-opinion
+correction). Real evidence = native arm is slower than fused.
+
+**Exp 2 (m-sweep/occupancy):** m=4 is NOT specifically degraded — flat in the m=2-8 band (54-67 GB/s);
+the only special point is m=1 (79). No m=4 occupancy anomaly exists. **Exp 3 (split-K n_splits override
+on the existing kernel):** monotonically WORSE with more splits (m4: +0.03/+0.08/+0.21/+0.53 ms at
+4/8/16/32), cosine 1.0 — the launch parallel tune is already optimal; decisive refutation of the
+latency/occupancy hypothesis. **Exp 4 (decode-mechanism env arms):** no arm beats stock beyond noise
+(SWAR=0 slower; LUT/FUSE <= +1.7% = within run noise; SIMD=0 1.48x slower = harness-sensitivity sanity).
+
+**Gate G1 (offline p95 m=4 >= 5 ms/round):** best arm ~ -1.1 ms/round, inside noise. FAILS.
+**Falsifier fired -> CLOSE.** No tune-existing mechanism remains; a real gain needs a NEW custom Metal
+kernel (fused decode+MMA / different small-M dataflow) — scope-closed (NOT-FUNDED). Honest boundary
+recorded: the P2 "collectives at m=1" angle is a separate slice (m=1 GEMV advantage 79 vs 66 GB/s) and
+was NOT measured here; and this is an isolated layer-20 microbench — the verdict is "no shippable
+change", not "round is at 100% of theoretical floor".
+
+Cluster: production `fb4f9290b` + mlx-lm `16830e1` still live on both nodes, gates unset, canary
+healthy (14.86/14.84) before+after, nothing deployed, nothing to restore. Budget: 0/3 promotions
+(+1 reserve) spent. Next levers live elsewhere: capture-harness hardening (token-63 root cause) and
+the m=1 collective/comm slice.
