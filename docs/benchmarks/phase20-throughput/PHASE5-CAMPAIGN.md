@@ -128,11 +128,21 @@ evidence IDs in `PHASE5-P1-LEVER2.md` §14; the gate is **RE-FROZEN** under it. 
 
 | # | phase | deploy | purpose | status |
 |---|---|---|---|---|
-| R1 | P3 | exo `576e9d279` + mlx-lm `deploy/next18-lever2 @ cd68bf4` | fixed-replay A/B baseline-vs-lever; 91K capture replay; greedy token-identity + control; adversarial cells; battery both arms; `HIER=0` benign | **EXECUTING (relaunch #1)** |
-| R2 | P3 | next18 (L2-full default-on) | ship: retire env, fresh boot, canary+battery+parity, tag | CONTINGENT on R1 gates |
+| R1 | P3 | exo `576e9d279` + mlx-lm `deploy/next18-lever2 @ cd68bf4` | fixed-replay A/B baseline-vs-lever; 91K capture replay; greedy token-identity + control; adversarial cells; battery both arms; `HIER=0` benign | **ABORTED — capture flush starved the runner (SIGKILL); restored. See `PHASE5-R1-RESULTS.md`** |
+| R2 | P3 | next18 (L2-full default-on) | ship: retire env, fresh boot, canary+battery+parity, tag | CONTINGENT on R1 gates — **HARD-BLOCKED** |
 | R3 | P3 | restore best SHIPPED | **RESERVE ONLY** — one pre-named retry | HELD |
 
-**Budget: ≤3 relaunches total. R1 = 1/3.** Blockers known before R1 (from `PHASE5-R1-KIT.md` §J): (1) the
+**Budget: ≤3 relaunches total. R1 = 1/3. RESTORE = 2/3. One relaunch remains.**
+
+> **R1 outcome (2026-10-08):** R1 deployed `deploy/next18-identity @ ff676b3ca` + mlx-lm `17bbd98`
+> with the 91K capture ON; READY + installed-module/env verified on both nodes; then the
+> first agentic rep **SIGKILLed the runner** — the capture hook's `np.savez_compressed` flush
+> (~197 MB) blocks the server event loop in zlib deflate, tripping the 45 s hang-watchdog.
+> Baseline arm + prod-vs-prod token-identity CONTROL completed (deterministic); lever arm,
+> battery, offline replay and token-diff did NOT. Production **RESTORED** to
+> `576e9d279`/`3bf8316`. Full detail + evidence: `docs/benchmarks/phase20-throughput/PHASE5-R1-RESULTS.md`.
+
+**Blockers known before R1 (from `PHASE5-R1-KIT.md` §J):** (1) the
 91K capture env `DSV41_NEXT18_CAPTURE*` is NOT forwarded by `start_cluster.sh` — **RESOLVED**: launcher
 patch landed at `deploy/next18-identity @ ff676b3ca` (env forwarded + env-gated import in
 `dsv41/engine.py`, verified inert when unset); (2) `deploy/next18-identity` unpushed → now pushed, R1
