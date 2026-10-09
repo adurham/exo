@@ -1,0 +1,187 @@
+### Adams-Mac-Studio-M4-1 exo.log.prev (affine6 boot, 12:55-13:07)
+[ 2026-10-09 12:56:30.445 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 47s; liveness probe baseline footprint=92.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 12:56:45.842 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 63.4s: built=40/40 layers, rank=1/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.6 GB
+[ 2026-10-09 12:56:48.239 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 12:56:49.375 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 12:56:58.855 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:04.122 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:11.163 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:15.327 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:19.603 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:23.900 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:28.938 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:31.760 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 45s; liveness probe baseline footprint=110.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 12:57:32.522 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:39.170 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:45.684 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:51.445 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:55.189 | WARNING  | exo.worker.runner.supervisor:_check_hang:1157 ] [HANG_STACK] mode=shadow runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 66s verdict=kill stack_class=gpu spin=True footprint_gb=110.10 growth_gb=+0.00 cpu_delta_s=24.989999999999995 wall_s=21.305974583985517 spin_
+[ 2026-10-09 12:57:55.190 | CRITICAL | exo.worker.runner.supervisor:_do_hang_kill:1231 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 hung: 1 task(s) in progress, no event for 66s (>45s). SIGKILLing to force RunnerFailed + re-placement.
+[ 2026-10-09 12:57:58.413 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:58:59.889 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 49s; liveness probe baseline footprint=94.60GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 12:59:13.434 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 63.3s: built=40/40 layers, rank=1/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.6 GB
+[ 2026-10-09 12:59:15.867 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 12:59:16.135 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 12:59:23.096 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:27.300 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:33.109 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:37.660 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:42.391 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:46.925 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:52.366 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:55.768 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:01.318 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 47s; liveness probe baseline footprint=110.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:00:02.438 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:08.011 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:13.904 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:20.062 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:24.747 | WARNING  | exo.worker.runner.supervisor:_check_hang:1157 ] [HANG_STACK] mode=shadow runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 68s verdict=kill stack_class=gpu spin=True footprint_gb=110.10 growth_gb=+0.00 cpu_delta_s=25.28 wall_s=21.416007042018464 spin_fraction=0.5 
+[ 2026-10-09 13:00:24.747 | CRITICAL | exo.worker.runner.supervisor:_do_hang_kill:1231 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 hung: 1 task(s) in progress, no event for 68s (>45s). SIGKILLing to force RunnerFailed + re-placement.
+[ 2026-10-09 13:00:27.978 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:01:28.450 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 47s; liveness probe baseline footprint=92.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:01:42.833 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 63.1s: built=40/40 layers, rank=1/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.6 GB
+[ 2026-10-09 13:01:45.192 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 13:01:47.868 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 13:01:54.450 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:01:58.032 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:03.298 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:07.238 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:11.606 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:15.573 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:20.583 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:24.258 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:29.822 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 46s; liveness probe baseline footprint=110.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:02:30.486 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:36.930 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:42.857 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:48.912 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:53.279 | WARNING  | exo.worker.runner.supervisor:_check_hang:1157 ] [HANG_STACK] mode=shadow runner a89697c8-65c6-4b78-8021-6f840bb47329 silent for 67s verdict=kill stack_class=gpu spin=True footprint_gb=110.10 growth_gb=+0.00 cpu_delta_s=25.319999999999993 wall_s=21.3661238749919 spin_fr
+[ 2026-10-09 13:02:53.279 | CRITICAL | exo.worker.runner.supervisor:_do_hang_kill:1231 ] Runner a89697c8-65c6-4b78-8021-6f840bb47329 hung: 1 task(s) in progress, no event for 67s (>45s). SIGKILLing to force RunnerFailed + re-placement.
+[ 2026-10-09 13:02:56.513 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+
+### Adams-Mac-Studio-M4-1 exo.log (exl3 production restore, 13:08-)
+[ 2026-10-09 13:09:00.602 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner e0766a85-c2f4-4a35-9098-1cf06fd8f169 silent for 47s; liveness probe baseline footprint=90.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:09:11.723 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 59.8s: built=40/40 layers, rank=0/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.9 GB
+[ 2026-10-09 13:09:13.769 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 13:09:14.739 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 13:09:24.889 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:28.124 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:31.630 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:36.362 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:40.549 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:44.512 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:49.284 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:55.678 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:10:02.160 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner e0766a85-c2f4-4a35-9098-1cf06fd8f169 silent for 49s; liveness probe baseline footprint=105.50GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:10:03.752 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=1352 block=8 bp=169 strips/indexer-layer=4 evals/indexer-layer=4 (merged)
+[ 2026-10-09 13:10:04.741 | INFO     | exo.worker.engines.mlx.dsv41.builder:load_warmup:137 ] [DSV41] load warmup (kernel compile): {'chunk512_a': 48.23847683297936, 'chunk512_b': 1.7003810410096776, 'chunk128': 0.6753627909929492, 'decode1': 0.09972374999779277, 'total': 50.955301333015086}
+[ 2026-10-09 13:10:05.129 | INFO     | exo.worker.engines.mlx.dsv41.builder:build:102 ] [DSV41] engine built: 40/40 layers, rank 0/2, speculative=True (gamma=3), prefill chunk 2048 tokens.
+### Adams-Mac-Studio-M4-2 exo.log.prev (affine6 boot, 12:55-13:07)
+[ 2026-10-09 12:56:30.429 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 47s; liveness probe baseline footprint=89.70GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 12:56:46.720 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 64.4s: built=40/40 layers, rank=0/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.6 GB
+[ 2026-10-09 12:56:49.081 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 12:56:49.376 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 12:56:58.856 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:04.123 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:11.164 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:15.329 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:19.604 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:23.901 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:28.939 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:32.524 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:36.735 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 49s; liveness probe baseline footprint=110.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 12:57:39.174 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:45.686 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:51.446 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:57:57.690 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:58:00.162 | WARNING  | exo.worker.runner.supervisor:_check_hang:1157 ] [HANG_STACK] mode=shadow runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 70s verdict=kill stack_class=gpu spin=True footprint_gb=110.10 growth_gb=+0.00 cpu_delta_s=25.0 wall_s=21.287833333015442 spin_fraction=0.5 a
+[ 2026-10-09 12:58:00.162 | CRITICAL | exo.worker.runner.supervisor:_do_hang_kill:1231 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 hung: 1 task(s) in progress, no event for 70s (>45s). SIGKILLing to force RunnerFailed + re-placement.
+[ 2026-10-09 12:58:57.995 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 47s; liveness probe baseline footprint=92.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 12:59:12.418 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 62.4s: built=40/40 layers, rank=0/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.6 GB
+[ 2026-10-09 12:59:14.829 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 12:59:16.136 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 12:59:23.097 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:27.301 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:33.111 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:37.661 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:42.392 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:46.927 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:52.367 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:55.769 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 12:59:59.386 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 46s; liveness probe baseline footprint=114.60GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:00:02.440 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:08.012 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:13.905 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:20.063 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:00:22.826 | WARNING  | exo.worker.runner.supervisor:_check_hang:1157 ] [HANG_STACK] mode=shadow runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 67s verdict=kill stack_class=gpu spin=True footprint_gb=114.60 growth_gb=+0.00 cpu_delta_s=25.230000000000004 wall_s=21.38645020799595 spin_f
+[ 2026-10-09 13:00:22.826 | CRITICAL | exo.worker.runner.supervisor:_do_hang_kill:1231 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 hung: 1 task(s) in progress, no event for 67s (>45s). SIGKILLing to force RunnerFailed + re-placement.
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:01:27.636 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 47s; liveness probe baseline footprint=92.10GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:01:43.408 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 63.7s: built=40/40 layers, rank=0/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.6 GB
+[ 2026-10-09 13:01:45.842 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 13:01:47.867 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 13:01:54.449 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:01:58.031 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:03.297 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:07.237 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:11.605 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:15.572 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:20.582 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:24.257 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:30.485 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:34.019 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 50s; liveness probe baseline footprint=114.60GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:02:36.930 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:42.856 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:48.911 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:54.879 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:02:57.469 | WARNING  | exo.worker.runner.supervisor:_check_hang:1157 ] [HANG_STACK] mode=shadow runner 6e3638b7-6ed9-4639-9169-24b904697151 silent for 71s verdict=kill stack_class=gpu spin=True footprint_gb=114.60 growth_gb=+0.00 cpu_delta_s=25.11999999999999 wall_s=21.371808791009244 spin_f
+[ 2026-10-09 13:02:57.469 | CRITICAL | exo.worker.runner.supervisor:_do_hang_kill:1231 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 hung: 1 task(s) in progress, no event for 71s (>45s). SIGKILLing to force RunnerFailed + re-placement.
+[ 2026-10-09 13:02:58.594 | WARNING  | exo.worker.runner.bootstrap:entrypoint:372 ] Runner 6e3638b7-6ed9-4639-9169-24b904697151 crashed with critical exception [jaccl] Recv failed: peer closed connection (EOF) fd=52 remaining=16
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/prefill.py", line 365, in load_warmup
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/prefill.py", line 413, in warmup
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/moe.py", line 184, in __call__
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/moe.py", line 62, in _all_sum_tail
+RuntimeError: [jaccl] Recv failed: peer closed connection (EOF) fd=52 remaining=16
+Runner error: RuntimeError: [jaccl] Recv failed: peer closed connection (EOF) fd=52 remaining=16
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/prefill.py", line 365, in load_warmup
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/prefill.py", line 413, in warmup
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/moe.py", line 184, in __call__
+  File "/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/moe.py", line 62, in _all_sum_tail
+RuntimeError: [jaccl] Recv failed: peer closed connection (EOF) fd=52 remaining=16
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+
+### Adams-Mac-Studio-M4-2 exo.log (exl3 production restore, 13:08-)
+[ 2026-10-09 13:09:00.677 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 5514d95c-c91c-4f0d-958a-9964f0389ca5 silent for 47s; liveness probe baseline footprint=89.70GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:09:12.167 | INFO     | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [DSV41] body loaded in 60.2s: built=40/40 layers, rank=1/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.9 GB
+[ 2026-10-09 13:09:14.458 | INFO     | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])
+[ 2026-10-09 13:09:14.740 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=336 block=8 bp=42 strips/indexer-layer=13 evals/indexer-layer=13 (merged)
+[ 2026-10-09 13:09:24.890 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:28.125 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:31.630 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:36.362 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:40.550 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:44.513 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:49.285 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:09:55.679 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [Event::wait] slow wait: elapsed=3.0s signaled=0 target=1 (polling; self-abort at 20000ms)
+[ 2026-10-09 13:10:02.167 | WARNING  | exo.worker.runner.supervisor:_check_hang:1082 ] Runner 5514d95c-c91c-4f0d-958a-9964f0389ca5 silent for 49s; liveness probe baseline footprint=105.50GB, extending 20s for a growth check (1/20).
+[ 2026-10-09 13:10:03.753 | WARNING  | exo.worker.runner.supervisor:<lambda>:601 ] Runner stderr: [DSV41] hier geometry: exact_mb=128 estrip=1352 block=8 bp=169 strips/indexer-layer=4 evals/indexer-layer=4 (merged)
+[ 2026-10-09 13:10:04.740 | INFO     | exo.worker.engines.mlx.dsv41.builder:load_warmup:137 ] [DSV41] load warmup (kernel compile): {'chunk512_a': 47.55047162499977, 'chunk512_b': 1.6999221660080366, 'chunk128': 0.6753680830006488, 'decode1': 0.09974099998362362, 'total': 50.26690775001771}
+[ 2026-10-09 13:10:05.130 | INFO     | exo.worker.engines.mlx.dsv41.builder:build:102 ] [DSV41] engine built: 40/40 layers, rank 1/2, speculative=True (gamma=3), prefill chunk 2048 tokens.

@@ -101,7 +101,98 @@ Forward collective sequence (`moe.py:180`):
 
 ## 4. R0 — COLLECTIVE-PARITY TABLE + ROOT-CAUSE HYPOTHESIS
 
-_(filled by R0/R1 worker — see below)_
+**Verdict: the pre-registered hypothesis (collective ORDERING / PAIRING divergence) is REFUTED.** The collective
+sequence is identical across exl3 and affine, and the node logs show both ranks completing collectives in
+lockstep right up to the kill. The boot was killed by the **exo supervisor's silence watchdog** during a
+**healthy but slow, event-free load warmup**. No rank was deadlocked.
+
+### 4.1 Collective-parity table — first warmup forward, world=2
+
+Path: `Dsv41Builder.load` → `prefill.load_warmup` (inside `sync_collectives()`, so every collective is
+host-evaluated) → `warmup` stage `chunk512_a`: `model(ids[1,512], argmax=True, last_logit_only=True)`.
+Build flags (`build_block`, both modes, `tp_on=True`): `attn_tp=True`, `shared_tp=True`,
+`blk.ffn.group=group`, `blk.ffn.shared_sharded=True`, `ShardedHead` (`_SHARD_HEAD`).
+`DSV41_MOE_ALLSUM_BF16` defaults **ON**, so the MoE tail is **bf16** too. (§3 above says "fp32 MoE"; that is wrong
+for this build. The traceback below confirms a bf16 `_all_sum_tail`.)
+
+| # (per forward) | site | issued by | exl3 (control) | affine6 (treatment) | dtype / shape (rank-local) |
+|---|---|---|---|---|---|
+| 0 (connect, pre-load) | `MlxBuilder._probe_data_path` | both ranks | yes | yes | small probe, identical |
+| per layer L=0..39: 2L+1 | `attention.py:243` `attn.all_sum` | both ranks (`attn.group` set) | yes | yes | **bf16** `[1,512,5120]` |
+| per layer L=0..39: 2L+2 | `moe.py:184` `_all_sum_tail` (shared_sharded branch: shared added BEFORE) | both ranks | yes | yes | **bf16** `[512,5120]` → fp32 |
+| 81 | `ShardedHead.combine_argmax` (`exl3_build.py`, ShardedHead is EXL3 in both modes) | both ranks | yes | yes | fp32 `[2,1,2]` |
+| — | `_fuse_block` (exl3-only) | — | issues **no** collective (row≤16 GEMM fusion only) | not built | — |
+| — | `AffineProj` / `_Grouped` | — | — | issues **no** collective | — |
+| later stages | `chunk512_b`, `chunk128`, `decode1`, then the spec-verify `[1,4]` ×2 (+ DSpark `mtp.py:194` per stage) | both ranks | same sequence | same sequence | same shapes as exl3 |
+
+**Parity: identical.** The projection type is never an input to any collective call. Each sharded group produces
+the same output shape on both ranks: `wq_b` is out-sliced, `wo_b` and `w2` are in-sliced and then partial-summed,
+and `w1`/`w3` are out-sliced. `_block_bounds` is shared by the exl3 and affine slicers. No collective is
+conditional on rank, data, or dense format. Pinned statically by
+`tests/test_dsv41_q1b_warmup_liveness.py::test_tp_collective_sequence_is_independent_of_dense_format`, which
+traces `_coll.all_sum` (site, dtype, shape) through a real TP-wired 4-layer model with EXL3-style vs `AffineProj`
+projections and asserts the traces are equal. `test_fused_exl3_helpers_issue_no_collectives` source-checks the fused
+helpers.
+
+### 4.2 What the node logs actually show (NEW evidence this round — `raw/pricing/q1/q1b/node_log_excerpts.txt`)
+
+`~/exo.log.prev` on both nodes (affine6 boot) and `~/exo.log` (exl3 production restore) were read with
+read-only ssh.
+
+1. **Both ranks keep completing collectives.** After `hier geometry`, both ranks print
+   `[Event::wait] slow wait: elapsed=3.0s … (polling; self-abort at 20000ms)` **at the same millisecond**
+   every 4-7 s (e.g. 12:56:58.855/.856, 12:57:04.122/.123, …, 12:57:51.445/.446), right up to the kill.
+   The line is logged once per `Event::wait` call, so each line is a **new** wait, which means the previous
+   one completed. A host-synced warmup does one collective+eval per layer half, so this is the per-layer
+   rhythm of a forward that is making progress.
+2. **No wait ever wedged.** `MLX_EVENT_WAIT_TIMEOUT_MS=20000` (start_cluster default), and
+   `Event::wait` throws `Timed out` after 20 s on a genuinely stuck peer. Count of `Timed out` in both affine
+   logs: **0**.
+3. **The supervisor killed on silence, not on a hang signature.** For each cycle: `silent for 45-50s; liveness
+   probe baseline footprint=110.10GB (114.60 rank0), extending 20s`, then `silent for 66-71s verdict=kill
+   stack_class=gpu spin=True growth_gb=+0.00 at_ceiling=False`, then SIGKILL. The footprint is flat by
+   construction during a compile-heavy forward, since the weights are already resident.
+4. **Survivor traceback (rank0, after its peer was SIGKILLed):** `builder.load → load_warmup →
+   warmup:413 (chunk512_a) → model.py:148 _fused_call → moe.py:184 _all_sum_tail → collective.all_sum →
+   mx.eval → RuntimeError: [jaccl] Recv failed: peer closed connection (EOF)`. This is the **bf16 MoE tail** of
+   some layer in the **first warmup forward**. The rank was blocked only because its peer had been killed.
+5. **The control has the SAME shape and barely survives.** The exl3 production restore (13:08) prints the
+   **identical** synchronized slow-wait pattern (9 lines, 13:09:24 → 13:09:55). The supervisor's probe fired at
+   `silent for 49s` (13:10:02), and warmup finished at 13:10:04.7 with `chunk512_a=48.2 s, total 50.9 s`. That
+   is about 52.7 s of silence against a ~66 s kill budget, so **exl3 runs ~13 s from the same cliff**.
+6. **The hang-stack "rank asymmetry" is an artifact of sampling a host-synced forward.**
+   `sync_collectives` evals every collective, so at any instant one rank can be in
+   `MeshGroup::all_sum` (polling for its peer) while the other is in `eval → Event::wait` on its own
+   per-layer GPU work. In 5 of the 6 stacks, the SAME process holds both a `MeshGroup::all_sum` stream thread
+   and a main thread in `Event::wait`. The 6th, `85628`, has its stream thread in `Fence::wait` with no jaccl
+   frame, i.e. between collectives. That is the expected snapshot of a host-synced forward, not evidence of
+   a pairing divergence.
+
+### 4.3 Root cause (mechanism)
+
+`Dsv41Builder.load` emits its last event (the `RunnerLoading` progress yield) when the body build finishes. It
+then runs `build_draft_head` and `prefill.load_warmup` **without emitting any event**. The first warmup forward
+(`chunk512_a`, 512 rows × 40 layers, host-synced collectives, cold Metal pipeline compile for every new shape)
+takes **~48 s on exl3** and **>66 s on affine6**. The supervisor's `_check_hang` kills a runner after
+`HANG_TIMEOUT_SECONDS=45` plus one 20 s growth probe whenever the footprint is flat and the stack is `gpu`+spin.
+Affine crosses that line deterministically. exl3 does not, by about 13 s.
+
+Why affine is slower or heavier going into the warmup (contributing factors, measured offline, NOT proven on
+the cluster):
+
+- (a) Building `AffineProj` (reconstruct EXL3 → fp16 `.T` → slice → `mx.quantize`) leaves the fp16
+  intermediates in MLX's buffer cache: **~1.5 GiB residue** after one layer's rank-0 dense roster, versus
+  **0** for exl3 (`raw/pricing/q1/q1b/affine_build_residue_probe.py`). This matches the higher pre-warmup
+  footprint on the cluster: 110.1-114.6 GB affine vs 105.5 GB exl3, at equal post-load `active`
+  (104.6 vs 104.9 GB).
+- (b) Affine adds a second family of first-use Metal kernels: `affine_qmm/qmv` at bits=6, gs=64 for every new
+  (M, K, N). On a laptop the cold dense-roster cost per layer at M=512 is the same in both modes (104 vs 103 ms),
+  so (b) alone does not explain +20 s. **The exact source of the extra affine warmup time is an OPEN
+  QUESTION.** The fix below does not depend on it.
+
+**Why it was not caught before:** the replicated affine path (`tp_on=False`) issued no attention collective
+and was never booted through this warmup at world=2. The control (exl3) passes with a margin that nobody
+measured.
 
 ## 5. R1 — MINIMAL FIX
 
