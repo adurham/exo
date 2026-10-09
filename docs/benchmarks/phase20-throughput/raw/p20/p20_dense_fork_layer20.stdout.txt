@@ -1,0 +1,107 @@
+[fork] mlx 0.32.3.dev20260918+603f16eb7 loadavg=(1.57, 1.67, 2.0)
+[fork] 18 dense linears; trellis full=101.8 MB rank0=66.7 MB
+[fork] R0 pure-read
+[fork]   read slice 66.7MB: 264.3 GB/s   read 512MB: 477.2 GB/s (roof)
+[fork] decoding W (for R1) + fresh x
+[fork]   decoded W total = 339.9 MB  (mlx.core.float16)  W/trellis = 5.09x
+[fork] prod_m1        whole   1.011 ms ( 66.0 GB/s tB) | K-batched/call med   0.746 p95   0.752 ms ( 88.8 GB/s tB)
+[fork] prod_m4        whole   1.243 ms ( 53.7 GB/s tB) | K-batched/call med   1.022 p95   1.030 ms ( 64.8 GB/s tB)
+[fork] native_m1      whole   1.320 ms ( 50.5 GB/s tB) | K-batched/call med   0.925 p95   1.062 ms ( 62.8 GB/s tB)
+[fork] native_m4      whole   1.422 ms ( 46.9 GB/s tB) | K-batched/call med   1.216 p95   1.225 ms ( 54.5 GB/s tB)
+[fork] decode_only    whole   1.654 ms ( 40.4 GB/s tB) | K-batched/call med   1.441 p95   1.452 ms ( 46.0 GB/s tB)
+[fork] FORK: CLOSE_DECODE_ALU_BOUND  decode_share_m4=1.41  native/prod m4=1.19  roof=477 GB/s
+[fork] JSON -> /Users/adam.durham/p5-dense-ws/p20_dense_fork_layer20.json
+JSON_BEGIN
+{
+ "layer": 20,
+ "reps": 9,
+ "k_batch": 8,
+ "mlx": "0.32.3.dev20260918+603f16eb7",
+ "sum_trellis_full_bytes": 101810176,
+ "sum_trellis_rank0_bytes": 66748416,
+ "read_slice": {
+  "arr_MB": 66.748416,
+  "ms_median": 0.25254199863411486,
+  "ms_p95": 0.269124997430481,
+  "ms_min": 0.24983299954328686,
+  "ms_max": 0.269124997430481,
+  "read_gbs": 264.306200002423,
+  "read_gbs_p95": 248.02012684548976
+ },
+ "read_512mb": {
+  "arr_MB": 536.870912,
+  "ms_median": 1.1250214956817217,
+  "ms_p95": 1.1306249944027513,
+  "ms_min": 1.1237500002607703,
+  "ms_max": 1.1306249944027513,
+  "read_gbs": 477.2094702729888,
+  "read_gbs_p95": 474.8443689621422
+ },
+ "W_dtype": "mlx.core.float16",
+ "sum_W_bytes": 339869696,
+ "arms": {
+  "prod_m1": {
+   "ms_median": 1.011125001241453,
+   "ms_p95": 1.084292001905851,
+   "ms_min": 0.9489160001976416,
+   "ms_max": 1.084292001905851,
+   "kmed_percall": 0.7462213752660318,
+   "kp95_percall": 0.7515781253459863,
+   "trellis_gbs": 66.0140100561718,
+   "trellis_gbs_kp95": 88.81101478209283
+  },
+  "prod_m4": {
+   "ms_median": 1.2431459981598891,
+   "ms_p95": 1.253416994586587,
+   "ms_min": 1.2199579941807315,
+   "ms_max": 1.253416994586587,
+   "kmed_percall": 1.02178124961938,
+   "kp95_percall": 1.0304375009582145,
+   "trellis_gbs": 53.69314312140435,
+   "trellis_gbs_kp95": 64.77677291240852
+  },
+  "native_m1": {
+   "ms_median": 1.3204584902268834,
+   "ms_p95": 1.5494999970542267,
+   "ms_min": 1.2252500018803403,
+   "ms_max": 1.5494999970542267,
+   "kmed_percall": 0.9254088754460099,
+   "kp95_percall": 1.0622031240927754,
+   "trellis_gbs": 50.54942392663261,
+   "trellis_gbs_kp95": 62.83959676451679
+  },
+  "native_m4": {
+   "ms_median": 1.4218750002328306,
+   "ms_p95": 1.4396670012502,
+   "ms_min": 1.4149579947115853,
+   "ms_max": 1.4396670012502,
+   "kmed_percall": 1.2160442502135993,
+   "kp95_percall": 1.2253384993528016,
+   "trellis_gbs": 46.9439409153899,
+   "trellis_gbs_kp95": 54.47345042635576
+  },
+  "decode_only": {
+   "ms_median": 1.6536665061721578,
+   "ms_p95": 1.7089169996324927,
+   "ms_min": 1.601374999154359,
+   "ms_max": 1.7089169996324927,
+   "kmed_percall": 1.4411458741960814,
+   "kp95_percall": 1.451765625461121,
+   "trellis_gbs": 40.36389184328744,
+   "trellis_gbs_kp95": 45.97740491258625
+  }
+ },
+ "fork": {
+  "read_roof_gbs": 477.2094702729888,
+  "decode_share_m4": 1.4104250540249366,
+  "native_over_prod_m4": 1.1901219078609864,
+  "native_over_prod_m1": 1.2401264639680105,
+  "prod_m4_kmed": 1.02178124961938,
+  "native_m4_kmed": 1.2160442502135993,
+  "decode_kmed": 1.4411458741960814,
+  "native_m4_trellis_gbs": 54.47345042635576,
+  "prod_m4_trellis_gbs": 64.77677291240852,
+  "verdict": "CLOSE_DECODE_ALU_BOUND"
+ }
+}
+JSON_END

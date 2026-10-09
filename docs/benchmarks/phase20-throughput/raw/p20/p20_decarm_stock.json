@@ -1,0 +1,19 @@
+{
+ "layer": 20,
+ "reps": 9,
+ "k": 8,
+ "arm": "stock",
+ "split_gbs": null,
+ "arms": {
+  "m1": {
+   "kmed_percall": 0.7511849371439894,
+   "kp95_percall": 0.759489499614574,
+   "trellis_gbs_p95": 87.88589708465162
+  },
+  "m4": {
+   "kmed_percall": 1.0439218749525025,
+   "kp95_percall": 1.0478802505531348,
+   "trellis_gbs_p95": 63.69851513545191
+  }
+ }
+}

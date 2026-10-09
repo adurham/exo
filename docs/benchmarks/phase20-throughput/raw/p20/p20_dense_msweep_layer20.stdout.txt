@@ -1,0 +1,229 @@
+[msweep] m= 1  whole   1.514 ms ( 44.1 GB/s) | K/call med   0.841 p95   1.028 ms ( 64.9 GB/s)
+[msweep] m= 2  whole   1.245 ms ( 53.6 GB/s) | K/call med   0.992 p95   1.005 ms ( 66.4 GB/s)
+[msweep] m= 3  whole   1.288 ms ( 51.8 GB/s) | K/call med   1.084 p95   1.089 ms ( 61.3 GB/s)
+[msweep] m= 4  whole   1.250 ms ( 53.4 GB/s) | K/call med   1.018 p95   1.031 ms ( 64.7 GB/s)
+[msweep] m= 5  whole   1.432 ms ( 46.6 GB/s) | K/call med   1.226 p95   1.234 ms ( 54.1 GB/s)
+[msweep] m= 6  whole   1.376 ms ( 48.5 GB/s) | K/call med   1.229 p95   1.260 ms ( 53.0 GB/s)
+[msweep] m= 8  whole   1.412 ms ( 47.3 GB/s) | K/call med   1.163 p95   1.168 ms ( 57.1 GB/s)
+[msweep] m=16  whole   2.321 ms ( 28.8 GB/s) | K/call med   2.090 p95   2.097 ms ( 31.8 GB/s)
+[msweep]   split attn.wq_a              in_t= 320 out_t=  80 nsplit m1=  2 m4=  4  grid_m4=320
+[msweep]   split attn.wq_b              in_t=  80 out_t=2048 nsplit m1=  1 m4=  1  grid_m4=2048
+[msweep]   split attn.wkv               in_t= 320 out_t=  32 nsplit m1=  2 m4=  4  grid_m4=128
+[msweep]   split attn.wo_a.slice.0      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.1      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.2      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.3      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.4      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.5      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.6      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_a.slice.7      in_t= 256 out_t=  64 nsplit m1=  2 m4=  4  grid_m4=256
+[msweep]   split attn.wo_b              in_t= 512 out_t= 320 nsplit m1=  4 m4=  8  grid_m4=2560
+[msweep]   split attn.compressor.wkv    in_t= 320 out_t=  32 nsplit m1=  2 m4=  4  grid_m4=128
+[msweep]   split attn.indexer.wk        in_t=  32 out_t=   8 nsplit m1=  1 m4=  4  grid_m4=32
+[msweep]   split attn.indexer.wq_b      in_t=  80 out_t= 256 nsplit m1=  1 m4=  1  grid_m4=256
+[msweep]   split ffn.shared_experts.w1  in_t= 320 out_t= 144 nsplit m1=  2 m4=  4  grid_m4=576
+[msweep]   split ffn.shared_experts.w2  in_t= 144 out_t= 320 nsplit m1=  1 m4=  2  grid_m4=640
+[msweep]   split ffn.shared_experts.w3  in_t= 320 out_t= 144 nsplit m1=  2 m4=  4  grid_m4=576
+[msweep] JSON -> /Users/adam.durham/p5-dense-ws/p20_dense_msweep_layer20.json
+JSON_BEGIN
+{
+ "layer": 20,
+ "reps": 9,
+ "k": 8,
+ "sum_trellis_rank0_bytes": 66748416,
+ "arms": {
+  "1": {
+   "ms_median": 1.5137919981498271,
+   "ms_p95": 1.679249995504506,
+   "ms_min": 1.3512500008800998,
+   "kmed_percall": 0.8408671874349238,
+   "kp95_percall": 1.0278646259394009,
+   "trellis_gbs": 79.38045032250206
+  },
+  "2": {
+   "ms_median": 1.2454374955268577,
+   "ms_p95": 1.251875000889413,
+   "ms_min": 1.2410409981384873,
+   "kmed_percall": 0.9922213739628205,
+   "kp95_percall": 1.0051666249637492,
+   "trellis_gbs": 67.27169737678028
+  },
+  "3": {
+   "ms_median": 1.2882709997938946,
+   "ms_p95": 1.3163330004317686,
+   "ms_min": 1.275499991606921,
+   "kmed_percall": 1.0841614384844434,
+   "kp95_percall": 1.0886042509810068,
+   "trellis_gbs": 61.56686046065987
+  },
+  "4": {
+   "ms_median": 1.2500000084401108,
+   "ms_p95": 1.2736659991787747,
+   "ms_min": 1.2377499951981008,
+   "kmed_percall": 1.0178046877626912,
+   "kp95_percall": 1.0312135000276612,
+   "trellis_gbs": 65.58077085174803
+  },
+  "5": {
+   "ms_median": 1.431666998541914,
+   "ms_p95": 1.5130410029087216,
+   "ms_min": 1.3607080036308616,
+   "kmed_percall": 1.2262604377610842,
+   "kp95_percall": 1.2343333746684948,
+   "trellis_gbs": 54.4324956955064
+  },
+  "6": {
+   "ms_median": 1.3761875015916303,
+   "ms_p95": 1.460458996007219,
+   "ms_min": 1.3612500042654574,
+   "kmed_percall": 1.2287005620237323,
+   "kp95_percall": 1.2596822507475736,
+   "trellis_gbs": 54.32439608399133
+  },
+  "8": {
+   "ms_median": 1.4116875026957132,
+   "ms_p95": 1.4284160133684054,
+   "ms_min": 1.4024580013938248,
+   "kmed_percall": 1.1629245009316946,
+   "kp95_percall": 1.168390625025495,
+   "trellis_gbs": 57.39703303741859
+  },
+  "16": {
+   "ms_median": 2.3206254991237074,
+   "ms_p95": 2.366167012951337,
+   "ms_min": 2.27650000306312,
+   "kmed_percall": 2.0901666875943192,
+   "kp95_percall": 2.0973906248400453,
+   "trellis_gbs": 31.934494218173672
+  }
+ },
+ "auto_splits": {
+  "attn.wq_a": {
+   "in_tiles": 320,
+   "out_tiles": 80,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 320
+  },
+  "attn.wq_b": {
+   "in_tiles": 80,
+   "out_tiles": 2048,
+   "n_splits_m1": 1,
+   "n_splits_m4": 1,
+   "threadgroups_m4": 2048
+  },
+  "attn.wkv": {
+   "in_tiles": 320,
+   "out_tiles": 32,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 128
+  },
+  "attn.wo_a.slice.0": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.1": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.2": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.3": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.4": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.5": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.6": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_a.slice.7": {
+   "in_tiles": 256,
+   "out_tiles": 64,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 256
+  },
+  "attn.wo_b": {
+   "in_tiles": 512,
+   "out_tiles": 320,
+   "n_splits_m1": 4,
+   "n_splits_m4": 8,
+   "threadgroups_m4": 2560
+  },
+  "attn.compressor.wkv": {
+   "in_tiles": 320,
+   "out_tiles": 32,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 128
+  },
+  "attn.indexer.wk": {
+   "in_tiles": 32,
+   "out_tiles": 8,
+   "n_splits_m1": 1,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 32
+  },
+  "attn.indexer.wq_b": {
+   "in_tiles": 80,
+   "out_tiles": 256,
+   "n_splits_m1": 1,
+   "n_splits_m4": 1,
+   "threadgroups_m4": 256
+  },
+  "ffn.shared_experts.w1": {
+   "in_tiles": 320,
+   "out_tiles": 144,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 576
+  },
+  "ffn.shared_experts.w2": {
+   "in_tiles": 144,
+   "out_tiles": 320,
+   "n_splits_m1": 1,
+   "n_splits_m4": 2,
+   "threadgroups_m4": 640
+  },
+  "ffn.shared_experts.w3": {
+   "in_tiles": 320,
+   "out_tiles": 144,
+   "n_splits_m1": 2,
+   "n_splits_m4": 4,
+   "threadgroups_m4": 576
+  }
+ }
+}
+JSON_END

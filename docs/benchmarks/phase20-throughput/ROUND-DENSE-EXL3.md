@@ -214,3 +214,29 @@ chosen mechanism needs a **new custom kernel → CLOSE the dense track here** wi
 - **[0]** 2026-10-09 03:20 CDT — Phase 0 pre-registration written. Budget 0/3(+1 reserve) spent.
   2nd-opinion note: consult is rate-limited until 05:20; use `model='deepseek-v4-pro'`
   `provider='ollama-cloud'` if needed. Resume from §6 Experiment 1.
+- **[1]** 2026-10-09 03:14 CDT — **Phase 1 Exp 1 (fork)** run on studio2, real weights, idle-guarded,
+  0 relaunch. Result: native (decode-free) is **1.19× SLOWER** than the fused kernel; decode ≈ the
+  whole fused cost; read roof 477 GB/s. Falsifier for "decode-free is faster" → **CLOSE-direction**.
+  `raw/p20/p20_dense_fork_layer20.json`.
+- **[2]** 03:18 — **Exp 2 (m-sweep + auto-split report)**. m=4 flat in the m=2–8 band (54–67 GB/s);
+  only m=1 special (79). **m=4 is NOT degraded.** `raw/p20/p20_dense_msweep_layer20.json`.
+- **[3]** 03:21 — **Exp 3 (split-K sweep, in-place launch-param override, no recompile)**. Finer
+  splits monotonically WORSE (+0.03→+0.53 ms); cosine 1.0. **Auto-tune already optimal.**
+  `raw/p20/p20_dense_splitk_layer20.json`.
+- **[4]** 03:23 — **Exp 4 (decode-mechanism env arms)**. SWAR/LUT/FUSE_POST/SIMD arms: none beats stock
+  by > noise (+1.7 % best, inside noise; SWAR=0 slower; SIMD=0 sanity 1.48× slower).
+  `raw/p20/p20_decarm_*.json`.
+- **[5]** 03:25 — **VERDICT: CLOSE.** All four experiments converge: decode-ALU + small-M-structural
+  floor; no tune-existing mechanism clears ≥5 ms/round. **Promotions spent 0/3(+1).** Cluster
+  untouched (production `fb4f9290b`/`16830e1`, gates unset, canary 14.86/14.84). Written:
+  `MECHANISM.md`. Phases 2–6 NOT entered (nothing to ship; falsifier fired).
+
+## 10. FINAL STATE (2026-10-09 ~03:25 CDT)
+
+**CLOSED — honest falsifier close, no ship.** Dense/EXL3 is structurally bound (decode-ALU +
+small-M latency floor); a further gain needs a NEW custom kernel (scope-closed). Evidence:
+`MECHANISM.md` §1–5 + `raw/p20/`. Best any-arm m4 delta ≤ ~1 ms/round (inside noise) vs the 5 ms gate.
+Cluster: production `fb4f9290b`/`16830e1` live, gates unset, canary healthy, no stray processes.
+Budget spent: **0 / 3 promotions (+1 reserve held)**. Restore path (unchanged, still live):
+`fb4f9290b` + `16830e1`. No `PERFORMANCE_HISTORY.md` ship entry (nothing shipped); the close-out is
+recorded on the campaign branch.
