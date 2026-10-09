@@ -2687,6 +2687,27 @@ for NODE in "${NODES[@]}"; do
   # default ON, bit-exact: block maxima provably identical; local function
   # 2.3x @131K / 3.7x @262K). =0 restores the full-width coarse pass for A/B.
   [ -n "${DSV41_INDEXER_CONSUMER_SKIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_CONSUMER_SKIP=$DSV41_INDEXER_CONSUMER_SKIP"
+  # DSV41_INDEXER_L2_FULL / DSV41_INDEXER_SMALLN_ROW_BF16: the lever-2 ship design
+  # and its mechanism control (mlx_lm deepseek_v41/indexer.py, read at import).
+  # L2_FULL default ON = the small-n fallback stores its score row in fp32 so it
+  # is bitwise-identical to the hierarchical exact re-score; SMALLN_ROW_BF16=1 is
+  # the diagnostic that re-creates the bf16-row ties. Forwarded so a promotion A/B
+  # can flip the control from the launcher (same allow-list foot-gun as above).
+  # Audited: no stale values.
+  [ -n "${DSV41_INDEXER_L2_FULL:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_L2_FULL=$DSV41_INDEXER_L2_FULL"
+  [ -n "${DSV41_INDEXER_SMALLN_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_ROW_BF16=$DSV41_INDEXER_SMALLN_ROW_BF16"
+  # DSV41_NEXT18_CAPTURE*: the next18 real-tensor capture hook (R1 ship precondition
+  # A2 / R2 hard gate). bench/next18_capture.py auto-installs its Indexer.__call__
+  # wrapper only when DSV41_NEXT18_CAPTURE names an output path; the four vars are the
+  # harness contract (path / row-counts to record / ring size). Forwarded here as
+  # documented. The auto-install itself is wired by the env-gated import in the
+  # dsv41 engine module (exo.worker.engines.mlx.dsv41.engine), NOT by a code path that
+  # runs in production -- see that module's _maybe_install_next18_capture(). With the
+  # env unset the import is inert (bench/next18_capture's own top-level guard), so the
+  # production path is byte-for-byte unchanged.
+  [ -n "${DSV41_NEXT18_CAPTURE:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE=$DSV41_NEXT18_CAPTURE"
+  [ -n "${DSV41_NEXT18_CAPTURE_NS:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_NS=$DSV41_NEXT18_CAPTURE_NS"
+  [ -n "${DSV41_NEXT18_CAPTURE_MAX:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_MAX=$DSV41_NEXT18_CAPTURE_MAX"
   [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
   # DSV41_MOE_ALLSUM_BF16: MoE-tail collective payload dtype (mlx_lm
   # deepseek_v41/moe.py, read at import; default 0 = fp32 exact). Halves the

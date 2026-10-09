@@ -112,6 +112,59 @@ from exo.worker.engines.mlx.generator.generate import PrefillCancelled
 from exo.worker.engines.mlx.utils_mlx import apply_chat_template, get_coord_group
 from exo.worker.runner.bootstrap import logger
 
+
+def _maybe_install_next18_capture() -> None:
+    """Install the next18 real-tensor capture hook when the operator opted in.
+
+    The R1 ship precondition A2 / R2 hard gate needs the DSv4.1 indexer's REAL
+    decode/verify tensors recorded *inside the model-server process*, which the
+    offline synthetic suite cannot give. ``bench/next18_capture.py`` provides the
+    hook, but nothing in the stock server imports it, so a capture path exported
+    in the operator's shell is (correctly) inert.
+
+    This is the ONE bootstrap point: the DSv4.1 engine is constructed on every
+    rank of every node exactly once, before any request is served, and only for
+    this model. The hook is installed here IFF both hold:
+
+      * ``DSV41_NEXT18_CAPTURE`` is set to a non-empty output path (the operator
+        opted in), AND
+      * the ``next18_capture`` module is importable (the harness file is staged on
+        ``sys.path`` by the operator's ``PYTHONPATH`` -- e.g. the R1 capture run
+        copies ``bench/next18_capture.py`` to each node's ``/tmp`` and exports
+        ``PYTHONPATH`` accordingly, mirroring the existing ``EXO_PYTHONPATH_DIAG``
+        mechanism in ``start_cluster.sh``).
+
+    WHY IT NEVER FIRES IN PRODUCTION. With ``DSV41_NEXT18_CAPTURE`` unset this
+    function returns immediately -- no import, no monkeypatch, no cost -- so the
+    production path is byte-for-byte unchanged. The capture path is a separate
+    process concern (its own module on ``PYTHONPATH``), never linked into exo or
+    mlx-lm, so nothing about a production boot can reach it.
+
+    ``next18_capture`` auto-installs on import when the env names a path; we log
+    the confirmed install so the runner log is the on-node evidence the capture
+    is live (``grep '[next18_capture]'``).
+    """
+    import os
+
+    path = os.environ.get("DSV41_NEXT18_CAPTURE")
+    if not path:
+        return                                    # production: inert, zero cost
+    try:
+        import next18_capture as cap              # operator-staged on PYTHONPATH
+    except Exception as e:  # noqa: BLE001 - capture must never break serving
+        logger.warning(
+            f"[DSV41] DSV41_NEXT18_CAPTURE={path} set but next18_capture is not "
+            f"importable ({e!r}); capture DISABLED. Stage bench/next18_capture.py "
+            f"on PYTHONPATH (see start_cluster.sh DSV41_NEXT18_CAPTURE* forwards)."
+        )
+        return
+    try:
+        if getattr(cap, "_CAP", None) is None:
+            cap.install(path)                     # idempotent; env default path
+        logger.info(f"[DSV41] next18 capture hook ACTIVE -> {path}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[DSV41] next18 capture auto-install failed: {e!r}")
+
 #: Chunk size for the chunked prefill loop. PREFILL IS THE KNOWN BLOCKER for
 #: this model (74 tok/s at 8K, Metal GPU-timeout above 16K -- exo phase 19), and
 #: workstream C owns the fix. Until then the engine keeps chunks small so a long
@@ -329,6 +382,9 @@ class Dsv41Engine(Engine):
     # ---------------------------------------------------------------- lifecycle
 
     def __post_init__(self) -> None:
+        # Real-tensor capture (R1 ship precondition A2): install the next18 hook
+        # when the operator opted in. No-op with DSV41_NEXT18_CAPTURE unset.
+        _maybe_install_next18_capture()
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
             logger.warning(
