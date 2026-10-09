@@ -11547,3 +11547,48 @@ set is hardcoded {1,2,3,4}, so γ5 (benign-only) can't be selected. Zero relaunc
 
 **End state:** production restored to `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, **gates unset**,
 canary 14.86/14.85, 2 runners Ready; parity smoke below.
+
+## 2026-10-08 — Phase-5 continuation: P0 unit-reconcile (1 pass/round, NOT 4; KV 2.23%); lever-2 L2-full SHIP-DESIGNED but **NO-SHIP** (changes production output at production H — leg-A token diff at 63/300); dense EXL3 measured 69.3/53.4 GB/s -> route Reading-2 (GEMV tuning), GO; 3/3 relaunches; production restored
+
+Phase-5 campaign (PM, `deploy/phase20-campaign`; entry `PHASE5-CAMPAIGN.md` + `PHASE5-P0-UNITS.md` +
+`PHASE5-P1-LEVER2.md` + `PHASE5-P1-AMENDMENT.md` + `PHASE5-P2-DENSE.md` + `PHASE5-R1-KIT.md` +
+`PHASE5-REQ3-DEVIATION.md` + `PHASE5-R1-RESULTS.md` + `PHASE5-R1B-RESULTS.md`). Entry state: production
+`deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset.
+
+**P0 — unit reconciliation (CORRECTS the P5 roofline).** The brief's per-round dense model was wrong.
+(1) **1 indexer/score pass per round, not 4**: the MTP draft is a separate 3-stage `DSparkHead`
+(`mtp.py:18-19,295,313`) with NO `Indexer` object; the body runs ONE m=4 verify forward
+(`attention.py:119,197`). So `2.04 GB`/pass = per-round (P5's 8.5x stands; the "~240 GB/s / 4-pass"
+reading is refuted — P2's real-weight census agrees: 2.734 GB/rank/pass at the real 5.0 bpw).
+(2) **KV share = 2.23 %**, not 0.2 % (decimal-place error at `PHASE4-P5-ROOFLINE.md:190`).
+(3) 27.0+29.0=56.0 ms; 29.0/56.0=51.8 %≈52 % — self-consistent.
+
+**P1 — lever-2 as CODE (L2-full): built, PROVEN, but NO-SHIP.** Design: at n≤16 the indexer fallback
+stores its score row in **fp32** (matching the hierarchical exact re-score) → both rank a
+bitwise-identical row. Frozen suite 2045 cells: **1794 equal / 251 divergent** (shipped: 939); both
+ablations (`L2_FULL=0`, `SMALLN_ROW_BF16=1`) reproduce 939 exactly. Residual 251 = H=2 fixture exact-tie
+class (census matches 2^-H; **0 diffs at H∈{8,32,64}**, 258,048 slots; production **H=32**, not 64).
+Adversarial suite at production H: 45/45 identity, 0 row-bitwise mismatch, 0 ulp flips. Per-diff-slot
+attribution: 22,740 slots = 10,406 exact-zero-column + 12,288 masked padding + 46 non-zero-column 1-ulp
+(all in one cell; L2-full loses 0 vs shipped's 48 value slots there); superset TRUE. **R1b (relaunch
+#3) measured a clean perf win — agentic 91K 130.38→99.30 ms (−31.08, disjoint), benign 118.86→94.93 — but
+LEG A FAILED: greedy token-identity vs production diverges at token 63/300** (prod-vs-prod control
+deterministic; deterministic across lever runs). Root cause: production runs `HIER` at all n
+(`indexer.py:531`), which ranks by a **bf16 coarse pass + top-k+overfetch blocks**; the lever's
+fp32-full-row ranks every column exactly — they differ on real tie-dense activations → committed-token
+change. **Pre-registered abort fired: the lever is a genuine OUTPUT change at production H. NO-SHIP; not
+a code win.** Lever-2's 29 ms remains env-only (`DSV41_INDEXER_HIER=0`), a documented speed-vs-output
+tradeoff. Harness fix shipped: `bench/next18_capture.py` flushes off the request thread (R1's
+hang-watchdog SIGKILL root cause) — mlx-lm `16830e1`.
+
+**P2 — dense EXL3 on REAL weights: route Reading-2, GO.** Isolated production-shape rate on the real
+checkpoint: **m=1 GEMV 69.3 GB/s, m=4 GEMM 53.4 GB/s** (9.3x the 497 GB/s read floor; flat across
+layers). Kernel-parity audit PASS (production ≡ fused-inner variant; full-W 2.8-3.6x / striped 4.1-5.3x
+slower — the prior ~58 GB/s sweep reproduces, NOT suspect). bf16 dequant-cache measured **dead**
+(3.2-4.0x the bytes → 10-21% slower wall). Route: GEMV bandwidth/latency tuning + collectives-at-m=1;
+**go/no-go = GO** (projected ≥5 ms/round). Real trellis is **5.0 bpw**, dense slice ≈51 ms/round.
+
+**Budget:** 3/3 relaunches (R1 + restore, R1b + safety restore). **End state:** production RESTORED
+`deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset, canary 14.86/14.85, parity smoke benign
+117.66 ms; no ship, no `known-good` tag; next round's levers = dense GEMV tuning (GO) + a value-identity
+gate for lever-2.
