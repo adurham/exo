@@ -364,3 +364,22 @@ self-close**:
    - If the battery comes back **DIRTY** → restore + close as pre-registered (genuine negative).
    - If the same-boot Δ **≥ 15 ms** → proceed to ship per the original plan.
    - **This is the ONLY change to the round; everything else proceeds as pre-registered.**
+
+### 8.2 R2 SAME-BOOT CONTROL — VALIDATES THE FROZEN ANCHOR (drift 0.3 %)
+
+Same-boot control re-anchor (`exl3` on the eval build, process-only arm switch; salt `q1b`, benign 20K):
+
+| benign 20K | ms/round median | decode t/s | mean_accepted |
+|---|---:|---:|---:|
+| control, **same boot** (exl3) | **94.56** (94.56/94.75/94.51) | 37.945 | 2.5919 |
+| control, **frozen** (exl3, prior round) | 94.88 (94.56/95.01/94.88) | 38.48 | 2.682 |
+
+- The same-boot control (94.56) matches the frozen control (94.88) to **0.32 ms (0.3 %)** ⇒ the frozen anchor was
+  valid and there is no material cross-boot drift. ⇒ the frozen agentic anchor (101.07) is trustworthy.
+- **Confirmed same-boot benign Δ = 94.56 − 80.97 = −13.59 ms** (frozen-anchor Δ was −13.91). Both < 15 ms.
+  Acceptance within noise (2.59 vs 2.74 treated).
+- **⇒ G-B is a CONFIRMED narrow miss**: agentic Δ −13.79 ms vs the 15 ms floor, benign Δ −13.59 ms, deterministic
+  (σ ≤ 0.15 ms), acceptance unchanged. The near-floor adjudication (§8.1) therefore applies: run the R8a battery +
+  logit-drift on the affine6 treatment, keep the build live, do NOT auto-restore/ship, and escalate.
+
+**Battery (affine6, depth 40000) + logit drift: RUNNING** — see §9.
