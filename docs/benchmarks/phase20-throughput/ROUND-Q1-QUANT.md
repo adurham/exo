@@ -140,13 +140,14 @@ past 3 boots.
 
 | # | phase | deploy | purpose | status |
 |---|---|---|---|---|
-| P0 | offline | — | plan doc | ✅ committed |
-| P1 | offline | — | source + engine (sharded affine + env forwarding + affine5) + microbench | PENDING |
-| B1 | P2/P3 | exo `<eval>` + mlx-lm `<eval>` | within-build A/B (exl3 vs affine6) + depth runs + battery + drift | PENDING |
-| B2 | P4 | qN default | ship (or single retry affine5) | PENDING |
-| B3 | reserve | — | one pre-named retry only | HELD |
+| P0 | offline | — | plan doc | ✅ committed (`859e407eb`) |
+| P1 | offline | — | source + engine (sharded affine + env forwarding + affine5) + microbench | ✅ DONE — G-A PASS; branches pushed (mlx-lm `e444cbd`, exo `e4c2cb4`) |
+| B1 | P2/P3 | exo `e4c2cb460` + mlx-lm `e444cbd` | within-build A/B (exl3 vs affine6) + depth runs + battery + drift | ✅ control measured; ⛔ treatment FAILED to boot (collective stall) |
+| B2 | P4 | qN default | ship (or single retry affine5) | ✖ NOT SPENT — falsifier fired |
+| B3 | reserve | — | one pre-named retry only | HELD (unused) |
+| — | restore | production `fb4f9290b`/`16830e1` | return cluster to production | ✅ RESTORED |
 
-**Budget spent: 0 boots of ≤3.**
+**Budget spent: 3 boots of ≤3 (+1 reserve unused).**
 
 ---
 
@@ -219,7 +220,54 @@ Fixed-replay A/B (`r1_driver.py`, salt `q1eval`, benign 20K + agentic 91K, 4 rep
 Ranges are extremely tight (±0.1 ms). These are the pre-change anchors; the treatment arm is measured on
 boot #2 below. **Boots spent: 1 / 3.**
 
+### Boot #2 (treatment) — `DSV41_DENSE=affine6` FAILED to come up (deterministic collective stall)
+Deploy: `EXO_TARGET_BRANCH=deploy/q1-dense-qn DSV41_DENSE=affine6 ./start_cluster.sh`.
+
+- The DSv4 body **loaded fine on every attempt** — `[DSV41] body loaded in 63.1s: built=40/40 layers,…
+  active=104.6 GB`, then `DSpark draft head attached`, then `hier geometry` — and **immediately after,
+  the runner went silent and the hang watchdog SIGKILLed it**: `Runner … hung: 1 task(s) in progress, no
+  event for 66-68s (>45s). SIGKILLing to force RunnerFailed + re-placement`, respawn, repeat. **4/4
+  deterministic cycles**, never reaching READY.
+- **Hang stack (`/tmp/exo_hang_*.txt`, BOTH nodes):** main thread parked in
+  `mlx::core::eval → Event::wait() → metal::EventImpl::wait → __psynch_cvwait`, plus a
+  `jaccl::MeshGroup::all_sum → reliable_all_reduce_v2<bfloat16,SumOp> → __psynch_cvwait` thread — i.e. a
+  **cross-rank collective + GPU-event wait during the first (warmup) forward**.
+- **NOT the known 2026-08-18 `MLX_JACCL_DATA_RECV_POOL` rank-0 hang:** the log shows **no**
+  `jaccl init attempt N/6 failed: unordered_map::at: key not found`, and the stuck frame is a post-load
+  `all_sum`, not `allocate_buffers/ibv_reg_mr/ioctl`. So the documented `MLX_JACCL_DATA_RECV_POOL=0`
+  mitigation is not indicated by the evidence.
+- **Attribution:** the control boot (#1) ran the *identical* warmup on the *same* build/trees cleanly, and
+  the only runtime difference on boot #2 is `DSV41_DENSE=affine6`. The stall is therefore specific to the
+  **sharded-affine treatment path** (the sharded-affine code change, or a reproducible interaction it
+  triggers), not generic to the eval build.
+- **FALSIFIER FIRED.** The treatment does not survive full-model — it never serves a forward. Per the
+  pre-registered falsifier: **CLOSE the eval with the negative result and RESTORE.** The restore to
+  production (`fb4f9290b`/`16830e1`) is the safety action *and* the attribution control: if production
+  (exl3) boots clean, the environment is healthy and the affine treatment is the failing element.
+
+**RESULT: RESTORED — eval CLOSED NEGATIVE.** The Q1 dense re-quant win (G-A PASS offline, 2.32× at m=4)
+does **not** survive full-model: the sharded-affine `DSV41_DENSE=affine6` build deterministically stalls in
+a cross-rank collective on the first forward at world=2 and cannot serve. Production `fb4f9290b` +
+mlx-lm `16830e1` restored. No ship.
+
 ---
 
 ## END STATE
-(to be filled at close: build live, gates state, canary, SHIPPED/RESTORED line, budget spent.)
+
+- **Build live:** production `fb4f9290b` (exo) + mlx-lm `16830e1` on **BOTH** nodes — verified by
+  `git rev-parse --short HEAD` on each node. Runner env has **no** `DSV41_DENSE` (gates unset).
+  Post-restore canary **14.86 / 14.86 TFLOPS** (healthy); serving probe returned `Paris` (finish=stop).
+  No stray processes / no stray bench files on the nodes.
+- **RESULT: RESTORED — eval CLOSED NEGATIVE.** The dense re-quant win passed the OFFLINE gate (G-A:
+  affine q6 2.32× whole / 2.97× K-batched; q5 2.36×/3.06×) but the **sharded-affine treatment build
+  failed to serve**: `DSV41_DENSE=affine6` stalls on the world=2 first forward (cross-rank `all_sum` +
+  GPU-event wait), SIGKILLed by the hang watchdog 4/4, never READY. The falsifier fired (the win does not
+  survive full-model). exl3 on the same build boots clean → the stall is specific to the affine path. **No ship.**
+- **Budget spent: 3 boots of ≤3** (control + treatment + restore); 1 reserve unused.
+- **Artifacts:** eval branches `deploy/q1-dense-qn` pushed on BOTH forks (mlx-lm `e444cbd`, exo `e4c2cb4`);
+  recheck raw `raw/pricing/q1/recheck/`; restore script `raw/pricing/q1/restore_production.sh`;
+  `PERFORMANCE_HISTORY.md` on main = `b3813fbaf` (same-turn honest negative).
+- **Q5 instrument:** SPLIT OUT (not spent); the ship had priority and the MLX wheel rebuild risked the deploy.
+- **Next:** root-cause the sharded-affine world=2 first-forward stall (prime suspect: the sharded-affine code
+  path; the replicated path was numerically fine); EXL3 experts arm remains PARKED; Q4 MoE-expert reduction
+  remains priced/untaken (~18 ms/round standalone, quality-gated).

@@ -1,0 +1,268 @@
+{
+ "summary": {
+  "label": "q1_ctl_agentic",
+  "arm": "agentic",
+  "salt_base": "q1eval",
+  "round_prof": null,
+  "reps": 4,
+  "depth": 20000,
+  "max_tokens": 800,
+  "decode_tps_median": 30.962,
+  "decode_tps_all": [
+   31.18,
+   31.118,
+   30.807,
+   29.609
+  ],
+  "ms_per_round_median": 101.07,
+  "ms_per_round_all": [
+   101.09,
+   100.92,
+   101.07
+  ],
+  "mean_accepted_median": 2.1128,
+  "aborted": false,
+  "abort_reason": null
+ },
+ "recs": [
+  {
+   "wall_s": 382.911,
+   "ttft_s": 357.2852,
+   "decode_s": 25.6251,
+   "content_chars": 2579,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 255.25250965668246,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 124785533244
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 3405,
+    "mtp_accepted_drafts_cumulative": 2870,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 3405,
+   "accepted_cum": 2870,
+   "prefix_hit": "none",
+   "prompt_tps": 255.3,
+   "decode_tps": 31.18,
+   "rounds": null,
+   "mean_accepted": null,
+   "ms_per_round": null,
+   "gamma_implied": null,
+   "rep": 0,
+   "arm": "agentic",
+   "chunk": "q1_ctl_agentic_c0",
+   "salt": "q1eval-0",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308979,
+    "pred_tokens_3p48": 88812
+   }
+  },
+  {
+   "wall_s": 384.645,
+   "ttft_s": 358.9675,
+   "decode_s": 25.6768,
+   "content_chars": 2774,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 254.11459448099313,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 125053380908
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 4167,
+    "mtp_accepted_drafts_cumulative": 3418,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 4167,
+   "accepted_cum": 3418,
+   "prefix_hit": "none",
+   "prompt_tps": 254.1,
+   "decode_tps": 31.118,
+   "rounds": 254.0,
+   "mean_accepted": 2.1575,
+   "ms_per_round": 101.09,
+   "gamma_implied": 1.638,
+   "rounds_est": 465.3,
+   "rep": 1,
+   "arm": "agentic",
+   "chunk": "q1_ctl_agentic_c0",
+   "salt": "q1eval-1",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308979,
+    "pred_tokens_3p48": 88812
+   }
+  },
+  {
+   "wall_s": 385.037,
+   "ttft_s": 359.102,
+   "decode_s": 25.9353,
+   "content_chars": 2761,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 254.2417360337071,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 125053380908
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 4938,
+    "mtp_accepted_drafts_cumulative": 3961,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 4938,
+   "accepted_cum": 3961,
+   "prefix_hit": "none",
+   "prompt_tps": 254.2,
+   "decode_tps": 30.807,
+   "rounds": 257.0,
+   "mean_accepted": 2.1128,
+   "ms_per_round": 100.92,
+   "gamma_implied": 1.643,
+   "rounds_est": 469.4,
+   "rep": 2,
+   "arm": "agentic",
+   "chunk": "q1_ctl_agentic_c2",
+   "salt": "q1eval-2",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308979,
+    "pred_tokens_3p48": 88812
+   }
+  },
+  {
+   "wall_s": 386.551,
+   "ttft_s": 359.5656,
+   "decode_s": 26.9851,
+   "content_chars": 2703,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 253.94501764696622,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 125053380908
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 5739,
+    "mtp_accepted_drafts_cumulative": 4495,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 5739,
+   "accepted_cum": 4495,
+   "prefix_hit": "none",
+   "prompt_tps": 253.9,
+   "decode_tps": 29.609,
+   "rounds": 267.0,
+   "mean_accepted": 2.0,
+   "ms_per_round": 101.07,
+   "gamma_implied": 1.669,
+   "rounds_est": 480.0,
+   "rep": 3,
+   "arm": "agentic",
+   "chunk": "q1_ctl_agentic_c2",
+   "salt": "q1eval-3",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308979,
+    "pred_tokens_3p48": 88812
+   }
+  }
+ ]
+}
