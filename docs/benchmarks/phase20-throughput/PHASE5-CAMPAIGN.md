@@ -169,8 +169,62 @@ R2); **R2 requires explicit re-ratification.**
 - P2 raw JSON verified: real trellis **k=5 → 5.0 bpw**; m=1 = **69.3 GB/s**, m=4 = **53.4 GB/s**; kernel-parity
   `prod ≡ fused` on every shape.
 
-## 8. End state / resume pointer
+## 9. R1 RESULT — ABORTED (harness bug, NOT a lever failure); cluster RESTORED. One relaunch remains.
+
+Full report: `PHASE5-R1-RESULTS.md` @ `f5c474748`. Verdict: R1 **aborted mid-session** — the lever arm
+could not be measured. Root cause: the 91K capture hook's `np.savez_compressed` (~197 MB .npz) ran
+**inline on the server's request thread**; the multi-minute zlib `deflate` emitted no runner events →
+the 45 s hang-watchdog SIGKILLed the runner on both nodes (`/tmp/exo_hang_*.txt`, `verdict=kill`,
+main thread in `zlib_Compress_compress`). **No lever timing, no capture.** This is a harness/tooling
+defect, **not** evidence about the lever.
+
+- **Baseline (live prod boot, 0 budget, PASS):** agentic 91K **130.38 ms**/24.09 t/s (reproduces the
+  frozen next17 anchor 130.07); benign 20K **118.86 ms**/31.22 t/s (vs 118.56). Leg-A **prod-vs-prod
+  determinism control = 0 diff** (text sha `e65639ce…`), prod reference captured.
+- **Lever numbers: N/A.** Leg C (91K replay): **NOT satisfied**. Battery: **not run**. Trigger: n/a.
+- **RESTORE (PASS):** `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset, canary 14.85/14.86,
+  parity smoke benign **118.21 ms** (Δ0.65, within noise), token-identical to pre-R1 prod.
+- **Budget after R1: 2/3** (R1 relaunch #1 + restore #2). **One relaunch remains.**
+
+**R1b = the final relaunch (charge R3-reserve), SHIP-IN-PLACE on pass.** Fix = run the harness flush
+**off the request thread** (a bench-harness-only change, committed + staged on the nodes) and keep capture
+OFF during the timing arms conceptually by making the flush non-blocking; then lever timing → leg A
+(token-identity vs `e65639ce…`) → 91K capture replay (HARD) → battery (G3) → **if all clean: default-on
+verified, tag `known-good`, SHIPPED**; else restore (safety-mandated). Gates G2/G3/legs A-C all still
+pending.
+
+## 10. End state / resume pointer
 
 End: best SHIPPED build live, gates unset, canary healthy, RESTORED/SHIPPED line + parity smoke in doc, no stray processes,
 worktrees cleaned or clearly parked. `docs/PERFORMANCE_HISTORY.md` updated same-turn per finding on main; `known-good-*` tagged
 on both forks on ship. Last commit on this doc says where we are; resume from the first unchecked box.
+
+## 11. R1c FINAL SHIP ROUND (2026-10-08/09) — SHIPPED-IN-PLACE
+
+**Owner ruling (verbatim, 2026-10-08):** *"as long as we pass our quality tests then I'm fine with it."*
+→ the **R8a quality battery is the governing ship gate** for lever-2; the strict identity gate is
+superseded; the token-63 output change is accepted. Full report: `PHASE5-R1C-SHIP.md`.
+
+- **Production artifact:** exo `deploy/next18-identity @ fb4f9290b` (gitlink bumped `3bf8316` →
+  `16830e1`), pushed to `origin` (adurham/exo). mlx-lm `deploy/next18-lever2 @ 16830e1` (pushed).
+- **Deploy:** exo `fb4f9290b` + mlx-lm WT `16830e1`, ALL lever/capture env unset; READY (2/2);
+  canary 14.84/14.84. Installed-module verify PASS both nodes; runner env has no `DSV41_*` keys.
+- **Battery (governing):** **CLEAN** — needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park PASS;
+  `compare.py` vs frozen `g3` → no fails.
+- **SHIPPED-IN-PLACE:** build left LIVE as production, gates unset. Tag
+  `known-good-decode-next18-20261009-001052` on both forks. Parity smoke benign 20K **94.94 ms** /
+  agentic 91K **99.46 ms** (reproduces R1b).
+- **Open item:** token-63 divergence root cause NOT fully explained (harness replayed 64/128 records).
+
+### R1c relaunch budget (declared ≤2; declare-before-spend)
+
+| # | purpose | deploy | declared | status |
+|---|---|---|---|---|
+| 1 | SHIP deploy (gates unset) | exo `fb4f9290b` + mlx-lm `16830e1` | ≤2 | **SPENT** (1/2) |
+| 2 | contingency RESTORE (only on DIRTY) | exo `576e9d279` + mlx-lm `3bf8316` | ≤2 | **HELD — not spent** (battery CLEAN) |
+
+### Cluster end state (final)
+
+exo `deploy/next18-identity @ fb4f9290b` + mlx-lm `16830e1`, both nodes, **gates unset**, canary
+**14.85/14.85** healthy, 2 runners RunnerReady, no stray bench processes. `known-good` tag created
+on both forks.

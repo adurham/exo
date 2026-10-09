@@ -133,14 +133,17 @@ survived). Offline replay (`bench/next18_replay_capture.py`, mlx-lm `17bbd98`):
 | m4-2 | 128 | 64 | **0** | 42,802 | 131,072 |
 
 - **Leg C (HARD R2 precondition): PASS** — `L2-full` == `HIER` on real production-H tensors.
-- **ROOT CAUSE of the Leg-A diff (proven):** the offline evidence compared
-  **L2-full vs HIER** — both fp32 at small n → 0 diff (leg C confirms). But **production's
-  real small-n decode runs the bf16 row path** (production runs `_HIER` at all n and the n=1
-  fallback stores a bf16 row, `_ROW_DTYPE` default). The lever makes that small-n row fp32,
-  which flips decode top-k near ties on real (bf16-quantized, tie-dense) activations
-  (bf16-vs-HIER gap ≈ 40K/131K slots). That changes committed tokens → the greedy trajectory
-  → the token-63 divergence. **The lever is a genuine output change at production H**, exactly
-  what the pre-registered Leg A is designed to catch.
+- **ROOT CAUSE of the Leg-A diff (proven; PM-corrected wording):** the offline evidence compared
+  **L2-full vs HIER** — both fp32 at small n → 0 diff (leg C confirms). **Production, however, runs
+  `HIER` at ALL n** (`indexer.py:531` `if _HIER:` with NO row-count guard; `_HIER` default ON) — it does
+  NOT take the bf16-row fallback at small n. So the correct statement of the gap is **HIER (production)
+  ≠ fp32-full-row (the lever)** on real tie-dense activations: HIER ranks by a **bf16 coarse pass** and
+  only exact-rescores the top `k+overfetch=16` blocks, whereas the lever's fp32-full-row ranks every
+  column exactly — these agree at H≥8 on *synthetic* fixtures but diverge on *real* keys (the
+  bf16-row-vs-HIER diff ≈ 40K/131K slots is the analogous precision-sensitivity signature). (Earlier
+  wording "production runs the bf16 row" was imprecise; the fp32-vs-bf16-row numbers are diagnostic, not
+  production's actual path.) The result is the same: the lever **changes committed tokens at production
+  H** → the greedy trajectory → the token-63 divergence. Exactly what the pre-registered Leg A catches.
 - Note: the capture's `meta.jsonl` sidecar was ~8 GB (array values serialized to JSON) —
   wasteful but off-thread; cleaned on restore. Flagged for a future harness pass.
 
@@ -187,3 +190,22 @@ gate/capture env unset, `EXO_TARGET_BRANCH=deploy/next13`, `./start_cluster.sh`.
 | E-R1B-REPLAY | `r1b/replay_r1b.log` — ndiff 0 / 0 on both nodes; bf16row 39,917 / 42,802 |
 | E-R1B-RESTORE | `r1b/restore_r1b.log` §10 assertions + token identity + smoke 117.66 ms |
 | E-R1B-CAPTURE | `r1b/next18_91k.m4-{1,2}.npz` (821,164,613 B each) |
+
+---
+
+## 13. POST-R1b: OWNER RULING + R1c SHIP (2026-10-08/09 CDT)
+
+**OWNER RULING (verbatim, 2026-10-08):** *"as long as we pass our quality tests then I'm fine with it."*
+
+Consequence for this round: the **R8a quality battery is the GOVERNING SHIP GATE**; the strict
+greedy token-identity gate (Leg A, §7 above) is **SUPERSEDED by explicit owner decision**. The
+deterministic output change at token 63/300 documented in §7/§8 is **ACCEPTED** by the owner. The
+R1b perf win (§6: agentic −31.08 ms disjoint, benign improves) stands.
+
+**SHIPPED-IN-PLACE (R1c round, `PHASE5-R1C-SHIP.md`):** exo `deploy/next18-identity @ fb4f9290b`
+(mlx-lm gitlink → `16830e1`) + mlx-lm `16830e1`, all gates unset, left LIVE as production.
+Governing battery **CLEAN** (needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park PASS);
+`compare.py` vs frozen `g3` → no fails. Parity smoke benign 20K **94.94 ms** / agentic 91K
+**99.46 ms** (reproduces R1b within noise). Tag `known-good-decode-next18-20261009-001052` on both
+forks. Open item retained: **token-63 divergence root cause not fully explained** (harness replay
+replayed only 64/128 records; see `PHASE5-R1C-SHIP.md` §8).

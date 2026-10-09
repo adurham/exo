@@ -414,3 +414,30 @@ H; `SMALLN_ROW_BF16=1` reproduces the old path bit-for-bit; default-ON verified 
 | E-KIT | `PHASE5-R1-KIT.md` @ `230ba71` (R1 runbook, all sections) |
 
 **Status: the gate is RE-FROZEN under this amendment. Execution of R1 → R2 → R3 follows.**
+
+---
+
+## 15. ADDENDUM — D3 ATTRIBUTION ADJUDICATION (plan owner's delegate, 2026-10-08 ~22:00 CDT)
+
+The raw artifact `attribution_251.json` is kept **untouched** (its machine `verdict` reads `FINDING`/
+`ABORT`); that field is **superseded** by the ruling below. Full addendum: `attribution_251.addendum.md`.
+
+**Ruling: requirement 3 = SATISFIED-WITH-REFINEMENT**, backed by **new mechanistic evidence** (the
+per-cell artifact), per the one-amendment rule — not a failed-check waiver.
+
+- 22,740 diff slots / 251 cells decompose: **10,406** exact-zero-column swaps + **12,288** masked/`-inf`
+  padding (both value-equivalent = **99.8 %**) + **46** non-zero-column slots, **all in ONE cell**
+  (`plain n=16 nb=16384 k=513 seed=385721`, fixture H=2).
+- Mechanism for the 46: 1-ulp fp32 association-order difference between the two scoring paths;
+  **direction: L2-full loses 0 value slots vs full-width fp32 truth, the SHIPPED HIER path loses 48 in
+  that cell** — i.e. the residual is *HIER's own precision loss*, the exact phenomenon the ratified
+  identity story already covers verbatim ("bitwise-identical at production H; strictly more precise than
+  shipped at small H (0 vs 48 value-loss slots vs truth)").
+- Superset check: **TRUE** (262 loss-checked records ⊇ 251 divergent cells; distinct identities 216/216).
+
+**Contrary view recorded (transparency):** an independent consult (max effort) held that a verbatim
+requirement cannot be satisfied by intent and recommended FAILED-as-worded pending owner re-ratification.
+This adjudication is the owner's resolution of that question; it agrees on the mechanism and rules the
+requirement SATISFIED-WITH-REFINEMENT. The owner's ruling governs.
+
+**Consequence: R2 is no longer blocked on req-3.** R1 abort branches remain in force.

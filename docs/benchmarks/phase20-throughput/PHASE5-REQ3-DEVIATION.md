@@ -94,3 +94,20 @@ truth than the shipped path.
 | E-ADV | `tests/test_dsv41_indexer_adversarial_prodh.py` (mlx-lm `17bbd98`) — 45/45 identity, 0 row-bitwise mismatch, 0 ulp flips @ H∈{8,32,64} |
 | E-FP32-91k | `scratch/p5/prep/fp32row_91k.log` — verify n=4 @ nb=45500 `+0.005 ms/call → ≈0.04 ms/round` |
 | E-STAB/E-DET | `scratch/p5/prodgate_full.log` |
+
+---
+
+## 7. ADDENDUM — OWNER RULING SUPERSEDES THIS GATE (2026-10-08/09)
+
+**Owner ruling 2026-10-08 (verbatim):** *"as long as we pass our quality tests then I'm fine with it."*
+
+**Decision layer (added on top; the history above is NOT rewritten):** for lever-2 the
+**quality-battery gate SUPERSEDES the identity gate**. The req-3 deviation recorded in §§0–3, and
+the draft second amendment proposed in §4, are **MOOT** — neither is a ship precondition any more.
+R2 is therefore **no longer hard-blocked** on req-3 (the §4/§5 "R2 HARD-BLOCKED" disposition is
+superseded by the owner ruling).
+
+Outcome: lever-2 **SHIPPED-IN-PLACE** — exo `deploy/next18-identity @ fb4f9290b` (mlx-lm gitlink →
+`16830e1`) + mlx-lm `16830e1`, gates unset, left LIVE as production, on the strength of the R8a
+quality battery being **CLEAN** (needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park PASS).
+Full report: `PHASE5-R1C-SHIP.md`. Tag `known-good-decode-next18-20261009-001052` on both forks.
