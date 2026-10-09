@@ -318,6 +318,98 @@ row_dtype, lever_on, ts`). The **tensor** payload is recorded only inside the wi
 
 ---
 
+## §B1-RESULTS — the boot happened: fidelity/determinism verdicts + first divergence
+
+Boots: **3 of 4** budget spent (1 gate-retry + 1 capture boot + 1 restore boot); reserve unused.
+The capture accounted for **2 boots**, the first of which captured nothing (a zsh `nomatch` glob
+aborted the gate removal, so the runtime gate sentinel stayed present and the hook stayed inert);
+fixed by using `find -delete` instead of a bare glob, then recaptured.
+
+### R1 — capture contents
+
+- **24 indexer call records per node**, tokens `window_rel ∈ {53,54,56}` (layers
+  2/8/14/20/24/28/32/36 at each), `n=4` untiled, `k=512`, `nb≈10067/20134`, `ratio∈{1,2}`.
+- **plus ONE logits record** (`wrel=60`). Both nodes.
+
+### R2 — FIDELITY GATE = `harness valid` (PASSED)
+
+Verdict dict on EACH capture:
+
+```
+{"verdict":"harness valid","format":"token63","records":24,"valid":24,"unreproducible":0,"failed":0}
+```
+
+Every record self-reproduces **bit-exactly in ranked order, consumer layers included** — the gate
+the pre-registered §"Fidelity gate + determinism precondition" demanded is **PASSED** (not a silent
+"0 diffs").
+
+### R3 — DETERMINISM = **PASSED**, both clauses
+
+- **within-boot:** the fixed prompt (sha `deec4f8d1a3c71fa`) was sent twice; both responses were
+  bit-identical (`sha_thinking16=574b67a031c10f4b`, `sha_content` empty for both — thinking-only,
+  `finish_reason=length`).
+- **cross-boot:** the SAME deployed build produced byte-identical output sha `574b67a031c10f4b`
+  across TWO separate boots (the 10:09 boot and the 10:25 capture boot). Both arms ran the same
+  prompt, the same tokenization, and a fresh prefix cache per arm.
+- **Note (plainly):** the pre-registered precondition's multi-pass "arm-on#2 == arm-on#1" clause
+  was written for a proposed multi-pass driver that was **never implemented**; the kit is
+  **PASSIVE** (in-line A/B on identical inputs), so determinism was realized as the two-request
+  within-boot check + the cross-boot check above.
+
+### R4 — FIRST DIVERGENCE
+
+- `window_rel=53` (generation token 53), `layer_id=2`, op = **DSv4.1 indexer top-k column
+  selection**, mechanism = **dtype-dependent tie-break at the stored score row**,
+  **MARGIN = 0.0** (the bf16 k-th vs (k+1)-th boundary gap is EXACTLY 0.0 — an exact tie).
+
+### R5 — magnitude / type
+
+- **24/24** records diverge; **24/24 are PURE TIE-BREAK**; **0/24 genuine re-rank**.
+- True committed column-**SET** symmetric difference per record only **4–50 columns**; the npz
+  `ab_order_ndiff` (rank-slot permutation count) is inflated to **1081–1585** by the position-sort
+  (same inflation class as B0).
+- Max bf16 gap among **ALL** swapped columns across all records = **0.0**.
+
+### R6 — PROOF of pure tie-break
+
+bf16-rounding the fp32 arm's stored row reproduces the bf16 arm's row **BIT-EXACTLY** — **96/96
+query-rows, worst finite diff 0.0**. The two arms carry the SAME bf16-rounded row; only the fp32
+row preserves sub-bf16 distinctions. (bf16 rounding collapses ~98 % of scores to shared magnitudes,
+so the k-boundary is a large exact tie.)
+
+### R7 — CONSUMER LAYERS RESOLVED (the offline gap B0.4 could not close)
+
+**12 records** have `uses_candidates=True` (consumer layers 24/28/32/36); ALL **12/12** diverge
+identically and all are pure tie-break. The offline R1b capture could not replay these (no
+`shared.candidates`); the single-process probe stored the mask and replayed them — gate valid.
+
+### R8 — What is NOT shown (explicit)
+
+- **Propagation to token 63 is NOT shown.** The single captured logits step (`wrel=60`) shows
+  LARGE log-prob margins (`margin12 = 9.23/9.20/1.875/4.72`) — no near-tie flipping there; there
+  are NO logits at the first divergent token (53); the sequential path 53→63 is **UNOBSERVED**. So
+  the indexer tie-break is **mechanistically sufficient** to drive a greedy divergence (via a
+  downstream near-tie flip) but the token-63 propagation is **NOT pinned by this capture**.
+- `nrounds=0` (the `spec.generate` round hook was not on the hot path) — **no round-shape data
+  exists; do not invent it.**
+- **Capture-time optional-hook limitation (known, not a failure):** in the actual boot the optional
+  logits hook captured a single step (`nlogits=1`) and the rounds hook captured nothing
+  (`nrounds=0`).
+
+### R9 — WHAT FUTURE IDENTITY CLAIMS CAN RELY ON
+
+The lever's effect on the DSv4.1 indexer is a **PURE bf16-boundary tie-break (margin 0.0)**,
+present at every index layer incl. all consumer layers, with **ZERO genuine re-ranking** and a
+committed-set change of only **4–50 columns/record**. It is a coin-flip among exactly-tied scores,
+deterministic within a build. It is mechanistically sufficient to flip a downstream greedy token
+ONLY where a subsequent near-tie exists — and this capture does **NOT** show such a near-tie at the
+captured logits step. Therefore identity/quality claims for the shipped lever must rest on the
+**R8a battery** (as already ruled), **NOT** on any claim that this differential is null or
+benign-to-logits; and **NOT**, conversely, on a claim that it is proven to have caused token 63.
+Neither stronger claim is supported.
+
+---
+
 ## Evidence / provenance
 
 - Divergence re-confirmed offline: base `ids[63]=23393` vs lever `5789` (first divergence index 63;
