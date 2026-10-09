@@ -1,0 +1,114 @@
+{
+  "lead": "A0",
+  "title": "Acceptance-per-draft-position histogram by agentic content type",
+  "author": "mid-tier subagent (LEAD-A0)",
+  "date": "2026-10-09",
+  "mode": "OFFLINE, READ-ONLY, 0 boots (no ssh, no API request)",
+  "granularity": {
+    "per_round_n_accepted_histogram": "AVAILABLE (both arms, 0..3)",
+    "per_position_survival_vector": "AVAILABLE (gamma-matrix.json; benign+agentic, gamma 3/4/5) — derived from the coarse 0..gamma histogram as S_k = sum(bins >= k)",
+    "per_content_type_breakdown": "PARTIAL only: a 2-way benign-synthetic vs agentic-real split exists. NO tool-call-JSON vs prose vs echoed-tool-output breakdown exists anywhere in local data.",
+    "per_position_x_content_type_cross_tab": "NOT AVAILABLE"
+  },
+  "sources": {
+    "round_prof_p3": [
+      "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/p3/off_s1_rank1.round_prof.jsonl",
+      "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/p3/off_s2_rank0.round_prof.jsonl",
+      "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/p3/on_s1_rank1.round_prof.jsonl",
+      "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/p3/on_s2_rank0.round_prof.jsonl"
+    ],
+    "round_prof_prof": [
+      "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/prof/m4-1.round_prof.jsonl",
+      "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/prof/m4-2.round_prof.jsonl"
+    ],
+    "per_position": "/private/tmp/next14-gamma/docs/benchmarks/phase19-latency/raw/gamma-matrix.json",
+    "per_position_producer": "/private/tmp/next14-gamma/bench/phase19_gamma_matrix.py",
+    "per_position_doc": "/private/tmp/next14-gamma/docs/benchmarks/phase19-latency/gamma-depth-2026-10-07.md",
+    "histogram_field_producer": "/Users/adam.durham/repos/exo/bench/phase19_agentic_trunc_cap.py",
+    "histogram_metric_def": "/Users/adam.durham/repos/exo/src/exo/metrics/metrics.py",
+    "benign_cumulative_hist": "/private/tmp/phase20-campaign/docs/benchmarks/phase20-throughput/raw/p3/levers_off_measure.json",
+    "arm_json_agentic": "/private/tmp/p5r1c/ship_smoke_agentic.json",
+    "arm_json_benign": "/private/tmp/p5r1c/ship_smoke_benign.json"
+  },
+  "per_round_histogram": {
+    "note": "n_accepted = drafts accepted in a round (0..gamma=3). 'committed/round' = 1 (bonus) + mean_accepted. This is per-ROUND, not per-POSITION.",
+    "arms": [
+      {
+        "label": "agentic 91K g3 (real session replay)",
+        "source": "raw/p3/off_s1_rank1.round_prof.jsonl (verify_block_ms >= 95 ms stratum)",
+        "n_rounds": 1056,
+        "bin_counts": {"0": 152, "1": 180, "2": 165, "3": 559},
+        "bin_fracs": [0.1439, 0.1705, 0.1562, 0.5294],
+        "mean_accepted": 2.071,
+        "committed_tokens_per_round": 3.071,
+        "median_round_total_ms": 99.23,
+        "median_verify_block_ms": 97.77
+      },
+      {
+        "label": "benign 20K g3 (synthetic filler)",
+        "source": "raw/p3/off_s1_rank1.round_prof.jsonl (verify_block_ms < 95 ms stratum)",
+        "n_rounds": 2016,
+        "bin_counts": {"0": 92, "1": 83, "2": 60, "3": 1781},
+        "bin_fracs": [0.0456, 0.0412, 0.0298, 0.8834],
+        "mean_accepted": 2.751,
+        "committed_tokens_per_round": 3.751,
+        "median_round_total_ms": 93.69,
+        "median_verify_block_ms": 92.21
+      },
+      {
+        "label": "benign 20K g3 (levers OFF, cumulative-delta)",
+        "source": "raw/p3/levers_off_measure.json (benign recs, delta of mtp_accepted_histogram_cumulative)",
+        "n_rounds": 2030,
+        "bin_counts": {"0": 92, "1": 84, "2": 70, "3": 1784},
+        "bin_fracs": [0.0453, 0.0414, 0.0345, 0.8788],
+        "mean_accepted": 2.747,
+        "committed_tokens_per_round": 3.747
+      },
+      {
+        "label": "benign 20K, next16-instr levers-ON, PROF-instrumented",
+        "source": "raw/prof/m4-1.round_prof.jsonl (n=480) and m4-2 (identical)",
+        "n_rounds": 480,
+        "bin_counts": {"0": 142, "1": 122, "2": 48, "3": 168},
+        "bin_fracs": [0.2958, 0.2542, 0.1000, 0.3500],
+        "mean_accepted": 1.504,
+        "committed_tokens_per_round": 2.504,
+        "caveat": "Instrumented (PROF) levers-ON run; mean_accepted 1.504 DISAGREES with the clean G1.1 benign measurement mean_accepted 2.756 documented in PHASE1-M1.md:7. Reported verbatim; flag for triage, do not trust this run as the benign acceptance."
+      }
+    ]
+  },
+  "per_position_survival": {
+    "definition": "S_k = P(n_accepted >= k) = sum(bins>=k)/n_rounds. Implied per-position conditional accept prob q_k = S_k/S_{k-1}. Expectation check: sum_k S_k == mean_accepted (exact for all arms below).",
+    "source": "/private/tmp/next14-gamma/docs/benchmarks/phase19-latency/raw/gamma-matrix.json (field per_position / per_position_median); produced by bench/phase19_gamma_matrix.py:191 (sum(hist_delta[k:])/total_rounds). Live run 2026-10-07 14:14-14:42 CDT, depth 100K, temp 0, gamma via per-request spec_gamma.",
+    "arms": {
+      "agentic:3": {"S": {"1": 0.879, "2": 0.7293, "3": 0.5796}, "q": {"1": 0.879, "2": 0.8296, "3": 0.7950}, "mean_accepted": 2.1879, "ms_per_round": 153.76, "decode_tps": 20.692},
+      "agentic:4": {"S": {"1": 0.8542, "2": 0.6509, "3": 0.5051, "4": 0.3797}, "mean_accepted": 2.3898, "ms_per_round": 173.49, "decode_tps": 19.519},
+      "agentic:5": {"S": {"1": 0.8518, "2": 0.6556, "3": 0.5482, "4": 0.3926, "5": 0.263}, "mean_accepted": 2.7111, "ms_per_round": 183.94, "decode_tps": 20.116},
+      "benign:3": {"S": {"1": 0.9764, "2": 0.9449, "3": 0.9055}, "q": {"1": 0.9764, "2": 0.9677, "3": 0.9583}, "mean_accepted": 2.8268, "ms_per_round": 154.26, "decode_tps": 24.756},
+      "benign:4": {"S": {"1": 0.8974, "2": 0.8419, "3": 0.7778, "4": 0.7607}, "mean_accepted": 3.2778, "ms_per_round": 174.34, "decode_tps": 24.489},
+      "benign:5": {"S": {"1": 0.9219, "2": 0.8594, "3": 0.8281, "4": 0.8073, "5": 0.7865}, "mean_accepted": 4.2031, "ms_per_round": 185.36, "decode_tps": 28.07}
+    },
+    "reading": "Agentic per-position survival at gamma=3 decays hard (S: 0.879 -> 0.729 -> 0.580); benign is near-flat (0.976 -> 0.945 -> 0.906). This is the acceptance mechanism behind the agentic throughput gap."
+  },
+  "content_type_attribution": {
+    "available_split": "2-way only: benign-synthetic (12-sentence filler + 'count 1..450') vs agentic-real (flattened session 20261007_092009_9a2ed7 = code + terminal output + tool JSON + prose).",
+    "not_available": "Any finer content-type label (tool-call JSON vs prose vs echoed tool output) per round or per position. No local file labels rounds or accept positions by content kind; round_prof files carry only {round_idx, gamma, n_accepted, *_ms, rank}; arm JSONs carry only workload-level meta (n_messages_total, preamble_chars, prompt_chars).",
+    "conclusion": "The data CANNOT resolve whether echoed tool output dominates the rejects. Do NOT assert prompt-lookup / n-gram drafting as evidenced. The per-position decay is consistent with hard agentic content in aggregate, but the specific contributor is unresolved."
+  },
+  "gamma_pricing": {
+    "config_only": true,
+    "mechanism": "gamma is a per-request field spec_gamma (server clamps [1,6]); a static gamma change is config/request-only, NO code. Verified live: raw/gamma-fieldcheck.json (one request WITH spec_gamma=4 -> hist_delta [16,7,5,8,25,0,0], top non-empty bin=4; one WITHOUT -> hist[4]=0).",
+    "live_pricing_gamma4_vs_gamma3": {
+      "benign": {"gamma3_tps": 24.756, "gamma4_tps": 24.489, "delta_pct": -1.1, "ms_round_3": 154.26, "ms_round_4": 174.34},
+      "agentic": {"gamma3_tps": 20.692, "gamma4_tps": 19.519, "delta_pct": -5.7, "ms_round_3": 153.76, "ms_round_4": 173.49},
+      "verdict": "gamma=4 is WORSE on both workloads (live, IQRs disjoint). A static gamma change is NOT a win."
+    },
+    "gamma2_pricing": "gamma=2 was NOT in the live matrix (matrix = 3,4,5). Priced only by the offline model gamma-optimality.md (round_ms(g)=8.5+0.9*(g-1)+VERIFY_MS[g+1]+4.0, VERIFY_MS={1:58.5,2:74.9,3:87.9,4:97.7,5:111.7,6:120.1}): at benign saturation gamma2 ~ -8% vs gamma3; at low-acceptance regime (mean ~1.27/3) gamma2 ~ +5%. No live gamma2 measurement exists.",
+    "prior_art_already_prices_it": "YES. phase19 gamma-matrix.json prices gamma3/4/5 live on both workloads; gamma-optimality.md prices gamma1..6 offline; gamma-depth-2026-10-07.md 4c gives a per-position-tail sensitivity table; phase18 p63_spec2.py/run1.log shows adaptive gamma picks gamma2 on low-acceptance prompts (acc 0.90-1.29, gamma mix {2:75-90}) for +1.1 tok/s mean.",
+    "adaptive_gamma": "NOT-FUNDED / feature-blocked. GammaPolicy.update() is never called on the serving path (dsv41 engine gamma pinned at 3); wiring adaptive gamma = new code, out of scope. This note is analysis only."
+  },
+  "blockers": [
+    "No per-round content-type label exists; per-position x content-type cross-tab is uncomputable from local data.",
+    "prof/m4-1/m4-2 n_accepted mean (1.504) disagrees with the documented clean benign mean_accepted (2.756, PHASE1-M1.md:7) — flagged, unexplained.",
+    "The p3 round_prof files are byte-identical across on/off and s1/s2 (md5 matched); the 'on_*' copies were NOT independently measured (copied), and the same file pools two workloads disambiguated only by a verify_block bimodality (~24 transition rounds)."
+  ]
+}
