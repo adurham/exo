@@ -200,5 +200,26 @@ boot** (recorded; not spent this round unless the budget frees up).
 
 ---
 
+## P2 RESULTS (cluster) — same-build A/B
+
+### Boot #1 (control) — eval build live at DEFAULTS
+Deploy: `EXO_TARGET_BRANCH=deploy/q1-dense-qn ./start_cluster.sh` from the shared checkout on the eval
+branch. **Verified on BOTH nodes**: `exo=e4c2cb460`, `mlx-lm-wt=e444cbd`; the **INSTALLED** venv module
+`…/site-packages/mlx_lm/models/deepseek_v41/exl3_build.py` contains the affine-shard line + `DSV41_DENSE`;
+runner env has **NO** `DSV41_DENSE` key → **control = exl3**. Post-READY canary **14.86 / 14.85 TFLOPS**
+(healthy).
+
+Fixed-replay A/B (`r1_driver.py`, salt `q1eval`, benign 20K + agentic 91K, 4 reps/arm, same content both arms):
+
+| arm | ms/round median (all) | decode t/s | mean_accepted | ttft |
+|---|---:|---:|---:|---:|
+| control **benign 20K** | **94.88** (94.56 / 95.01 / 94.88) | 38.5 | 2.682 | ~70 s |
+| control **agentic 91K** | **101.07** (101.09 / 100.92 / 101.07) | 31.0 | 2.1128 | ~357 s |
+
+Ranges are extremely tight (±0.1 ms). These are the pre-change anchors; the treatment arm is measured on
+boot #2 below. **Boots spent: 1 / 3.**
+
+---
+
 ## END STATE
 (to be filled at close: build live, gates state, canary, SHIPPED/RESTORED line, budget spent.)
