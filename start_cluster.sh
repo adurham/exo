@@ -2711,6 +2711,14 @@ for NODE in "${NODES[@]}"; do
   # (read at import; default 1). Forwarded for the prefill-bubble A/B.
   # Audited: no stale value.
   [ -n "${DSV41_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV DSV41_ASYNC_EVAL=$DSV41_ASYNC_EVAL"
+  # DSV41_DENSE: DSv4.1 dense re-quant format toggle exl3 | affine6 | affine5 |
+  # affine8 (mlx_lm .../exl3_build.py, read at import); unset = exl3 default.
+  # affineN re-encodes the dense groups (attn wq_b/wo_b, shared experts) as MLX
+  # affine and TP-shards them exactly like exl3. DSV41_DENSE_TP=0 forces the
+  # affine modes back to the replicated (unsharded) path so the A/B can measure
+  # sharded vs replicated vs exl3.
+  [ -n "${DSV41_DENSE:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE=$DSV41_DENSE"
+  [ -n "${DSV41_DENSE_TP:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_TP=$DSV41_DENSE_TP"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
