@@ -11477,3 +11477,73 @@ MoE_ALLSUM_BF16 decode A/B (≥3 ms bar) → P3 loop-2 consumer-skip (prefill, �
 bytes-roofline one verify round vs measured bandwidth → near-floor verdict or headroom). Adaptive gamma parked
 (feature-blocked; γ5 benign-only).
 
+
+## 2026-10-08 — Phase-4 continuation: lever-2 code guard ABORTS (not identity-preserving); MoE_ALLSUM_BF16 decode A/B PASSES (3.32 ms); prefill consumer-skip already shipped; roofline = 6.9× headroom at MEASURED 497 GB/s
+
+Phase-4 campaign (PM, `deploy/phase20-campaign`; entry: `PHASE4-CAMPAIGN.md`, `PHASE4-P5-ROOFLINE.md`).
+Entry state: production `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset, canary healthy.
+
+**P1 — lever-2 code guard (`indexer.py` `if _HIER and n > _FENCE_MIN_ROWS`): ABORTED, not shipped.**
+Spec (`PHASE3B-SHIP-VALIDATION.md` §7) predicted ~29 ms/round. Implemented with a shared
+`deepseek_v41/_gates.py` threshold (retires the twin-default foot-gun). The required value-identity
+proof **DIVERGED**: `tests/test_dsv41_indexer_smallm_hier.py` = **2045 cells, 939 divergent**, all at
+`n<=16` (decode m=1 / verify m=4); `n=17` identically 0-diff; path-boundary + RED/GREEN controls PASS.
+Root cause (PM-reproduced): the hierarchical path exact-rescores in **fp32**, the fallback stores the
+row in `_ROW_DTYPE=bf16` — at the k-th boundary bf16 creates ties fp32 lacks, broken differently:
+`fallback(fp32 row) vs hier = 0 diffs / 165,924 slots`; `fallback(bf16 row) vs hier = 264 diffs`.
+Even with `DSV41_INDEXER_ROW_BF16=0` the engineered near-tie cells still diverge → `overfetch=16` is a
+heuristic, not a proof. So the guard would change decode/verify output vs shipped next17 → **not
+shippable** (ties = divergence). Lever-2's 29 ms is real but only reachable via the `DSV41_INDEXER_HIER=0`
+env flip — a genuine speed-vs-output tradeoff, not a code win. Future path (documented, not attempted):
+make the small-n fallback rank on an fp32 row so both branches share one precision, bound the overfetch
+residual / emit a runtime certificate, then re-run the suite to green incl. the tie cells.
+Branch `deploy/next18-lever2 @ 938b811` (proof `d4531e2` + capture harness `bench/next18_capture.py`).
+**Budget: 0 relaunches** (proof was offline).
+
+**P2 — `DSV41_MOE_ALLSUM_BF16` decode A/B: PASS on agentic; no new build needed.**
+`=0` (fp32 exact) vs default `=1` (bf16 halved tail collective), cross-boot (env is launch-time), same
+harness, same workload shapes:
+
+| arm | bf16 (=1, shipped) | fp32 (=0, this round) | Δ (bf16 wins) |
+|---|---|---|---|
+| benign 20K g3 | 118.53 ms / 32.36 t/s | 121.21 ms / 31.06 t/s | **2.68 ms** |
+| agentic 91K g3 | **129.90 ms / 23.62 t/s** | **133.22 ms / 23.63 t/s** | **3.32 ms** (≥3 ms bar; ranges disjoint) |
+| mean_accepted (agentic) | 2.0611 | 2.1575 | −0.096 (still >2.0) |
+
+The ON boot reproduced the §P3B next17-defaults point to 0.03–0.17 ms. **Verdict: the already-shipped
+bf16 default clears the Phase-4 ≥3 ms bar** (bf16 is marginally *lower* acceptance than fp32 — the
+known, already-accepted tradeoff). No `next19`; production stays as-is. **Budget: 1 relaunch.**
+
+**P3 — loop-2 consumer-index-skip PREFILL: ALREADY SHIPPED.** The audit the brief references
+(`bench/dsv41_loop2/consumer_index_sizing.md`, "up to ~15% of wall, provably exact") is exactly
+`coarse_block_scores_candidates` + `DSV41_INDEXER_CONSUMER_SKIP`, implemented + shipped in **`5a986da`**
+(loop-2, 2026-10-07) — `git merge-base --is-ancestor 5a986da 3bf8316` = TRUE; installed prod module has
+`_HIER_CONSUMER_SKIP` default 1 wired at `indexer.py:574`. It is the consumer coarse pass at prefill
+m=2048, already default. Recorded prefill wins (soak13 r500 +29.0%, r750 +57.3%, r1m +65.5%; 350K build
++17.0%) all exceed the 8% bar. **No new work, no budget.**
+
+**P5 — roofline close-out (bench-only).**
+(A) Round accounting: `verify_block 92.4 / round_total 93.8 = 98.5%` (server-internal) vs
+`92.4 / 101.06 = 91.4%` (client). The 8.66 ms split MECE = **1.40 ms in-round server residual**
+(measured: draft 0.55 + tail 0.09 + 0.76 host/serialisation) + **7.26 ms client↔server per-round
+boundary** (bounded, not measured — no PROF-capable build deployed). New finding: the raw OFF PROF is
+**bimodal** (benign verify 92.25 / agentic 97.81) — the brief's "8.7 ms" is dominated by a
+benign-vs-agentic mismatch, not in-round overhead; the 98.5% ratio is arm-robust (0.9845/0.9853).
+(B) Bytes-roofline, one verify round at 91K m=4 (per rank): routed-expert 4.46 GB + dense/shared/attn
+EXL3 2.04 GB + KV 0.15 GB + collectives 0.003 GB = **6.65 GB**; FLOPs floor 3.8 ms << bytes floor →
+memory-bound. **Read bandwidth MEASURED at 497 GB/s** (pure-read/GEMV canary, both nodes; the old 450
+was a *triad* number, read+write ≈304 here) → floor **13.4 ms**; measured verify **92.4 ms = 6.9× the
+floor (14.5% of achieved BW).** **VERDICT: NOT near-floor — ~79 ms headroom.** Largest single slice =
+**dense/shared EXL3 (≈34 ms, 8.5× its floor, ~53-55 GB/s = decode-ALU/issue-bound at the small-M
+plateau) → the lever**; routed experts second (~1.5-3× floor, closer to honest BW). Localizing
+differential (design, not run): force top-k routing down via debug hook — if halving activated experts
+barely moves ms/round, the gap is dense/other. A read-bw canary (`read_bw_canary.py`) is retained.
+
+**Adaptive gamma — PARKED.** Feature-blocked: `GammaPolicy.update()` is never called; the candidate γ
+set is hardcoded {1,2,3,4}, so γ5 (benign-only) can't be selected. Zero relaunches.
+
+**Session budget:** Phase-4 spent **2 relaunches** (P2 OFF arm + final restore), well under the cap of
+3 promotions + 1 reserve. P1/P3 needed none (offline proof / already-shipped).
+
+**End state:** production restored to `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, **gates unset**,
+canary 14.86/14.85, 2 runners Ready; parity smoke below.
