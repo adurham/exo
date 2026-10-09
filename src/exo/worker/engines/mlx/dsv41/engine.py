@@ -165,6 +165,59 @@ def _maybe_install_next18_capture() -> None:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[DSV41] next18 capture auto-install failed: {e!r}")
 
+
+def _maybe_install_token63_capture() -> None:
+    """Install the B1 token-63 runtime-toggle capture hook when opted in.
+
+    The B1 investigation records the DSv4.1 indexer's REAL per-call tensors while
+    the operator flips runtime knobs, which the offline synthetic suite cannot
+    give. ``token63_probe.py`` provides the hook, but nothing in the stock server
+    imports it, so a capture path exported in the operator's shell is (correctly)
+    inert.
+
+    This is the ONE bootstrap point: the DSv4.1 engine is constructed on every
+    rank of every node exactly once, before any request is served, and only for
+    this model. The hook is installed here IFF both hold:
+
+      * ``DSV41_TOKEN63_CAPTURE`` is set to a non-empty output path (the operator
+        opted in), AND
+      * the ``token63_probe`` module is importable (the harness file is staged on
+        ``sys.path`` by the operator's ``PYTHONPATH`` -- the B1 capture run copies
+        ``token63_probe.py`` to each node's ``/tmp`` and exports ``PYTHONPATH``
+        accordingly, mirroring the existing ``EXO_PYTHONPATH_DIAG`` mechanism and
+        the next18 capture above in ``start_cluster.sh``).
+
+    WHY IT NEVER FIRES IN PRODUCTION. With ``DSV41_TOKEN63_CAPTURE`` unset this
+    function returns immediately -- no import, no monkeypatch, no cost -- so the
+    production path is byte-for-byte unchanged. The capture path is a separate
+    process concern (its own module on ``PYTHONPATH``), never linked into exo or
+    mlx-lm, so nothing about a production boot can reach it.
+
+    ``token63_probe`` auto-installs on import when the env names a path; we log
+    the confirmed install so the runner log is the on-node evidence the capture
+    is live (``grep '[token63_probe]'``).
+    """
+    import os
+
+    path = os.environ.get("DSV41_TOKEN63_CAPTURE")
+    if not path:
+        return                                    # production: inert, zero cost
+    try:
+        import token63_probe as cap               # operator-staged on PYTHONPATH
+    except Exception as e:  # noqa: BLE001 - capture must never break serving
+        logger.warning(
+            f"[DSV41] DSV41_TOKEN63_CAPTURE={path} set but token63_probe is not "
+            f"importable ({e!r}); capture DISABLED. Stage token63_probe.py on "
+            f"PYTHONPATH (see start_cluster.sh DSV41_TOKEN63_CAPTURE* forwards)."
+        )
+        return
+    try:
+        if getattr(cap, "_CAP", None) is None:
+            cap.install(path)                     # idempotent; env default path
+        logger.info(f"[DSV41] token63 capture hook ACTIVE -> {path}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[DSV41] token63 capture auto-install failed: {e!r}")
+
 #: Chunk size for the chunked prefill loop. PREFILL IS THE KNOWN BLOCKER for
 #: this model (74 tok/s at 8K, Metal GPU-timeout above 16K -- exo phase 19), and
 #: workstream C owns the fix. Until then the engine keeps chunks small so a long
@@ -385,6 +438,9 @@ class Dsv41Engine(Engine):
         # Real-tensor capture (R1 ship precondition A2): install the next18 hook
         # when the operator opted in. No-op with DSV41_NEXT18_CAPTURE unset.
         _maybe_install_next18_capture()
+        # B1 runtime-toggle capture: install the token-63 hook when the operator
+        # opted in. No-op with DSV41_TOKEN63_CAPTURE unset.
+        _maybe_install_token63_capture()
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
             logger.warning(
