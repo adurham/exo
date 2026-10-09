@@ -11597,3 +11597,17 @@ completion. Next round's levers = dense GEMV tuning (GO) + hardening the capture
 the live path (the token-63 divergence root cause is NOT fully explained: capture replay showed 64/128
 records replayable with 0 diffs on those, yet the live greedy trajectory diverges — the offline harness
 does not fully model the live path; open item).
+
+**OUTCOME (R1c ship round, 2026-10-09) — SHIPPED-IN-PLACE.** Production artifact =
+exo `deploy/next18-identity @ fb4f9290b` (mlx-lm gitlink bumped `3bf8316`→`16830e1`; pushed to
+origin/adurham/exo). Deployed with ALL lever/capture env unset; READY 2/2; canary 14.84/14.84;
+installed-module verify on BOTH nodes (lever-2 guard + `_L2_FULL` in the installed indexer.py;
+lever-1 guard in installed sparse_attention.py; runner env has zero `DSV41_*` keys). The governing
+R8a quality battery came back **CLEAN** — needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park
+`recall_teal=True`; `compare.py` vs frozen `g3` → no fails. Parity smoke on the live build: benign
+20K **94.94 ms / 39.13 t/s**, agentic 91K **99.46 ms / 31.03 t/s** (reproduces R1b). **Build left
+LIVE as production, gates unset; tag `known-good-decode-next18-20261009-001052` on BOTH forks
+(adurham/exo `fb4f9290b`, adurham/mlx-lm `16830e1`).** Ship-round budget: **1/2 spent** (ship deploy;
+contingency restore not needed). Open item unchanged: the token-63 divergence root cause is not
+fully explained (harness replay replayed only 64/128 records) — harden the capture/replay harness so
+it models the live path next round.
