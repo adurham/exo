@@ -1,0 +1,29 @@
+[q1r] mlx 0.32.3.dev20260918+603f16eb7 loadavg=(1.79, 1.73, 1.66)
+[q1r] RANK0 roster: 14 dense linears (wo_a head-split -> 4 groups); skipped=0
+[q1r] decoding W (raw) + reconstructing W (rotations folded) + quantizing arms
+[q1r] reconstruct W total=187.0 MB ; native q6=76.0 MB ; affine q6=76.0 MB ; skipped=0
+[q1r] equiv check: reconstruct_public_mlx(full) sliced  vs  reconstruct(sliced)
+[q1r]   equiv: {"attn.wq_b": {"max_abs_rel": 0.0, "allclose": true}, "attn.wo_b": {"max_abs_rel": 0.0, "allclose": true}, "ffn.shared_experts.w2": {"max_abs_rel": 0.0, "allclose": true}}
+[q1r] prod_m1                whole   1.020 ms (183.4 GB/s) | K/call med   0.476 p95   0.480 ms
+[q1r] prod_m4                whole   0.850 ms (220.0 GB/s) | K/call med   0.641 p95   0.657 ms
+[q1r] native_m1_B5           whole   0.291 ms (221.0 GB/s) | K/call med   0.151 p95   0.153 ms
+[q1r] nativehad_m1_B5        whole   0.368 ms (174.8 GB/s) | K/call med   0.208 p95   0.209 ms
+[q1r] affine_m1_B5           whole   0.287 ms (223.7 GB/s) | K/call med   0.152 p95   0.152 ms
+[q1r] native_m1_B6           whole   0.360 ms (211.1 GB/s) | K/call med   0.171 p95   0.172 ms
+[q1r] nativehad_m1_B6        whole   0.445 ms (170.8 GB/s) | K/call med   0.234 p95   0.237 ms
+[q1r] affine_m1_B6           whole   0.360 ms (211.0 GB/s) | K/call med   0.172 p95   0.173 ms
+[q1r] native_m4_B5           whole   0.360 ms (178.8 GB/s) | K/call med   0.210 p95   0.220 ms
+[q1r] nativehad_m4_B5        whole   0.450 ms (142.9 GB/s) | K/call med   0.288 p95   0.289 ms
+[q1r] affine_m4_B5           whole   0.361 ms (178.2 GB/s) | K/call med   0.209 p95   0.211 ms
+[q1r] native_m4_B6           whole   0.364 ms (208.5 GB/s) | K/call med   0.211 p95   0.221 ms
+[q1r] nativehad_m4_B6        whole   0.447 ms (169.9 GB/s) | K/call med   0.286 p95   0.291 ms
+[q1r] affine_m4_B6           whole   0.366 ms (207.6 GB/s) | K/call med   0.216 p95   0.220 ms
+[q1r] cosine fidelity (arm output vs matching bf16 reference)
+[q1r]   m1 B5: prod~rec 1.00000 | native~dec 0.99902 | nativehad~rec 0.99904 | affine~rec 0.99896 | affine~dec 0.00750
+[q1r]   m1 B6: prod~rec 1.00000 | native~dec 0.99976 | nativehad~rec 0.99977 | affine~rec 0.99974 | affine~dec 0.00682
+[q1r]   m4 B5: prod~rec 1.00000 | native~dec 0.99904 | nativehad~rec 0.99903 | affine~rec 0.99898 | affine~dec -0.00205
+[q1r]   m4 B6: prod~rec 1.00000 | native~dec 0.99976 | nativehad~rec 0.99976 | affine~rec 0.99975 | affine~dec -0.00213
+[q1r] GATE G-A: affine m4 whole max ratio=2.36x  Kmean=3.06x  (nativehad 1.90x) -> PASS
+[q1r] FULL-18 roster cross-check (prior script's roster: all 8 wo_a) -> prod + affine6
+[q1r]   FULL18 prod_m4 whole 1.014 ms (per-call 0.0563); affine6 whole 0.375 (per-call 0.0208) ratio_whole 2.70x Km 3.09x
+[q1r] JSON -> /Users/adam.durham/q1_recheck/q1_recheck_layer20.json ; loadavg_after=(1.79, 1.73, 1.66)

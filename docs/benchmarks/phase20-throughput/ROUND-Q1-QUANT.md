@@ -150,5 +150,55 @@ past 3 boots.
 
 ---
 
+## P1 RESULTS (offline) — STATUS: DONE. G-A = **PASS**
+
+### Source decision — CONFIRMED: EXL3-reconstruction source (labeled LOUDLY)
+No original bf16 source available without a >200 GB download; the engine already reconstructs the EXL3
+dense groups (`reconstruct_public_mlx`) and the treatment dense ≈ the CURRENT deployed dense + a q6
+rounding (cos 0.9998). Artifacts carry the label: **"fidelity measured from EXL3-decoded source, not the
+original model"**, compensated by the logit-drift check + the R8a battery.
+
+### Engine work (2 branches, both pushed to adurham remotes)
+| repo | branch | SHA | change |
+|---|---|---|---|
+| mlx-lm | `deploy/q1-dense-qn` | `e444cbdcad3253ac25770d3a75d5c2354cea54dd` (off `16830e1`) | TP-shard affine dense modes (qN) like exl3 + `affine5` + `AffineProj.from_weight` + `DSV41_DENSE_TP` |
+| exo | `deploy/q1-dense-qn` | `e4c2cb4607f8f87b13bde2910344ea8479eadf30` (off main `745efdfdf`) | `start_cluster.sh`: forward `DSV41_DENSE` + `DSV41_DENSE_TP` (was a silent no-op — the R1-class blocker) |
+
+- **The key fix**: affine mode previously set `attn_tp`/`shared_tp` = False (gated on `DENSE_MODE=="exl3"`),
+  so every rank computed the FULL dense slice. Removed the gate; affine now TP-shards on the SAME 128-wide
+  block boundaries (`_block_bounds`). Slicing is `reconstruct(full) → slice fp16 → mx.quantize(gs=64)` —
+  exact: `reconstruct(full)[slice] == reconstruct(slice)` (max_abs_rel 0.0).
+- **Correctness trace (verified)**: replicated affine at world=2 was ALREADY numerically correct — the
+  attention `all_sum` is keyed off `group is not None` (not `world`) so replicated attention does no
+  collective, and the shared-expert output is added AFTER the routed-expert all_sum. So the sharding fix is
+  a **PERF** fix (recovers the priced 2.4× → ~19 ms/round vs ~break-even), not a correctness fix.
+- Unit test `tests/test_dsv41_dense_affine_shard.py`: **12 passed** (re-run by the PM).
+
+### Per-layer re-check on the CONVERTED/affine tensors — G-A PASS
+`raw/pricing/q1/recheck/` (script + JSON + stdout). Layer-20 dense roster, **TP=2 rank-0 sharded
+shapes** (14 linears; wo_a head-split → 4 of 8 groups — the TRUE engine rank-0 geometry; the prior Q1
+script's "18-linear" roster was a non-rank-0 proxy).
+
+| arm (m=4, per-rank) | whole ms | K/call med·p95 ms | ratio whole | ratio K | cos |
+|---|---:|---:|---:|---:|---:|
+| prod EXL3 (fused, baseline) | 0.850 | 0.641 · 0.657 | 1.00× | 1.00× | 1.0000 vs W_rec |
+| native q6 +Hadamard (drop-in) | 0.447 | 0.286 · 0.291 | 1.90× | 2.24× | 0.99976 |
+| native raw q6 | 0.364 | 0.211 · 0.221 | 2.33× | 3.03× | 0.99976 |
+| **affine q6 (engine path)** | **0.366** | **0.216 · 0.220** | **2.32×** | **2.97×** | 0.99975 |
+| **affine q5 (engine path)** | **0.361** | **0.209 · 0.211** | **2.36×** | **3.06×** | 0.99898 |
+
+- **G-A PASS**: affine q6 = **2.32×** whole / **2.97×** K-batched; affine q5 = 2.36× / 3.06×.
+- The affine engine path runs at **raw-native speed** (rotations folded into W, not dispatched per call) —
+  i.e. it beats the "fair drop-in +Hadamard" arm. Projected dense-slice win ≈ **19.4 ms/round**
+  (34.0 → 14.6 ms/round over 40 layers).
+- `prod EXL3 vs x@reconstruct_public_mlx` = 1.0000 (confirms the reconstruct reference).
+
+### P5 decision — **SPLIT OUT** (ship takes priority)
+The Q5 Path-2 per-kernel ring is an MLX C++ patch + a node wheel rebuild; baking it into the ship boot
+risks the deploy for a diagnostic that is orthogonal to the dense change. **Deferred to its own later
+boot** (recorded; not spent this round unless the budget frees up).
+
+---
+
 ## END STATE
 (to be filled at close: build live, gates state, canary, SHIPPED/RESTORED line, budget spent.)
