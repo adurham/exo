@@ -976,10 +976,30 @@ class Dsv41Sessions:
             return f"id:{key}"
         return "p:" + _sc.prefix_hash(_ids_of(prompt_ids))
 
-    def get(self, prompt_ids: Any, key: str | None = None) -> Conversation:
+    def get(
+        self, prompt_ids: Any, key: str | None = None, *, reuse: bool = True
+    ) -> Conversation:
+        """The conversation this request belongs to.
+
+        ``reuse=False`` (set by the engine for an image-carrying request) skips
+        BOTH the resident prefix match AND the parked-store restore and opens a
+        cold conversation. An image span is only valid inside the forward whose
+        cache offset is 0, so a request whose prefill carries image spans must
+        not join a conversation whose cache is already advanced: reuse would
+        delta-prefill from a nonzero offset, which the vision splice refuses
+        (that RuntimeError used to escape step() and kill the runner). The
+        caller drops the conversation when the request finishes.
+        """
         from mlx_lm.models.deepseek_v41 import session_cache as _sc
 
         ids = _ids_of(prompt_ids)
+        if not reuse:
+            self.stats["cold"] += 1
+            logger.info(
+                f"[DSV41] session forced cold: image-carrying request must not "
+                f"reuse a resident conversation (this {len(ids)}-token prompt)."
+            )
+            return self._open("cold:" + _sc.prefix_hash(ids))
         if key:
             entry = self._entries.get(f"id:{key}")
             if entry is not None:
