@@ -1,0 +1,3827 @@
+{
+ "query": "exo_peak_memory_bytes{model_id=\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\"}",
+ "unit_factor_K": 1.073741824,
+ "window": [
+  1789037478,
+  1791629478
+ ],
+ "instances": [
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "91e9a8fd-4100-41bc-94ff-d3be6ea0f843",
+   "first_sample": "2026-10-01T02:04:09",
+   "last_sample": "2026-10-01T02:20:24",
+   "n_samples": 59,
+   "first_labelled_GB": 118.67967177500002,
+   "max_labelled_GB": 119.15358909299998,
+   "first_true_GB": 110.52905747201295,
+   "max_true_GB": 110.97042736876753,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-01T02:08:39",
+     "labelled_B": 119153589092.99998,
+     "prompt_tokens_in_scrape_window": 2456,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2456
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "6d95e7a4-8789-4276-821d-179ec73eb72b",
+   "first_sample": "2026-10-01T02:23:09",
+   "last_sample": "2026-10-01T08:11:24",
+   "n_samples": 1388,
+   "first_labelled_GB": 118.672916376,
+   "max_labelled_GB": 119.026153016,
+   "first_true_GB": 110.5227660164237,
+   "max_true_GB": 110.85174327343701,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-01T02:27:24",
+     "labelled_B": 119026153016,
+     "prompt_tokens_in_scrape_window": 2456,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2456
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "0d13e6c4-e1f2-48fc-a47f-4745c751a77a",
+   "first_sample": "2026-10-01T08:14:01",
+   "last_sample": "2026-10-01T08:31:31",
+   "n_samples": 39,
+   "first_labelled_GB": 118.64755723900001,
+   "max_labelled_GB": 118.64755723900001,
+   "first_true_GB": 110.49914847966284,
+   "max_true_GB": 110.49914847966284,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "7a623ae3-2854-465a-a9c3-65b7727672fb",
+   "first_sample": "2026-10-01T08:33:46",
+   "last_sample": "2026-10-01T08:43:31",
+   "n_samples": 11,
+   "first_labelled_GB": 118.67967177500002,
+   "max_labelled_GB": 118.67967177500002,
+   "first_true_GB": 110.52905747201295,
+   "max_true_GB": 110.52905747201295,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "198f5df3-dc3d-4ef8-85b8-38d092bfb0f9",
+   "first_sample": "2026-10-01T09:08:54",
+   "last_sample": "2026-10-01T09:12:09",
+   "n_samples": 8,
+   "first_labelled_GB": 118.67967177500002,
+   "max_labelled_GB": 118.67967177500002,
+   "first_true_GB": 110.52905747201295,
+   "max_true_GB": 110.52905747201295,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "ff04df48-5659-4671-be12-57322f4ee90e",
+   "first_sample": "2026-10-01T09:14:54",
+   "last_sample": "2026-10-01T15:01:24",
+   "n_samples": 1159,
+   "first_labelled_GB": 118.67967177500002,
+   "max_labelled_GB": 121.608154172,
+   "first_true_GB": 110.52905747201295,
+   "max_true_GB": 113.25641923770307,
+   "n_up_steps": 7,
+   "up_steps": [
+    {
+     "t": "2026-10-01T09:51:24",
+     "labelled_B": 120069283796.99998,
+     "prompt_tokens_in_scrape_window": 2452,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T10:06:39",
+     "labelled_B": 120346089238,
+     "prompt_tokens_in_scrape_window": 2452,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T10:22:39",
+     "labelled_B": 120346392732.99998,
+     "prompt_tokens_in_scrape_window": 2452,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T10:42:24",
+     "labelled_B": 120370996230,
+     "prompt_tokens_in_scrape_window": 2452,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T10:50:09",
+     "labelled_B": 120373290188.99998,
+     "prompt_tokens_in_scrape_window": 2452,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T13:05:39",
+     "labelled_B": 120391497380,
+     "prompt_tokens_in_scrape_window": 2452,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T14:01:09",
+     "labelled_B": 121608154172,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 8196
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "745bc21f-8519-4e91-8946-af339a7da885",
+   "first_sample": "2026-10-01T15:11:46",
+   "last_sample": "2026-10-01T19:50:46",
+   "n_samples": 1041,
+   "first_labelled_GB": 118.650812618,
+   "max_labelled_GB": 120.06781350300001,
+   "first_true_GB": 110.50218028761446,
+   "max_true_GB": 111.82186520006508,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-01T15:12:01",
+     "labelled_B": 120067813503.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2052
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "4af57bbd-6b82-4ba3-a9be-daee9fc04909",
+   "first_sample": "2026-10-01T19:53:24",
+   "last_sample": "2026-10-01T22:55:24",
+   "n_samples": 416,
+   "first_labelled_GB": 120.067803852,
+   "max_labelled_GB": 120.10443991500001,
+   "first_true_GB": 111.8218562118709,
+   "max_true_GB": 111.85597620438784,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-01T19:53:54",
+     "labelled_B": 120104439915.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2052
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "6b5c4c97-7180-4d13-8b50-4e1a663c504c",
+   "first_sample": "2026-10-01T22:57:39",
+   "last_sample": "2026-10-02T00:54:39",
+   "n_samples": 217,
+   "first_labelled_GB": 118.650812618,
+   "max_labelled_GB": 120.10443582099998,
+   "first_true_GB": 110.50218028761446,
+   "max_true_GB": 111.8559723915532,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-01T22:57:54",
+     "labelled_B": 120067803607.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-01T22:58:09",
+     "labelled_B": 120104435820.99998,
+     "prompt_tokens_in_scrape_window": 2063,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2063
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "d3ba8c7f-2a08-4e5b-ab62-0ebc31f998a6",
+   "first_sample": "2026-10-02T00:56:54",
+   "last_sample": "2026-10-02T03:31:09",
+   "n_samples": 107,
+   "first_labelled_GB": 118.650812618,
+   "max_labelled_GB": 120.10443967,
+   "first_true_GB": 110.50218028761446,
+   "max_true_GB": 111.85597597621381,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-02T00:57:09",
+     "labelled_B": 120067821200,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T00:57:39",
+     "labelled_B": 120104439670,
+     "prompt_tokens_in_scrape_window": 2063,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2063
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "bbf5e383-7395-4f3c-a0f7-6bd1137e74ae",
+   "first_sample": "2026-10-02T03:33:39",
+   "last_sample": "2026-10-02T04:17:24",
+   "n_samples": 108,
+   "first_labelled_GB": 118.67967177500002,
+   "max_labelled_GB": 120.06790883,
+   "first_true_GB": 110.52905747201295,
+   "max_true_GB": 111.82195398025213,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-02T03:33:54",
+     "labelled_B": 120067819138,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T03:34:24",
+     "labelled_B": 120067908830,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2052
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "9faefe65-4b38-4eaa-a0bb-3047b4a0df00",
+   "first_sample": "2026-10-02T04:19:54",
+   "last_sample": "2026-10-02T11:54:39",
+   "n_samples": 1818,
+   "first_labelled_GB": 118.650812618,
+   "max_labelled_GB": 123.336847308,
+   "first_true_GB": 110.50218028761446,
+   "max_true_GB": 114.86639017984271,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-02T04:20:09",
+     "labelled_B": 120067821200,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T04:20:39",
+     "labelled_B": 120067909628.99998,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T11:52:09",
+     "labelled_B": 120068212252,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T11:52:54",
+     "labelled_B": 121676661166,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T11:54:09",
+     "labelled_B": 123336847308,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16392
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "df3531d3-3324-4a8b-852e-d3d8bcc4b59f",
+   "first_sample": "2026-10-02T11:57:31",
+   "last_sample": "2026-10-02T12:47:01",
+   "n_samples": 196,
+   "first_labelled_GB": 118.650812618,
+   "max_labelled_GB": 121.48140196300001,
+   "first_true_GB": 110.50218028761446,
+   "max_true_GB": 113.138372044079,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-02T11:58:31",
+     "labelled_B": 119820167011.00002,
+     "prompt_tokens_in_scrape_window": 2078,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-02T11:59:16",
+     "labelled_B": 120626612078,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T12:00:16",
+     "labelled_B": 120838599015.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T12:44:31",
+     "labelled_B": 121322626986,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T12:45:16",
+     "labelled_B": 121377693295.00002,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T12:46:16",
+     "labelled_B": 121481401963.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16392
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "2d7264d2-a1c6-44c5-b21c-a98b96d2a629",
+   "first_sample": "2026-10-02T12:50:31",
+   "last_sample": "2026-10-02T14:37:01",
+   "n_samples": 49,
+   "first_labelled_GB": 118.67967177500002,
+   "max_labelled_GB": 120.83851490700002,
+   "first_true_GB": 110.52905747201295,
+   "max_true_GB": 112.53963681589813,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-02T12:51:31",
+     "labelled_B": 119820165916,
+     "prompt_tokens_in_scrape_window": 2078,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-02T12:52:16",
+     "labelled_B": 120557561652.99998,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T12:53:31",
+     "labelled_B": 120838514907.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16392
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "ca44022b-4edb-4087-b0a9-6d361def1dd6",
+   "first_sample": "2026-10-02T14:39:39",
+   "last_sample": "2026-10-02T14:50:09",
+   "n_samples": 41,
+   "first_labelled_GB": 118.89185255900001,
+   "max_labelled_GB": 118.89185255900001,
+   "first_true_GB": 110.72666622605175,
+   "max_true_GB": 110.72666622605175,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "519f0674-d7f3-45ba-a752-295a784cd72b",
+   "first_sample": "2026-10-02T14:53:01",
+   "last_sample": "2026-10-02T15:00:31",
+   "n_samples": 29,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 120.92772594300001,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 112.62272106762975,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-02T14:56:16",
+     "labelled_B": 119821853903.00002,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T14:57:01",
+     "labelled_B": 120559255136.99998,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "none": 1,
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-02T14:58:01",
+     "labelled_B": 120927725943.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16392
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "2a084b61-0cf7-4076-8c56-15954584ddea",
+   "first_sample": "2026-10-02T15:03:16",
+   "last_sample": "2026-10-02T15:35:16",
+   "n_samples": 125,
+   "first_labelled_GB": 118.650812618,
+   "max_labelled_GB": 118.650812618,
+   "first_true_GB": 110.50218028761446,
+   "max_true_GB": 110.50218028761446,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "07f346dc-cb26-4d5a-835e-bbfb0fb7a4e4",
+   "first_sample": "2026-10-02T15:38:01",
+   "last_sample": "2026-10-02T16:39:16",
+   "n_samples": 241,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.44728444099998,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 113.10659762565044,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-02T15:39:16",
+     "labelled_B": 119820220440.99998,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T15:39:46",
+     "labelled_B": 120722391739.00002,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T15:41:01",
+     "labelled_B": 121153483310,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T16:37:46",
+     "labelled_B": 121447284440.99998,
+     "prompt_tokens_in_scrape_window": 8092,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16392
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "bd1fb89f-d9e8-45d4-a0c0-c64d0a06e047",
+   "first_sample": "2026-10-02T16:41:54",
+   "last_sample": "2026-10-02T16:42:09",
+   "n_samples": 1,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 118.650867594,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 110.50223148800433,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b36f578f-0b40-4513-9d40-4ffd31377d38",
+   "first_sample": "2026-10-02T16:44:46",
+   "last_sample": "2026-10-02T17:38:16",
+   "n_samples": 214,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.34331210700002,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 113.00976584386082,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-02T16:45:01",
+     "labelled_B": 119819727383.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T16:46:01",
+     "labelled_B": 120631415436.99998,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T16:46:31",
+     "labelled_B": 120885914999.00002,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T16:48:16",
+     "labelled_B": 121009759587.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T16:49:16",
+     "labelled_B": 121343312107.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "a5950bac-bf3e-4211-86fe-8af1599a14ec",
+   "first_sample": "2026-10-02T17:41:31",
+   "last_sample": "2026-10-02T17:50:16",
+   "n_samples": 33,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.30526090499998,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 112.97432790044692,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-02T17:43:46",
+     "labelled_B": 121085069604.99998,
+     "prompt_tokens_in_scrape_window": 14531,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T17:45:31",
+     "labelled_B": 121305260904.99998,
+     "prompt_tokens_in_scrape_window": 14531,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 14531
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "44d21299-ef79-433e-bd0f-8e975a73aa09",
+   "first_sample": "2026-10-02T17:53:01",
+   "last_sample": "2026-10-02T18:26:46",
+   "n_samples": 133,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 122.22562205900002,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 113.83148101996632,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-02T17:53:16",
+     "labelled_B": 119068772555.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T17:54:16",
+     "labelled_B": 120942945899.00002,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T17:54:46",
+     "labelled_B": 121051927292,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T17:56:31",
+     "labelled_B": 122006367276.99998,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-02T17:57:46",
+     "labelled_B": 122225622059.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "eb61b905-982a-40e3-bfde-63786c16b337",
+   "first_sample": "2026-10-02T18:30:31",
+   "last_sample": "2026-10-02T21:25:01",
+   "n_samples": 285,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 119.81993005,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 111.59100574441253,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-02T18:31:01",
+     "labelled_B": 119819930050,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2052
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "e4df3419-743a-407a-be89-ab45610e66eb",
+   "first_sample": "2026-10-02T21:27:46",
+   "last_sample": "2026-10-02T21:31:16",
+   "n_samples": 14,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 119.81976337900001,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 111.59085051994771,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-02T21:29:16",
+     "labelled_B": 119819763379.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2052
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b27d32da-4704-4402-97b6-bdffd2c83fec",
+   "first_sample": "2026-10-02T21:33:46",
+   "last_sample": "2026-10-02T21:37:46",
+   "n_samples": 15,
+   "first_labelled_GB": 118.650850002,
+   "max_labelled_GB": 119.819743446,
+   "first_true_GB": 110.50221510417758,
+   "max_true_GB": 111.59083195589483,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-02T21:35:16",
+     "labelled_B": 119819742724.99998,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-02T21:35:31",
+     "labelled_B": 119819743446,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 4104
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "0bbb84ec-a431-4787-b2bb-825bba4c4de2",
+   "first_sample": "2026-10-02T21:40:31",
+   "last_sample": "2026-10-03T00:57:01",
+   "n_samples": 488,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 119.81996166099998,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 111.59103518445042,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-02T21:40:46",
+     "labelled_B": 119819961660.99998,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 2052
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "e9f360f5-028f-408b-a112-fab4aa70cd5a",
+   "first_sample": "2026-10-03T01:00:46",
+   "last_sample": "2026-10-03T01:21:01",
+   "n_samples": 59,
+   "first_labelled_GB": 118.650885186,
+   "max_labelled_GB": 120.48815298899999,
+   "first_true_GB": 110.50224787183105,
+   "max_true_GB": 112.21333685237913,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-03T01:01:01",
+     "labelled_B": 119819837231.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T01:13:01",
+     "labelled_B": 120488152988.99998,
+     "prompt_tokens_in_scrape_window": 4108,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 4108
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "af72995b-bb2e-4a06-a147-12d59b782e2a",
+   "first_sample": "2026-10-03T01:23:24",
+   "last_sample": "2026-10-03T01:39:24",
+   "n_samples": 64,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 120.64702196099998,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 112.36129511240867,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-03T01:25:39",
+     "labelled_B": 120487891459.00002,
+     "prompt_tokens_in_scrape_window": 4108,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T01:26:09",
+     "labelled_B": 120647021960.99998,
+     "prompt_tokens_in_scrape_window": 7180,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 7180
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "51ac9434-9400-4e6e-9491-10606edc511a",
+   "first_sample": "2026-10-03T01:41:54",
+   "last_sample": "2026-10-03T04:31:39",
+   "n_samples": 678,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 120.328782102,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 112.06491114757955,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-03T01:42:09",
+     "labelled_B": 119819920948.99998,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-03T04:27:39",
+     "labelled_B": 120328782102,
+     "prompt_tokens_in_scrape_window": 4108,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 4108
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b1d1e244-07d9-4a9f-8fa7-7d097f0820ff",
+   "first_sample": "2026-10-03T04:35:01",
+   "last_sample": "2026-10-03T05:03:01",
+   "n_samples": 111,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.444141842,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 113.10367085225879,
+   "n_up_steps": 7,
+   "up_steps": [
+    {
+     "t": "2026-10-03T04:36:46",
+     "labelled_B": 120487906715.00002,
+     "prompt_tokens_in_scrape_window": 4108,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T04:37:31",
+     "labelled_B": 120654646795.00002,
+     "prompt_tokens_in_scrape_window": 7180,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T04:49:46",
+     "labelled_B": 120926276468.99998,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T04:50:46",
+     "labelled_B": 121247036580,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T04:52:01",
+     "labelled_B": 121247038988.99998,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T04:53:01",
+     "labelled_B": 121381372922,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T05:00:01",
+     "labelled_B": 121444141842,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "15260194-4e41-4726-9a02-6f9bb8783038",
+   "first_sample": "2026-10-03T05:05:24",
+   "last_sample": "2026-10-03T09:44:09",
+   "n_samples": 1113,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 121.40124755,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 113.06372242979704,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-03T05:05:39",
+     "labelled_B": 119819920428.99998,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-03T09:41:39",
+     "labelled_B": 119871053906,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T09:42:24",
+     "labelled_B": 120686505348,
+     "prompt_tokens_in_scrape_window": 16392,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T09:43:24",
+     "labelled_B": 121401247550,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16392
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "5b0f89b6-6025-4329-b8f1-26d1cf393162",
+   "first_sample": "2026-10-03T09:46:46",
+   "last_sample": "2026-10-03T10:32:16",
+   "n_samples": 182,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 120.89268269100002,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 112.59008449595423,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-03T09:48:01",
+     "labelled_B": 119820222884.99998,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T09:48:31",
+     "labelled_B": 120557619442,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T09:49:46",
+     "labelled_B": 120892682691.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "9f02d6b2-596d-4f8e-b424-1f5007ced6b2",
+   "first_sample": "2026-10-03T11:02:01",
+   "last_sample": "2026-10-03T11:43:16",
+   "n_samples": 165,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.27747479,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 112.94845006428658,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-03T11:02:16",
+     "labelled_B": 119819887718,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-03T11:22:31",
+     "labelled_B": 119820242843.00002,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-03T11:23:16",
+     "labelled_B": 121021929046,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:25:31",
+     "labelled_B": 121083191910,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:27:46",
+     "labelled_B": 121205552710,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:34:31",
+     "labelled_B": 121277474790,
+     "prompt_tokens_in_scrape_window": 7180,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "dd46c8e8-2559-4533-9ab3-77531580235c",
+   "first_sample": "2026-10-03T11:49:24",
+   "last_sample": "2026-10-03T12:09:24",
+   "n_samples": 80,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.395272102,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 113.05815736018121,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-03T11:50:24",
+     "labelled_B": 119820243982,
+     "prompt_tokens_in_scrape_window": 2078,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-03T11:51:24",
+     "labelled_B": 120767706328,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:51:54",
+     "labelled_B": 120868527146,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:53:24",
+     "labelled_B": 121010410600.99998,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:54:24",
+     "labelled_B": 121351844691.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T11:55:24",
+     "labelled_B": 121395272102,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "bae9aafc-eeb8-437d-a98e-5033040464ed",
+   "first_sample": "2026-10-03T12:12:31",
+   "last_sample": "2026-10-03T12:49:16",
+   "n_samples": 145,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 121.351827034,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 113.0176959875971,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-03T12:12:46",
+     "labelled_B": 119819902124,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:34:31",
+     "labelled_B": 119820259310,
+     "prompt_tokens_in_scrape_window": 4104,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-03T12:35:16",
+     "labelled_B": 120554441140,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:35:46",
+     "labelled_B": 120724797272.99998,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:36:31",
+     "labelled_B": 120853622102,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:38:31",
+     "labelled_B": 121351827034,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "f39f5e39-c716-47d1-b1c8-8a53a2c97d1f",
+   "first_sample": "2026-10-03T12:51:46",
+   "last_sample": "2026-10-03T12:52:31",
+   "n_samples": 3,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 118.67972675100002,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 110.52910867240281,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b9b462b8-af0a-469e-b780-1fb81f9fe4f9",
+   "first_sample": "2026-10-03T12:54:46",
+   "last_sample": "2026-10-03T20:42:46",
+   "n_samples": 1869,
+   "first_labelled_GB": 118.650867594,
+   "max_labelled_GB": 121.351855922,
+   "first_true_GB": 110.50223148800433,
+   "max_true_GB": 113.01772289164363,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-03T12:56:01",
+     "labelled_B": 119820238171.00002,
+     "prompt_tokens_in_scrape_window": 2052,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:56:46",
+     "labelled_B": 120595037059.00002,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:57:16",
+     "labelled_B": 120868520786,
+     "prompt_tokens_in_scrape_window": 8196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T12:59:01",
+     "labelled_B": 121059178851.00002,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T13:00:01",
+     "labelled_B": 121351855922,
+     "prompt_tokens_in_scrape_window": 16004,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 16004
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "2c6c9dae-f114-4c67-9f92-ab0e9a75dca4",
+   "first_sample": "2026-10-03T20:46:01",
+   "last_sample": "2026-10-03T22:00:46",
+   "n_samples": 296,
+   "first_labelled_GB": 118.67972675100002,
+   "max_labelled_GB": 118.67972675100002,
+   "first_true_GB": 110.52910867240281,
+   "max_true_GB": 110.52910867240281,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "c49f5c00-44ef-404e-b5ed-2b25506e09ac",
+   "first_sample": "2026-10-03T22:05:24",
+   "last_sample": "2026-10-04T00:11:39",
+   "n_samples": 481,
+   "first_labelled_GB": 122.85106626499999,
+   "max_labelled_GB": 132.32105776300003,
+   "first_true_GB": 114.41397132817654,
+   "max_true_GB": 123.23358819168062,
+   "n_up_steps": 13,
+   "up_steps": [
+    {
+     "t": "2026-10-03T22:36:39",
+     "labelled_B": 122920820146,
+     "prompt_tokens_in_scrape_window": 48932,
+     "hit_kind_increments": {
+      "partial": 1,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-03T22:37:39",
+     "labelled_B": 123420579808.99998,
+     "prompt_tokens_in_scrape_window": 27717,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T22:43:54",
+     "labelled_B": 124665856210,
+     "prompt_tokens_in_scrape_window": 90506,
+     "hit_kind_increments": {
+      "partial": 2
+     }
+    },
+    {
+     "t": "2026-10-03T22:46:24",
+     "labelled_B": 125118432516.99998,
+     "prompt_tokens_in_scrape_window": 49487,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:12:54",
+     "labelled_B": 123967812755.00002,
+     "prompt_tokens_in_scrape_window": 99155,
+     "hit_kind_increments": {
+      "partial": 3
+     }
+    },
+    {
+     "t": "2026-10-03T23:14:54",
+     "labelled_B": 124619337084,
+     "prompt_tokens_in_scrape_window": 48543,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:17:24",
+     "labelled_B": 127344008896.99998,
+     "prompt_tokens_in_scrape_window": 74205,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:19:09",
+     "labelled_B": 127614690295.00002,
+     "prompt_tokens_in_scrape_window": 89528,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:19:54",
+     "labelled_B": 128190810348.99998,
+     "prompt_tokens_in_scrape_window": 95816,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:20:39",
+     "labelled_B": 129022237355.00002,
+     "prompt_tokens_in_scrape_window": 102377,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:21:24",
+     "labelled_B": 129560424072.99998,
+     "prompt_tokens_in_scrape_window": 109704,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:22:39",
+     "labelled_B": 129866549636.99998,
+     "prompt_tokens_in_scrape_window": 117433,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-03T23:24:09",
+     "labelled_B": 132321057763.00002,
+     "prompt_tokens_in_scrape_window": 126527,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 126527
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "9312e3e1-9007-49cd-85eb-8c89a75a40f5",
+   "first_sample": "2026-10-04T00:14:31",
+   "last_sample": "2026-10-04T08:09:31",
+   "n_samples": 1895,
+   "first_labelled_GB": 118.66942840700001,
+   "max_labelled_GB": 132.164771501,
+   "first_true_GB": 110.51951759215444,
+   "max_true_GB": 123.08803526777773,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-04T00:19:01",
+     "labelled_B": 123042925035.00002,
+     "prompt_tokens_in_scrape_window": 24493,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T00:20:16",
+     "labelled_B": 123721424060.99998,
+     "prompt_tokens_in_scrape_window": 34688,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-04T00:21:46",
+     "labelled_B": 124716145986,
+     "prompt_tokens_in_scrape_window": 49812,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-04T00:24:16",
+     "labelled_B": 126932165991.00002,
+     "prompt_tokens_in_scrape_window": 71777,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-04T00:29:01",
+     "labelled_B": 127203231603.00002,
+     "prompt_tokens_in_scrape_window": 87370,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-04T00:58:46",
+     "labelled_B": 132164771500.99998,
+     "prompt_tokens_in_scrape_window": 90115,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 90115
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "40a82722-e7cc-444c-b2e7-e66eed17c7ae",
+   "first_sample": "2026-10-04T08:12:16",
+   "last_sample": "2026-10-04T12:36:01",
+   "n_samples": 1048,
+   "first_labelled_GB": 118.647933272,
+   "max_labelled_GB": 152.480596565,
+   "first_true_GB": 110.49949868768454,
+   "max_true_GB": 142.0086217718199,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-04T08:20:01",
+     "labelled_B": 129336748356.99998,
+     "prompt_tokens_in_scrape_window": 106445,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T08:35:46",
+     "labelled_B": 135304672382,
+     "prompt_tokens_in_scrape_window": 159995,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T10:54:01",
+     "labelled_B": 152480596565,
+     "prompt_tokens_in_scrape_window": 449977,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 449977
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "867ef937-43ff-4774-94e9-27aa413c3b5b",
+   "first_sample": "2026-10-04T12:38:16",
+   "last_sample": "2026-10-05T08:43:01",
+   "n_samples": 4809,
+   "first_labelled_GB": 118.605985254,
+   "max_labelled_GB": 163.278536398,
+   "first_true_GB": 110.46043155156076,
+   "max_true_GB": 152.06498689763248,
+   "n_up_steps": 7,
+   "up_steps": [
+    {
+     "t": "2026-10-04T12:39:16",
+     "labelled_B": 120750407624,
+     "prompt_tokens_in_scrape_window": 6998,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T12:39:46",
+     "labelled_B": 120799696836,
+     "prompt_tokens_in_scrape_window": 6998,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T12:40:16",
+     "labelled_B": 121029004590,
+     "prompt_tokens_in_scrape_window": 13996,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T14:45:31",
+     "labelled_B": 153454344067,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-04T17:33:31",
+     "labelled_B": 163278536398,
+     "prompt_tokens_in_scrape_window": 749983,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-05T06:23:31",
+     "labelled_B": 148115504707,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-05T07:06:16",
+     "labelled_B": 149370301848,
+     "prompt_tokens_in_scrape_window": 350142,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 749983
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "c8cd7435-b36a-44a5-9627-4b30d555dd99",
+   "first_sample": "2026-10-05T08:45:16",
+   "last_sample": "2026-10-05T10:26:31",
+   "n_samples": 399,
+   "first_labelled_GB": 118.605985254,
+   "max_labelled_GB": 149.393939956,
+   "first_true_GB": 110.46043155156076,
+   "max_true_GB": 139.13394879177213,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-05T08:47:16",
+     "labelled_B": 121747643476.99998,
+     "prompt_tokens_in_scrape_window": 30008,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-05T09:38:16",
+     "labelled_B": 148167384188,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-05T10:22:46",
+     "labelled_B": 149393939956,
+     "prompt_tokens_in_scrape_window": 350149,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350149
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "8193c1c3-20a8-4ac8-9db8-58679df61b54",
+   "first_sample": "2026-10-05T10:28:54",
+   "last_sample": "2026-10-05T12:27:39",
+   "n_samples": 464,
+   "first_labelled_GB": 118.60605562300002,
+   "max_labelled_GB": 147.495675728,
+   "first_true_GB": 110.46049708779903,
+   "max_true_GB": 137.3660524636507,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-05T10:30:54",
+     "labelled_B": 121690817828.99998,
+     "prompt_tokens_in_scrape_window": 30008,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-05T11:31:39",
+     "labelled_B": 147495675728,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350124
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "89dc3593-6bff-48b6-bf18-b45df6d4c7d5",
+   "first_sample": "2026-10-05T12:30:24",
+   "last_sample": "2026-10-05T17:51:54",
+   "n_samples": 1236,
+   "first_labelled_GB": 118.649067968,
+   "max_labelled_GB": 134.41635974300002,
+   "first_true_GB": 110.50055545568465,
+   "max_true_GB": 125.18499022629112,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-05T12:31:09",
+     "labelled_B": 120330360396,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-05T12:59:09",
+     "labelled_B": 120742112340.99998,
+     "prompt_tokens_in_scrape_window": 1023,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-05T12:59:24",
+     "labelled_B": 120742199924,
+     "prompt_tokens_in_scrape_window": 1020,
+     "hit_kind_increments": {
+      "none": 2
+     }
+    },
+    {
+     "t": "2026-10-05T12:59:39",
+     "labelled_B": 120751273734,
+     "prompt_tokens_in_scrape_window": 1538,
+     "hit_kind_increments": {
+      "none": 3
+     }
+    },
+    {
+     "t": "2026-10-05T13:00:09",
+     "labelled_B": 120759413668,
+     "prompt_tokens_in_scrape_window": 520,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-05T13:17:39",
+     "labelled_B": 134416359743.00002,
+     "prompt_tokens_in_scrape_window": 159995,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350124
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "f4dc9372-ae96-411a-b1e1-7ba6e138abee",
+   "first_sample": "2026-10-05T18:01:31",
+   "last_sample": "2026-10-05T18:41:01",
+   "n_samples": 151,
+   "first_labelled_GB": 123.03842741,
+   "max_labelled_GB": 123.03842741,
+   "first_true_GB": 114.58846499212085,
+   "max_true_GB": 114.58846499212085,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "97e58946-380c-4271-87ab-5b440d979ccd",
+   "first_sample": "2026-10-05T18:47:54",
+   "last_sample": "2026-10-05T19:22:39",
+   "n_samples": 126,
+   "first_labelled_GB": 122.72899130300002,
+   "max_labelled_GB": 122.72899130300002,
+   "first_true_GB": 114.30028016027063,
+   "max_true_GB": 114.30028016027063,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b0180ca3-01cc-4347-816c-e874147bc9af",
+   "first_sample": "2026-10-05T19:33:16",
+   "last_sample": "2026-10-06T00:27:46",
+   "n_samples": 1169,
+   "first_labelled_GB": 126.40294120700001,
+   "max_labelled_GB": 155.843047417,
+   "first_true_GB": 117.7219126438722,
+   "max_true_GB": 145.14014815632254,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-05T19:43:01",
+     "labelled_B": 132337006283.00002,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-05T20:47:31",
+     "labelled_B": 155843047417,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 499981
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "d4ba6c31-742e-4049-814a-f78be3a5efb4",
+   "first_sample": "2026-10-06T00:30:54",
+   "last_sample": "2026-10-06T01:21:24",
+   "n_samples": 177,
+   "first_labelled_GB": 118.606143584,
+   "max_labelled_GB": 147.851234313,
+   "first_true_GB": 110.46057900786398,
+   "max_true_GB": 137.6971922004595,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-06T01:10:24",
+     "labelled_B": 147851234313,
+     "prompt_tokens_in_scrape_window": 350003,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350003
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "16c44794-70ef-4856-a610-6cf3d63a8201",
+   "first_sample": "2026-10-06T01:25:24",
+   "last_sample": "2026-10-06T03:43:24",
+   "n_samples": 539,
+   "first_labelled_GB": 118.647933272,
+   "max_labelled_GB": 137.226713014,
+   "first_true_GB": 110.49949868768454,
+   "max_true_GB": 127.80233567021787,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-06T01:32:09",
+     "labelled_B": 124545676556.99998,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T01:40:39",
+     "labelled_B": 125516939224,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T02:19:39",
+     "labelled_B": 135660130287.00002,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T02:19:54",
+     "labelled_B": 137181265815.00002,
+     "prompt_tokens_in_scrape_window": 350146,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-06T03:32:24",
+     "labelled_B": 137226713014,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 499981
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "c3e688da-7dda-4e50-84ee-fc4aba56de4a",
+   "first_sample": "2026-10-06T03:47:09",
+   "last_sample": "2026-10-06T04:18:24",
+   "n_samples": 113,
+   "first_labelled_GB": 118.678341366,
+   "max_labelled_GB": 125.70787093,
+   "first_true_GB": 110.52781843207775,
+   "max_true_GB": 117.07457800395785,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-06T03:54:09",
+     "labelled_B": 124727200291.00002,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T04:02:39",
+     "labelled_B": 125707870930,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 199992
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "d301ea85-489d-4289-a629-e1d78af07d24",
+   "first_sample": "2026-10-06T04:22:24",
+   "last_sample": "2026-10-06T09:23:24",
+   "n_samples": 1193,
+   "first_labelled_GB": 118.60602098899999,
+   "max_labelled_GB": 142.308506765,
+   "first_true_GB": 110.46046483237295,
+   "max_true_GB": 132.53512491006404,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-06T04:56:54",
+     "labelled_B": 134585949036.99998,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T04:57:09",
+     "labelled_B": 137461445619,
+     "prompt_tokens_in_scrape_window": 350146,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T06:10:24",
+     "labelled_B": 137658979881,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-06T06:56:39",
+     "labelled_B": 138478351374,
+     "prompt_tokens_in_scrape_window": 749983,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-06T08:03:54",
+     "labelled_B": 142308506765,
+     "prompt_tokens_in_scrape_window": 1039963,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 1039963
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "4ca8d3d9-66e1-4307-b7f7-8815b9563849",
+   "first_sample": "2026-10-06T09:27:31",
+   "last_sample": "2026-10-06T09:49:31",
+   "n_samples": 82,
+   "first_labelled_GB": 118.60622219900002,
+   "max_labelled_GB": 125.70783794499998,
+   "first_true_GB": 110.46065222378822,
+   "max_true_GB": 117.07454728428272,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-06T09:34:31",
+     "labelled_B": 124548970556,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T09:43:01",
+     "labelled_B": 125707837944.99998,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 199992
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b453fece-1d17-4117-9e73-251abcaebce7",
+   "first_sample": "2026-10-06T09:53:46",
+   "last_sample": "2026-10-06T10:16:01",
+   "n_samples": 83,
+   "first_labelled_GB": 118.60626727900002,
+   "max_labelled_GB": 130.22737087,
+   "first_true_GB": 110.46069420780988,
+   "max_true_GB": 121.28369032405315,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-06T10:01:01",
+     "labelled_B": 129158346226,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T10:10:16",
+     "labelled_B": 130227370870,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 199992
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "6a277170-dec1-4257-ab63-93222cd85fc0",
+   "first_sample": "2026-10-06T10:20:16",
+   "last_sample": "2026-10-06T10:43:31",
+   "n_samples": 85,
+   "first_labelled_GB": 118.678341366,
+   "max_labelled_GB": 125.64916280300001,
+   "first_true_GB": 110.52781843207775,
+   "max_true_GB": 117.01990179996938,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-06T10:27:01",
+     "labelled_B": 124847019043.00002,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T10:35:16",
+     "labelled_B": 125649162803.00002,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 199992
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "5689f0ba-2004-4a3a-82ad-b070525b59ab",
+   "first_sample": "2026-10-06T10:46:31",
+   "last_sample": "2026-10-06T12:14:16",
+   "n_samples": 343,
+   "first_labelled_GB": 118.60598745299998,
+   "max_labelled_GB": 136.75604285699998,
+   "first_true_GB": 110.46043359953907,
+   "max_true_GB": 127.36398992780593,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-06T10:53:16",
+     "labelled_B": 124856080668,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T11:01:31",
+     "labelled_B": 125544381544,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T11:40:01",
+     "labelled_B": 135660095262,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T11:40:31",
+     "labelled_B": 136756042856.99998,
+     "prompt_tokens_in_scrape_window": 350146,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350146
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "247fb3c8-4425-41b6-95df-5728eb0c89e7",
+   "first_sample": "2026-10-06T12:17:54",
+   "last_sample": "2026-10-06T16:02:24",
+   "n_samples": 880,
+   "first_labelled_GB": 118.801812124,
+   "max_labelled_GB": 141.974273533,
+   "first_true_GB": 110.64280953630804,
+   "max_true_GB": 132.22384595591575,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-06T12:30:24",
+     "labelled_B": 128690409216.99998,
+     "prompt_tokens_in_scrape_window": 159995,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T13:13:39",
+     "labelled_B": 136634934263.00002,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T13:59:24",
+     "labelled_B": 138167660962,
+     "prompt_tokens_in_scrape_window": 749983,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-06T15:05:39",
+     "labelled_B": 141974273533,
+     "prompt_tokens_in_scrape_window": 1039963,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 1039963
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "719ba32b-cc09-4a5f-841a-0a619dba58d5",
+   "first_sample": "2026-10-06T16:05:01",
+   "last_sample": "2026-10-06T17:25:46",
+   "n_samples": 315,
+   "first_labelled_GB": 118.60598745299998,
+   "max_labelled_GB": 139.50122539,
+   "first_true_GB": 110.46043359953907,
+   "max_true_GB": 129.92064039222896,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-06T16:11:46",
+     "labelled_B": 125911996934,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T16:20:01",
+     "labelled_B": 127865738387.00002,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T17:00:16",
+     "labelled_B": 139501225390,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350124
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "1d2a95af-bb77-43db-acb2-a5b0c4ed44d4",
+   "first_sample": "2026-10-06T17:28:54",
+   "last_sample": "2026-10-06T18:51:39",
+   "n_samples": 315,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 139.702893071,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 130.1084580561146,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-06T17:35:24",
+     "labelled_B": 127823952616,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T17:43:24",
+     "labelled_B": 129200538012.99998,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T18:23:24",
+     "labelled_B": 139702893071,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350124
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "7ea1cbf8-db9a-4742-8f36-df5212687d37",
+   "first_sample": "2026-10-06T18:54:46",
+   "last_sample": "2026-10-06T21:56:46",
+   "n_samples": 707,
+   "first_labelled_GB": 118.67335398099999,
+   "max_labelled_GB": 142.392400801,
+   "first_true_GB": 110.52317356783895,
+   "max_true_GB": 132.61325731966645,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-06T19:06:01",
+     "labelled_B": 131168119431.00002,
+     "prompt_tokens_in_scrape_window": 159995,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T19:49:01",
+     "labelled_B": 142392400801,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 499981
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "ae8da8b5-83c2-4155-8bd9-361634e8e9bf",
+   "first_sample": "2026-10-06T22:00:24",
+   "last_sample": "2026-10-06T22:55:39",
+   "n_samples": 204,
+   "first_labelled_GB": 118.606005046,
+   "max_labelled_GB": 125.72390537,
+   "first_true_GB": 110.46044998429716,
+   "max_true_GB": 117.08951123990117,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-06T22:06:54",
+     "labelled_B": 124938802666,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T22:14:54",
+     "labelled_B": 125427108148.99998,
+     "prompt_tokens_in_scrape_window": 199992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T22:33:39",
+     "labelled_B": 125723905370,
+     "prompt_tokens_in_scrape_window": 88463,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 199992
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "5348143f-0547-43fa-8b9b-a589a78af0d3",
+   "first_sample": "2026-10-06T23:04:16",
+   "last_sample": "2026-10-06T23:13:16",
+   "n_samples": 29,
+   "first_labelled_GB": 125.51123974700002,
+   "max_labelled_GB": 125.51123974700002,
+   "first_true_GB": 116.89145094435663,
+   "max_true_GB": 116.89145094435663,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "45c16a44-dc42-4a50-8727-77c7eab279d3",
+   "first_sample": "2026-10-06T23:16:39",
+   "last_sample": "2026-10-07T00:24:54",
+   "n_samples": 231,
+   "first_labelled_GB": 118.606005046,
+   "max_labelled_GB": 126.506953676,
+   "first_true_GB": 110.46044998429716,
+   "max_true_GB": 117.81878180429338,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-06T23:22:54",
+     "labelled_B": 124822179568,
+     "prompt_tokens_in_scrape_window": 100001,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-06T23:23:54",
+     "labelled_B": 125645235695.00002,
+     "prompt_tokens_in_scrape_window": 100037,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-06T23:39:39",
+     "labelled_B": 126506953676,
+     "prompt_tokens_in_scrape_window": 128787,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 128787
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "30b396d2-526e-4a5c-9a40-e9c011f14c6c",
+   "first_sample": "2026-10-07T00:28:39",
+   "last_sample": "2026-10-07T01:47:39",
+   "n_samples": 302,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 136.48152334,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 127.10832370445131,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-07T00:34:54",
+     "labelled_B": 124662613355.00002,
+     "prompt_tokens_in_scrape_window": 100012,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T00:41:09",
+     "labelled_B": 125147466784,
+     "prompt_tokens_in_scrape_window": 100010,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T00:47:09",
+     "labelled_B": 125206816910,
+     "prompt_tokens_in_scrape_window": 100012,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T01:21:09",
+     "labelled_B": 136138018796,
+     "prompt_tokens_in_scrape_window": 350124,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T01:21:24",
+     "labelled_B": 136481523340,
+     "prompt_tokens_in_scrape_window": 350146,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 350146
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "a92de233-fa3c-45ef-876c-785176750704",
+   "first_sample": "2026-10-07T01:51:16",
+   "last_sample": "2026-10-07T04:07:01",
+   "n_samples": 536,
+   "first_labelled_GB": 118.67564096499999,
+   "max_labelled_GB": 137.520489728,
+   "first_true_GB": 110.52530348766594,
+   "max_true_GB": 128.07593655586243,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-07T02:02:16",
+     "labelled_B": 129430086427.00002,
+     "prompt_tokens_in_scrape_window": 159995,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T02:45:01",
+     "labelled_B": 137520489728,
+     "prompt_tokens_in_scrape_window": 499981,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 499981
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "38ed8ddb-bc94-490d-b992-e96cc5f9c36e",
+   "first_sample": "2026-10-07T04:10:39",
+   "last_sample": "2026-10-07T08:00:24",
+   "n_samples": 903,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 142.46552029,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 132.6813551504165,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-07T04:16:39",
+     "labelled_B": 124998402968.99998,
+     "prompt_tokens_in_scrape_window": 100012,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T04:26:39",
+     "labelled_B": 127632690442,
+     "prompt_tokens_in_scrape_window": 160006,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T04:57:09",
+     "labelled_B": 137110678448.99998,
+     "prompt_tokens_in_scrape_window": 499992,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-07T05:27:09",
+     "labelled_B": 137554252440,
+     "prompt_tokens_in_scrape_window": 350146,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-07T07:08:39",
+     "labelled_B": 138622849291,
+     "prompt_tokens_in_scrape_window": 749994,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-07T07:48:39",
+     "labelled_B": 142465520290,
+     "prompt_tokens_in_scrape_window": 1039974,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 1039974
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "75fa21d8-022a-473d-a768-aa524fa674d5",
+   "first_sample": "2026-10-07T08:03:39",
+   "last_sample": "2026-10-07T09:02:09",
+   "n_samples": 203,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 143.114641394,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 133.285896288231,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-07T08:09:39",
+     "labelled_B": 126526729080,
+     "prompt_tokens_in_scrape_window": 100013,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T08:19:39",
+     "labelled_B": 130058441367.00002,
+     "prompt_tokens_in_scrape_window": 160007,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T08:50:09",
+     "labelled_B": 143114641394,
+     "prompt_tokens_in_scrape_window": 499993,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 499993
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "749972ca-095a-4d58-9564-ad0be2dc74e4",
+   "first_sample": "2026-10-07T09:04:54",
+   "last_sample": "2026-10-07T14:00:09",
+   "n_samples": 1170,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 127.24438798099999,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 118.50557101983576,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-07T09:22:09",
+     "labelled_B": 121744525300,
+     "prompt_tokens_in_scrape_window": 48435,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T09:23:39",
+     "labelled_B": 121899632482,
+     "prompt_tokens_in_scrape_window": 28743,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-07T11:28:24",
+     "labelled_B": 124304015575.00002,
+     "prompt_tokens_in_scrape_window": 247044,
+     "hit_kind_increments": {
+      "partial": 2,
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T11:35:54",
+     "labelled_B": 125223301819.00002,
+     "prompt_tokens_in_scrape_window": 100039,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T11:56:39",
+     "labelled_B": 127244387980.99998,
+     "prompt_tokens_in_scrape_window": 160196,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 247044
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "9b0be201-3903-495b-9181-e03f2f4a416f",
+   "first_sample": "2026-10-07T14:10:39",
+   "last_sample": "2026-10-07T15:26:24",
+   "n_samples": 288,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 125.08064865900002,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 116.490431743674,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-07T14:10:54",
+     "labelled_B": 119960285512.99998,
+     "prompt_tokens_in_scrape_window": 2033,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T14:11:09",
+     "labelled_B": 119961642503.00002,
+     "prompt_tokens_in_scrape_window": 2032,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T14:21:39",
+     "labelled_B": 124929679124,
+     "prompt_tokens_in_scrape_window": 100042,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T14:34:39",
+     "labelled_B": 125080648659.00002,
+     "prompt_tokens_in_scrape_window": 91046,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 100042
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "5baee206-1aea-40b6-a217-bf8bfa35687f",
+   "first_sample": "2026-10-07T15:28:54",
+   "last_sample": "2026-10-07T16:32:24",
+   "n_samples": 87,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 118.72299913,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 110.56940921582282,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "eb90ab78-a69d-443b-ae76-ba55eea7f60d",
+   "first_sample": "2026-10-07T16:35:16",
+   "last_sample": "2026-10-07T17:04:46",
+   "n_samples": 100,
+   "first_labelled_GB": 118.6058819,
+   "max_labelled_GB": 124.521339464,
+   "first_true_GB": 110.46033529564738,
+   "max_true_GB": 115.96953446418046,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-07T16:54:31",
+     "labelled_B": 124521339464,
+     "prompt_tokens_in_scrape_window": 100040,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 100040
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "4d02870e-fa46-40fe-8f85-8fa103ac671b",
+   "first_sample": "2026-10-07T17:06:54",
+   "last_sample": "2026-10-08T00:28:09",
+   "n_samples": 1737,
+   "first_labelled_GB": 118.6058819,
+   "max_labelled_GB": 125.579130466,
+   "first_true_GB": 110.46033529564738,
+   "max_true_GB": 116.95467910356818,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-07T17:14:24",
+     "labelled_B": 124744672266,
+     "prompt_tokens_in_scrape_window": 100039,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T17:24:09",
+     "labelled_B": 124905225084,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T17:44:09",
+     "labelled_B": 125067003514,
+     "prompt_tokens_in_scrape_window": 100039,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T23:17:54",
+     "labelled_B": 125301215983.00002,
+     "prompt_tokens_in_scrape_window": 100503,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-07T23:24:24",
+     "labelled_B": 125579130466,
+     "prompt_tokens_in_scrape_window": 102419,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 102419
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "328f0c70-f5b4-4ac4-80f6-f5ce88c5424c",
+   "first_sample": "2026-10-08T00:32:31",
+   "last_sample": "2026-10-08T00:44:16",
+   "n_samples": 35,
+   "first_labelled_GB": 121.59807130099999,
+   "max_labelled_GB": 122.278626392,
+   "first_true_GB": 113.24702883232383,
+   "max_true_GB": 113.88084515184164,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-08T00:36:01",
+     "labelled_B": 122278626392,
+     "prompt_tokens_in_scrape_window": 34030,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 34030
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "2213804a-abc7-4b72-9da3-03f7b9cccd36",
+   "first_sample": "2026-10-08T00:48:24",
+   "last_sample": "2026-10-08T08:28:24",
+   "n_samples": 1825,
+   "first_labelled_GB": 121.72387302300001,
+   "max_labelled_GB": 122.315464816,
+   "first_true_GB": 113.36419081594795,
+   "max_true_GB": 113.9151536077261,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-08T00:51:09",
+     "labelled_B": 122010297726,
+     "prompt_tokens_in_scrape_window": 30117,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T00:55:24",
+     "labelled_B": 122306298076,
+     "prompt_tokens_in_scrape_window": 35023,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T00:57:39",
+     "labelled_B": 122315464816,
+     "prompt_tokens_in_scrape_window": 35023,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 35023
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "49984332-cb05-49d8-8494-0a26220ea0b5",
+   "first_sample": "2026-10-08T08:46:09",
+   "last_sample": "2026-10-08T10:28:09",
+   "n_samples": 396,
+   "first_labelled_GB": 121.13255292499998,
+   "max_labelled_GB": 129.38166296,
+   "first_true_GB": 112.81348105985668,
+   "max_true_GB": 120.49606345593928,
+   "n_up_steps": 8,
+   "up_steps": [
+    {
+     "t": "2026-10-08T08:57:39",
+     "labelled_B": 121236007348.99998,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T08:59:09",
+     "labelled_B": 121309924216.99998,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T09:02:09",
+     "labelled_B": 121327657140,
+     "prompt_tokens_in_scrape_window": 20078,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T09:19:39",
+     "labelled_B": 121506844550,
+     "prompt_tokens_in_scrape_window": 20075,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T09:26:09",
+     "labelled_B": 126258700980,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T09:32:54",
+     "labelled_B": 126742060812.99998,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T09:39:39",
+     "labelled_B": 126758970958,
+     "prompt_tokens_in_scrape_window": 91045,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T09:57:39",
+     "labelled_B": 129381662960,
+     "prompt_tokens_in_scrape_window": 120120,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 120120
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "7f2a212f-6a43-45ff-9010-ee15fea5178a",
+   "first_sample": "2026-10-08T10:36:01",
+   "last_sample": "2026-10-08T12:58:16",
+   "n_samples": 563,
+   "first_labelled_GB": 121.55706391500001,
+   "max_labelled_GB": 125.12314890700002,
+   "first_true_GB": 113.20883772801608,
+   "max_true_GB": 116.53001318406314,
+   "n_up_steps": 5,
+   "up_steps": [
+    {
+     "t": "2026-10-08T10:37:46",
+     "labelled_B": 121802260092.99998,
+     "prompt_tokens_in_scrape_window": 20075,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T10:47:46",
+     "labelled_B": 124495111267.00002,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T10:54:31",
+     "labelled_B": 124667645188,
+     "prompt_tokens_in_scrape_window": 91045,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T11:01:16",
+     "labelled_B": 124934847164,
+     "prompt_tokens_in_scrape_window": 91042,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T11:11:46",
+     "labelled_B": 125123148907.00002,
+     "prompt_tokens_in_scrape_window": 100040,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 100040
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "5a64155e-827e-4408-90e3-f171a34ab8b9",
+   "first_sample": "2026-10-08T13:05:39",
+   "last_sample": "2026-10-08T14:44:24",
+   "n_samples": 383,
+   "first_labelled_GB": 121.74187972499999,
+   "max_labelled_GB": 125.080705078,
+   "first_true_GB": 113.38096086401491,
+   "max_true_GB": 116.4904842879623,
+   "n_up_steps": 9,
+   "up_steps": [
+    {
+     "t": "2026-10-08T13:07:24",
+     "labelled_B": 121788744620.99998,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T13:10:24",
+     "labelled_B": 121811184967.00002,
+     "prompt_tokens_in_scrape_window": 20075,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T13:12:09",
+     "labelled_B": 121814240784,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T13:16:54",
+     "labelled_B": 121949051355.00002,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T13:32:09",
+     "labelled_B": 124631447410,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T13:38:54",
+     "labelled_B": 124912832776.99998,
+     "prompt_tokens_in_scrape_window": 91046,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T13:49:09",
+     "labelled_B": 124934205015.00002,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T14:05:54",
+     "labelled_B": 125026488880.99998,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T14:12:39",
+     "labelled_B": 125080705078,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91046
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "0e852ea7-fdd1-4be0-bba4-07046a55986c",
+   "first_sample": "2026-10-08T14:54:46",
+   "last_sample": "2026-10-08T15:25:31",
+   "n_samples": 117,
+   "first_labelled_GB": 125.29914890099998,
+   "max_labelled_GB": 125.90270603500001,
+   "first_true_GB": 116.6939259516075,
+   "max_true_GB": 117.25603233557194,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-08T15:01:16",
+     "labelled_B": 125864801867.00002,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T15:18:01",
+     "labelled_B": 125902706035.00002,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91044
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "46eb86e5-2ddc-495a-ba04-31f4698bbbe3",
+   "first_sample": "2026-10-08T15:31:46",
+   "last_sample": "2026-10-08T16:05:46",
+   "n_samples": 129,
+   "first_labelled_GB": 121.72841180700001,
+   "max_labelled_GB": 124.91536220300002,
+   "first_true_GB": 113.36841788794845,
+   "max_true_GB": 116.33649673592299,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-08T15:35:16",
+     "labelled_B": 121949174088,
+     "prompt_tokens_in_scrape_window": 20078,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T15:51:16",
+     "labelled_B": 124915362203.00002,
+     "prompt_tokens_in_scrape_window": 98523,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 98523
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "a56e7d60-3ef8-4c80-843f-4be21e0c3918",
+   "first_sample": "2026-10-08T16:12:16",
+   "last_sample": "2026-10-08T17:38:31",
+   "n_samples": 339,
+   "first_labelled_GB": 121.72395328700001,
+   "max_labelled_GB": 125.08064455299998,
+   "first_true_GB": 113.36426556762308,
+   "max_true_GB": 116.49042791966346,
+   "n_up_steps": 7,
+   "up_steps": [
+    {
+     "t": "2026-10-08T16:29:31",
+     "labelled_B": 121809794496.99998,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T16:31:16",
+     "labelled_B": 121949085715.00002,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T16:49:31",
+     "labelled_B": 124774302283.00002,
+     "prompt_tokens_in_scrape_window": 91045,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T16:56:01",
+     "labelled_B": 124912821828.99998,
+     "prompt_tokens_in_scrape_window": 91042,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T17:06:16",
+     "labelled_B": 124951651258,
+     "prompt_tokens_in_scrape_window": 91045,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T17:12:46",
+     "labelled_B": 124956195247.00002,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T17:29:46",
+     "labelled_B": 125080644552.99998,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91045
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "f687ccda-e7cf-44d1-b0fa-f6cf2ca079f1",
+   "first_sample": "2026-10-08T17:46:39",
+   "last_sample": "2026-10-08T18:56:09",
+   "n_samples": 261,
+   "first_labelled_GB": 121.74787976,
+   "max_labelled_GB": 125.152703986,
+   "first_true_GB": 113.3865488320589,
+   "max_true_GB": 116.55753849633038,
+   "n_up_steps": 6,
+   "up_steps": [
+    {
+     "t": "2026-10-08T17:50:09",
+     "labelled_B": 121870636110,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T18:06:54",
+     "labelled_B": 124631470775.00002,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T18:13:39",
+     "labelled_B": 124753675788,
+     "prompt_tokens_in_scrape_window": 91046,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T18:24:09",
+     "labelled_B": 124956102682,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T18:41:09",
+     "labelled_B": 125145983066,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T18:48:09",
+     "labelled_B": 125152703986,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91046
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "b61539b7-bc8a-40dc-b606-67d9c45852f9",
+   "first_sample": "2026-10-08T19:01:01",
+   "last_sample": "2026-10-08T21:28:16",
+   "n_samples": 583,
+   "first_labelled_GB": 121.80723359699998,
+   "max_labelled_GB": 125.053614726,
+   "first_true_GB": 113.44182640034703,
+   "max_true_GB": 116.46525443159044,
+   "n_up_steps": 3,
+   "up_steps": [
+    {
+     "t": "2026-10-08T19:02:31",
+     "labelled_B": 121941459502,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T20:32:31",
+     "labelled_B": 124557410420,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T20:39:01",
+     "labelled_B": 125053614726,
+     "prompt_tokens_in_scrape_window": 91044,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91044
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "ae775ed7-b52e-4365-a750-2cc94f0bc635",
+   "first_sample": "2026-10-08T21:54:46",
+   "last_sample": "2026-10-08T22:10:16",
+   "n_samples": 57,
+   "first_labelled_GB": 118.6058819,
+   "max_labelled_GB": 121.79870025299998,
+   "first_true_GB": 110.46033529564738,
+   "max_true_GB": 113.43387910444287,
+   "n_up_steps": 1,
+   "up_steps": [
+    {
+     "t": "2026-10-08T21:57:01",
+     "labelled_B": 121798700252.99998,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 20077
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "f7fc8030-3965-454d-b6ae-212259752ec6",
+   "first_sample": "2026-10-08T22:20:09",
+   "last_sample": "2026-10-08T23:04:24",
+   "n_samples": 165,
+   "first_labelled_GB": 124.713301618,
+   "max_labelled_GB": 124.713301618,
+   "first_true_GB": 116.14831315167248,
+   "max_true_GB": 116.14831315167248,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "57afa611-cc00-4463-afe6-a566937d0c47",
+   "first_sample": "2026-10-08T23:10:31",
+   "last_sample": "2026-10-08T23:34:31",
+   "n_samples": 91,
+   "first_labelled_GB": 121.66721518899999,
+   "max_labelled_GB": 121.66721518899999,
+   "first_true_GB": 113.31142409611492,
+   "max_true_GB": 113.31142409611492,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "b8d90d57-09f5-40c7-afb9-f99ed3c5d28f",
+   "first_sample": "2026-10-08T23:37:39",
+   "last_sample": "2026-10-09T10:06:54",
+   "n_samples": 2506,
+   "first_labelled_GB": 119.63480070700001,
+   "max_labelled_GB": 127.797828658,
+   "first_true_GB": 111.41859060805291,
+   "max_true_GB": 119.02100281603633,
+   "n_up_steps": 9,
+   "up_steps": [
+    {
+     "t": "2026-10-08T23:37:54",
+     "labelled_B": 119642842896,
+     "prompt_tokens_in_scrape_window": 80299,
+     "hit_kind_increments": {
+      "partial": 2
+     }
+    },
+    {
+     "t": "2026-10-08T23:38:09",
+     "labelled_B": 119647399547.00002,
+     "prompt_tokens_in_scrape_window": 80305,
+     "hit_kind_increments": {
+      "partial": 2
+     }
+    },
+    {
+     "t": "2026-10-08T23:50:09",
+     "labelled_B": 121263833862,
+     "prompt_tokens_in_scrape_window": 8012,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T23:50:39",
+     "labelled_B": 121283030648,
+     "prompt_tokens_in_scrape_window": 8011,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-08T23:51:09",
+     "labelled_B": 121355437344.99998,
+     "prompt_tokens_in_scrape_window": 16039,
+     "hit_kind_increments": {
+      "none": 1,
+      "partial": 1
+     }
+    },
+    {
+     "t": "2026-10-09T00:03:09",
+     "labelled_B": 121772132572.99998,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T00:04:39",
+     "labelled_B": 121777694590,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T00:06:09",
+     "labelled_B": 121797924642,
+     "prompt_tokens_in_scrape_window": 20077,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T02:17:09",
+     "labelled_B": 127797828658,
+     "prompt_tokens_in_scrape_window": 188261,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 188261
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "7c76775d-9754-4539-b5d2-7d222a3087fd",
+   "first_sample": "2026-10-09T10:10:16",
+   "last_sample": "2026-10-09T10:23:46",
+   "n_samples": 48,
+   "first_labelled_GB": 121.50058200300002,
+   "max_labelled_GB": 121.50058200300002,
+   "first_true_GB": 113.15623484831305,
+   "max_true_GB": 113.15623484831305,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "6b5cb82d-b21a-4a07-bc98-8ee655f3d2e1",
+   "first_sample": "2026-10-09T10:27:09",
+   "last_sample": "2026-10-09T10:31:54",
+   "n_samples": 8,
+   "first_labelled_GB": 121.88131209299999,
+   "max_labelled_GB": 121.88131209299999,
+   "first_true_GB": 113.5108173759654,
+   "max_true_GB": 113.5108173759654,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "837c441d-3092-478a-a51e-fa1dbf1e46d2",
+   "first_sample": "2026-10-09T12:18:16",
+   "last_sample": "2026-10-09T12:55:31",
+   "n_samples": 144,
+   "first_labelled_GB": 121.88131209299999,
+   "max_labelled_GB": 125.053380908,
+   "first_true_GB": 113.5108173759654,
+   "max_true_GB": 116.46503667160867,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-09T12:29:31",
+     "labelled_B": 124785533244,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T12:36:01",
+     "labelled_B": 125053380908,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91043
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "977f998f-08eb-4dce-aafe-df440236c20b",
+   "first_sample": "2026-10-09T13:12:31",
+   "last_sample": "2026-10-09T15:21:16",
+   "n_samples": 509,
+   "first_labelled_GB": 118.695977532,
+   "max_labelled_GB": 118.695977532,
+   "first_true_GB": 110.54424339160323,
+   "max_true_GB": 110.54424339160323,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "ad8178f9-4189-4104-8cad-c5b23b1a1b26",
+   "first_sample": "2026-10-09T15:25:09",
+   "last_sample": "2026-10-09T16:13:24",
+   "n_samples": 192,
+   "first_labelled_GB": 118.423625272,
+   "max_labelled_GB": 124.60540288499999,
+   "first_true_GB": 110.29059558361767,
+   "max_true_GB": 116.04782462585716,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-09T15:37:09",
+     "labelled_B": 121108752362,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T15:38:39",
+     "labelled_B": 121171277877,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T15:41:39",
+     "labelled_B": 121192265905,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T15:49:09",
+     "labelled_B": 124605402884.99998,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91043
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "d8d20cb6-a82a-447f-98ff-ed1fffc77b5d",
+   "first_sample": "2026-10-09T16:19:24",
+   "last_sample": "2026-10-09T16:31:09",
+   "n_samples": 46,
+   "first_labelled_GB": 118.67564096499999,
+   "max_labelled_GB": 118.67564096499999,
+   "first_true_GB": 110.52530348766594,
+   "max_true_GB": 110.52530348766594,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "461fd265-cf87-4dc6-824e-ac41e0b9c9c0",
+   "first_sample": "2026-10-09T16:34:01",
+   "last_sample": "2026-10-09T20:15:16",
+   "n_samples": 884,
+   "first_labelled_GB": 118.811933747,
+   "max_labelled_GB": 120.477741666,
+   "first_true_GB": 110.65223603229968,
+   "max_true_GB": 112.20364055223763,
+   "n_up_steps": 4,
+   "up_steps": [
+    {
+     "t": "2026-10-09T16:34:16",
+     "labelled_B": 119024743982,
+     "prompt_tokens_in_scrape_window": 120449,
+     "hit_kind_increments": {
+      "partial": 3
+     }
+    },
+    {
+     "t": "2026-10-09T16:34:31",
+     "labelled_B": 119029285240,
+     "prompt_tokens_in_scrape_window": 80305,
+     "hit_kind_increments": {
+      "partial": 2
+     }
+    },
+    {
+     "t": "2026-10-09T16:44:31",
+     "labelled_B": 119779635680,
+     "prompt_tokens_in_scrape_window": 24032,
+     "hit_kind_increments": {
+      "partial": 3
+     }
+    },
+    {
+     "t": "2026-10-09T16:44:46",
+     "labelled_B": 120477741666,
+     "prompt_tokens_in_scrape_window": 8041,
+     "hit_kind_increments": {
+      "partial": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 120449
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "51e40750-022a-408f-9b95-5cacb31e6748",
+   "first_sample": "2026-10-09T20:14:16",
+   "last_sample": "2026-10-09T20:15:16",
+   "n_samples": 3,
+   "first_labelled_GB": 118.423612078,
+   "max_labelled_GB": 118.423612078,
+   "first_true_GB": 110.29058329574764,
+   "max_true_GB": 110.29058329574764,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "710b7eb8-6cd6-432c-917d-d67e14a1a90c",
+   "first_sample": "2026-10-09T20:19:01",
+   "last_sample": "2026-10-09T20:31:16",
+   "n_samples": 49,
+   "first_labelled_GB": 118.605829124,
+   "max_labelled_GB": 118.605829124,
+   "first_true_GB": 110.46028614416717,
+   "max_true_GB": 110.46028614416717,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "636b449f-dc27-467f-b71b-8891e4693aa9",
+   "first_sample": "2026-10-09T20:42:24",
+   "last_sample": "2026-10-09T20:42:54",
+   "n_samples": 1,
+   "first_labelled_GB": 118.42361867500001,
+   "max_labelled_GB": 118.42361867500001,
+   "first_true_GB": 110.29058943968266,
+   "max_true_GB": 110.29058943968266,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "6fb89a7e-f929-4e94-8b1d-9e11c58536f3",
+   "first_sample": "2026-10-09T20:49:24",
+   "last_sample": "2026-10-09T20:50:39",
+   "n_samples": 5,
+   "first_labelled_GB": 119.443244186,
+   "max_labelled_GB": 119.443244186,
+   "first_true_GB": 111.2401896957308,
+   "max_true_GB": 111.2401896957308,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "0b2e35db-64ea-4903-8115-3c53a7c4c473",
+   "first_sample": "2026-10-09T20:57:09",
+   "last_sample": "2026-10-09T20:58:39",
+   "n_samples": 6,
+   "first_labelled_GB": 119.168828074,
+   "max_labelled_GB": 119.168828074,
+   "first_true_GB": 110.984619775787,
+   "max_true_GB": 110.984619775787,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "a45fdcd2-dc06-449b-9df2-32a44b5b6a0f",
+   "first_sample": "2026-10-09T21:05:16",
+   "last_sample": "2026-10-09T21:11:31",
+   "n_samples": 24,
+   "first_labelled_GB": 118.613620882,
+   "max_labelled_GB": 118.613620882,
+   "first_true_GB": 110.46754278428853,
+   "max_true_GB": 110.46754278428853,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "0b5b0c73-82e3-46d3-938c-93f1dff9ea51",
+   "first_sample": "2026-10-09T21:13:39",
+   "last_sample": "2026-10-09T21:19:39",
+   "n_samples": 24,
+   "first_labelled_GB": 118.72299913,
+   "max_labelled_GB": 118.72299913,
+   "first_true_GB": 110.56940921582282,
+   "max_true_GB": 110.56940921582282,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "0be6f3f7-a14c-4bb7-a9bd-bee3cf9173d6",
+   "first_sample": "2026-10-09T21:22:01",
+   "last_sample": "2026-10-09T22:13:01",
+   "n_samples": 198,
+   "first_labelled_GB": 118.613598891,
+   "max_labelled_GB": 118.61359889100001,
+   "first_true_GB": 110.46752230357377,
+   "max_true_GB": 110.46752230357379,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-09T21:40:01",
+     "labelled_B": 118613598891.00002,
+     "prompt_tokens_in_scrape_window": 0,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-09T21:41:01",
+     "labelled_B": 118613598891.00002,
+     "prompt_tokens_in_scrape_window": 0,
+     "hit_kind_increments": {}
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 0
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "4e7144a7-27cd-4fc7-8f93-ed39eb623490",
+   "first_sample": "2026-10-09T21:33:46",
+   "last_sample": "2026-10-09T22:13:01",
+   "n_samples": 151,
+   "first_labelled_GB": 121.453511017,
+   "max_labelled_GB": 124.850569014,
+   "first_true_GB": 113.11239657644181,
+   "max_true_GB": 116.27615337632596,
+   "n_up_steps": 2,
+   "up_steps": [
+    {
+     "t": "2026-10-09T21:40:16",
+     "labelled_B": 121453511017,
+     "prompt_tokens_in_scrape_window": 0,
+     "hit_kind_increments": {}
+    },
+    {
+     "t": "2026-10-09T21:41:16",
+     "labelled_B": 124850569014,
+     "prompt_tokens_in_scrape_window": 91043,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 91043
+  },
+  {
+   "host": "macstudio-m4-2",
+   "instance_id": "aac84cb8-6716-4e17-9321-2ca446b53cdd",
+   "first_sample": "2026-10-09T22:15:31",
+   "last_sample": "2026-10-09T22:43:31",
+   "n_samples": 106,
+   "first_labelled_GB": 118.613596692,
+   "max_labelled_GB": 118.613596692,
+   "first_true_GB": 110.46752025559545,
+   "max_true_GB": 110.46752025559545,
+   "n_up_steps": 0,
+   "up_steps": [],
+   "max_prompt_tokens_in_any_up_step": null
+  },
+  {
+   "host": "macstudio-m4-1",
+   "instance_id": "7aa2dbd3-3867-40b3-bbad-51b8c3519a26",
+   "first_sample": "2026-10-09T22:46:39",
+   "last_sample": "2026-10-10T05:51:09",
+   "n_samples": 1699,
+   "first_labelled_GB": 119.206670275,
+   "max_labelled_GB": 124.832997783,
+   "first_true_GB": 111.01986307185142,
+   "max_true_GB": 116.25978889223187,
+   "n_up_steps": 8,
+   "up_steps": [
+    {
+     "t": "2026-10-09T22:46:54",
+     "labelled_B": 119214697810,
+     "prompt_tokens_in_scrape_window": 80299,
+     "hit_kind_increments": {
+      "partial": 2
+     }
+    },
+    {
+     "t": "2026-10-09T22:47:09",
+     "labelled_B": 119219236868,
+     "prompt_tokens_in_scrape_window": 80305,
+     "hit_kind_increments": {
+      "partial": 2
+     }
+    },
+    {
+     "t": "2026-10-09T22:57:09",
+     "labelled_B": 120649371653,
+     "prompt_tokens_in_scrape_window": 32062,
+     "hit_kind_increments": {
+      "partial": 4
+     }
+    },
+    {
+     "t": "2026-10-09T23:09:09",
+     "labelled_B": 121488330877,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-09T23:12:09",
+     "labelled_B": 121527341824,
+     "prompt_tokens_in_scrape_window": 20076,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-10T00:29:54",
+     "labelled_B": 121615718458,
+     "prompt_tokens_in_scrape_window": 18387,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-10T00:33:24",
+     "labelled_B": 122242953283,
+     "prompt_tokens_in_scrape_window": 45702,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    },
+    {
+     "t": "2026-10-10T00:40:24",
+     "labelled_B": 124832997783,
+     "prompt_tokens_in_scrape_window": 100497,
+     "hit_kind_increments": {
+      "none": 1
+     }
+    }
+   ],
+   "max_prompt_tokens_in_any_up_step": 100497
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+mx.get_peak_memory() bytes            : 4000006400
+exo Memory.from_gb(P/1e9).in_bytes    : 4294974168
+inflation stored/true                 : 1.073741824  (1024**3/1e9 = 1.073741824)
+batch_generate-style from_gb(P/1024**3): 4000006400 (correct pairing, for contrast)
+
+VM gauge max (A2 'allocator' reading) : 124832997783 B -> labelled 124.8330 GB
+=> true mx.get_peak_memory()           : 116259788892 B = 116.2598 GB decimal = 108.2754 GiB

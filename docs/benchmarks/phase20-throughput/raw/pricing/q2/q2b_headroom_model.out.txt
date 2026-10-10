@@ -1,0 +1,162 @@
+W=125.82912 GB (=117.19 GiB)  gc_limit=119.538  phys=137.439  K=1.073741824  taps=30720 B/row  KV=3200 B/tok  live cap=1,048,576
+
+== FIT SET (true-unit allocator peaks = up-step requests) ==
+id                 N        D       cap  labelled     true |     pred   resid
+cur_20K_a      20076    20076     65536   121.488  113.145 |  113.080   0.064   current boot (next19), cold
+cur_20K_b      20076    20076     65536   121.527  113.181 |  113.080   0.101   current boot, cold (3rd 20K)
+cur_18K        18387    18387     65536   121.616  113.263 |  113.015   0.248   current boot, cold
+cur_45K        45702    45702     65536   122.243  113.848 |  114.071  -0.223   current boot, cold
+cur_100K      100497   100497    131072   124.833  116.260 |  116.398  -0.138   current boot, cold = THE request behind A2's 'peak at ~102K'
+n13_100K      100012   100012    131072   124.998  116.414 |  116.379   0.035   soak13 (next13), cold
+n13_160K      160006   160006    160006   127.633  118.867 |  118.790   0.077   soak13, cold (r160)
+n13_r500      499992   340248    499992   137.111  127.694 |  128.108  -0.414   soak13 delta 340,248 on 159,744 reused (r500)
+n13_r750      749994   250282    999984   138.623  129.103 |  128.925   0.178   soak13 delta 250,282 on 499,712 reused (r750)
+n13_r1m      1039974   290406   1048576   142.466  132.681 |  132.610   0.071   soak13 delta 290,406 on 749,568 reused (r1m)
+
+2-param fit: A = 112.095 GB ; t = 7922 B/token (se 195) ; sigma = 0.212 GB ; n=10
+free 3-param fit: A=112.220  cD=28489 +- 894 B/row (analytic retained taps = 30720; fp32 taps would be 61440)  cN=8559 +- 297 B/token (excl. KV) ; sigma=0.165
+
+== VALIDATION (unfitted; measured - predicted, GB) ==
+  n18 b8d90d57 188K    N=  188261 measured  119.021 predicted  119.972 err -0.951   next18 (shipped lineage), cold
+  n13 75fa21d8 160K    N=  160007 measured  121.126 predicted  118.790 err +2.336   next13-era other instance, cold
+  n17 49984332 91K     N=   91043 measured  117.588 predicted  116.032 err +1.555   next17 (lever-1 era), cold
+  old 247fb3c8 160K    N=  159995 measured  119.852 predicted  118.789 err +1.063   10-06 build, cold
+  old d301ea85 350K    N=  350124 measured  125.343 predicted  126.745 err -1.402   10-06 build, cold
+  old 5689f0ba 350K    N=  350124 measured  126.343 predicted  126.745 err -0.401   10-06 build, cold
+  old 30b396d2 350K    N=  350124 measured  126.788 predicted  126.745 err +0.044   10-07 build, cold
+  [envelope] OLD 867ef937 cold 500K   N=  499981 measured   142.92  (pre-bf16-row/M2 build; model gives 133.02)
+  [envelope] OLD 867ef937 cold 750K   N=  749983 measured   152.06  (pre-bf16-row/M2 build; model gives 143.48)
+  error band = [-1.40, +2.34] GB
+
+== N* (tokens) ==
+  allocator cold: central 328,242; band 272,413..361,749; LOO 326,975..328,968; two-anchor [363486, 337395, 327380]
+  resident cold:  266,376..286,130; model band 210,546..319,637; active>gc_limit at 177,880; active>PHYS at 605,710
+  warm D=2048: 1302189.0; warm D=25,662: 1210618.0; cold if taps fixed: 1310131.0; cold with FREE fit: 338,141
+  warm-turn max new rows before W (N: exact-cap / doubled-cap): 200,000: 200,000/200,000; 328,000: 328,000/294,161; 400,000: 302,261/260,594; 500,000: 266,057/213,973; 734,003: 181,337/148,569; 900,000: 121,239/105,763; 1,048,576: 67,448/67,448
+  H bounds 1.762..2.589
+
+== cold prefill (as shipped) ==
+  N=    20076  alloc  113.08 (-12.75 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  116.40 ( -9.43 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  117.58 ( -8.25 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  120.46 ( -5.37 vs W)   footprint  122.23.. 123.05
+  N=   262144  alloc  123.06 ( -2.77 vs W)   footprint  124.83.. 125.65
+  N=   300000  alloc  124.65 ( -1.18 vs W)   footprint  126.41.. 127.24
+  N=   328000  alloc  125.82 ( -0.01 vs W)   footprint  127.58.. 128.41
+  N=   400000  alloc  128.83 ( +3.00 vs W)   footprint  130.59.. 131.42
+  N=   500000  alloc  133.02 ( +7.19 vs W)   footprint  134.78.. 135.60
+  N=   734003  alloc  142.81 (+16.98 vs W)   footprint  144.57.. 145.40
+  N=   900000  alloc  149.75 (+23.92 vs W)   footprint  151.51.. 152.34
+  N=  1048576  alloc  155.97 (+30.14 vs W)   footprint  157.73.. 158.56
+
+== warm turn, D=2,048 rows ==
+  N=    20076  alloc  112.53 (-13.30 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  113.37 (-12.46 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  113.62 (-12.21 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  114.38 (-11.45 vs W)   footprint  122.13.. 122.13
+  N=   262144  alloc  115.07 (-10.76 vs W)   footprint  122.13.. 122.13
+  N=   300000  alloc  115.49 (-10.33 vs W)   footprint  122.13.. 122.13
+  N=   328000  alloc  115.81 (-10.02 vs W)   footprint  122.13.. 122.13
+  N=   400000  alloc  116.61 ( -9.22 vs W)   footprint  122.13.. 122.13
+  N=   500000  alloc  117.72 ( -8.11 vs W)   footprint  122.13.. 122.13
+  N=   734003  alloc  120.32 ( -5.51 vs W)   footprint  122.08.. 122.91
+  N=   900000  alloc  122.17 ( -3.66 vs W)   footprint  123.93.. 124.76
+  N=  1048576  alloc  123.82 ( -2.01 vs W)   footprint  125.58.. 126.41
+
+== warm turn D=2,048, capacity rounded up 2x (upper bound) ==
+  N=    20076  alloc  112.53 (-13.30 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  113.60 (-12.23 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  114.03 (-11.79 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  115.02 (-10.81 vs W)   footprint  122.13.. 122.13
+  N=   262144  alloc  115.91 ( -9.92 vs W)   footprint  122.13.. 122.13
+  N=   300000  alloc  116.45 ( -9.37 vs W)   footprint  122.13.. 122.13
+  N=   328000  alloc  116.86 ( -8.97 vs W)   footprint  122.13.. 122.13
+  N=   400000  alloc  117.89 ( -7.94 vs W)   footprint  122.13.. 122.13
+  N=   500000  alloc  119.32 ( -6.51 vs W)   footprint  122.13.. 122.13
+  N=   734003  alloc  121.33 ( -4.50 vs W)   footprint  123.09.. 123.92
+  N=   900000  alloc  122.64 ( -3.19 vs W)   footprint  124.41.. 125.23
+  N=  1048576  alloc  123.82 ( -2.01 vs W)   footprint  125.58.. 126.41
+
+== warm turn, D=25,662 (largest state.db growth) ==
+  N=    20076  alloc  113.25 (-12.58 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  114.10 (-11.73 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  114.34 (-11.49 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  115.11 (-10.72 vs W)   footprint  122.13.. 122.13
+  N=   262144  alloc  115.80 (-10.03 vs W)   footprint  122.13.. 122.13
+  N=   300000  alloc  116.22 ( -9.61 vs W)   footprint  122.13.. 122.13
+  N=   328000  alloc  116.53 ( -9.30 vs W)   footprint  122.13.. 122.13
+  N=   400000  alloc  117.33 ( -8.50 vs W)   footprint  122.13.. 122.13
+  N=   500000  alloc  118.44 ( -7.38 vs W)   footprint  122.13.. 122.13
+  N=   734003  alloc  121.05 ( -4.78 vs W)   footprint  122.81.. 123.64
+  N=   900000  alloc  122.89 ( -2.94 vs W)   footprint  124.66.. 125.48
+  N=  1048576  alloc  124.55 ( -1.28 vs W)   footprint  126.31.. 127.13
+
+== warm turn D=2,048 + 2nd resident session at 400K ==
+  N=    20076  alloc  113.81 (-12.02 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  114.65 (-11.18 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  114.90 (-10.93 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  115.66 (-10.17 vs W)   footprint  122.13.. 122.13
+  N=   262144  alloc  116.35 ( -9.48 vs W)   footprint  122.13.. 122.13
+  N=   300000  alloc  116.77 ( -9.05 vs W)   footprint  122.13.. 122.13
+  N=   328000  alloc  117.09 ( -8.74 vs W)   footprint  122.13.. 122.13
+  N=   400000  alloc  117.89 ( -7.94 vs W)   footprint  122.13.. 122.13
+  N=   500000  alloc  119.00 ( -6.83 vs W)   footprint  122.13.. 122.13
+  N=   734003  alloc  121.60 ( -4.23 vs W)   footprint  123.36.. 124.19
+  N=   900000  alloc  123.45 ( -2.38 vs W)   footprint  125.21.. 126.04
+  N=  1048576  alloc  125.10 ( -0.73 vs W)   footprint  126.86.. 127.69
+
+== warm turn D=2,048 + 2nd resident session at cap ==
+  N=    20076  alloc  115.88 ( -9.95 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  116.73 ( -9.10 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  116.97 ( -8.86 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  117.74 ( -8.09 vs W)   footprint  122.13.. 122.13
+  N=   262144  alloc  118.43 ( -7.40 vs W)   footprint  122.13.. 122.13
+  N=   300000  alloc  118.85 ( -6.98 vs W)   footprint  122.13.. 122.13
+  N=   328000  alloc  119.16 ( -6.67 vs W)   footprint  122.13.. 122.13
+  N=   400000  alloc  119.96 ( -5.87 vs W)   footprint  121.72.. 122.55
+  N=   500000  alloc  121.07 ( -4.75 vs W)   footprint  122.84.. 123.66
+  N=   734003  alloc  123.68 ( -2.15 vs W)   footprint  125.44.. 126.27
+  N=   900000  alloc  125.52 ( -0.31 vs W)   footprint  127.29.. 128.11
+  N=  1048576  alloc  127.18 ( +1.35 vs W)   footprint  128.94.. 129.76
+
+== cold prefill IF taps retention were fixed (projection) ==
+  N=    20076  alloc  112.46 (-13.37 vs W)   footprint  122.13.. 122.13
+  N=   100497  alloc  113.31 (-12.52 vs W)   footprint  122.13.. 122.13
+  N=   131072  alloc  113.55 (-12.28 vs W)   footprint  122.13.. 122.13
+  N=   200000  alloc  114.32 (-11.51 vs W)   footprint  122.13.. 122.13
+  N=   262144  alloc  115.01 (-10.82 vs W)   footprint  122.13.. 122.13
+  N=   300000  alloc  115.43 (-10.40 vs W)   footprint  122.13.. 122.13
+  N=   328000  alloc  115.74 (-10.09 vs W)   footprint  122.13.. 122.13
+  N=   400000  alloc  116.54 ( -9.29 vs W)   footprint  122.13.. 122.13
+  N=   500000  alloc  117.66 ( -8.17 vs W)   footprint  122.13.. 122.13
+  N=   734003  alloc  120.26 ( -5.57 vs W)   footprint  122.02.. 122.85
+  N=   900000  alloc  122.10 ( -3.72 vs W)   footprint  123.87.. 124.69
+  N=  1048576  alloc  123.76 ( -2.07 vs W)   footprint  125.52.. 126.35
+
+== Q1E re-derivation ==
+  allocator_corrected: {'non_weight': 11.56, 'demand': 18.07, 'headroom': 15.41, 'over': 2.66, 'over_with_margin': 4.66}
+  resident_corrected: {'non_weight': 17.43, 'demand': 23.94, 'headroom': 15.41, 'over': 8.53, 'over_with_margin': 10.53}
+  allocator_A2_reported: {'non_weight': 20.13, 'demand': 26.64, 'headroom': 15.41, 'over': 11.23, 'over_with_margin': 13.23}
+  resident_A2_reported: {'non_weight': 9.3, 'demand': 15.81, 'headroom': 15.41, 'over': 0.4, 'over_with_margin': 2.4}
+  allocator_if_taps_fixed_projection: {'non_weight': 8.47, 'over': -0.43}
+
+== system RAM-used maxima (GB; m4-1, m4-2) ==
+  soak13 concurrent ram+swap max  100K cold                   125.799  126.001
+  soak13 concurrent ram+swap max  160K cold                   125.953  126.182
+  soak13 concurrent ram+swap max  r500 delta (to 500K)        133.315  132.408
+  soak13 concurrent ram+swap max  r750 delta (to 750K)        134.686  134.803
+  soak13 concurrent ram+swap max  r1m delta (to 1.04M)        136.872  135.217
+  current  cold 20K (23:07:30)        ram  125.836  126.147   swap   0.03   0.08
+  current  cold 20K (23:10:31)        ram  125.910  126.272   swap   0.03   0.08
+  current  cold 18K                   ram  126.247  126.507   swap   0.03   0.08
+  current  cold 45.7K                 ram  126.455  126.958   swap   0.03   0.08
+  current  cold 100.5K                ram  126.554  127.113   swap   0.03   0.08
+  current  idle 01:30-02:00           ram  119.565  108.130   swap   0.03  10.15
+  soak13   100K cold                  ram  125.688  125.890   swap   0.11   0.11
+  soak13   160K cold                  ram  125.850  126.072   swap   0.10   0.11
+  soak13   r500 delta (to 500K)       ram  133.220  132.297   swap   0.16   0.29
+  soak13   r750 delta (to 750K)       ram  133.640  133.707   swap   2.15   1.45
+  soak13   r1m delta (to 1.04M)       ram  133.122  133.355   swap   4.10   3.82
+
+wrote /private/tmp/q2-gamma-mem/docs/benchmarks/phase20-throughput/raw/pricing/q2/q2b-memory-headroom.json
+wrote /private/tmp/q2-gamma-mem/docs/benchmarks/phase20-throughput/raw/pricing/q2/q2b-memory-headroom.md

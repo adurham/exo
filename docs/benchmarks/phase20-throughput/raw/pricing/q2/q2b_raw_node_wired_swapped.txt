@@ -1,0 +1,96 @@
+2026-10-10 06:57:11 CDT
+### Adams-Mac-Studio-M4-1 runner pid 49330
+iogpu.wired_limit_mb: 120000
+hw.memsize: 137438953472
+vm.swapusage: total = 1024.00M  used = 31.06M  free = 992.94M  (encrypted)
+### footprint -f bytes
+python [49330]: 64-bit    Footprint: 114345083928 B (16384 bytes per page)
+112583049216 B           0 B           0 B       5055    IOAccelerator (graphics)
+    phys_footprint: 114345083928 B
+    phys_footprint_peak: 122126271536 B
+### footprint --wired --swapped (binary units)
+==========================================================================================
+python [49330]: 64-bit    Footprint: 106 GB (16384 bytes per page)
+==========================================================================================
+
+  Dirty  (Swapped)      Clean  Reclaimable    (Wired)    Regions    Category
+    ---        ---        ---          ---        ---        ---    ---
+ 105 GB    1965 MB        0 B          0 B      99 GB       5055    IOAccelerator (graphics)
+1019 MB      10 MB        0 B          0 B        0 B        102    Malloc Large
+### footprint --sysFootprint
+Auxiliary data:
+    phys_footprint: 106 GB
+    phys_footprint_peak: 114 GB
+
+
+System auxiliary data:
+    boot_carveout:              774 MB
+    sys_wired:               104306 MB
+    sys_unwired:               9034 MB
+    ---------------------------------------
+    sys_footprint:           114114 MB
+
+### vmmap -summary
+Physical footprint:         106.5G
+Physical footprint (peak):  113.7G
+IOAccelerator (graphics)         104.9G   104.9G   102.9G     1.9G       0K   104.8G    4928K     5055 
+TOTAL                            495.1G   106.9G   104.6G     1.9G       0K   104.8G    4928K     8816 
+TOTAL                             596.8M     484.9M     415.1M       880K    1304493     402.0M      14.0M      4%     163
+### vm_stat
+Pages free:                                    25769.
+Pages wired down:                            6675011.
+Pages stored in compressor:                   126166.
+Pages occupied by compressor:                 124990.
+Swapins:                                    50194015.
+Swapouts:                                   50328626.
+### memory_pressure
+
+System-wide memory free percentage: 18%
+2026-10-10 06:57:16 CDT
+### Adams-Mac-Studio-M4-2 runner pid 59829
+iogpu.wired_limit_mb: 120000
+hw.memsize: 137438953472
+vm.swapusage: total = 10240.00M  used = 9644.38M  free = 595.62M  (encrypted)
+### footprint -f bytes
+python [59829]: 64-bit    Footprint: 113805869000 B (16384 bytes per page)
+113112285184 B           0 B           0 B       5063    IOAccelerator (graphics)
+    phys_footprint: 113805869000 B
+    phys_footprint_peak: 122104151408 B
+### footprint --wired --swapped (binary units)
+==========================================================================================
+python [59829]: 64-bit    Footprint: 106 GB (16384 bytes per page)
+==========================================================================================
+
+  Dirty  (Swapped)      Clean  Reclaimable    (Wired)    Regions    Category
+    ---        ---        ---          ---        ---        ---    ---
+ 105 GB      19 GB        0 B          0 B      86 GB       5063    IOAccelerator (graphics)
+ 315 MB     302 MB        0 B        15 MB      66 MB        142    Malloc Small
+### footprint --sysFootprint
+Auxiliary data:
+    phys_footprint: 106 GB
+    phys_footprint_peak: 114 GB
+
+
+System auxiliary data:
+    boot_carveout:              774 MB
+    sys_wired:                91130 MB
+    sys_unwired:              21270 MB
+    ---------------------------------------
+    sys_footprint:           113174 MB
+
+### vmmap -summary
+Physical footprint:         106.0G
+Physical footprint (peak):  113.7G
+IOAccelerator (graphics)         105.3G   105.3G    86.7G    18.7G       0K   105.3G    4864K     5063 
+TOTAL                            494.6G   105.9G    86.8G    19.2G       0K   105.3G    4864K     8711 
+TOTAL                             601.3M      27.9M      15.7M     337.4M    1303341     402.6M         0K      0%     163
+### vm_stat
+Pages free:                                  1363281.
+Pages wired down:                            5832301.
+Pages stored in compressor:                   623288.
+Pages occupied by compressor:                 617326.
+Swapins:                                    60949812.
+Swapouts:                                   62407707.
+### memory_pressure
+
+System-wide memory free percentage: 22%

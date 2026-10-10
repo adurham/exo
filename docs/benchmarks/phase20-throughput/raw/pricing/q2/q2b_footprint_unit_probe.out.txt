@@ -1,0 +1,11 @@
+allocated_bytes 4000006400  = 3.7253 GiB / 4.0000 GB(dec)
+--- footprint -f formatted ---
+python [83069]: 64-bit    Footprint: 3968 MB (16384 bytes per page)
+3816 MB        0 B          0 B         26    IOAccelerator (graphics)
+    phys_footprint: 3968 MB
+    phys_footprint_peak: 3968 MB
+--- footprint -f bytes ---
+python [83069]: 64-bit    Footprint: 4160553656 B (16384 bytes per page)
+4000956416 B           0 B           0 B         26    IOAccelerator (graphics)
+    phys_footprint: 4160553656 B
+    phys_footprint_peak: 4160553656 B
