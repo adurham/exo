@@ -78,8 +78,13 @@ so `GET /state` alone never reaches `RunnerReady` — the driver therefore
 "max_tokens":8,"temperature":0.0,"stream":false}`), retrying on HTTP 503 (the
 ~120 s load timeout returns 503 first, then 200) for up to ~300 s. The warmup
 POST epoch is **registered in the own-request registry** (`own_requests_<arm>.jsonl`)
-so the next idle guard treats this driver traffic as own. It then polls `GET
-/state` until **READY 2/2**, asserts **RANK CONSISTENCY** by grepping both nodes'
+so the next idle guard treats this driver traffic as own. `ensure_loaded()` then
+re-checks `/state` (a warmup POST only if NO runner is present), and is called
+again at the START of every measurement chunk so a **mid-arm JIT unload** is
+repaired transparently. It then polls `GET /state` until **READY 2/2** (a warmup
+that already served HTTP 200 is treated as sufficient readiness — a transiently
+empty `/state` right after a warmup warns instead of aborting), asserts **RANK
+CONSISTENCY** by grepping both nodes'
 current-boot `~/.exo/exo_log/exo.log` for
 `[DSV41] spec gamma override: DSV41_SPEC_GAMMA=N -> effective gamma=N ..., rank R`
 and aborting if the two ranks' effective gamma differ (or the ranks aren't {0,1}),
@@ -87,9 +92,14 @@ idle-guards, then runs the fixed replays.
 
 **REUSE (safe optimisation):** if BOTH nodes' latest logged effective gamma is
 ALREADY the target arm N (e.g. the first arm `gamma3a` right after a boot/warm),
-the relaunch+warmup is **skipped** and control goes straight to the READY check +
-rank-consistency assert. This avoids a redundant ~5-min relaunch cycle while
-preserving the bracketed determinism semantics. Whether each arm was
+the **sed+relaunch** is skipped — but the **warmup POST still runs**. The JIT idle
+reaper UNLOADS and REMOVES the instance after 300 s idle
+(`EXO_JIT_IDLE_UNLOAD_SECONDS=300`), leaving NO runner (`instances: 0`), so a reuse
+right after an unload must still re-trigger the load; skipping the warmup too (the
+previous behaviour) left `wait_ready` polling forever on a dead model. After the
+warmup an `ensure_loaded()` guard re-checks `/state` (POST only if no runner), so a
+mid-arm unload is repaired as well. This avoids a redundant ~5-min relaunch cycle
+while preserving the bracketed determinism semantics. Whether each arm was
 `relaunch`ed or `reuse`d is logged and written to `<outdir>/arm_switches.json`.
 
 ## Replays (FIXED content, byte-identical across arms)
@@ -165,6 +175,11 @@ Outputs (under `--outdir`): `round_budget.json`, `arm_<arm>.json` (records),
   live-measured behaviour (POST 200 in 119.6 s triggers the JIT load); the
   selftest exercises the loop with an injected fake transport (503/200/None/4xx)
   — the real endpoint was NOT exercised here (no live run).
+* The **JIT idle-unload repair** (unconditional warmup on the REUSE path +
+  `ensure_loaded()` before every chunk + warmup-tolerant `wait_ready`) is
+  exercised offline with injected `/state` payloads and fake transports only; the
+  real ~300 s reaper behaviour (`EXO_JIT_IDLE_UNLOAD_SECONDS`) is taken from the
+  live log, not re-measured here.
 * `wait_ready` (`RunnerReady` 2/2) and the effective-gamma log-line regex are
   modelled on read-only `/state` and source probes, not a live eval boot.
 * `footprint -f bytes` first-line parsing is defensive (first numeric line, else

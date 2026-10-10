@@ -464,40 +464,190 @@ def warmup_checks():
     out.append(("reuse: duplicated rank => no reuse (mirrors rank-consistency abort)",
                 DRV.reuse_verdict(per_dup, 3)[0] is False, DRV.reuse_verdict(per_dup, 3)[1]))
 
-    # ---- skip-reuse path (integration: switch_arm) -------------------------
-    saved = (DRV.latest_effective_gamma, DRV.warmup_post, DRV._ssh)
+    # ---- switch_arm integration (relaunch + REUSE both warm up) ------------
+    saved = (DRV.latest_effective_gamma, DRV.warmup_post, DRV._ssh, DRV._fetch_json)
     ssh_calls = {"n": 0}
+    warm_calls = {"n": 0}
+    ready_state = {"runners": {"a": {"RunnerReady": {}}, "b": {"RunnerReady": {}}}}
 
     def fake_ssh(node, cmd, **kw):
         ssh_calls["n"] += 1
         return 0, "DSV41_SPEC_GAMMA=3"
 
-    warm_calls = {"n": 0}
-
     def fake_warmup(**kw):
         warm_calls["n"] += 1
         return {"ok": True, "attempts": 1, "statuses": [200], "registered": True, "t_reg": 0.0}
 
+    def fake_fetch(url, **kw):
+        return ready_state  # a runner is placed => ensure_loaded no-ops
+
     try:
-        # reuse: latest logged effective gamma already == 3 => no ssh, no warmup
-        DRV.latest_effective_gamma = lambda **kw: per_hit
         DRV.warmup_post = fake_warmup
         DRV._ssh = fake_ssh
-        r_reuse = DRV.switch_arm(3, arm="gamma3a", registry_path=None, settle_s=0)
-        out.append(("reuse-path: switch_arm(3) with latest eff==3 => mode 'reuse', NO relaunch/warmup",
-                    r_reuse["mode"] == "reuse" and ssh_calls["n"] == 0 and warm_calls["n"] == 0,
-                    f"mode={r_reuse['mode']} ssh={ssh_calls['n']} warmup={warm_calls['n']}"))
+        DRV._fetch_json = fake_fetch
 
-        # miss: latest eff==4 != 3 => full relaunch + warmup
+        # REUSE: latest logged effective gamma already == 3 => NO sed/relaunch,
+        # but the warmup POST STILL runs (JIT idle-unload repair).
+        warm_calls["n"] = 0
+        DRV.latest_effective_gamma = lambda **kw: per_hit
+        r_reuse = DRV.switch_arm(3, arm="gamma3a", registry_path=None, settle_s=0)
+        out.append(("reuse-path: switch_arm(3) with latest eff==3 => mode 'reuse', NO relaunch "
+                    "BUT the warmup STILL fires + ensure_loaded proceeds",
+                    r_reuse["mode"] == "reuse" and ssh_calls["n"] == 0 and warm_calls["n"] == 1
+                    and r_reuse.get("warmup_ok") is True
+                    and r_reuse.get("ensure_loaded", {}).get("ok") is True,
+                    f"mode={r_reuse['mode']} ssh={ssh_calls['n']} warmup={warm_calls['n']} "
+                    f"warmup_ok={r_reuse.get('warmup_ok')}"))
+
+        # MISS: latest eff==4 != 3 => full sed+relaunch + warmup
         ssh_calls["n"] = 0
+        warm_calls["n"] = 0
         DRV.latest_effective_gamma = lambda **kw: per_miss
         r_relaunch = DRV.switch_arm(3, arm="gamma3a", registry_path=None, settle_s=0)
-        out.append(("reuse-path: switch_arm(3) with latest eff==4 => mode 'relaunch' + warmup fired",
-                    r_relaunch["mode"] == "relaunch" and ssh_calls["n"] >= 2 and warm_calls["n"] == 1,
+        out.append(("relaunch-path: switch_arm(3) with latest eff==4 => mode 'relaunch' + warmup fired",
+                    r_relaunch["mode"] == "relaunch" and ssh_calls["n"] >= 2 and warm_calls["n"] == 1
+                    and r_relaunch.get("warmup_ok") is True,
                     f"mode={r_relaunch['mode']} ssh={ssh_calls['n']} warmup={warm_calls['n']}"))
     finally:
-        DRV.latest_effective_gamma, DRV.warmup_post, DRV._ssh = saved
+        DRV.latest_effective_gamma, DRV.warmup_post, DRV._ssh, DRV._fetch_json = saved
 
+    # ---- ensure_loaded: empty /state => warmup POST fired; proceeds --------
+    saved2 = (DRV._fetch_json, DRV.warmup_post)
+    e_warm = {"n": 0}
+
+    def e_fake_warmup(**kw):
+        e_warm["n"] += 1
+        return {"ok": True, "attempts": 2, "statuses": [503, 200], "registered": True, "t_reg": 1.0}
+
+    try:
+        DRV._fetch_json = lambda url, **kw: {"instances": 0}  # reaped: no runner
+        DRV.warmup_post = e_fake_warmup
+        ok_b, detail_b = DRV.ensure_loaded(registry_path=None, label="ensure_empty")
+        out.append(("ensure_loaded: empty /state (no runner, instances 0) => warmup POST + proceeds",
+                    ok_b is True and e_warm["n"] == 1 and "warmup POST ok" in detail_b,
+                    f"ok={ok_b} warmup_calls={e_warm['n']} detail={detail_b}"))
+        # a runner present => NO POST (fast path)
+        e_warm["n"] = 0
+        DRV._fetch_json = lambda url, **kw: ready_state
+        ok_c, detail_c = DRV.ensure_loaded(registry_path=None, label="ensure_present")
+        out.append(("ensure_loaded: runner present => NO POST (fast path)",
+                    ok_c is True and e_warm["n"] == 0 and "no POST" in detail_c,
+                    f"ok={ok_c} warmup_calls={e_warm['n']} detail={detail_c}"))
+    finally:
+        DRV._fetch_json, DRV.warmup_post = saved2
+
+    # ---- wait_ready: transient empty /state after a warmup-200 tolerated ---
+    saved3 = DRV._fetch_json
+    seq = [{}, {}, ready_state]
+    wr = {"n": 0}
+
+    def wr_fetch(url, **kw):
+        i = min(wr["n"], len(seq) - 1)
+        wr["n"] += 1
+        return seq[i]
+
+    try:
+        DRV._fetch_json = wr_fetch
+        n_ready = DRV.wait_ready(timeout_s=5, poll_s=0, warmup_ok=True)
+        out.append(("wait_ready: transiently empty /state after warmup-200 => tolerated, reaches READY 2/2",
+                    n_ready == 2 and wr["n"] >= 3, f"ready={n_ready} polls={wr['n']}"))
+
+        # sustained empty + NO warmup + deadline => SystemExit (unchanged hard fail)
+        raised = False
+        DRV._fetch_json = lambda url, **kw: {}
+        try:
+            DRV.wait_ready(timeout_s=0, poll_s=0, warmup_ok=False)
+        except SystemExit:
+            raised = True
+        out.append(("wait_ready: empty /state with NO warmup past deadline => SystemExit",
+                    raised, f"raised={raised}"))
+
+        # sustained empty BUT a warmup-200 proves serving => warn + return, no SystemExit
+        DRV._fetch_json = lambda url, **kw: {}
+        ret = DRV.wait_ready(timeout_s=0, poll_s=0, warmup_ok=True)
+        out.append(("wait_ready: empty /state but warmup-200 => warn + return (no SystemExit)",
+                    ret == 0, f"returned={ret}"))
+    finally:
+        DRV._fetch_json = saved3
+
+    return out
+
+
+def run_arm_wiring_check():
+    """Integration: run_arm calls ensure_loaded at the START of each chunk (pre-idle-guard)."""
+    out = []
+    order: list = []
+
+    class _Ev:
+        def is_set(self):
+            return False
+
+    class _GuardCtx:
+        def __init__(self, *a, **k):
+            self.aborted = False
+            self.reason = None
+            self.cancel_event = _Ev()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def register_own_request(self, t):
+            pass
+
+    class _Guard:
+        def wait_for_idle(self, **k):
+            order.append("idle")
+
+        def ChunkGuard(self, *a, **k):
+            order.append("chunk")
+            return _GuardCtx()
+
+    class _RM:
+        @staticmethod
+        def build_prompt(depth, salt, mode):
+            return f"P{depth}:{salt}"
+
+        @staticmethod
+        def derive(r, pc, pa, gamma):
+            return {}
+
+    class _AM:
+        @staticmethod
+        def build_agentic_prompt(salt, _):
+            return f"A{salt}", {}
+
+    def fake_ensure(**k):
+        order.append("ensure")
+        return True, "runner present; no POST"
+
+    def fake_replay(prompt, max_tokens, **k):
+        return {"stats": {}, "usage": {}, "logprobs_available": True}
+
+    saved = (DRV._load_kit, DRV._load_guard, DRV.ensure_loaded, DRV.replay_once, DRV.collect_memory)
+    _real_sleep = time.sleep
+    try:
+        DRV._load_kit = lambda: (_RM, _AM)
+        DRV._load_guard = lambda: _Guard()
+        DRV.ensure_loaded = fake_ensure
+        DRV.replay_once = fake_replay
+        DRV.collect_memory = lambda: {"peak_alloc_bytes": {}, "peak_resident_bytes": {}}
+        time.sleep = lambda *a, **k: None
+        tmpd = tempfile.mkdtemp(prefix="q2gamma_runarm_")
+        rec = DRV.run_arm("gamma3a", 3, {"benign_reps": 1, "agentic_reps": 1}, out_dir=tmpd)
+        chunk_order = [x for x in order if x in ("ensure", "idle", "chunk")]
+        out.append(("run_arm: ensure_loaded at the START of EVERY chunk (before the idle-guard)",
+                    chunk_order == ["ensure", "idle", "chunk", "ensure", "idle", "chunk"],
+                    f"order={chunk_order}"))
+        out.append(("run_arm: benign+agentic chunks both measured under the ensure guard",
+                    len(rec["benign"]) == 1 and len(rec["agentic"]) == 1,
+                    f"benign={len(rec['benign'])} agentic={len(rec['agentic'])}"))
+    finally:
+        (DRV._load_kit, DRV._load_guard, DRV.ensure_loaded, DRV.replay_once,
+         DRV.collect_memory) = saved
+        time.sleep = _real_sleep
     return out
 
 
@@ -509,6 +659,7 @@ def all_checks():
     out += evaluator_checks()
     out += harness_checks()
     out += warmup_checks()
+    out += run_arm_wiring_check()
     return out
 
 

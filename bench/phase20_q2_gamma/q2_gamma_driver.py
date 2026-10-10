@@ -14,8 +14,10 @@ runner, so ``GET /state`` alone never reaches READY; the POST returns 503 at the
 READY 2/2, assert RANK CONSISTENCY of the logged effective gamma, idle-guard, then
 run the FIXED replays (benign 20K x3 + agentic 91K x2) with the FIXED salt base
 ``q2gamma`` so the content is byte-identical across arms.  If both nodes' latest
-logged effective gamma is ALREADY the target arm the relaunch+warmup is SKIPPED
-(REUSE) and control goes straight to the READY check.
+logged effective gamma is ALREADY the target arm the sed+relaunch is SKIPPED
+(REUSE) — but the warmup POST STILL runs: the JIT idle reaper removes the runner
+after 300 s idle, so a reuse must re-trigger the load — then control goes to the
+READY check.
 
 This module is DELIVERED NOT-RUN: no live arm switch is executed here.  Run it
 only after the eval boot (see ``README.md`` for preconditions).  ``--dry-run``
@@ -82,6 +84,11 @@ WARMUP_HTTP_TIMEOUT_S = 300.0  # per-attempt socket timeout (> the ~120 s load t
 WARMUP_RETRY_SLEEP_S = 5.0    # pause between retries
 WARMUP_BODY = {"model": MODEL, "messages": [{"role": "user", "content": "Say OK."}],
                "max_tokens": 8, "temperature": 0.0, "stream": False}
+
+# A ``GET /state`` runner entry counts as "present" (model placed) if any of
+# these appear; the JIT idle reaper removes the instance entirely (NO runner,
+# ``instances`` 0) so presence is decided by these keys + a nonzero count.
+_RUNNER_STATES = ("RunnerReady", "RunnerIdle", "RunnerLoading")
 
 SCRATCH = "/Users/adam.durham/.hermes/cache/scratch/phase20/q2gamma"
 DEFAULT_REGISTRY = os.path.join(SCRATCH, "own_requests.jsonl")
@@ -220,13 +227,18 @@ def switch_arm(n: int, *, dry: bool = False, arm: str | None = None,
 
     After the relaunch the driver TRIGGERS THE JIT MODEL LOAD with a tiny warmup
     POST (the relaunch spawns NO runner), registers that POST in the own-request
-    registry so the next idle guard treats it as own traffic, and only then
-    returns for :func:`wait_ready`.
+    registry so the next idle guard treats it as own traffic, then runs
+    :func:`ensure_loaded` (belt-and-suspenders) before returning for
+    :func:`wait_ready`.
 
     REUSE optimisation (safe): if BOTH nodes' latest logged effective gamma is
-    ALREADY ``n`` (e.g. the first arm right after a boot), the relaunch+warmup is
-    SKIPPED and control goes straight to the READY check + rank assert.  Returns
-    ``{"mode": "reuse"|"relaunch", ...}`` so the caller can log/record which.
+    ALREADY ``n`` (e.g. the first arm right after a boot) the driver skips ONLY
+    the sed+relaunch — NEVER the warmup.  The warmup POST is UNCONDITIONAL on both
+    paths: a reuse right after the JIT idle reaper unloaded the instance (idle
+    >= 300 s => the runner is REMOVED, not merely idle) must still re-trigger the
+    load, so control goes to the warmup + :func:`ensure_loaded`, then the READY
+    check + rank assert.  Returns ``{"mode": "reuse"|"relaunch", ...}`` plus the
+    warmup outcome so the caller can log/record which.
     """
     if n not in SUPPORTED_GAMMA:
         raise ValueError(f"gamma {n} not in supported set {SUPPORTED_GAMMA}")
@@ -234,24 +246,37 @@ def switch_arm(n: int, *, dry: bool = False, arm: str | None = None,
 
     if dry:
         print(f"[dry] ssh <node> \"{_LOG_TAIL_CMD}\"  # if latest effective gamma already == {n}: "
-              f"REUSE (skip relaunch+warmup)")
+              f"REUSE (skip sed+relaunch ONLY; the warmup STILL runs)")
+        print("[dry] REUSE path: skip sed+relaunch, then warmup POST + ensure_loaded (no settle)")
         for node in NODES:
             print(f"[dry] ssh {node} \"{sed_cmd(n)}\"")
             print(f"[dry] ssh {node} \"{grep_cmd()}\"  # confirm one token == {n}")
             print(f"[dry] ssh {node} '{relaunch_cmd()}'  # graceful relaunch, ~2-3 min")
-        print(f"[dry] sleep {settle_s:.0f}s settle, then warmup POST {API_BASE}/v1/chat/completions "
-              f"({json.dumps(WARMUP_BODY)})  # retry 503->200, <= {WARMUP_TIMEOUT_S:.0f}s")
+        print(f"[dry] sleep {settle_s:.0f}s settle (RELAUNCH path only), then warmup POST "
+              f"{API_BASE}/v1/chat/completions ({json.dumps(WARMUP_BODY)})  # retry 503->200, "
+              f"<= {WARMUP_TIMEOUT_S:.0f}s")
         print(f"[dry] register warmup epoch in own-request registry "
               f"({registry_path or 'own_requests_<arm>.jsonl'})")
+        print("[dry] ensure_loaded() (GET /state; warmup POST only if NO runner) after the warmup")
         return {"mode": "relaunch", "dry": True}
 
     if allow_reuse:
         per = latest_effective_gamma()
         reuse, msg = reuse_verdict(per, n)
         if reuse:
-            print(f"[{time.strftime('%T')}] {label}: REUSE — {msg}; "
-                  f"skipping relaunch+warmup", flush=True)
-            return {"mode": "reuse", "per": per, "reason": msg}
+            print(f"[{time.strftime('%T')}] {label}: REUSE — {msg}; skipping sed+relaunch ONLY "
+                  f"(warmup STILL runs)", flush=True)
+            warm = warmup_post(registry_path=registry_path, label=label)
+            print(f"[{time.strftime('%T')}] {label}: warmup (reuse path) attempted -> "
+                  f"ok={warm.get('ok')} attempts={warm.get('attempts')} "
+                  f"statuses={warm.get('statuses')}", flush=True)
+            ok, detail = ensure_loaded(registry_path=registry_path, label=label)
+            print(f"[{time.strftime('%T')}] {label}: ensure_loaded -> ok={ok} ({detail})", flush=True)
+            if not ok:
+                raise SystemExit(f"switch_arm({n}) reuse path {label}: ensure_loaded failed: {detail}")
+            return {"mode": "reuse", "per": per, "reason": msg, "warmup": warm,
+                    "warmup_ok": bool(warm.get("ok")),
+                    "ensure_loaded": {"ok": ok, "detail": detail}}
 
     for node in NODES:
         rc, out = _ssh(node, sed_cmd(n))
@@ -268,7 +293,15 @@ def switch_arm(n: int, *, dry: bool = False, arm: str | None = None,
         print(f"[{time.strftime('%T')}] {label}: settle {settle_s:.0f}s before warmup POST", flush=True)
         time.sleep(settle_s)
     warm = warmup_post(registry_path=registry_path, label=label)
-    return {"mode": "relaunch", "warmup": warm}
+    print(f"[{time.strftime('%T')}] {label}: warmup (relaunch path) attempted -> "
+          f"ok={warm.get('ok')} attempts={warm.get('attempts')} "
+          f"statuses={warm.get('statuses')}", flush=True)
+    ok, detail = ensure_loaded(registry_path=registry_path, label=label)
+    print(f"[{time.strftime('%T')}] {label}: ensure_loaded -> ok={ok} ({detail})", flush=True)
+    if not ok:
+        raise SystemExit(f"switch_arm({n}) relaunch path {label}: ensure_loaded failed: {detail}")
+    return {"mode": "relaunch", "warmup": warm, "warmup_ok": bool(warm.get("ok")),
+            "ensure_loaded": {"ok": ok, "detail": detail}}
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +388,45 @@ def warmup_post(*, registry_path: str | None = None, label: str = "warmup",
         sleep_fn(retry_sleep_s)
 
 
+def ensure_loaded(*, registry_path: str | None = None, label: str = "ensure_loaded",
+                  state_fn=None, warmup_fn=None, log_fn=print) -> tuple[bool, str]:
+    """Guarantee the JIT model is LOADED; repair a silent idle-unload.  -> (ok, detail).
+
+    GET ``/state``: if a runner is present (``RunnerReady``/``RunnerIdle``/
+    ``RunnerLoading`` or a nonzero instance count) the model is placed — return
+    immediately WITHOUT a POST.  Otherwise the instance was reaped (no runner,
+    ``instances`` 0): fire the warmup POST (503 -> 200) and register its epoch in
+    the own-request registry so the load is re-triggered.  A warmup that fails
+    (SystemExit) is caught and reported as ``ok=False`` so the caller decides.
+
+    Called (a) at the end of :func:`switch_arm` (belt-and-suspenders after the
+    warmup) and (b) at the START of each measurement chunk in :func:`run_arm`
+    (before the idle-guard) so a mid-arm JIT unload is transparently repaired.
+    """
+    state_fn = _fetch_json if state_fn is None else state_fn
+    warmup_fn = warmup_post if warmup_fn is None else warmup_fn
+    try:
+        st = state_fn(f"{API_BASE}/state")
+    except Exception as exc:  # noqa: BLE001 (treat an unreadable /state as unloaded)
+        log_fn(f"[{time.strftime('%T')}] ensure_loaded {label}: /state read error {exc!r} "
+               f"-> treating as unloaded", flush=True)
+        st = {}
+    if state_has_runner(st):
+        detail = f"runner present ({count_ready_runners(st)} ready/idle); no POST needed"
+        log_fn(f"[{time.strftime('%T')}] ensure_loaded {label}: {detail}", flush=True)
+        return True, detail
+    log_fn(f"[{time.strftime('%T')}] ensure_loaded {label}: no runner in /state "
+           f"-> warmup POST (re-trigger JIT load)", flush=True)
+    try:
+        warm = warmup_fn(registry_path=registry_path, label=label)
+    except SystemExit as exc:
+        return False, f"warmup POST failed: {exc}"
+    detail = (f"warmup POST ok (attempts={warm.get('attempts')}, "
+              f"statuses={warm.get('statuses')}, registered={warm.get('registered')})")
+    log_fn(f"[{time.strftime('%T')}] ensure_loaded {label}: {detail}", flush=True)
+    return True, detail
+
+
 def latest_effective_gamma(*, dry: bool = False) -> dict:
     """Read each node's latest ``[DSV41] spec gamma override`` line -> {rank/env/eff} or None."""
     per: dict = {}
@@ -403,20 +475,69 @@ def count_ready_runners(state: dict) -> int:
     return n
 
 
-def wait_ready(*, timeout_s: float = 600, poll_s: float = 10) -> int:
-    """Poll ``GET /state`` until READY 2/2 (both runners placed + idle)."""
+def state_has_runner(state: dict) -> bool:
+    """True if ``GET /state`` shows the model PLACED (a runner or a nonzero instance count).
+
+    Under JIT the idle reaper UNLOADS and removes the instance after 300 s idle:
+    ``instances`` becomes 0 and NO ``RunnerReady``/``RunnerIdle``/``RunnerLoading``
+    entry remains.  In that shape the model is fully gone (not merely idle) and a
+    warmup POST is required to re-place it.
+    """
+    if not isinstance(state, dict):
+        return False
+    runners = state.get("runners")
+    if isinstance(runners, dict):
+        for v in runners.values():
+            if isinstance(v, dict) and any(k in v for k in _RUNNER_STATES):
+                return True
+    inst = state.get("instances")
+    if isinstance(inst, (list, tuple, dict)):
+        return len(inst) > 0
+    if isinstance(inst, int):
+        return inst > 0
+    return False
+
+
+def wait_ready(*, timeout_s: float = 600, poll_s: float = 10, warmup_ok: bool = False,
+               grace_polls: int = 3) -> int:
+    """Poll ``GET /state`` until READY 2/2 (both runners placed + idle).
+
+    ``warmup_ok`` records that a warmup POST already served HTTP 200 for this arm
+    (the model IS serving).  Under JIT the state can be TRANSIENTLY empty right
+    after a warmup while the instance is re-placed, so an empty /state within the
+    first ``grace_polls`` polls is logged as a warning and tolerated (never a
+    SystemExit).  A sustained empty state past the deadline is only fatal when no
+    warmup has proven the model is serving; with ``warmup_ok`` it warns and
+    returns (readiness is proven by the warmup 200, not by /state alone).
+    """
     deadline = time.time() + timeout_s
     last = 0
+    polls = 0
+    empty_polls = 0
     while True:
+        polls += 1
+        has_runner = False
         try:
             st = _fetch_json(f"{API_BASE}/state")
             last = count_ready_runners(st)
+            has_runner = state_has_runner(st)
         except Exception as exc:  # noqa: BLE001
             last = -1
             print(f"[{time.strftime('%T')}] /state poll error: {exc!r}", flush=True)
         if last >= 2:
             return last
+        if not has_runner:
+            empty_polls += 1
+            if warmup_ok and empty_polls <= grace_polls:
+                print(f"[{time.strftime('%T')}] wait_ready: transiently empty /state after a "
+                      f"warmup-200 (poll {polls}, {empty_polls}/{grace_polls}); tolerating",
+                      flush=True)
         if time.time() >= deadline:
+            if warmup_ok:
+                print(f"[{time.strftime('%T')}] WARNING: wait_ready timed out with /state not "
+                      f"READY (count={last}) but the warmup POST served 200 — model is serving; "
+                      f"continuing", flush=True)
+                return max(last, 0)
             raise SystemExit(f"wait_ready timed out; last ready count={last}")
         time.sleep(poll_s)
 
@@ -669,6 +790,10 @@ def run_arm(arm: str, gamma: int, budget: dict, *, out_dir: str) -> dict:
     def run_chunk(kind: str, reps: int) -> None:
         nonlocal own
         label = f"q2gamma_{arm}_{kind}"
+        ok, detail = ensure_loaded(registry_path=registry, label=f"ensure_{label}")
+        print(f"[{time.strftime('%T')}] ensure_loaded before {label}: ok={ok} ({detail})", flush=True)
+        if not ok:
+            raise SystemExit(f"ensure_loaded failed before chunk {label}: {detail}")
         print(f"[{time.strftime('%T')}] wait-idle before {label} ({reps} reps)...", flush=True)
         G.wait_for_idle(max_wait_s=1500, own_requests=own)
         prev_cyc = prev_acc = prev_hist = None
@@ -798,7 +923,7 @@ def main(argv=None) -> int:
         outcome = switch_arm(g, arm=arm, registry_path=arm_registry_path(a.outdir, arm))
         switches[arm] = outcome["mode"]
         print(f"[{time.strftime('%T')}] arm {arm}: switch mode = {outcome['mode']}", flush=True)
-        wait_ready()
+        wait_ready(warmup_ok=bool(outcome.get("warmup_ok")))
         confirm_rank_consistency(g)
         records[arm] = run_arm(arm, g, budget, out_dir=a.outdir)
         records[arm]["switch_mode"] = outcome["mode"]
