@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "A 2-day forecast for Sydney.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"158b6703-d58c-44b8-a8b1-a7af053f1214\",\"object\":\"chat.completion\",\"created\":1791602211,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"We need answer user asks \\\"A 2-day forecast for Sydney.\\\" Need call get_forecast city days=2. Need unit? Not specified. Could choose celsius likely Sydney Australia. Use celsius. Let's call.\",\"tool_calls\":[{\"id\":\"9aede1ba-e119-4a8a-9ce9-b656d56171c7\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"9aede1ba-e119-4a8a-9ce9-b656d56171c7\",\"name\":\"get_forecast\",\"arguments\":\"{\\\"city\\\": \\\"Sydney\\\", \\\"days\\\": 2, \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":509,\"completion_tokens\":118,\"total_tokens\":627,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":45,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

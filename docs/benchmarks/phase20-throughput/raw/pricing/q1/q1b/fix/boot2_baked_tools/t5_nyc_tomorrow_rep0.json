@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "What is the temperature in New York City tomorrow?",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"2ca75cb6-56f1-4498-8d84-3ad688fcaf88\",\"object\":\"chat.completion\",\"created\":1791602192,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"The user wants the temperature in New York City tomorrow. I should use the forecast tool. Let me get a forecast for NYC. Days: 2 would include today and tomorrow, but I need tomorrow specifically. Let me get 2 days.\\n\\nUnit not specified, let me use celsius or fahrenheit. I'll use fahrenheit since NYC commonly uses it. Actually, let me just pick one. Let me use celsius... hmm. I'll go with fahrenheit.\\n\\nLet me call get_forecast with city \\\"New York City\\\", days 2, unit fahrenheit.\",\"tool_calls\":[{\"id\":\"963e9508-c4be-4341-a472-08ef4ccd06e7\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"963e9508-c4be-4341-a472-08ef4ccd06e7\",\"name\":\"get_forecast\",\"arguments\":\"{\\\"city\\\": \\\"New York City\\\", \\\"days\\\": 2, \\\"unit\\\": \\\"fahrenheit\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":511,\"completion_tokens\":192,\"total_tokens\":703,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":117,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

@@ -1,0 +1,704 @@
+{
+  "label": "sharedq8_expanded",
+  "n": 36,
+  "n_pass": 35,
+  "n_fail": 1,
+  "n_leaked": 0,
+  "fails": [
+    "b11_notool_haiku_p2_r0"
+  ],
+  "recs": [
+    {
+      "id": "b01_single_p0_r0",
+      "base": "b01_single",
+      "kind": "call",
+      "prompt": "What's the weather in Paris right now?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 116,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer weather. Need call get_weather Paris unit? User didn't specify. Could use celsius likely. Let's call."
+    },
+    {
+      "id": "b01_single_p1_r0",
+      "base": "b01_single",
+      "kind": "call",
+      "prompt": "Tell me the current weather for Paris.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 145,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer weather Paris. Need call get_weather city Paris unit? Need choose unit. User didn't specify. Could use celsius likely. Let's call."
+    },
+    {
+      "id": "b01_single_p2_r0",
+      "base": "b01_single",
+      "kind": "call",
+      "prompt": "Paris weather, please.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 94,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants Paris weather. Let me get the current weather. Unit? Let me default to celsius."
+    },
+    {
+      "id": "b02_numeric_p0_r0",
+      "base": "b02_numeric",
+      "kind": "call",
+      "prompt": "Give me a 5-day forecast for Tokyo.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 181,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified - I'll default to celsius since Tokyo typically uses celsius."
+    },
+    {
+      "id": "b02_numeric_p1_r0",
+      "base": "b02_numeric",
+      "kind": "call",
+      "prompt": "I want Tokyo's forecast for the next 5 days.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 171,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer user wants Tokyo 5-day forecast. Need call get_forecast city Tokyo days 5. Unit? Not specified. Could choose celsius likely. Need maybe include. Let's call."
+    },
+    {
+      "id": "b02_numeric_p2_r0",
+      "base": "b02_numeric",
+      "kind": "call",
+      "prompt": "Forecast Tokyo 5 days.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 139,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer forecast Tokyo 5 days. Need use get_forecast city Tokyo days 5. Unit? Not specified. Could choose celsius maybe. Let's call."
+    },
+    {
+      "id": "b03_multiarg_p0_r0",
+      "base": "b03_multiarg",
+      "kind": "call",
+      "prompt": "Set the thermostat to 21 degrees in Berlin.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "set_thermostat"
+      ],
+      "expect": [
+        "set_thermostat"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 359,
+      "content": "\n\n",
+      "reasoning_tail": " so 21\u00b0C makes sense. Let me just set it in Celsius.\n\nActually, let me think. The set_thermostat requires a unit. 21 degrees in Berlin \u2014 Berlin uses Celsius, so 21 celsius is reasonable.\n\nI'll set it."
+    },
+    {
+      "id": "b03_multiarg_p1_r0",
+      "base": "b03_multiarg",
+      "kind": "call",
+      "prompt": "Make Berlin's thermostat 21 degrees.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "set_thermostat"
+      ],
+      "expect": [
+        "set_thermostat"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 123,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants to set Berlin's thermostat to 21 degrees. Need to decide unit. Berlin is in Germany, so Celsius makes sense."
+    },
+    {
+      "id": "b03_multiarg_p2_r0",
+      "base": "b03_multiarg",
+      "kind": "call",
+      "prompt": "Berlin heating to 21, please.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "set_thermostat"
+      ],
+      "expect": [
+        "set_thermostat"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 244,
+      "content": "\n\n",
+      "reasoning_tail": "arget 21. Need unit? User says 21, likely celsius? Berlin. We can call set_thermostat city Berlin target_temp 21 unit celsius. Maybe also weather? \"Berlin heating to 21, please.\" Just set. Let's call."
+    },
+    {
+      "id": "b04_parallel_p0_r0",
+      "base": "b04_parallel",
+      "kind": "call",
+      "prompt": "What's the weather in Paris, and give me a 3-day forecast for London.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "expect": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 280,
+      "content": "\n\n",
+      "reasoning_tail": "s. We can parallel. Need get_weather Paris unit? unspecified. Could choose celsius maybe default? Tool requires unit. get_forecast London days 3 unit? unspecified. Use celsius likely. Let's call both."
+    },
+    {
+      "id": "b04_parallel_p1_r0",
+      "base": "b04_parallel",
+      "kind": "call",
+      "prompt": "Current Paris weather plus a 3-day London forecast.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "expect": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 237,
+      "content": "\n\n",
+      "reasoning_tail": "s weather plus 3-day London forecast. Need call tools. Need decide units? Not specified. Could use celsius likely. Need get_weather Paris celsius, get_forecast London days=3. Parallel. Then summarize."
+    },
+    {
+      "id": "b04_parallel_p2_r0",
+      "base": "b04_parallel",
+      "kind": "call",
+      "prompt": "Weather in Paris and a 3-day outlook for London.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "expect": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 349,
+      "content": "",
+      "reasoning_tail": "ys required? days integer. Need choose units. No unit specified. Could use celsius likely. Need call both in parallel. Let's do get_weather Paris celsius, get_forecast London days=3. Then summarize.\n\n"
+    },
+    {
+      "id": "b05_optionalomit_p0_r0",
+      "base": "b05_optionalomit",
+      "kind": "call",
+      "prompt": "What's the weather in Tokyo?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 134,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer weather in Tokyo. Need call get_weather. Need unit? User didn't specify. Could choose celsius likely. Need invoke tool."
+    },
+    {
+      "id": "b05_optionalomit_p1_r0",
+      "base": "b05_optionalomit",
+      "kind": "call",
+      "prompt": "Current conditions in Tokyo please.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 162,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer user asks weather Tokyo current conditions. Need call get_weather. Need decide unit? User didn't specify. Could use celsius likely. Need call tool."
+    },
+    {
+      "id": "b05_optionalomit_p2_r0",
+      "base": "b05_optionalomit",
+      "kind": "call",
+      "prompt": "Tokyo weather?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 150,
+      "content": "\n\n",
+      "reasoning_tail": "The user asks about Tokyo weather. Let me get the current weather. Unit not specified, so I'll pick celsius (common default). Let me call get_weather."
+    },
+    {
+      "id": "b06_unicode_p0_r0",
+      "base": "b06_unicode",
+      "kind": "call",
+      "prompt": "What's the weather in Z\u00fcrich?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 129,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer weather in Z\u00fcrich. Need call get_weather. Need unit? User didn't specify. Could choose celsius likely. Let's call."
+    },
+    {
+      "id": "b06_unicode_p1_r0",
+      "base": "b06_unicode",
+      "kind": "call",
+      "prompt": "Tell me the weather in Z\u00fcrich.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 166,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer weather in Z\u00fcrich. Need call get_weather. Need unit? User didn't specify. Could choose celsius likely. Let's call get_weather city Z\u00fcrich unit celsius."
+    },
+    {
+      "id": "b06_unicode_p2_r0",
+      "base": "b06_unicode",
+      "kind": "call",
+      "prompt": "Z\u00fcrich current weather.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 159,
+      "content": "",
+      "reasoning_tail": "We need answer user asks Z\u00fcrich current weather. Need call get_weather city Z\u00fcrich unit? They didn't specify. Could default likely celsius. Need invoke tool.\n\n"
+    },
+    {
+      "id": "b07_multiword_p0_r0",
+      "base": "b07_multiword",
+      "kind": "call",
+      "prompt": "What's the weather in New York City?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 285,
+      "content": "\n\n",
+      "reasoning_tail": " Could choose default? Tool requires unit. We can call celsius maybe. But maybe better Fahrenheit for NYC? Need maybe call both? Let's call get_weather city New York City unit fahrenheit. Then answer."
+    },
+    {
+      "id": "b07_multiword_p1_r0",
+      "base": "b07_multiword",
+      "kind": "call",
+      "prompt": "Current weather for New York City.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 229,
+      "content": "\n\n",
+      "reasoning_tail": "r for NYC. Need call get_weather with city New York City, unit? User didn't specify. Need maybe default? Tool requires unit enum celsius/fahrenheit. We can choose fahrenheit likely for NYC. Need call."
+    },
+    {
+      "id": "b07_multiword_p2_r0",
+      "base": "b07_multiword",
+      "kind": "call",
+      "prompt": "NYC weather right now.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [
+        "get_weather"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 195,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants NYC weather right now. Let me call get_weather. Unit? Default to celsius or fahrenheit? Let me pick fahrenheit since NYC is US. Actually, let me just pick one. I'll use fahrenheit."
+    },
+    {
+      "id": "b08_longsys_p0_r0",
+      "base": "b08_longsys",
+      "kind": "call",
+      "prompt": "I need Tokyo's outlook for the next 5 days.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 154,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants a 5-day forecast for Tokyo. Call get_forecast with city Tokyo, days 5, unit celsius (default preference is celsius).\n\nLet me make the call."
+    },
+    {
+      "id": "b08_longsys_p1_r0",
+      "base": "b08_longsys",
+      "kind": "call",
+      "prompt": "Give me a forecast for Tokyo covering 5 days.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 157,
+      "content": "\n\n",
+      "reasoning_tail": "We need answer forecast Tokyo 5 days. Need call get_forecast city Tokyo days 5 unit? Prefer celsius unless user says otherwise. Use celsius.\n\nNeed tool call."
+    },
+    {
+      "id": "b08_longsys_p2_r0",
+      "base": "b08_longsys",
+      "kind": "call",
+      "prompt": "5-day forecast for Tokyo, please.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 162,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants a 5-day forecast for Tokyo. Call get_forecast with city Tokyo, days 5, unit celsius (default preference is celsius).\n\nNo dependencies, single call."
+    },
+    {
+      "id": "b09_ambiguous_p0_r0",
+      "base": "b09_ambiguous",
+      "kind": "nocall",
+      "prompt": "What should I do about the weather today?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "length",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 2139,
+      "content": "",
+      "reasoning_tail": "just ask for the city. Actually, I'll ask and also make a call for a default.\n\nDecision: Call get_weather for \"San Francisco\" with celsius, and get_forecast for 3 days, then present and ask to confirm"
+    },
+    {
+      "id": "b09_ambiguous_p1_r0",
+      "base": "b09_ambiguous",
+      "kind": "nocall",
+      "prompt": "Any weather advice for me today?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "stop",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 398,
+      "content": "I'd love to help! Which city are you in (and do you prefer Celsius or Fahrenheit)? Once you tell me, I can pull the current conditions, forecast, air quality, and sunrise time and give you tailored ad",
+      "reasoning_tail": "y.\n\nActually, maybe I should call get_weather for a city... but which? Let me ask. Hmm, but the question is simple. Let me ask for the city.\n\nActually, I could be helpful and just ask. Let me do that."
+    },
+    {
+      "id": "b09_ambiguous_p2_r0",
+      "base": "b09_ambiguous",
+      "kind": "nocall",
+      "prompt": "Should I worry about the weather?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "length",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 2204,
+      "content": "",
+      "reasoning_tail": "n assumption.\n\nI'll go with that approach \u2014 more useful. Let me pick... \"New York\"? Or maybe just ask. \n\nDecision: Ask for clarification but also make calls for a default city? That could be confusing"
+    },
+    {
+      "id": "b10_notool_math_p0_r0",
+      "base": "b10_notool_math",
+      "kind": "nocall",
+      "prompt": "What is 17 times 23?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "stop",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 30,
+      "content": "17 \u00d7 23 = **391**",
+      "reasoning_tail": "17 * 23 = 391. No tool needed."
+    },
+    {
+      "id": "b10_notool_math_p1_r0",
+      "base": "b10_notool_math",
+      "kind": "nocall",
+      "prompt": "Compute 17 * 23.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "stop",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 12,
+      "content": "17 \u00d7 23 = **391**",
+      "reasoning_tail": "17*23 = 391."
+    },
+    {
+      "id": "b10_notool_math_p2_r0",
+      "base": "b10_notool_math",
+      "kind": "nocall",
+      "prompt": "Multiply 17 by 23.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "stop",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 14,
+      "content": "17 \u00d7 23 = **391**",
+      "reasoning_tail": "17 * 23 = 391."
+    },
+    {
+      "id": "b11_notool_haiku_p0_r0",
+      "base": "b11_notool_haiku",
+      "kind": "nocall",
+      "prompt": "Write a short haiku about rain.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "stop",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 487,
+      "content": "Soft rain taps the roof,\nsilver threads on window glass,\nearth drinks quietly.",
+      "reasoning_tail": "2) threads(3?) Let's count: silver=2, threads=1 =>3, on=4, window=2 =>6, glass=7. earth drinks quietly = earth1 drinks2 quiet-ly3? quietly 3 (qui-et-ly) =>5. Good. Haiku. Ensure no title maybe. Final."
+    },
+    {
+      "id": "b11_notool_haiku_p1_r0",
+      "base": "b11_notool_haiku",
+      "kind": "nocall",
+      "prompt": "Compose a haiku on the theme of rain.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "stop",
+      "names": [],
+      "expect": [],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 655,
+      "content": "Silver rain descends,\nwhispering on thirsty leaves,\nearth drinks deeply green.",
+      "reasoning_tail": "green\" (5? earth 1, drinks 1, deep-ly 2, green 1 = 5). Good.\n\nCould include season word. Compose. Maybe title. Final answer just haiku. Ensure no extra? We can present.\n\nNeed maybe mention rain. Good."
+    },
+    {
+      "id": "b11_notool_haiku_p2_r0",
+      "base": "b11_notool_haiku",
+      "kind": "nocall",
+      "prompt": "Give me a rain haiku.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_weather"
+      ],
+      "expect": [],
+      "pass": false,
+      "leaked_xml": false,
+      "n_reasoning": 238,
+      "content": "\n\n",
+      "reasoning_tail": "eck the weather maybe? A haiku about rain. Let me get weather for a city to make it contextual. Let me just get weather for a city \u2014 maybe Tokyo, fitting for haiku.\n\nLet me call get_weather for Tokyo."
+    },
+    {
+      "id": "b12_seq_p0_r0",
+      "base": "b12_seq",
+      "kind": "call",
+      "prompt": "And a 3-day forecast for Paris?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 86,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants a 3-day forecast for Paris. I'll use the same unit (celsius) as before."
+    },
+    {
+      "id": "b12_seq_p1_r0",
+      "base": "b12_seq",
+      "kind": "call",
+      "prompt": "What about a forecast for Paris for 3 days?",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 66,
+      "content": "\n\n",
+      "reasoning_tail": "The user wants a 3-day forecast for Paris. I'll call get_forecast."
+    },
+    {
+      "id": "b12_seq_p2_r0",
+      "base": "b12_seq",
+      "kind": "call",
+      "prompt": "Now give me Paris's 3-day forecast.",
+      "status": 200,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "names": [
+        "get_forecast"
+      ],
+      "expect": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "leaked_xml": false,
+      "n_reasoning": 0,
+      "content": "\n\n",
+      "reasoning_tail": ""
+    }
+  ]
+}

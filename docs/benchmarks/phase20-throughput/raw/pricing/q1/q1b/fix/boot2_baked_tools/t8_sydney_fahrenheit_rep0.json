@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Current weather in Sydney in fahrenheit.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"3233b710-9e95-48ae-a441-130375aa4720\",\"object\":\"chat.completion\",\"created\":1791602206,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"We need answer current weather in Sydney in fahrenheit. Need call get_weather city Sydney unit fahrenheit.\",\"tool_calls\":[{\"id\":\"56786ee7-8ef9-470d-b977-a89bf38a39f7\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"56786ee7-8ef9-470d-b977-a89bf38a39f7\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\": \\\"Sydney\\\", \\\"unit\\\": \\\"fahrenheit\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":509,\"completion_tokens\":78,\"total_tokens\":587,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":22,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

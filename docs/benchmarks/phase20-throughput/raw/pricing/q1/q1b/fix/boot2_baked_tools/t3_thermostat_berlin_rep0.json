@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Set the thermostat to 21 degrees in Berlin.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"a69a12fb-c786-4f35-a69e-5f1455a2bc6e\",\"object\":\"chat.completion\",\"created\":1791602179,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"The user wants to set the thermostat to 21 degrees in Berlin. The unit isn't specified. Let me just set it. But should I check the weather first? The task is simple: set thermostat to 21 degrees in Berlin. Unit is ambiguous \u2014 21 degrees could be Celsius or Fahrenheit. Berlin typically uses Celsius, so 21\u00b0C makes sense.\\n\\nLet me just call set_thermostat with city Berlin, target_temp 21, unit celsius.\",\"tool_calls\":[{\"id\":\"6ac9f37e-5d57-40bd-b975-f7d13ebcbff5\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"6ac9f37e-5d57-40bd-b975-f7d13ebcbff5\",\"name\":\"set_thermostat\",\"arguments\":\"{\\\"city\\\": \\\"Berlin\\\", \\\"target_temp\\\": 21, \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":511,\"completion_tokens\":170,\"total_tokens\":681,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":95,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Turn the heat up to 23 degrees in Rome.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"8cae5ea7-35ab-4420-af66-fa1f5eb35175\",\"object\":\"chat.completion\",\"created\":1791602201,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"The user wants to set thermostat to 23 degrees in Rome. Unit? 23 degrees \u2014 likely Celsius since Rome uses Celsius. Let me set it.\",\"tool_calls\":[{\"id\":\"fbacc892-2694-43ae-a7c6-1ef908c7ba45\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"fbacc892-2694-43ae-a7c6-1ef908c7ba45\",\"name\":\"set_thermostat\",\"arguments\":\"{\\\"city\\\": \\\"Rome\\\", \\\"target_temp\\\": 23, \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":512,\"completion_tokens\":106,\"total_tokens\":618,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":31,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

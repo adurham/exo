@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Give me a 5-day forecast for Tokyo.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"f3c0f907-be6f-4876-8fc0-3ec2c22f9052\",\"object\":\"chat.completion\",\"created\":1791602173,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified but it's required... actually unit is not in required list for get_forecast (required: city, days). Let me include celsius as a sensible choice.\",\"tool_calls\":[{\"id\":\"c5f2eabe-8293-4ae2-bfae-c5ae6070f97b\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"c5f2eabe-8293-4ae2-bfae-c5ae6070f97b\",\"name\":\"get_forecast\",\"arguments\":\"{\\\"city\\\": \\\"Tokyo\\\", \\\"days\\\": 5, \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":511,\"completion_tokens\":137,\"total_tokens\":648,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":64,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

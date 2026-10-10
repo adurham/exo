@@ -1,0 +1,321 @@
+{
+  "label": "sharedq8_tools",
+  "n": 10,
+  "n_pass": 10,
+  "recs": [
+    {
+      "id": "t1_weather_celsius",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 4.09,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "f1f42b1d-c595-4797-992d-501ef6226074",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "f1f42b1d-c595-4797-992d-501ef6226074",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_weather"
+      ],
+      "expect_names": [
+        "get_weather"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "We need answer weather Paris celsius. Use get_weather.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t2_forecast_tokyo",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 5.82,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "4caffae7-5b0f-4a12-838c-3f37b8382dfb",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "4caffae7-5b0f-4a12-838c-3f37b8382dfb",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Tokyo\", \"days\": 5, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified but it's required... actually unit is not in required list for get_forecast (required: city, days). Let me include celsius as a sensible choice.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t3_thermostat_berlin",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 6.6,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "e319f98b-6fab-4d56-9ee9-8a887a248180",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "e319f98b-6fab-4d56-9ee9-8a887a248180",
+            "name": "set_thermostat",
+            "arguments": "{\"city\": \"Berlin\", \"target_temp\": 21, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "set_thermostat"
+      ],
+      "expect_names": [
+        "set_thermostat"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "The user wants to set the thermostat to 21 degrees in Berlin. The unit isn't specified. Let me just set it. But should I check the weather first? The task is simple: set thermostat to 21 degrees in Berlin. Unit is ambiguous \u2014 21 degrees could be Celsius or Fahrenheit. Berlin typically uses Celsius, so 21\u00b0C makes sense.\n\nLet me just call set_thermostat with city Berlin, target_temp 21, unit celsius.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t4_raining_london",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 4.68,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "5d4eeb7a-45c4-4f3e-9eed-99c64e2e5807",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "5d4eeb7a-45c4-4f3e-9eed-99c64e2e5807",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"London\", \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_weather"
+      ],
+      "expect_names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "We need answer. Need call get_weather London. Need unit? User asks raining. Use celsius maybe. Let's call.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t5_nyc_tomorrow",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 7.82,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "20c60914-17be-4f06-b2e0-411b821dabc6",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "20c60914-17be-4f06-b2e0-411b821dabc6",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"New York City\", \"days\": 2, \"unit\": \"fahrenheit\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_forecast",
+        "get_weather"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "The user wants the temperature in New York City tomorrow. I should use the forecast tool. Let me get a forecast for NYC. Days: 2 would include today and tomorrow, but I need tomorrow specifically. Let me get 2 days.\n\nUnit not specified, let me use celsius or fahrenheit. I'll use fahrenheit since NYC commonly uses it. Actually, let me just pick one. Let me use celsius... hmm. I'll go with fahrenheit.\n\nLet me call get_forecast with city \"New York City\", days 2, unit fahrenheit.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t6_forecast_madrid_3",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 4.49,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "bab7bf65-3459-4f5f-8318-6b72103689db",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "bab7bf65-3459-4f5f-8318-6b72103689db",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Madrid\", \"days\": 3, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "I'll get the 3-day forecast for Madrid in celsius.\n\n",
+      "reasoning": "",
+      "has_logprobs": true
+    },
+    {
+      "id": "t7_heat_rome",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 4.92,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "7e20c99f-666e-4d14-9a4c-b5d02ccc7028",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "7e20c99f-666e-4d14-9a4c-b5d02ccc7028",
+            "name": "set_thermostat",
+            "arguments": "{\"city\": \"Rome\", \"target_temp\": 23, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "set_thermostat"
+      ],
+      "expect_names": [
+        "set_thermostat"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "The user wants to set thermostat to 23 degrees in Rome. Unit? 23 degrees \u2014 likely Celsius since Rome uses Celsius. Let me set it.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t8_sydney_fahrenheit",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 4.24,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "4901e784-3f51-4936-a977-1e8aa187cba5",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "4901e784-3f51-4936-a977-1e8aa187cba5",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Sydney\", \"unit\": \"fahrenheit\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_weather"
+      ],
+      "expect_names": [
+        "get_weather"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "We need answer current weather in Sydney in fahrenheit. Need call get_weather city Sydney unit fahrenheit.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t9_sydney_2day",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 5.74,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "e0bb900f-2f64-4bb7-b241-96c7278ef6bb",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "e0bb900f-2f64-4bb7-b241-96c7278ef6bb",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Sydney\", \"days\": 2, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "We need answer user asks \"A 2-day forecast for Sydney.\" Need call get_forecast city days=2. Need unit? Not specified. Could choose celsius likely Sydney Australia. Use celsius. Let's call.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t10_unit_vs_days_confusion",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 6.31,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "8cbcc764-ec99-4eaf-b744-64987730b6ed",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "8cbcc764-ec99-4eaf-b744-64987730b6ed",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Madrid\", \"unit\": \"celsius\"}"
+          }
+        },
+        {
+          "id": "198dfc1b-a6d8-4396-a251-8efc3ee7c1fd",
+          "index": 1,
+          "type": "function",
+          "function": {
+            "id": "198dfc1b-a6d8-4396-a251-8efc3ee7c1fd",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Madrid\", \"days\": 4, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "We need answer user asks weather now and 4-day outlook Madrid celsius. Need call tools. We can call get_weather and get_forecast in parallel. Need use celsius. Let's do.",
+      "has_logprobs": true
+    }
+  ]
+}

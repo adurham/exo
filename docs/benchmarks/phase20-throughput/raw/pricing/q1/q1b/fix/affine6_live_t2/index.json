@@ -1,0 +1,41 @@
+{
+  "label": "affine6_live_t2",
+  "n": 2,
+  "n_pass": 0,
+  "recs": [
+    {
+      "id": "t2_forecast_tokyo",
+      "rep": 0,
+      "status": 503,
+      "elapsed_s": 120.25,
+      "error": "HTTPError",
+      "finish_reason": null,
+      "tool_calls": [],
+      "names": [],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": false,
+      "content": "",
+      "reasoning": "",
+      "has_logprobs": false
+    },
+    {
+      "id": "t2_forecast_tokyo",
+      "rep": 1,
+      "status": 200,
+      "elapsed_s": 6.89,
+      "error": null,
+      "finish_reason": "stop",
+      "tool_calls": [],
+      "names": [],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": false,
+      "content": "",
+      "reasoning": "The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified - I'll pick celsius since Tokyo uses celsius typically. Actually, let me just pick celsius as a sensible choice.\n\n<tool_calls>\n<invoke name=\"get_forecast\">\n<parameter name=\"city\">Tokyo</parameter>\n<parameter name=\"days\">5</parameter>\n<parameter name=\"unit\">celsius</parameter>\n</invoke>\n</ parameter>\n</invoke>\n</ calls>",
+      "has_logprobs": true
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Forecast for Madrid for the next 3 days, in celsius.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"a181227c-e4db-4a66-a8fa-05606e236288\",\"object\":\"chat.completion\",\"created\":1791602196,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"I'll get the 3-day forecast for Madrid in celsius.\\n\\n\",\"tool_calls\":[{\"id\":\"4c06edd6-016f-4a8b-8034-95709a0dda55\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"4c06edd6-016f-4a8b-8034-95709a0dda55\",\"name\":\"get_forecast\",\"arguments\":\"{\\\"city\\\": \\\"Madrid\\\", \\\"days\\\": 3, \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":515,\"completion_tokens\":86,\"total_tokens\":601,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

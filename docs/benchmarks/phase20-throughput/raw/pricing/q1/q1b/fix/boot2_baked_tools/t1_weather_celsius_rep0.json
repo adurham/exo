@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "What is the current weather in Paris, in celsius?",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"66b88460-aad2-4b25-8009-9d35fc8ad991\",\"object\":\"chat.completion\",\"created\":1791602167,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"We need answer weather Paris celsius. Use get_weather.\",\"tool_calls\":[{\"id\":\"e5849709-e822-452b-9a2d-81989194023c\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"e5849709-e822-452b-9a2d-81989194023c\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\": \\\"Paris\\\", \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":512,\"completion_tokens\":68,\"total_tokens\":580,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":12,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

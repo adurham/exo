@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "For Madrid, I want the weather right now and separately a 4-day outlook in celsius.",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"f1bed662-33e6-4aed-85e7-f8f77c923858\",\"object\":\"chat.completion\",\"created\":1791602217,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"We need answer user asks weather now and 4-day outlook Madrid celsius. Need call tools. We can call get_weather and get_forecast in parallel. Need use celsius. Let's do.\",\"tool_calls\":[{\"id\":\"4e0c42b5-5942-4b37-8457-1566ab93d30c\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"4e0c42b5-5942-4b37-8457-1566ab93d30c\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\": \\\"Madrid\\\", \\\"unit\\\": \\\"celsius\\\"}\"}},{\"id\":\"a7fb5c11-767e-4219-8b9b-36ab76b9a38e\",\"index\":1,\"type\":\"function\",\"function\":{\"id\":\"a7fb5c11-767e-4219-8b9b-36ab76b9a38e\",\"name\":\"get_forecast\",\"arguments\":\"{\\\"city\\\": \\\"Madrid\\\", \\\"days\\\": 4, \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":520,\"completion_tokens\":162,\"total_tokens\":682,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":41,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

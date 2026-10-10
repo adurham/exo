@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Is it raining in London right now?",
+    "logprobs": false
+  },
+  "raw_body": "{\"id\":\"2ab40a2b-adae-438d-91af-10878d1aeed6\",\"object\":\"chat.completion\",\"created\":1791602184,\"model\":\"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n\",\"reasoning_content\":\"We need answer. Need call get_weather London. Need unit? User asks raining. Use celsius maybe. Let's call.\",\"tool_calls\":[{\"id\":\"e7ccbe86-620f-46fe-a902-e5de89f20b88\",\"index\":0,\"type\":\"function\",\"function\":{\"id\":\"e7ccbe86-620f-46fe-a902-e5de89f20b88\",\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\": \\\"London\\\", \\\"unit\\\": \\\"celsius\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":509,\"completion_tokens\":82,\"total_tokens\":591,\"prompt_tokens_details\":{\"cached_tokens\":0,\"audio_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":26,\"audio_tokens\":0,\"accepted_prediction_tokens\":0,\"rejected_prediction_tokens\":0}}}"
+}

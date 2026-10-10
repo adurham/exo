@@ -1,0 +1,7 @@
+{
+  "request": {
+    "prompt": "Give me a 5-day forecast for Tokyo.",
+    "logprobs": true
+  },
+  "raw_body": "{\"error\":{\"message\":\"JIT auto-load for model dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw timed out after 120s\",\"type\":\"Service Unavailable\",\"param\":null,\"code\":503}}"
+}

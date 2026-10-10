@@ -1,0 +1,67 @@
+{
+  "label": "exl3_live_t2",
+  "n": 2,
+  "n_pass": 2,
+  "recs": [
+    {
+      "id": "t2_forecast_tokyo",
+      "rep": 0,
+      "status": 200,
+      "elapsed_s": 6.56,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "c6c737fb-38b8-4c17-9ec4-e2fde1524dd5",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "c6c737fb-38b8-4c17-9ec4-e2fde1524dd5",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Tokyo\", \"days\": 5, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified - I'll pick celsius as a sensible default, or I could ask. Let me just use celsius since Tokyo uses celsius. Actually, let me just call it.",
+      "has_logprobs": true
+    },
+    {
+      "id": "t2_forecast_tokyo",
+      "rep": 1,
+      "status": 200,
+      "elapsed_s": 4.07,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "tool_calls": [
+        {
+          "id": "8bbec628-15f4-4d04-bcba-bea017a1f438",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "8bbec628-15f4-4d04-bcba-bea017a1f438",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Tokyo\", \"days\": 5, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "names": [
+        "get_forecast"
+      ],
+      "expect_names": [
+        "get_forecast"
+      ],
+      "pass": true,
+      "content": "\n\n",
+      "reasoning": "The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified - I'll pick celsius as a sensible default, or I could ask. Let me just use celsius since Tokyo uses celsius. Actually, let me just call it.",
+      "has_logprobs": true
+    }
+  ]
+}
