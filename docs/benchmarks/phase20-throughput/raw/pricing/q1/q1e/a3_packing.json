@@ -1,0 +1,314 @@
+{
+  "bench": "q1e_a3_packing",
+  "author": "Phase-20 subagent (A3 desk check)",
+  "date": "2026-10-10 CDT",
+  "host": "studio2 (Adams-Mac-Studio-M4-2)",
+  "mlx_version": "0.32.3.dev20260918+603f16eb7",
+  "script": "raw/pricing/q1/q1e/q1e_packing.py",
+  "question": "What does mx.quantize ACTUALLY emit for bits=3, group_size in {128,64}? Effective bpw -> B_arm.",
+  "method": "mx.quantize(W, group_size=gs, bits=bits), default mode='affine'; nbytes depends only on shape+dtype+bits+group_size (data-independent) -> production-rank-shaped tensors used",
+  "production_rank_shapes": {
+    "gu_fused_rank": [
+      2304,
+      5120
+    ],
+    "gate_rank": [
+      1152,
+      5120
+    ],
+    "dn_rank": [
+      5120,
+      1152
+    ]
+  },
+  "B_arm_basis_gb_per_bpw": 33.974,
+  "emitted_arrays_per_config": {
+    "gu_fused_rank|q3g128": {
+      "q": {
+        "dtype": "uint32",
+        "shape": [
+          2304,
+          480
+        ],
+        "nbytes": 4423680
+      },
+      "scales": {
+        "dtype": "float16",
+        "shape": [
+          2304,
+          40
+        ],
+        "nbytes": 184320
+      },
+      "biases": {
+        "dtype": "float16",
+        "shape": [
+          2304,
+          40
+        ],
+        "nbytes": 184320
+      },
+      "numel": 11796480
+    },
+    "gu_fused_rank|q3g64": {
+      "q": {
+        "dtype": "uint32",
+        "shape": [
+          2304,
+          480
+        ],
+        "nbytes": 4423680
+      },
+      "scales": {
+        "dtype": "float16",
+        "shape": [
+          2304,
+          80
+        ],
+        "nbytes": 368640
+      },
+      "biases": {
+        "dtype": "float16",
+        "shape": [
+          2304,
+          80
+        ],
+        "nbytes": 368640
+      },
+      "numel": 11796480
+    },
+    "gu_fused_rank|q4g64": {
+      "q": {
+        "dtype": "uint32",
+        "shape": [
+          2304,
+          640
+        ],
+        "nbytes": 5898240
+      },
+      "scales": {
+        "dtype": "float16",
+        "shape": [
+          2304,
+          80
+        ],
+        "nbytes": 368640
+      },
+      "biases": {
+        "dtype": "float16",
+        "shape": [
+          2304,
+          80
+        ],
+        "nbytes": 368640
+      },
+      "numel": 11796480
+    },
+    "dn_rank|q3g128": {
+      "q": {
+        "dtype": "uint32",
+        "shape": [
+          5120,
+          108
+        ],
+        "nbytes": 2211840
+      },
+      "scales": {
+        "dtype": "float16",
+        "shape": [
+          5120,
+          9
+        ],
+        "nbytes": 92160
+      },
+      "biases": {
+        "dtype": "float16",
+        "shape": [
+          5120,
+          9
+        ],
+        "nbytes": 92160
+      },
+      "numel": 5898240
+    },
+    "dn_rank|q3g64": {
+      "q": {
+        "dtype": "uint32",
+        "shape": [
+          5120,
+          108
+        ],
+        "nbytes": 2211840
+      },
+      "scales": {
+        "dtype": "float16",
+        "shape": [
+          5120,
+          18
+        ],
+        "nbytes": 184320
+      },
+      "biases": {
+        "dtype": "float16",
+        "shape": [
+          5120,
+          18
+        ],
+        "nbytes": 184320
+      },
+      "numel": 5898240
+    },
+    "dn_rank|q4g64": {
+      "q": {
+        "dtype": "uint32",
+        "shape": [
+          5120,
+          144
+        ],
+        "nbytes": 2949120
+      },
+      "scales": {
+        "dtype": "float16",
+        "shape": [
+          5120,
+          18
+        ],
+        "nbytes": 184320
+      },
+      "biases": {
+        "dtype": "float16",
+        "shape": [
+          5120,
+          18
+        ],
+        "nbytes": 184320
+      },
+      "numel": 5898240
+    }
+  },
+  "eff_bpw_and_B_arm": {
+    "gu_fused_rank": {
+      "shape": {
+        "eff_bpw": 2304,
+        "B_arm_gb": 5120
+      },
+      "q3g128": {
+        "eff_bpw": 3.25,
+        "B_arm_gb": 110.4155
+      },
+      "q3g64": {
+        "eff_bpw": 3.5,
+        "B_arm_gb": 118.909
+      },
+      "q4g64": {
+        "eff_bpw": 4.5,
+        "B_arm_gb": 152.883
+      }
+    },
+    "gate_rank": {
+      "shape": {
+        "eff_bpw": 1152,
+        "B_arm_gb": 5120
+      },
+      "q3g128": {
+        "eff_bpw": 3.25,
+        "B_arm_gb": 110.4155
+      },
+      "q3g64": {
+        "eff_bpw": 3.5,
+        "B_arm_gb": 118.909
+      },
+      "q4g64": {
+        "eff_bpw": 4.5,
+        "B_arm_gb": 152.883
+      }
+    },
+    "dn_rank": {
+      "shape": {
+        "eff_bpw": 5120,
+        "B_arm_gb": 1152
+      },
+      "q3g128": {
+        "eff_bpw": 3.25,
+        "B_arm_gb": 110.4155
+      },
+      "q3g64": {
+        "eff_bpw": 3.5,
+        "B_arm_gb": 118.909
+      },
+      "q4g64": {
+        "eff_bpw": 4.5,
+        "B_arm_gb": 152.883
+      }
+    }
+  },
+  "headline": {
+    "q3g128": {
+      "eff_bpw": 3.25,
+      "B_arm_gb": 110.4155,
+      "arithmetic": "(2211840 + 92160 + 92160)*8/5898240 = 3.25 (dn_rank [5120,1152]); identical for all shapes",
+      "breakdown": "3.0 (3-bit packed) + 16/128 scale + 16/128 bias = 3.25"
+    },
+    "q3g64": {
+      "eff_bpw": 3.5,
+      "B_arm_gb": 118.909,
+      "breakdown": "3.0 + 16/64 scale + 16/64 bias = 3.5"
+    },
+    "q4g64_anchor": {
+      "eff_bpw": 4.5,
+      "B_arm_gb": 152.883,
+      "breakdown": "4.0 + 16/64 scale + 16/64 bias = 4.5"
+    }
+  },
+  "hypothesis_discrimination": {
+    "3.125 (dense 3-bit, scale-only, g128)": "REFUTED",
+    "3.25 (scale+bias, g128)": "MATCHES q3g128 (3.25)",
+    "3.325 (older 10-vals-per-uint32)": "REFUTED (q packs exactly 3.0 bpw)",
+    "verdict": "q3g128 emits q(uint32, exactly 3.0 bpw) + float16 scales + float16 biases (group 128) -> 3.25 bpw exactly"
+  },
+  "anchor_validation": {
+    "round1_doc_stated_q4g64_bpw": 4.25,
+    "measured_q4g64_bpw": 4.5,
+    "verdict": "does NOT reproduce the doc's stated 4.25; MLX affine emits BOTH scales and biases (2x16 bits), so bpw = bits + 2*16/gs. NOTE: the doc's own per-layer arm footprint (3.82 GB for q4g64) IS consistent with 4.5 (6.795e9 * 4.5/8 = 3.822 GB), so the doc's footprint was right and its stated 4.25 (bias omitted) was the error.",
+    "doc_footprint_crosswalk": {
+      "q4g64": "3.82GB->4.5bpw",
+      "q4g32": "4.25GB->5.0bpw(4+2*16/32)",
+      "q5g64": "4.67GB->5.5bpw",
+      "q6g64": "5.52GB->6.5bpw"
+    }
+  },
+  "real_weight_read": {
+    "source": "EXL3 ckpt ~/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw, layers.20.ffn.experts.0.w1 reconstructed (reconstruct_public_mlx)",
+    "dtype": "mlx.core.float16",
+    "shape": [
+      5120,
+      2304
+    ],
+    "q3g128_eff_bpw": 3.25,
+    "q3g64_eff_bpw": 3.5,
+    "q4g64_eff_bpw": 4.5
+  },
+  "sha256_verify_retained_originals_studio1": {
+    "method": "shasum -a 256 on studio1:/tmp/q1d_mem/orig/ (in place, no copy)",
+    "model-00003-of-00048.safetensors": {
+      "got": "e1281f85d0ce4a3dfb63d41926fc4a47fa71f36ba20992e3597e702ead49d4c9",
+      "expected": "e1281f85d0ce4a3dfb63d41926fc4a47fa71f36ba20992e3597e702ead49d4c9",
+      "match": true
+    },
+    "model-00023-of-00048.safetensors": {
+      "got": "680947670e4bd32cfff3d030c97b4009b9cb007cfaa56ad20a701de513e14524",
+      "expected": "680947670e4bd32cfff3d030c97b4009b9cb007cfaa56ad20a701de513e14524",
+      "match": true
+    },
+    "model-00042-of-00048.safetensors": {
+      "got": "e1a4d5d30ae51bafda75078d49b05a585c924b0af9b3481c075b04341507c2ef",
+      "expected": "e1a4d5d30ae51bafda75078d49b05a585c924b0af9b3481c075b04341507c2ef",
+      "match": true
+    },
+    "all_match": true
+  },
+  "notes": {
+    "mxfp4_probe": "mx.quantize(mode='mxfp4') at bits=3 rejected: 'mxfp4 quantization requires group size 32' -> not applicable",
+    "guard": "idle-guarded (rc=0) before/after; no engine touch; no POST; no writes under ~/repos/exo"
+  }
+}

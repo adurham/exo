@@ -1,0 +1,125 @@
+{
+  "bench": "q1e_a2_nwpeak",
+  "author": "Phase-20 subagent (A2 desk check)",
+  "date": "2026-10-10 CDT",
+  "question": "EXL3 incumbent non-weight memory peak at the production target context (~91K agentic) -> P",
+  "node_hw": {
+    "iogpu.wired_limit_mb_both_nodes": 120000,
+    "hw.memsize_B": 137438953472,
+    "W_live_B": 125829120000,
+    "W_live_GB": 125.8291,
+    "W_live_GiB": 117.19
+  },
+  "raw_readings": {
+    "1_vm_series": {
+      "source": "VictoriaMetrics http://172.16.0.42:8428",
+      "metric": "exo_peak_memory_bytes",
+      "metric_help": "Peak memory reported at completion of the most recent request.",
+      "metric_set_from": "GenerationStats.peak_memory_usage.in_bytes  <=  mx.get_peak_memory() (MLX allocator active high-water)",
+      "exact_query": "max_over_time(exo_peak_memory_bytes{instance=\"macstudio-m4-1\",instance_id=\"7aa2dbd3-3867-40b3-bbad-51b8c3519a26\"}[30d])",
+      "value_B": 124832997783,
+      "value_GB": 124.833,
+      "instance": "macstudio-m4-1",
+      "instance_id": "7aa2dbd3-3867-40b3-bbad-51b8c3519a26",
+      "cross_check_m4_2_historical_master_max_GB": 124.851,
+      "context_at_peak": "rose 119.219->124.833 GB; the 124.833 value appears right after the 102,411-token prompt that finished 2026-10-10 00:41:06 CDT (>= 91K target)"
+    },
+    "2_exo_state_api": {
+      "source": "http://192.168.86.48:52415/state",
+      "memory_fields_found": "none (only modelCard.storageSize.inBytes=210713013432 and jit memory fields; no per-process footprint)",
+      "modelCard_storageSize_B": 210713013432,
+      "note": "storageSize = whole-model (both ranks) on-disk size -> /2 = 105.36 GB/rank"
+    },
+    "3_node_runner_log": {
+      "source": "studio1+studio2 ~/exo.log, anchored to CURRENT process (studio1 pid=49282 launched 2026-10-09 22:43:24; studio2 pid=59746)",
+      "line_requires": "Generating with a model that requires 200951.6 MB",
+      "line_wired": "Wired limit set to 117.19 GiB",
+      "line_body_loaded": "[DSV41] body loaded in 64.0s: built=40/40 layers, rank=1/2, mtp_layers_skipped=3, vb_bias_loaded=True; active=104.7 GB",
+      "active_is": "mx.get_active_memory() / 1e9 (loader.py:190) => per-rank resident weights",
+      "active_value_GB_both_ranks": 104.7,
+      "warmup_peak_log_GB": 110.5
+    },
+    "4_idle_guarded_footprint_observation": {
+      "source": "studio1 `footprint -p 49330` (read-only), runner child of exo parent 49282",
+      "runner_phys_footprint_peak_GB": 114.0,
+      "runner_phys_footprint_now_GB": 106.0,
+      "breakdown_now_GB": {
+        "IOAccelerator(graphics)": 105,
+        "Malloc Large": 1.019,
+        "Malloc Small": 0.346,
+        "Untagged": 0.234,
+        "page table": 0.054
+      },
+      "parent_exo_pid_49282_footprint_MB": 227,
+      "footprint_unit": "decimal GB (verified: '105 GB' IOAccelerator ~= MLX active 104.7e9)"
+    },
+    "5_vm_system_ram_used": {
+      "metric": "exo_memory_ram_used_bytes",
+      "m4_1_node_f8754a0e_GB": 119.5374,
+      "m4_2_node_e662cd77_GB": 107.985
+    },
+    "6_weights_cross_checks": {
+      "header_per_rank_GB_doc": 108.963,
+      "live_measured_doc_GB": 105.5,
+      "storageSize_over_2_GB": 105.357,
+      "loader_active_GB": 104.7
+    }
+  },
+  "mlx_peak_semantics_measured_on_studio2": {
+    "test": "alloc 256MB, free, realloc; read active/peak/cache",
+    "peak_after_reset_at_idle": 0,
+    "after_alloc_256mb_peak_B": 268436480,
+    "after_free_active_B": 256,
+    "after_free_cache_B": 367839232,
+    "after_free_peak_B": 268436480,
+    "conclusion": "get_peak_memory() is a HIGH-WATER of ACTIVE memory only (cache is a separate counter); it does not drop on free. It is the allocator-side quantity (same domain as the wired limit), not necessarily resident."
+  },
+  "derivation": {
+    "definition_used": "non_weight_peak = peak_total - per_rank_weight_total ; P = non_weight_peak + 2 GB",
+    "weights_used_GB": 104.7,
+    "weights_provenance": "live loader log line 'active=104.7 GB' = mx.get_active_memory() on BOTH ranks of the CURRENT process (studio1 pid 49282 / studio2 pid 59746)",
+    "PRIMARY_resident": {
+      "peak_total_GB": 114.0,
+      "peak_source": "OS phys_footprint_peak (footprint -p 49330, studio1)",
+      "non_weight_peak_GB": 9.3,
+      "P_gb": 11.3,
+      "rationale": "a 'memory peak' is a resident quantity; reconciles with the doc's 11.01 GB"
+    },
+    "ALT_mlx_allocator": {
+      "peak_total_GB": 124.833,
+      "peak_source": "VM exo_peak_memory_bytes (mx.get_peak_memory)",
+      "non_weight_peak_GB": 20.133,
+      "P_gb": 22.133,
+      "note": "allocator high-water; exceeds the OS resident peak by ~10.8 GB (allocated-but-not-resident prefill transient); this is the domain of the W_live rule"
+    },
+    "variants_with_other_weight_defs": {
+      "header_108.963_footprint": {
+        "non_weight_GB": 5.037,
+        "P_gb": 7.037
+      },
+      "header_108.963_mlx": {
+        "non_weight_GB": 15.87,
+        "P_gb": 17.87
+      },
+      "storageOver2_105.36_footprint": {
+        "non_weight_GB": 8.64,
+        "P_gb": 10.64
+      },
+      "storageOver2_105.36_mlx": {
+        "non_weight_GB": 19.473,
+        "P_gb": 21.473
+      }
+    }
+  },
+  "reconciliation": {
+    "doc_non_weight_GB": 11.01,
+    "doc_breakdown": "10.71 non-expert rest weights + 0.30 KV@91K",
+    "observed_peak_includes_KV_at_91K": true,
+    "note": "observed peak is at a 102,411-token request (>=91K) so it includes KV at ~102K; resident non-weight (9.3) is within ~15% of the doc's 11.01 (which additionally counts the non-expert rest weights, themselves inside the 104.7 weight total). The MLX allocator high-water (20.13) additionally carries ~10.8 GB of allocated-but-non-resident prefill transient the doc omits."
+  },
+  "unavailable_sources": [
+    "exo /state has no memory/footprint field (source 2 gave no reading)"
+  ],
+  "P_gb": 11.3,
+  "P_gb_alt_mlx_allocator": 22.133
+}

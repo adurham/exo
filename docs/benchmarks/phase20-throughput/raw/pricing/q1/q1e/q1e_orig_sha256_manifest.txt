@@ -1,0 +1,12 @@
+# Retained sampled ORIGINAL pre-EXL3 shards — sha256 manifest (durable backstop)
+# Source: HF dealignai/DeepSeek-V4.1-Flash-UNCENSORED-FP8  (public, 510.3 GB, 48 shards; 1 shard/layer, shards 3-42 = layers 0-39)
+# Fetched: Round 1 (ROUND-Q1D-MICROBENCH), 2026-10-10, throttled curl --limit-rate 20M.
+# Location: studio1:/tmp/q1d_mem/orig/
+# Re-verified (sha256, on-node shasum) ROUND 2 (ROUND-Q1E-Q3ARM), 2026-10-10: ALL THREE MATCH.
+#
+# filename                                 layer  bytes          sha256
+model-00003-of-00048.safetensors           0      7389759032     e1281f85d0ce4a3dfb63d41926fc4a47fa71f36ba20992e3597e702ead49d4c9
+model-00023-of-00048.safetensors           20     7400713088     680947670e4bd32cfff3d030c97b4009b9cb007cfaa56ad20a701de513e14524
+model-00042-of-00048.safetensors           39     7389761368     e1a4d5d30ae51bafda75078d49b05a585c924b0af9b3481c075b04341507c2ef
+# (also present: config.json, model.safetensors.index.json; fetch_q1d.log; fetch script q1d/fetch_q1d_orig_shards.sh)
+# Total sampled bytes = 22.18 GB. These are the ONLY layers sampled; the full >200 GB checkpoint was never fetched.
