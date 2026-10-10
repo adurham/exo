@@ -396,13 +396,18 @@ def warmup_checks():
                 res["ok"] is True and res["attempts"] == 2 and res["statuses"] == [503, 200],
                 f"attempts={res['attempts']} statuses={res['statuses']}"))
 
-    # ---- warmup-registration assertion -------------------------------------
+    # ---- warmup-registration assertion (a): N attempts => N registered epochs ----
     own = DRV._load_own(reg)
     raw = [json.loads(x) for x in open(reg, encoding="utf-8").read().splitlines() if x.strip()]
-    out.append(("warmup: POST epoch registered (own-request registry, guard format + label)",
-                len(own) == 1 and abs(own[0] - res["t_reg"]) < 1e-6
-                and raw and raw[0]["label"] == "warmup_gammaX" and raw[0]["t"] == res["t_reg"],
-                f"own={own} raw_label={raw[0]['label'] if raw else None}"))
+    out.append(("warmup: a 503->200 retry registers ONE own-request epoch PER attempt "
+                "(2 POSTs => 2 epochs, guard format)",
+                len(own) == 2 and len(res["t_regs"]) == 2
+                and abs(own[0] - res["t_regs"][0]) < 1e-6
+                and abs(own[1] - res["t_regs"][1]) < 1e-6
+                and own[0] != own[1]
+                and len(raw) == 2 and all(r["label"] == "warmup_gammaX" for r in raw)
+                and raw[0]["t"] == res["t_regs"][0] and raw[1]["t"] == res["t_regs"][1],
+                f"n_epochs={len(own)} t_regs={res['t_regs']} labels={[r['label'] for r in raw]}"))
 
     # ---- warmup: transport error (API still coming up) then 200 => proceed --
     seq2 = [None, 200]
@@ -573,8 +578,159 @@ def warmup_checks():
     return out
 
 
+def replay_resilience_checks():
+    """replay_once JIT-unload resilience: 5xx retry, per-attempt own-request, bounds."""
+    import email.message
+    import urllib.error
+    out = []
+    quiet = lambda *a, **k: None  # noqa: E731
+    ok_result = {"wall_s": 1.0, "ttft_s": 0.1, "decode_s": 0.5, "content_chars": 3,
+                 "usage": {}, "stats": {}, "finish_reason": "stop",
+                 "tokens": [], "top2_logprobs": [], "logprobs_available": True}
+
+    def _http(code):
+        return urllib.error.HTTPError(DRV.API_BASE, code, f"HTTP {code}",
+                                      email.message.Message(), None)
+
+    # ---- (c) HTTP 503 (JIT unload) then 200 => ensure_loaded + retry succeeds -----
+    seq = {"n": 0}
+
+    def stream_503_then_ok(body, **kw):
+        seq["n"] += 1
+        if seq["n"] == 1:
+            raise _http(503)
+        return dict(ok_result)
+
+    ensure_calls = {"n": 0}
+
+    def fake_ensure(**k):
+        ensure_calls["n"] += 1
+        return True, "warmup POST ok (attempts=2, statuses=[503, 200], registered=True)"
+
+    r = DRV.replay_once("hi", 8, stream_fn=stream_503_then_ok, ensure_loaded_fn=fake_ensure,
+                        sleep_fn=lambda _s: None, log_fn=quiet)
+    out.append(("replay_once: HTTP 503 then 200 => ensure_loaded (JIT reload) + retry succeeds",
+                seq["n"] == 2 and ensure_calls["n"] == 1 and r["finish_reason"] == "stop",
+                f"stream_calls={seq['n']} ensure_calls={ensure_calls['n']}"))
+
+    # ---- own-request epoch registered IMMEDIATELY BEFORE EVERY POST attempt -------
+    reg = {"n": 0, "epochs": []}
+
+    def stream_two_503_then_ok(body, **kw):
+        reg["n"] += 1
+        if reg["n"] <= 2:
+            raise _http(503)
+        return dict(ok_result)
+
+    DRV.replay_once("hi", 8, register_fn=lambda t: reg["epochs"].append(t),
+                    stream_fn=stream_two_503_then_ok, ensure_loaded_fn=lambda **k: (True, "stub"),
+                    sleep_fn=lambda _s: None, log_fn=quiet)
+    out.append(("replay_once: own-request epoch registered before EVERY POST attempt "
+                "(2 retries + 1 success => 3 epochs)",
+                reg["n"] == 3 and len(reg["epochs"]) == 3,
+                f"attempts={reg['n']} epochs={len(reg['epochs'])}"))
+
+    # ---- register_fn forwarded to ensure_loaded (mid-chunk reload lands in guard) --
+    def sentinel(t):
+        pass  # unique callable identity to prove forwarding
+
+    fwd = {"seen": None}
+
+    def ensure_probe(**k):
+        fwd["seen"] = k.get("register_fn")
+        return True, "stub"
+
+    probe = {"n": 0}
+
+    def stream_503_then_ok2(body, **kw):
+        probe["n"] += 1
+        if probe["n"] == 1:
+            raise _http(503)
+        return dict(ok_result)
+
+    DRV.replay_once("hi", 8, register_fn=sentinel, stream_fn=stream_503_then_ok2,
+                    ensure_loaded_fn=ensure_probe, sleep_fn=lambda _s: None, log_fn=quiet)
+    out.append(("replay_once: register_fn forwarded to ensure_loaded (reload epoch is own)",
+                fwd["seen"] is sentinel, f"forwarded={fwd['seen'] is sentinel}"))
+
+    # ---- (d) persistent 503 => raises after the bounded retry budget --------------
+    calls = {"n": 0}
+
+    def always_503(body, **kw):
+        calls["n"] += 1
+        raise _http(503)
+
+    raised = False
+    try:
+        DRV.replay_once("hi", 8, stream_fn=always_503, ensure_loaded_fn=lambda **k: (True, "stub"),
+                        sleep_fn=lambda _s: None, log_fn=quiet, max_attempts=3)
+    except urllib.error.HTTPError as exc:
+        raised = (exc.code == 503)
+    out.append(("replay_once: persistent 503 => raises HTTPError after the retry budget (bounded)",
+                raised and calls["n"] == 3, f"raised={raised} attempts={calls['n']}"))
+
+    # ---- non-5xx (HTTP 400) => raised IMMEDIATELY, no retry -----------------------
+    calls400 = {"n": 0}
+
+    def always_400(body, **kw):
+        calls400["n"] += 1
+        raise _http(400)
+
+    raised400 = False
+    try:
+        DRV.replay_once("hi", 8, stream_fn=always_400, ensure_loaded_fn=lambda **k: (True, "stub"),
+                        sleep_fn=lambda _s: None, log_fn=quiet)
+    except urllib.error.HTTPError as exc:
+        raised400 = (exc.code == 400)
+    out.append(("replay_once: HTTP 400 (non-5xx) => raises immediately, NO retry",
+                raised400 and calls400["n"] == 1, f"attempts={calls400['n']}"))
+
+    # ---- transport URLError => treated as model-not-loaded and retried ------------
+    u = {"n": 0}
+
+    def url_err_then_ok(body, **kw):
+        u["n"] += 1
+        if u["n"] == 1:
+            raise urllib.error.URLError("connection refused")
+        return dict(ok_result)
+
+    ru = DRV.replay_once("hi", 8, stream_fn=url_err_then_ok,
+                         ensure_loaded_fn=lambda **k: (True, "stub"),
+                         sleep_fn=lambda _s: None, log_fn=quiet)
+    out.append(("replay_once: transport URLError => retried (model-not-loaded signal)",
+                u["n"] == 2 and ru["finish_reason"] == "stop", f"stream_calls={u['n']}"))
+
+    # ---- 503 past the retry WALL budget => bounded (fewer than max_attempts) ------
+    class _C:
+        def __init__(self, step):
+            self.t = 0.0
+            self.step = step
+
+        def __call__(self):
+            self.t += self.step
+            return self.t
+
+    calls_b = {"n": 0}
+
+    def always_503b(body, **kw):
+        calls_b["n"] += 1
+        raise _http(503)
+
+    raised_b = False
+    try:
+        DRV.replay_once("hi", 8, stream_fn=always_503b, ensure_loaded_fn=lambda **k: (True, "stub"),
+                        sleep_fn=lambda _s: None, log_fn=quiet, now_fn=_C(400.0),
+                        max_attempts=5, retry_budget_s=600.0)
+    except urllib.error.HTTPError:
+        raised_b = True
+    out.append(("replay_once: 503 past the retry wall budget => raises (budget-bounded)",
+                raised_b and calls_b["n"] < 5, f"raised={raised_b} attempts={calls_b['n']}"))
+
+    return out
+
+
 def run_arm_wiring_check():
-    """Integration: run_arm calls ensure_loaded at the START of each chunk (pre-idle-guard)."""
+    """Integration: run_arm ensure_loaded BOTH before AND after the idle-guard per chunk."""
     out = []
     order: list = []
 
@@ -619,9 +775,18 @@ def run_arm_wiring_check():
         def build_agentic_prompt(salt, _):
             return f"A{salt}", {}
 
+    ensure_details: list = []
+
     def fake_ensure(**k):
         order.append("ensure")
-        return True, "runner present; no POST"
+        # 1st call per chunk (pre-guard): the model is present.  2nd call (post-guard):
+        # the guard wait UNLOADED the model -> the reload fires.
+        if len(ensure_details) % 2 == 0:
+            detail = "runner present (2 ready/idle); no POST needed"
+        else:
+            detail = "no runner in /state -> warmup POST (re-trigger JIT load)"
+        ensure_details.append(detail)
+        return True, detail
 
     def fake_replay(prompt, max_tokens, **k):
         return {"stats": {}, "usage": {}, "logprobs_available": True}
@@ -638,9 +803,19 @@ def run_arm_wiring_check():
         tmpd = tempfile.mkdtemp(prefix="q2gamma_runarm_")
         rec = DRV.run_arm("gamma3a", 3, {"benign_reps": 1, "agentic_reps": 1}, out_dir=tmpd)
         chunk_order = [x for x in order if x in ("ensure", "idle", "chunk")]
-        out.append(("run_arm: ensure_loaded at the START of EVERY chunk (before the idle-guard)",
-                    chunk_order == ["ensure", "idle", "chunk", "ensure", "idle", "chunk"],
+        out.append(("run_arm: ensure_loaded BOTH before AND after the idle-guard in EVERY chunk "
+                    "(pre-guard + post-guard)",
+                    chunk_order == ["ensure", "idle", "ensure", "chunk",
+                                    "ensure", "idle", "ensure", "chunk"],
                     f"order={chunk_order}"))
+        out.append(("run_arm (b): the post-guard ensure_loaded reloads a model the guard wait unloaded",
+                    ensure_details == [
+                        "runner present (2 ready/idle); no POST needed",
+                        "no runner in /state -> warmup POST (re-trigger JIT load)",
+                        "runner present (2 ready/idle); no POST needed",
+                        "no runner in /state -> warmup POST (re-trigger JIT load)",
+                    ],
+                    f"ensure_details={ensure_details}"))
         out.append(("run_arm: benign+agentic chunks both measured under the ensure guard",
                     len(rec["benign"]) == 1 and len(rec["agentic"]) == 1,
                     f"benign={len(rec['benign'])} agentic={len(rec['agentic'])}"))
@@ -659,6 +834,7 @@ def all_checks():
     out += evaluator_checks()
     out += harness_checks()
     out += warmup_checks()
+    out += replay_resilience_checks()
     out += run_arm_wiring_check()
     return out
 

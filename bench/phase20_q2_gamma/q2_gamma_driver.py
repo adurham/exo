@@ -85,6 +85,19 @@ WARMUP_RETRY_SLEEP_S = 5.0    # pause between retries
 WARMUP_BODY = {"model": MODEL, "messages": [{"role": "user", "content": "Say OK."}],
                "max_tokens": 8, "temperature": 0.0, "stream": False}
 
+# --- replay 5xx retry (mid-chunk JIT (re)load signal) ------------------------
+# A benign/agentic replay POST can hit HTTP 503 if the JIT idle reaper unloaded the
+# model BEFORE the first rep lands (e.g. the idle-guard wait exceeded
+# EXO_JIT_IDLE_UNLOAD_SECONDS=300 and the instance was reaped).  Rather than raise
+# and kill the whole run, treat 5xx (and transport errors) as "model not loaded
+# yet": re-trigger the JIT load via ``ensure_loaded()`` (which registers that load
+# POST as own), then RETRY the POST — bounded.  Non-5xx HTTP errors still raise at
+# once (a 4xx is a config error, not a slow load).  The repair must work with
+# EXO_JIT_IDLE_UNLOAD_SECONDS=300 as-is (no env/JIT-setting change).
+REPLAY_MAX_ATTEMPTS = 5         # bounded POST-attempt budget per replay
+REPLAY_RETRY_SLEEP_S = 20.0     # pause between replay retries (~15-20 s)
+REPLAY_RETRY_BUDGET_S = 600.0   # total replay-retry wall budget (<= ~10 min)
+
 # A ``GET /state`` runner entry counts as "present" (model placed) if any of
 # these appear; the JIT idle reaper removes the instance entirely (NO runner,
 # ``instances`` 0) so presence is decided by these keys + a nonzero count.
@@ -353,22 +366,37 @@ def _http_warmup_post(body: dict | None = None, *, timeout_s: float = WARMUP_HTT
 
 def warmup_post(*, registry_path: str | None = None, label: str = "warmup",
                 timeout_s: float = WARMUP_TIMEOUT_S, retry_sleep_s: float = WARMUP_RETRY_SLEEP_S,
-                post_fn=None, sleep_fn=time.sleep, now_fn=time.time, log_fn=print) -> dict:
+                post_fn=None, sleep_fn=time.sleep, now_fn=time.time, log_fn=print,
+                register_fn=None) -> dict:
     """Trigger the JIT model load with a tiny POST; retry on 503 until 200.
 
-    The POST epoch is registered in ``registry_path`` BEFORE sending so the next
-    idle guard treats this driver traffic as own.  HTTP 200 => success.  HTTP
-    5xx / transport errors are retried until ``timeout_s``; other non-200 codes
-    are a hard failure (config error, not a slow load).
+    A FRESH own-request epoch is registered immediately BEFORE EVERY POST attempt
+    (in ``registry_path``, or via ``register_fn`` when the caller owns the guard's
+    in-memory registry), so a 503-then-200 retry leaves TWO registered epochs — one
+    per POST send.  This is load-bearing: the idle guard matches a node log line to
+    a registered epoch within ±2 s (``phase20_guard.OWN_MATCH_WINDOW_S``), and a
+    single pre-loop registration would leave the RETRY attempt's ``API request: POST
+    /v1/chat/completions`` line unmatched -> the guard waits the full min-idle window
+    and the JIT reaper unloads the model mid-wait.  HTTP 200 => success.  HTTP 5xx /
+    transport errors are retried until ``timeout_s``; other non-200 codes are a hard
+    failure (config error, not a slow load).
     """
     post_fn = _http_warmup_post if post_fn is None else post_fn
-    t_reg = register_own_request(registry_path, now_fn(), label)
     t0 = now_fn()
     deadline = t0 + timeout_s
     attempt = 0
     statuses: list = []
+    t_regs: list[float] = []
     while True:
         attempt += 1
+        # Register the own-request epoch IMMEDIATELY BEFORE this attempt's POST send
+        # (per-attempt, NOT once for the whole loop): the retry's log line must match.
+        t_reg = now_fn()
+        if register_fn is not None:
+            register_fn(t_reg)
+        else:
+            register_own_request(registry_path, t_reg, label)
+        t_regs.append(t_reg)
         a0 = now_fn()
         status = post_fn()
         elapsed = now_fn() - a0
@@ -377,8 +405,9 @@ def warmup_post(*, registry_path: str | None = None, label: str = "warmup",
                f"in {elapsed:.1f}s (total {now_fn() - t0:.1f}s)", flush=True)
         if status == 200:
             return {"ok": True, "attempts": attempt, "statuses": statuses,
-                    "elapsed_s": round(now_fn() - t0, 3), "registered": bool(registry_path),
-                    "t_reg": t_reg}
+                    "elapsed_s": round(now_fn() - t0, 3),
+                    "registered": bool(registry_path or register_fn),
+                    "t_reg": t_regs[0], "t_regs": t_regs}
         if status is not None and not (500 <= status < 600):
             raise SystemExit(f"warmup {label}: hard HTTP failure {status} "
                              f"(not a retryable JIT-load timeout)")
@@ -389,7 +418,7 @@ def warmup_post(*, registry_path: str | None = None, label: str = "warmup",
 
 
 def ensure_loaded(*, registry_path: str | None = None, label: str = "ensure_loaded",
-                  state_fn=None, warmup_fn=None, log_fn=print) -> tuple[bool, str]:
+                  state_fn=None, warmup_fn=None, log_fn=print, register_fn=None) -> tuple[bool, str]:
     """Guarantee the JIT model is LOADED; repair a silent idle-unload.  -> (ok, detail).
 
     GET ``/state``: if a runner is present (``RunnerReady``/``RunnerIdle``/
@@ -399,9 +428,15 @@ def ensure_loaded(*, registry_path: str | None = None, label: str = "ensure_load
     the own-request registry so the load is re-triggered.  A warmup that fails
     (SystemExit) is caught and reported as ``ok=False`` so the caller decides.
 
+    ``register_fn`` (optional) routes the warmup's own-request epoch into a
+    caller-owned registry (e.g. ``ChunkGuard.register_own_request``) instead of the
+    file, so a mid-chunk reload is matched by the chunk guard as own.
+
     Called (a) at the end of :func:`switch_arm` (belt-and-suspenders after the
-    warmup) and (b) at the START of each measurement chunk in :func:`run_arm`
-    (before the idle-guard) so a mid-arm JIT unload is transparently repaired.
+    warmup), (b) at the START of each measurement chunk in :func:`run_arm` (before
+    the idle-guard), and (c) AFTER the idle-guard, immediately before the first rep
+    (the guard wait can exceed EXO_JIT_IDLE_UNLOAD_SECONDS=300, so the JIT reaper may
+    have unloaded the model DURING the wait).
     """
     state_fn = _fetch_json if state_fn is None else state_fn
     warmup_fn = warmup_post if warmup_fn is None else warmup_fn
@@ -418,7 +453,7 @@ def ensure_loaded(*, registry_path: str | None = None, label: str = "ensure_load
     log_fn(f"[{time.strftime('%T')}] ensure_loaded {label}: no runner in /state "
            f"-> warmup POST (re-trigger JIT load)", flush=True)
     try:
-        warm = warmup_fn(registry_path=registry_path, label=label)
+        warm = warmup_fn(registry_path=registry_path, label=label, register_fn=register_fn)
     except SystemExit as exc:
         return False, f"warmup POST failed: {exc}"
     detail = (f"warmup POST ok (attempts={warm.get('attempts')}, "
@@ -600,19 +635,14 @@ def _fetch_json(url: str, *, timeout: float = 10.0) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def replay_once(prompt: str, max_tokens: int, *, top_n: int = TOP_N,
-                capture_positions: int = CAPTURE_POSITIONS) -> dict:
-    """One fixed replay; SSE parser mirroring the r1kit ``stream_once`` plus logprobs.
+def _stream_post_once(body: dict, *, timeout_s: float = 3600,
+                      capture_positions: int = CAPTURE_POSITIONS) -> dict:
+    """Send ONE streaming chat-completion POST and parse the SSE body -> result dict.
 
-    Requests ``logprobs=True, top_logprobs=top_n`` and captures the first
-    ``capture_positions`` (token, (lp_top1, lp_top2)) pairs so the identity
-    gate's first-divergence margin is computable.  Returns the same keys the
-    r1kit driver produces (``wall_s/ttft_s/decode_s/content_chars/usage/stats/
-    finish_reason``) plus ``tokens`` and ``top2_logprobs``.
+    Raises ``urllib.error.HTTPError`` on a non-2xx status (e.g. HTTP 503 when the JIT
+    model is unloaded) and ``urllib.error.URLError`` on a transport failure, so
+    :func:`replay_once` can treat either as a mid-run JIT unload signal and retry.
     """
-    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_tokens, "temperature": 0, "stream": True,
-            "logprobs": True, "top_logprobs": top_n}
     req = urllib.request.Request(API_BASE + "/v1/chat/completions",
                                  data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
@@ -623,7 +653,7 @@ def replay_once(prompt: str, max_tokens: int, *, top_n: int = TOP_N,
     tokens: list = []
     top2: list = []
     lp_seen = False
-    with urllib.request.urlopen(req, timeout=3600) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\n")
             if line.startswith(": generation_stats"):
@@ -669,6 +699,91 @@ def replay_once(prompt: str, max_tokens: int, *, top_n: int = TOP_N,
             "decode_s": round(last - first, 4) if (first and last and last > first) else None,
             "content_chars": chars, "usage": usage, "stats": stats, "finish_reason": finish,
             "tokens": tokens, "top2_logprobs": top2, "logprobs_available": lp_seen}
+
+
+def replay_once(prompt: str, max_tokens: int, *, top_n: int = TOP_N,
+                capture_positions: int = CAPTURE_POSITIONS,
+                registry_path: str | None = None, label: str = "replay",
+                register_fn=None, ensure_loaded_fn=None, stream_fn=None,
+                sleep_fn=time.sleep, now_fn=time.time, log_fn=print,
+                max_attempts: int = REPLAY_MAX_ATTEMPTS,
+                retry_sleep_s: float = REPLAY_RETRY_SLEEP_S,
+                retry_budget_s: float = REPLAY_RETRY_BUDGET_S) -> dict:
+    """One fixed replay; SSE parser mirroring the r1kit ``stream_once`` plus logprobs.
+
+    Requests ``logprobs=True, top_logprobs=top_n`` and captures the first
+    ``capture_positions`` (token, (lp_top1, lp_top2)) pairs so the identity gate's
+    first-divergence margin is computable.  Returns the same keys the r1kit driver
+    produces (``wall_s/ttft_s/decode_s/content_chars/usage/stats/finish_reason``)
+    plus ``tokens`` and ``top2_logprobs``.
+
+    JIT-unload resilience: an HTTP 5xx (502/503/504 — the JIT (re)load signal) or a
+    transport error means the model was unloaded mid-run (e.g. the idle-guard wait
+    exceeded EXO_JIT_IDLE_UNLOAD_SECONDS=300 and the reaper removed the instance).
+    Instead of raising, call ``ensure_loaded_fn`` (which re-triggers the JIT load and
+    registers that load POST as own), then RETRY the POST — bounded by
+    ``max_attempts`` and ``retry_budget_s``.  Each attempt re-registers its own-request
+    epoch immediately before sending (via ``register_fn`` when the caller owns the
+    guard's in-memory registry, else into ``registry_path``).  A non-5xx HTTP error
+    (e.g. 400) is a hard failure: re-raised at once, with NO retry.
+    """
+    import urllib.error
+
+    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens, "temperature": 0, "stream": True,
+            "logprobs": True, "top_logprobs": top_n}
+    stream_fn = _stream_post_once if stream_fn is None else stream_fn
+    if ensure_loaded_fn is None:
+        ensure_loaded_fn = ensure_loaded
+
+    def _attempt() -> dict:
+        # Register a fresh own-request epoch IMMEDIATELY BEFORE this POST send so the
+        # guard matches THIS attempt's log line as own (per-attempt, not once).
+        t = now_fn()
+        if register_fn is not None:
+            register_fn(t)
+        else:
+            register_own_request(registry_path, t, label)
+        return stream_fn(body, capture_positions=capture_positions)
+
+    attempt = 0
+    t_start = now_fn()
+    last_exc: Exception | None = None
+    while attempt < max_attempts:
+        attempt += 1
+        try:
+            return _attempt()
+        except urllib.error.HTTPError as exc:
+            if not (500 <= exc.code < 600):
+                raise  # 4xx / other => hard config error, NOT a slow JIT load
+            last_exc = exc
+            desc = f"HTTP {exc.code}"
+        except urllib.error.URLError as exc:
+            last_exc = exc
+            desc = f"transport error {exc.reason!r}"
+        log_fn(f"[{time.strftime('%T')}] {label}: replay attempt {attempt}/{max_attempts} "
+               f"failed ({desc}) — model not loaded; ensure_loaded + retry", flush=True)
+        try:
+            ok, detail = ensure_loaded_fn(registry_path=registry_path,
+                                          label=f"replay_{label}", register_fn=register_fn)
+            log_fn(f"[{time.strftime('%T')}] {label}: ensure_loaded -> ok={ok} ({detail})",
+                   flush=True)
+        except Exception as exc2:  # noqa: BLE001 (the repair must never kill the retry)
+            log_fn(f"[{time.strftime('%T')}] {label}: ensure_loaded raised {exc2!r}; "
+                   f"retrying anyway", flush=True)
+        if attempt >= max_attempts:
+            log_fn(f"[{time.strftime('%T')}] {label}: replay retry budget exhausted "
+                   f"({max_attempts} attempts)", flush=True)
+            raise last_exc
+        if (now_fn() - t_start) >= retry_budget_s:
+            log_fn(f"[{time.strftime('%T')}] {label}: replay retry wall budget "
+                   f"{retry_budget_s:.0f}s exceeded after {attempt} attempts", flush=True)
+            raise last_exc
+        sleep_fn(retry_sleep_s)
+    # Defensive: the loop bound above already guarantees a raise before reaching here.
+    if last_exc is None:  # pragma: no cover
+        raise RuntimeError(f"replay {label}: retry loop exited without an exception")
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -790,12 +905,27 @@ def run_arm(arm: str, gamma: int, budget: dict, *, out_dir: str) -> dict:
     def run_chunk(kind: str, reps: int) -> None:
         nonlocal own
         label = f"q2gamma_{arm}_{kind}"
+        # (1) pre-guard ensure_loaded: repair a model the JIT reaper unloaded since the
+        #     previous chunk (or during the arm switch / warmup).
         ok, detail = ensure_loaded(registry_path=registry, label=f"ensure_{label}")
         print(f"[{time.strftime('%T')}] ensure_loaded before {label}: ok={ok} ({detail})", flush=True)
         if not ok:
             raise SystemExit(f"ensure_loaded failed before chunk {label}: {detail}")
+        # pick up any own-request epoch the pre-guard warmup just registered, so the
+        # idle guard below matches that load POST as own.
+        own = _load_own(registry)
         print(f"[{time.strftime('%T')}] wait-idle before {label} ({reps} reps)...", flush=True)
         G.wait_for_idle(max_wait_s=1500, own_requests=own)
+        # (2) post-guard ensure_loaded: the idle-guard wait can be long (the min-idle
+        #     window) and exceed EXO_JIT_IDLE_UNLOAD_SECONDS=300, so the JIT reaper can
+        #     unload the model DURING the wait.  The pre-guard check alone is NOT enough
+        #     — re-verify and reload immediately BEFORE the first rep.
+        ok, detail = ensure_loaded(registry_path=registry, label=f"ensure_{label}_postguard")
+        print(f"[{time.strftime('%T')}] ensure_loaded after guard before {label}: "
+              f"ok={ok} ({detail})", flush=True)
+        if not ok:
+            raise SystemExit(f"ensure_loaded (post-guard) failed before chunk {label}: {detail}")
+        own = _load_own(registry)
         prev_cyc = prev_acc = prev_hist = None
         with G.ChunkGuard(label, max_wall_s=900, log_dir=log_dir,
                           registry_path=registry, own_requests=own) as guard:
@@ -808,8 +938,11 @@ def run_arm(arm: str, gamma: int, budget: dict, *, out_dir: str) -> dict:
                 else:
                     prompt = RM.build_prompt(DEPTH, salt, "count")
                     meta = {"prompt_chars": len(prompt)}
-                guard.register_own_request(time.time())
-                r = replay_once(prompt, MAX_TOKENS)
+                # replay_once registers the own-request epoch immediately before EACH
+                # POST attempt (incl. any 5xx retry) via the guard, and re-triggers the
+                # JIT load if the POST returns 503 (model unloaded mid-chunk).
+                r = replay_once(prompt, MAX_TOKENS, registry_path=registry,
+                                label=f"{label}_r{j}", register_fn=guard.register_own_request)
                 r.update(RM.derive(r, prev_cyc, prev_acc, gamma))
                 hist_cur = (r.get("stats") or {}).get("mtp_accepted_histogram_cumulative")
                 r["hist_delta"] = EV.hist_delta(hist_cur, prev_hist)
