@@ -194,6 +194,14 @@ class GenerationStats(BaseModel):
     # care about MTP can ignore these.
     mtp_cycles_cumulative: int = 0
     mtp_accepted_drafts_cumulative: int = 0
+    #: Per-position acceptance histogram -- index ``k`` counts rounds
+    #: (cumulative since the worker process started) that accepted exactly
+    #: ``k`` drafts, ``k = 0..gamma``. Length is always 7 (covers the engine's
+    #: max gamma of 5, so k up to 6). Deltas across successive requests from
+    #: the same instance give per-round ``p1..pk`` via the survival function
+    #: ``P(accept >= k)`` -- the scalar counters above only give the mean
+    #: acceptance rate. ``None`` for generators that do not collect it.
+    mtp_accepted_histogram_cumulative: list[int] | None = None
     # Round-11 phase-boundary instrumentation (EXO_PHASE_MARKS-gated). Maps
     # mark name -> milliseconds since the previous mark, ALL same-process
     # perf_counter deltas (see exo.worker.engines.mlx.phase_marks). None

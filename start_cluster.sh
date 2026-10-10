@@ -2771,6 +2771,15 @@ for NODE in "${NODES[@]}"; do
   # full tensor name, last match wins, unset = the DSV41_DENSE behavior. Only the
   # quant FORMAT changes, never the sharding (needs DSV41_DENSE_TP=1, the default).
   [ -n "${DSV41_DENSE_POLICY:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_POLICY=$DSV41_DENSE_POLICY"
+  # DSV41_SPEC_GAMMA: branch-only speculative draft-depth arm for the dsv41
+  # engine (read ONCE at engine construction in Dsv41Engine.__post_init__;
+  # validated against the supported set {2,3,4,5} with a HARD ERROR otherwise,
+  # never a silent fallback). Unset/empty => the engine default gamma 3, so the
+  # production boot is byte-identical and this line forwards nothing. Set => the
+  # generated ~/relaunch_exo.sh carries it, so a node-side arm switch can sed the
+  # value into ~/relaunch_exo.sh and restart the exo process to flip arms without
+  # a full cluster relaunch. NO request-level surface exists for this.
+  [ -n "${DSV41_SPEC_GAMMA:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPEC_GAMMA=$DSV41_SPEC_GAMMA"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget

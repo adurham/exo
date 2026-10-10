@@ -53,6 +53,18 @@ class Dsv41InvalidRequest(Dsv41Error):  # noqa: N818 - name is public API
     """
 
 
+class Dsv41ConfigError(Dsv41Error):  # noqa: N818 - name is public API
+    """A launch-time configuration value is invalid -- fail the boot.
+
+    Raised at engine construction (e.g. an out-of-set ``DSV41_SPEC_GAMMA``).
+    This is NOT request input and NOT a per-request refusal: it must stop the
+    runner from starting rather than degrade any behaviour, so it is a distinct
+    type from :class:`Dsv41InvalidRequest` (which the request path catches and
+    recovers from by failing only that one request). A typo'd experiment arm
+    has to fail loudly instead of silently running the default value.
+    """
+
+
 #: Message fragments that identify a ValueError raised while RENDERING or
 #: EXPANDING a request as request-input validation rather than an engine bug.
 #: Kept explicit (not a blanket ``except ValueError``) so a genuine internal

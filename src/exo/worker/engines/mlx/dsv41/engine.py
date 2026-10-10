@@ -51,6 +51,7 @@ uses.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Generator, Iterator
 from dataclasses import dataclass, field
@@ -81,6 +82,7 @@ from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.errors import (
+    Dsv41ConfigError,
     Dsv41InvalidRequest,
     Dsv41UnsupportedFeature,
     reclassify_input_error,
@@ -150,7 +152,7 @@ def _maybe_install_next18_capture() -> None:
     if not path:
         return                                    # production: inert, zero cost
     try:
-        import next18_capture as cap              # operator-staged on PYTHONPATH
+        import next18_capture as cap  # operator-staged on PYTHONPATH
     except Exception as e:  # noqa: BLE001 - capture must never break serving
         logger.warning(
             f"[DSV41] DSV41_NEXT18_CAPTURE={path} set but next18_capture is not "
@@ -164,6 +166,72 @@ def _maybe_install_next18_capture() -> None:
         logger.info(f"[DSV41] next18 capture hook ACTIVE -> {path}")
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[DSV41] next18 capture auto-install failed: {e!r}")
+
+
+#: Env var for the branch-only speculative draft-depth override. Read ONCE, at
+#: engine construction (``Dsv41Engine.__post_init__``), so it is a launch-time
+#: constant per process -- there is deliberately NO request-level surface
+#: (no wire field, no per-request param): an arm is switched by editing the
+#: launched env and restarting the runner (see start_cluster.sh).
+DSV41_SPEC_GAMMA_ENV = "DSV41_SPEC_GAMMA"
+
+#: The gamma values this engine's draft/verify loop actually supports.
+#:
+#: DERIVATION (the two files that define the loop):
+#:   * ``rounds._one_round`` drafts ``width=gamma`` tokens and verifies them in
+#:     ONE forward of ``gamma + 1`` rows (anchor + drafts), then accepts the
+#:     matching prefix (``accepted < gamma``) and rolls back. The loop is
+#:     shape-generic in ``gamma`` -- it grows the body cache by ``1 + gamma`` and
+#:     has no gamma-specific branch.
+#:   * mlx-lm ``deepseek_v41/spec.py`` ``VERIFY_MS = {1:58.5 ... 6:120.1}`` is the
+#:     verify-cost table keyed by the ROW count (``gamma + 1``); its max key is 6,
+#:     so the documented loop ceiling is ``gamma + 1 <= 6`` => ``gamma <= 5``.
+#:   * The DSpark head's own block default (``args.dspark_block_size``) is 5 and
+#:     ``DSparkHead._draft`` builds exactly ``width`` positions with NO clamp
+#:     (``bs = width or self.block_size``), so ``gamma = 5`` is a native width --
+#:     the batched path runs ``gamma == block_size == 5`` by default.
+#: Hence the supported set is ``{2, 3, 4, 5}``; ``gamma = 5`` IS structurally
+#: supported (6-row verify is in VERIFY_MS, the head drafts it natively). Values
+#: below 2 are the degenerate single-draft round and are not part of this round's
+#: study, so they are rejected rather than silently accepted.
+#:
+#: CAVEAT (why an arm is a warmup-gamma arm, not a whole-request width): the
+#: override only changes the engine's ``gamma`` field, which feeds
+#: ``rounds._spec_policy(self.gamma)`` == ``GammaPolicy(start=gamma)``. That
+#: policy uses ``start`` verbatim for its first ``warmup`` (4) rounds, then
+#: adapts over its fixed search set ``gammas=(1, 2, 3, 4)`` (so it can never
+#: settle on 5). The loop handles any of these widths cleanly; the arm simply
+#: differs in the warmup rounds' draft depth.
+_SPEC_GAMMA_SUPPORTED: tuple[int, ...] = (2, 3, 4, 5)
+
+
+def _spec_gamma_from_env(default: int) -> int:
+    """Effective speculative ``gamma`` from ``DSV41_SPEC_GAMMA``.
+
+    Unset (or empty) => ``default`` (the dataclass default 3): the production
+    path stays byte-for-byte unchanged, with no log emitted here. Any other
+    value is a HARD ERROR at construction -- a typo'd arm must fail the boot, not
+    silently run the default and poison the measurement (never a silent
+    fallback).
+    """
+    import os
+
+    raw = os.environ.get(DSV41_SPEC_GAMMA_ENV)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise Dsv41ConfigError(
+            f"[DSV41] {DSV41_SPEC_GAMMA_ENV}={raw!r} is not an integer; the "
+            f"supported gamma set is {_SPEC_GAMMA_SUPPORTED}."
+        ) from None
+    if value not in _SPEC_GAMMA_SUPPORTED:
+        raise Dsv41ConfigError(
+            f"[DSV41] {DSV41_SPEC_GAMMA_ENV}={value} is out of the supported "
+            f"gamma set {_SPEC_GAMMA_SUPPORTED} (see engine._spec_gamma_from_env)."
+        )
+    return value
 
 #: Chunk size for the chunked prefill loop. PREFILL IS THE KNOWN BLOCKER for
 #: this model (74 tok/s at 8K, Metal GPU-timeout above 16K -- exo phase 19), and
@@ -374,6 +442,15 @@ class Dsv41Engine(Engine):
     _spec_rounds: int = field(default=0, init=False)
     _spec_accepted: int = field(default=0, init=False)
     _spec_drafted: int = field(default=0, init=False)
+    #: Cumulative per-position acceptance histogram: index ``k`` counts rounds
+    #: that accepted exactly ``k`` drafts. Exposed on ``GenerationStats`` as
+    #: ``mtp_accepted_histogram_cumulative``; deltas across requests give the
+    #: per-round p1..pk survival curve P(accept >= k), which is what a per-arm
+    #: gamma study needs (the scalar counters only give the mean rate). Always
+    #: length 7 (covers the max supported gamma 5 => k up to 6).
+    _spec_accept_hist: list[int] = field(
+        default_factory=lambda: [0] * 7, init=False
+    )
     #: Monotonic timestamp of the previous ``_session_fence_heartbeat`` call,
     #: for the >30 s spacing watchdog. ``0.0`` (never called) is treated as
     #: "first call" and never warns.
@@ -385,6 +462,23 @@ class Dsv41Engine(Engine):
         # Real-tensor capture (R1 ship precondition A2): install the next18 hook
         # when the operator opted in. No-op with DSV41_NEXT18_CAPTURE unset.
         _maybe_install_next18_capture()
+        # Branch-only draft-depth arm: read DSV41_SPEC_GAMMA ONCE and freeze the
+        # effective gamma for this process. Unset/empty => the dataclass default
+        # (3), byte-identical to production and NO log line emitted. Set =>
+        # integer-validated against the supported set with a HARD ERROR on
+        # anything else (never a silent fallback). Deliberately NO request-level
+        # surface: an arm is flipped by relaunching with the env set (see
+        # start_cluster.sh). The builder's "[DSV41] engine built: ... (gamma=...)"
+        # line already reports the effective value; the explicit line below names
+        # the override on THIS rank.
+        _gamma_override = os.environ.get(DSV41_SPEC_GAMMA_ENV)
+        self.gamma = _spec_gamma_from_env(self.gamma)
+        if _gamma_override is not None and _gamma_override.strip() != "":
+            logger.info(
+                f"[DSV41] spec gamma override: {DSV41_SPEC_GAMMA_ENV}="
+                f"{_gamma_override} -> effective gamma={self.gamma} "
+                f"(supported set {_SPEC_GAMMA_SUPPORTED}), rank {self.device_rank}"
+            )
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
             logger.warning(
@@ -907,6 +1001,7 @@ class Dsv41Engine(Engine):
                         logprob=as_logprob(lp_entry),
                         mtp_cycles=self._spec_drafted,
                         mtp_accepted=self._spec_accepted,
+                        mtp_accept_hist=self._spec_accept_hist,
                     )
                     return
                 yield _mid_response(tid, text, task_id, as_logprob(lp_entry))
@@ -929,6 +1024,7 @@ class Dsv41Engine(Engine):
             reused_tokens=turn.reused_tokens,
             mtp_cycles=self._spec_drafted,
             mtp_accepted=self._spec_accepted,
+            mtp_accept_hist=self._spec_accept_hist,
         )
 
     def _end_turn(
@@ -1063,6 +1159,12 @@ class Dsv41Engine(Engine):
                 self._spec_rounds += 1
                 self._spec_accepted += int(_accepted)
                 self._spec_drafted += int(_gamma)
+                # Per-position acceptance histogram (index k = rounds accepting
+                # exactly k drafts); clamped so a future wider gamma can never
+                # index out of the fixed-length list.
+                self._spec_accept_hist[
+                    min(int(_accepted), len(self._spec_accept_hist) - 1)
+                ] += 1
             batch = [int(t) for t in committed]
             n += len(batch)
             token = batch[-1]

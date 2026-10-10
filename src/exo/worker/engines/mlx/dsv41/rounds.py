@@ -195,6 +195,7 @@ def _final_response(
     logprob: Any = None,
     mtp_cycles: int = 0,
     mtp_accepted: int = 0,
+    mtp_accept_hist: list[int] | None = None,
 ) -> GenerationResponse:
     """The terminal response for a request, with usage and stats attached.
 
@@ -207,6 +208,9 @@ def _final_response(
     ``mtp_cycles``/``mtp_accepted`` are the session-cumulative speculative
     counters (same meaning as the batch-generator's ``mtp_*_cumulative``:
     deltas across successive requests give the live acceptance rate).
+    ``mtp_accept_hist`` is the session-cumulative per-position acceptance
+    histogram (index ``k`` = rounds that accepted exactly ``k`` drafts); deltas
+    across successive requests give the per-round p1..pk survival curve.
     """
     del task_id, prefill_tokens  # the split is reported through usage/stats below
     hit = "partial" if reused_tokens > 0 else "none"
@@ -216,6 +220,7 @@ def _final_response(
                 "prefix_cache_hit": hit,
                 "mtp_cycles_cumulative": mtp_cycles,
                 "mtp_accepted_drafts_cumulative": mtp_accepted,
+                "mtp_accepted_histogram_cumulative": mtp_accept_hist,
             }
         )
     else:
@@ -228,6 +233,7 @@ def _final_response(
             prefix_cache_hit=hit,
             mtp_cycles_cumulative=mtp_cycles,
             mtp_accepted_drafts_cumulative=mtp_accepted,
+            mtp_accepted_histogram_cumulative=mtp_accept_hist,
         )
     sel, top = logprob if logprob is not None else (None, None)
     return GenerationResponse(
