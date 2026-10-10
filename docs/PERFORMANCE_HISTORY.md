@@ -11866,3 +11866,47 @@ layer-20 EXL3 `SwitchGLU` at production shapes (R=4 verify, topk6, per-rank H=11
   + shared-experts@q8g64, 1 runner/node, no strays, canary **14.86 / 14.85 healthy**). Budget: **0 boots of ≤2**
   (offline resolved it; reserve held unspent), 3 idle-guarded live ladder chunks, **no encode spend**. Round doc
   `ROUND-Q1C-MEASURE.md` + raw `raw/pricing/q1/q1c/` on `deploy/phase20-campaign`.
+
+## 2026-10-10 — Q1d GATE 1 (experts requant): native q4g64 is FASTER (+32.6 % wall / +43.6 % GPU) but NO native arm FITS 128 GiB → lead CLOSED on MEMORY
+
+Round 1 of the experts-requant campaign — the offline microbench deciding whether a native MLX affine
+re-encode (`mx.quantize` + `mx.gather_qmm`) of the routed experts beats the EXL3 2.9 bpw fused trellis
+kernel in **WALL** time enough to justify the quality work. Offline, single-node (studio2), **0 boots,
+0 live/encode spend**. Doc `ROUND-Q1D-MICROBENCH.md` + raw `raw/pricing/q1/q1d/` on `deploy/phase20-campaign`.
+
+- **Speed limb PASSES.** Same-session, cache-busted (fresh routing/rep + 1.5 GiB SLC flush outside the
+  timed region), R=4 verify ×40 expert stack: EXL3 baseline wall **48.97 ms** vs native **q4g64 (fused
+  gate+up `gather_qmm`, sorted) 33.00 ms = +32.6 % wall**; kernel/GPU ratio native/EXL3 **0.564 (native
+  44 % faster on GPU)**. Only the q4 arms clear 30 % (q4g32 +32.5 %); q5g64 +25.7 %, mixed gu4/dn6 +27.1 %,
+  q6g64 +19.8 % miss — the speed lever is the **4-bit packed stream**, not precision. Dense-slice
+  precedent (native q4 ~2.47× EXL3, ROUND-PRICING Q1) **transfers** to the expert path. Correctness clean:
+  reconstructed-true-W vs EXL3 **near-exact** (cos 0.9999995, relL2 9.5e-4); arm-vs-EXL3 cos 0.9881 (q4g64)
+  … 0.9993 (q6g64) — no fast-but-wrong arm.
+- **Routing shape corrected (Fable correction #1 CONFIRMED).** A real captured 40-layer trace
+  (`phase10-planb-gate-2026-09-28/raw/p30_exl3_trace_clamp.json`, 531 tok × 40 layers) shows the N1/R1
+  "[4,4,4,4,4,4] = 6 experts × 4 rows" claim is **FALSE on real routing — 0/21 120 groups**. Real R=4 =
+  **16.25 unique experts** (med 16, p5–p95 **12–21**, max 24), m ≈ 1.48 (70 % m=1 / 17 % m=2 / 7 % m=3 /
+  5 % m=4); R=1 = 6. The 6×4 shape is a corr ≲ 0.03 near-zero-perturbation artifact of the synthetic model.
+  Gate headline taken at the conservative 24-unique; native is *faster* still at the realistic 16.
+- **MEMORY limb FAILS — the lead CLOSES.** Exact per-rank, all 40 layers, vs 128 GiB (= 137.44 GB; wired
+  limit 120.59 GB): **EXL3 98.25 GB experts → 109.26 GB total FITS (79.5 %)**; native **q4g64 144.39 GB
+  experts → 155.40 GB total = 113.1 % of 128 GiB DOES-NOT-FIT** (**+46 GB/rank over the EXL3 it replaces**).
+  q4g32 119 %, mixed 129.5 %, q5g64 137.8 %, q6g64 162.5 % — every native arm is over RAM *and* over the
+  wired limit. The fitting routed-expert budget implies **≤ 3.72 bpw, below q4** (the dropped q3-class).
+  KV@91K is only 0.30 GB — the **experts** are the constraint, not KV.
+- **GATE 1 = FAIL (close) — a memory-ceiling close, not a speed close.** Pre-registered PASS required
+  ≥30 % wall ∧ correct ∧ mem-fit-OK; memory fails for every arm ⇒ no arm clears it ⇒ Round 2 (quality
+  pre-screen) **NOT** authorized. The native requant is a **real but unshippable** speedup on the current
+  128 GiB nodes. Reopen only if (a) the owner adopts the streaming/tiering memory stack, or (b) a ≤3.7 bpw
+  native format is judged quality-acceptable. (The brief's other note — memory "feeds gate 2" — read
+  alone would instead PASS the speed limb on q4g64; the conjunctive pre-registered condition makes the
+  default FAIL/close.)
+- **Original pre-EXL3 checkpoint located + sampled.** `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-FP8`
+  (public, 510 GB, fp8/fp4 experts; the plain `…-UNCENSORED` bf16 name is absent). Fetched **only** sampled
+  layers {0,20,39} → shards 00003/00023/00042 = **22.18 GB, sha256 bit-exact** vs HF LFS, retained at
+  `studio1:/tmp/q1d_mem/orig/` for Round 2's recon-source-vs-original penalty.
+- **End state:** production UNCHANGED & LIVE (next19-dense `99e2966ee` + mlx-lm `689e4ea`, `DSV41_DENSE=affine6`
+  + shared-experts@q8g64; 1 runner/node, no strays, canary **14.86 / 14.85 healthy**). Budget: **0 boots of ≤2**
+  (reserve held unspent); bench ~33 s node GPU (after a memory-lean rebuild — a 27 GiB fp16 first attempt
+  GPU-timed-out on the production-live node), fetch ~15 min throttled — well inside the 2–4 GPU-h cap;
+  **no encode spend**.
