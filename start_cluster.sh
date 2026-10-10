@@ -2719,6 +2719,12 @@ for NODE in "${NODES[@]}"; do
   # sharded vs replicated vs exl3.
   [ -n "${DSV41_DENSE:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE=$DSV41_DENSE"
   [ -n "${DSV41_DENSE_TP:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_TP=$DSV41_DENSE_TP"
+  # DSV41_DENSE_POLICY: per-tensor dense-quant override on top of DSV41_DENSE
+  # (mlx_lm .../exl3_build.py, read at import). Either an inline
+  # "selector=mode,..." spec or a path to a JSON file; selectors are globs on the
+  # full tensor name, last match wins, unset = the DSV41_DENSE behavior. Only the
+  # quant FORMAT changes, never the sharding (needs DSV41_DENSE_TP=1, the default).
+  [ -n "${DSV41_DENSE_POLICY:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_POLICY=$DSV41_DENSE_POLICY"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
