@@ -11837,3 +11837,32 @@ build BEFORE building instrumentation — F1 + attribution answered in minutes v
 **Rollback (pre-authorized, unspent):** exo `deploy/q1-dense-qn` @ `cfd74d49f` + mlx-lm `689e4ea` via the same detach-checkout procedure; instant in-place fallback `DSV41_DENSE=exl3` (process restart, proven). Reserve boot held.
 
 **Open items:** (1) 15 ms floor miss (as-is, owner-accepted); (2) parser-robustness backlog (salvage leaked XML / malformed tags) — Fable-parked, not a fix; (3) §5 projection gap (realized ~71 % of the offline projection) recorded, not chased.
+
+## 2026-10-10 — Q1c post-dense measurement: experts GATE 0 = PROCEED (kernel-dominated); engram already affine6; prefill ladder FLAT
+
+GATE 0 for the **experts requant campaign**, measured on the shipped dense build (0 boots, 0 encode, nothing
+shipped). Offline Path1 per-op-class **GPU** timing (`MLX_GPU_TIME=1` → `mx.metal.gpu_time_ns()`) of the real
+layer-20 EXL3 `SwitchGLU` at production shapes (R=4 verify, topk6, per-rank H=1152 world=2), fused and unfused arms.
+
+- **N1 — the expert block is KERNEL-dominated.** Fused (prod) `_decode_fused2` at verify R=4: gate_up kernel
+  0.5405 + down kernel 0.3238 = **0.8643 ms/layer KERNEL = 92 %** of the 0.9398 ms whole module; prep/gather+
+  Hadamard 0.9 %; unattributed 7.1 %; router 0.048 ms. The unfused arm (fully split) corroborates **90 % kernel
+  / 10 % non-kernel**. ×40 layers: **whole 37.59 ms, KERNEL 34.57 ms** = **40 % of the 86.03 ms agentic round**.
+  Cross-checks Q4 (wall 43.08 ms, same block; the gap is Python/launch overhead that GPU-time excludes).
+  m-distribution at verify: 24 slots land on 6 experts × 4 rows — tiny-m, ALU/launch-bound.
+- **GATE 0 = PROCEED** — expert kernel 34.57 ms ≥ the ~25 ms bar AND kernel-dominated; Q4's ≤5.25 ms exposed
+  non-compute bounds the unmeasurable all-sum/RDMA well below kernel. Opens the campaign (its own offline
+  microbench + quality pre-screen + live A/B = a LATER round; the native-qN speedup on the expert
+  gather/segmented path is UNPROVEN and is the campaign's first task).
+- **N2 — prefill ladder FLAT** on the dense build: 20K **269.2** / 50K **253.7** / 110K **251.5** rows/s vs the
+  recorded EXL3-dense ceiling 272.6 / 249.6 / 242.4 (all within ±4 %). The dense format change did **not** move
+  the prefill ceiling — the prior "no lever on prefill" close stands.
+- **N3 — the engram group (8 % of dense bytes) is COVERED, not EXL3:** `layers.{1,14}.engram.wkv` loads through
+  `_dense()` → base **affine6** (`exl3_build.py:688, 713-724, 615-632`). No ~8 % free extra for a future experts
+  re-encode. (The native fp8 `engram.embed` hash table is streamed — neither EXL3 nor affine, out of scope.)
+- **N4 — acceptance baseline recorded:** agentic 91K mean_acc **1.9395** / 86.03 ms; benign 20K mean_acc
+  **2.6723** / 81.30 ms.
+- **End state:** production UNCHANGED & LIVE (next19-dense `99e2966ee` + mlx-lm `689e4ea`, `DSV41_DENSE=affine6`
+  + shared-experts@q8g64, 1 runner/node, no strays, canary **14.86 / 14.85 healthy**). Budget: **0 boots of ≤2**
+  (offline resolved it; reserve held unspent), 3 idle-guarded live ladder chunks, **no encode spend**. Round doc
+  `ROUND-Q1C-MEASURE.md` + raw `raw/pricing/q1/q1c/` on `deploy/phase20-campaign`.
