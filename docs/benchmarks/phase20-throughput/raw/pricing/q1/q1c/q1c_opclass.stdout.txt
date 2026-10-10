@@ -1,0 +1,84 @@
+[driver] === arm=fused -> /tmp/q1c_fused.json ===
+[load] arm=fused E=384 D=5120 H=1152 k=2 gu_tiles=72 dn_tiles=320 in 0.7s
+[R1_topk6] path=_decode_fused2 whole=0.5350ms sum=0.5179 unatt=+0.0171 uniqE=6.0
+    prep_gather_hadamard             0.0091 ms
+    gateup_kernel                    0.2847 ms
+    down_kernel(act_inline)          0.2241 ms
+[R4_topk6] path=_decode_fused2 whole=0.9398ms sum=0.8732 unatt=+0.0666 uniqE=6.0
+    prep_gather_hadamard             0.0089 ms
+    gateup_kernel                    0.5405 ms
+    down_kernel(act_inline)          0.3238 ms
+[S2048_topk6] whole=52.8954ms sum=67.0146 unatt=-14.1192 uniqE=7.33
+    sort_gather_argsort              0.0899 ms
+    gu_prep_gather_hadamard          8.0926 ms
+    segtable                         0.0295 ms
+    gu_kernel(seg_mm)                39.0510 ms
+    gu_finish_hadamard               1.2458 ms
+    act                              0.4930 ms
+    dn_prep_hadamard                 0.4974 ms
+    dn_kernel(seg_mm)                12.7245 ms
+    dn_finish_hadamard               2.1398 ms
+    scatter(combine_in_block)        2.6511 ms
+[S512_topk6] whole=13.7535ms sum=17.5592 unatt=-3.8057 uniqE=7.33
+    sort_gather_argsort              0.0462 ms
+    gu_prep_gather_hadamard          1.2465 ms
+    segtable                         0.0295 ms
+    gu_kernel(seg_mm)                11.5384 ms
+    gu_finish_hadamard               0.2043 ms
+    act                              0.0842 ms
+    dn_prep_hadamard                 0.1040 ms
+    dn_kernel(seg_mm)                3.4158 ms
+    dn_finish_hadamard               0.4049 ms
+    scatter(combine_in_block)        0.4854 ms
+[router R1] 0.0412 ms
+[router R4] 0.0481 ms
+[router S2048] 0.8198 ms
+[fused] wrote /tmp/q1c_fused.json
+[driver] === arm=unfused -> /tmp/q1c_unfused.json ===
+[load] arm=unfused E=384 D=5120 H=1152 k=2 gu_tiles=72 dn_tiles=320 in 0.7s
+[R1_topk6] path=_decode whole=0.3888ms sum=0.3816 unatt=+0.0072 uniqE=6.0
+    gu_prep_gather_hadamard          0.0058 ms
+    gu_kernel(mapped_gemv)           0.2341 ms
+    gu_finish_hadamard               0.0069 ms
+    act                              0.0057 ms
+    dn_prep_hadamard                 0.0064 ms
+    dn_kernel(mapped_gemv)           0.1155 ms
+    dn_finish_hadamard               0.0072 ms
+[R4_topk6] path=_prefill whole=0.9212ms sum=1.2563 unatt=-0.3351 uniqE=6.0
+    sort_gather_argsort              0.0159 ms
+    gu_prep_gather_hadamard          0.0358 ms
+    segtable                         0.0273 ms
+    gu_kernel(seg_mm)                0.9380 ms
+    gu_finish_hadamard               0.0079 ms
+    act                              0.0063 ms
+    dn_prep_hadamard                 0.0101 ms
+    dn_kernel(seg_mm)                0.1967 ms
+    dn_finish_hadamard               0.0081 ms
+    scatter(combine_in_block)        0.0102 ms
+[S2048_topk6] whole=53.1396ms sum=66.9433 unatt=-13.8037 uniqE=7.33
+    sort_gather_argsort              0.0905 ms
+    gu_prep_gather_hadamard          8.0596 ms
+    segtable                         0.0295 ms
+    gu_kernel(seg_mm)                38.9997 ms
+    gu_finish_hadamard               1.2465 ms
+    act                              0.4888 ms
+    dn_prep_hadamard                 0.4906 ms
+    dn_kernel(seg_mm)                12.7450 ms
+    dn_finish_hadamard               2.1381 ms
+    scatter(combine_in_block)        2.6550 ms
+[S512_topk6] whole=13.7866ms sum=17.5957 unatt=-3.8091 uniqE=7.33
+    sort_gather_argsort              0.0469 ms
+    gu_prep_gather_hadamard          1.2442 ms
+    segtable                         0.0294 ms
+    gu_kernel(seg_mm)                11.5775 ms
+    gu_finish_hadamard               0.2035 ms
+    act                              0.0843 ms
+    dn_prep_hadamard                 0.1042 ms
+    dn_kernel(seg_mm)                3.4167 ms
+    dn_finish_hadamard               0.4042 ms
+    scatter(combine_in_block)        0.4848 ms
+[router R1] 0.0404 ms
+[router R4] 0.0477 ms
+[router S2048] 0.8201 ms
+[unfused] wrote /tmp/q1c_unfused.json
+[driver] wrote /tmp/pricing/q1c/q1c_opclass.json

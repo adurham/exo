@@ -1,0 +1,9 @@
+table,key,delta_rows,actual_rows_median,n,median,min,max,vs_4096
+A,20k,2048,3868,3,269.18,266.025,270.476,
+A,50k,2048,2503,3,253.725,253.328,254.01,
+A,110k,2048,2024,3,251.522,238.393,251.747,
+A,fresh100k,None,None,0,None,None,None,
+B,256,256,None,0,None,None,None,None
+B,1024,1024,None,0,None,None,None,None
+B,4096,4096,None,0,None,None,None,None
+B,8192,8192,None,0,None,None,None,None

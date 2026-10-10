@@ -1,0 +1,787 @@
+{
+  "meta": {
+    "bench": "p20_q1c_opclass",
+    "arm": "fused",
+    "node": "Adams-Mac-Studio-M4-2",
+    "mlx": "0.32.3.dev20260918+603f16eb7",
+    "layer": 20,
+    "n_moe_layers": 40,
+    "E": 384,
+    "D": 5120,
+    "H_per_rank": 1152,
+    "topk": 6,
+    "rank": 0,
+    "world": 2,
+    "k_trellis": 2,
+    "env": {
+      "EXL3_MOE_V2": "1",
+      "EXL3_MOE_FUSED": "1",
+      "EXL3_MOE_MM": "1",
+      "EXL3_MOE_A2_TILES": null,
+      "EXL3_MOE_CLAMP": null,
+      "MLX_GPU_TIME": "1",
+      "MLX_DISPATCH_COUNT": "1"
+    },
+    "reps_decode": 15,
+    "reps_prefill": 11,
+    "warmup": 3,
+    "n_seeds": 3,
+    "gate_dtype": "fp32",
+    "route_scale": 1.5,
+    "gate_temp": 1.0,
+    "load_s": 0.7,
+    "arms": [
+      "fused",
+      "unfused"
+    ],
+    "unfused_note": "EXL3_MOE_FUSED=0: R=1 -> _decode (mapped GEMV, fully split); R=4 -> _prefill (the R<=8 fused decode branch is disabled, so verify falls to the prefill sort/table machinery); S=2048 -> _prefill."
+  },
+  "fused": {
+    "meta": {
+      "bench": "p20_q1c_opclass",
+      "arm": "fused",
+      "node": "Adams-Mac-Studio-M4-2",
+      "mlx": "0.32.3.dev20260918+603f16eb7",
+      "layer": 20,
+      "n_moe_layers": 40,
+      "E": 384,
+      "D": 5120,
+      "H_per_rank": 1152,
+      "topk": 6,
+      "rank": 0,
+      "world": 2,
+      "k_trellis": 2,
+      "env": {
+        "EXL3_MOE_V2": "1",
+        "EXL3_MOE_FUSED": "1",
+        "EXL3_MOE_MM": "1",
+        "EXL3_MOE_A2_TILES": null,
+        "EXL3_MOE_CLAMP": null,
+        "MLX_GPU_TIME": "1",
+        "MLX_DISPATCH_COUNT": "1"
+      },
+      "reps_decode": 15,
+      "reps_prefill": 11,
+      "warmup": 3,
+      "n_seeds": 3,
+      "gate_dtype": "fp32",
+      "route_scale": 1.5,
+      "gate_temp": 1.0,
+      "load_s": 0.7,
+      "arms": [
+        "fused",
+        "unfused"
+      ],
+      "unfused_note": "EXL3_MOE_FUSED=0: R=1 -> _decode (mapped GEMV, fully split); R=4 -> _prefill (the R<=8 fused decode branch is disabled, so verify falls to the prefill sort/table machinery); S=2048 -> _prefill."
+    },
+    "shapes": {
+      "R1_topk6": {
+        "R": 1,
+        "kk": 6,
+        "path": "_decode_fused2",
+        "whole_gpu_ms": 0.535,
+        "sum_stages_ms": 0.5179,
+        "unattributed_ms": 0.0171,
+        "unique_experts_mean": 6.0,
+        "stages": {
+          "prep_gather_hadamard": 0.0091,
+          "gateup_kernel": 0.2847,
+          "down_kernel(act_inline)": 0.2241
+        },
+        "stage_per_seed": {
+          "prep_gather_hadamard": [
+            0.0096,
+            0.0091,
+            0.0084
+          ],
+          "gateup_kernel": [
+            0.285,
+            0.2846,
+            0.2847
+          ],
+          "down_kernel(act_inline)": [
+            0.224,
+            0.2276,
+            0.2241
+          ]
+        },
+        "whole_per_seed": [
+          0.5335,
+          0.535,
+          0.5352
+        ]
+      },
+      "R4_topk6": {
+        "R": 4,
+        "kk": 6,
+        "path": "_decode_fused2",
+        "whole_gpu_ms": 0.9398,
+        "sum_stages_ms": 0.8732,
+        "unattributed_ms": 0.0666,
+        "unique_experts_mean": 6.0,
+        "stages": {
+          "prep_gather_hadamard": 0.0089,
+          "gateup_kernel": 0.5405,
+          "down_kernel(act_inline)": 0.3238
+        },
+        "stage_per_seed": {
+          "prep_gather_hadamard": [
+            0.0097,
+            0.0089,
+            0.0088
+          ],
+          "gateup_kernel": [
+            0.6475,
+            0.5405,
+            0.5403
+          ],
+          "down_kernel(act_inline)": [
+            0.3671,
+            0.3238,
+            0.323
+          ]
+        },
+        "whole_per_seed": [
+          1.297,
+          0.9398,
+          0.8797
+        ],
+        "verify_m_distribution": {
+          "n_slots": 24,
+          "n_experts_hit": 6,
+          "max_rows_per_expert": 4,
+          "mean_rows_per_hit_expert": 4.0,
+          "hist_max": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4
+          ]
+        }
+      },
+      "S2048_topk6": {
+        "S": 2048,
+        "kk": 6,
+        "path": "_prefill",
+        "whole_gpu_ms": 52.8954,
+        "sum_stages_ms": 67.0146,
+        "unattributed_ms": -14.1192,
+        "unique_experts_mean": 7.33,
+        "stages": {
+          "sort_gather_argsort": 0.0899,
+          "gu_prep_gather_hadamard": 8.0926,
+          "segtable": 0.0295,
+          "gu_kernel(seg_mm)": 39.051,
+          "gu_finish_hadamard": 1.2458,
+          "act": 0.493,
+          "dn_prep_hadamard": 0.4974,
+          "dn_kernel(seg_mm)": 12.7245,
+          "dn_finish_hadamard": 2.1398,
+          "scatter(combine_in_block)": 2.6511
+        },
+        "stage_per_seed": {
+          "sort_gather_argsort": [
+            0.0779,
+            0.0914,
+            0.0899
+          ],
+          "gu_prep_gather_hadamard": [
+            7.889,
+            8.0926,
+            8.0957
+          ],
+          "segtable": [
+            0.0295,
+            0.0291,
+            0.0303
+          ],
+          "gu_kernel(seg_mm)": [
+            48.4284,
+            39.051,
+            39.0071
+          ],
+          "gu_finish_hadamard": [
+            1.2458,
+            1.243,
+            1.2489
+          ],
+          "act": [
+            0.4888,
+            0.493,
+            0.495
+          ],
+          "dn_prep_hadamard": [
+            0.495,
+            0.4981,
+            0.4974
+          ],
+          "dn_kernel(seg_mm)": [
+            12.7223,
+            12.7479,
+            12.7245
+          ],
+          "dn_finish_hadamard": [
+            2.1398,
+            2.1569,
+            2.1372
+          ],
+          "scatter(combine_in_block)": [
+            2.6505,
+            2.6511,
+            2.6597
+          ]
+        },
+        "whole_per_seed": [
+          52.8954,
+          53.0758,
+          52.8654
+        ]
+      },
+      "S512_topk6": {
+        "S": 512,
+        "kk": 6,
+        "path": "_prefill",
+        "whole_gpu_ms": 13.7535,
+        "sum_stages_ms": 17.5592,
+        "unattributed_ms": -3.8057,
+        "unique_experts_mean": 7.33,
+        "stages": {
+          "sort_gather_argsort": 0.0462,
+          "gu_prep_gather_hadamard": 1.2465,
+          "segtable": 0.0295,
+          "gu_kernel(seg_mm)": 11.5384,
+          "gu_finish_hadamard": 0.2043,
+          "act": 0.0842,
+          "dn_prep_hadamard": 0.104,
+          "dn_kernel(seg_mm)": 3.4158,
+          "dn_finish_hadamard": 0.4049,
+          "scatter(combine_in_block)": 0.4854
+        },
+        "stage_per_seed": {
+          "sort_gather_argsort": [
+            0.046,
+            0.0462,
+            0.0465
+          ],
+          "gu_prep_gather_hadamard": [
+            1.2492,
+            1.2449,
+            1.2465
+          ],
+          "segtable": [
+            0.0295,
+            0.0291,
+            0.0297
+          ],
+          "gu_kernel(seg_mm)": [
+            11.424,
+            11.7005,
+            11.5384
+          ],
+          "gu_finish_hadamard": [
+            0.2046,
+            0.2031,
+            0.2043
+          ],
+          "act": [
+            0.0845,
+            0.0839,
+            0.0842
+          ],
+          "dn_prep_hadamard": [
+            0.1043,
+            0.104,
+            0.1039
+          ],
+          "dn_kernel(seg_mm)": [
+            3.4137,
+            3.4316,
+            3.4158
+          ],
+          "dn_finish_hadamard": [
+            0.4049,
+            0.4049,
+            0.405
+          ],
+          "scatter(combine_in_block)": [
+            0.4856,
+            0.4845,
+            0.4854
+          ]
+        },
+        "whole_per_seed": [
+          13.7497,
+          13.8354,
+          13.7535
+        ]
+      }
+    },
+    "router": {
+      "R1": {
+        "R": 1,
+        "gpu_ms": 0.0412,
+        "per_seed": [
+          0.0412,
+          0.0411,
+          0.0412
+        ]
+      },
+      "R4": {
+        "R": 4,
+        "gpu_ms": 0.0481,
+        "per_seed": [
+          0.0482,
+          0.0476,
+          0.0481
+        ]
+      },
+      "S2048": {
+        "R": 2048,
+        "gpu_ms": 0.8198,
+        "per_seed": [
+          0.8177,
+          0.8203,
+          0.8198
+        ]
+      }
+    }
+  },
+  "unfused": {
+    "meta": {
+      "bench": "p20_q1c_opclass",
+      "arm": "unfused",
+      "node": "Adams-Mac-Studio-M4-2",
+      "mlx": "0.32.3.dev20260918+603f16eb7",
+      "layer": 20,
+      "n_moe_layers": 40,
+      "E": 384,
+      "D": 5120,
+      "H_per_rank": 1152,
+      "topk": 6,
+      "rank": 0,
+      "world": 2,
+      "k_trellis": 2,
+      "env": {
+        "EXL3_MOE_V2": "1",
+        "EXL3_MOE_FUSED": "0",
+        "EXL3_MOE_MM": "1",
+        "EXL3_MOE_A2_TILES": null,
+        "EXL3_MOE_CLAMP": null,
+        "MLX_GPU_TIME": "1",
+        "MLX_DISPATCH_COUNT": "1"
+      },
+      "reps_decode": 15,
+      "reps_prefill": 11,
+      "warmup": 3,
+      "n_seeds": 3,
+      "gate_dtype": "fp32",
+      "route_scale": 1.5,
+      "gate_temp": 1.0,
+      "load_s": 0.7
+    },
+    "shapes": {
+      "R1_topk6": {
+        "R": 1,
+        "kk": 6,
+        "path": "_decode",
+        "whole_gpu_ms": 0.3888,
+        "sum_stages_ms": 0.3816,
+        "unattributed_ms": 0.0072,
+        "unique_experts_mean": 6.0,
+        "stages": {
+          "gu_prep_gather_hadamard": 0.0058,
+          "gu_kernel(mapped_gemv)": 0.2341,
+          "gu_finish_hadamard": 0.0069,
+          "act": 0.0057,
+          "dn_prep_hadamard": 0.0064,
+          "dn_kernel(mapped_gemv)": 0.1155,
+          "dn_finish_hadamard": 0.0072
+        },
+        "stage_per_seed": {
+          "gu_prep_gather_hadamard": [
+            0.0058,
+            0.0059,
+            0.0058
+          ],
+          "gu_kernel(mapped_gemv)": [
+            0.234,
+            0.2341,
+            0.2346
+          ],
+          "gu_finish_hadamard": [
+            0.0069,
+            0.007,
+            0.0069
+          ],
+          "act": [
+            0.0057,
+            0.0059,
+            0.0057
+          ],
+          "dn_prep_hadamard": [
+            0.0064,
+            0.0065,
+            0.0064
+          ],
+          "dn_kernel(mapped_gemv)": [
+            0.1157,
+            0.1155,
+            0.1155
+          ],
+          "dn_finish_hadamard": [
+            0.0072,
+            0.0071,
+            0.0072
+          ]
+        },
+        "whole_per_seed": [
+          0.3888,
+          0.3881,
+          0.3891
+        ]
+      },
+      "R4_topk6": {
+        "R": 4,
+        "kk": 6,
+        "path": "_prefill",
+        "whole_gpu_ms": 0.9212,
+        "sum_stages_ms": 1.2563,
+        "unattributed_ms": -0.3351,
+        "unique_experts_mean": 6.0,
+        "stages": {
+          "sort_gather_argsort": 0.0159,
+          "gu_prep_gather_hadamard": 0.0358,
+          "segtable": 0.0273,
+          "gu_kernel(seg_mm)": 0.938,
+          "gu_finish_hadamard": 0.0079,
+          "act": 0.0063,
+          "dn_prep_hadamard": 0.0101,
+          "dn_kernel(seg_mm)": 0.1967,
+          "dn_finish_hadamard": 0.0081,
+          "scatter(combine_in_block)": 0.0102
+        },
+        "stage_per_seed": {
+          "sort_gather_argsort": [
+            0.0158,
+            0.0159,
+            0.0161
+          ],
+          "gu_prep_gather_hadamard": [
+            0.0358,
+            0.036,
+            0.0357
+          ],
+          "segtable": [
+            0.0277,
+            0.0271,
+            0.0273
+          ],
+          "gu_kernel(seg_mm)": [
+            0.958,
+            0.938,
+            0.9297
+          ],
+          "gu_finish_hadamard": [
+            0.0084,
+            0.0078,
+            0.0079
+          ],
+          "act": [
+            0.0063,
+            0.0061,
+            0.0064
+          ],
+          "dn_prep_hadamard": [
+            0.0102,
+            0.01,
+            0.0101
+          ],
+          "dn_kernel(seg_mm)": [
+            0.2064,
+            0.1946,
+            0.1967
+          ],
+          "dn_finish_hadamard": [
+            0.008,
+            0.0081,
+            0.0081
+          ],
+          "scatter(combine_in_block)": [
+            0.0101,
+            0.0104,
+            0.0102
+          ]
+        },
+        "whole_per_seed": [
+          0.9212,
+          0.9444,
+          0.9196
+        ],
+        "verify_m_distribution": {
+          "n_slots": 24,
+          "n_experts_hit": 6,
+          "max_rows_per_expert": 4,
+          "mean_rows_per_hit_expert": 4.0,
+          "hist_max": [
+            4,
+            4,
+            4,
+            4,
+            4,
+            4
+          ]
+        }
+      },
+      "S2048_topk6": {
+        "S": 2048,
+        "kk": 6,
+        "path": "_prefill",
+        "whole_gpu_ms": 53.1396,
+        "sum_stages_ms": 66.9433,
+        "unattributed_ms": -13.8037,
+        "unique_experts_mean": 7.33,
+        "stages": {
+          "sort_gather_argsort": 0.0905,
+          "gu_prep_gather_hadamard": 8.0596,
+          "segtable": 0.0295,
+          "gu_kernel(seg_mm)": 38.9997,
+          "gu_finish_hadamard": 1.2465,
+          "act": 0.4888,
+          "dn_prep_hadamard": 0.4906,
+          "dn_kernel(seg_mm)": 12.745,
+          "dn_finish_hadamard": 2.1381,
+          "scatter(combine_in_block)": 2.655
+        },
+        "stage_per_seed": {
+          "sort_gather_argsort": [
+            0.0905,
+            0.091,
+            0.0901
+          ],
+          "gu_prep_gather_hadamard": [
+            7.8781,
+            8.1127,
+            8.0596
+          ],
+          "segtable": [
+            0.0295,
+            0.0289,
+            0.0304
+          ],
+          "gu_kernel(seg_mm)": [
+            38.9997,
+            38.8981,
+            47.3972
+          ],
+          "gu_finish_hadamard": [
+            1.1777,
+            1.2465,
+            1.2494
+          ],
+          "act": [
+            0.4888,
+            0.4883,
+            0.4956
+          ],
+          "dn_prep_hadamard": [
+            0.4906,
+            0.4879,
+            0.4914
+          ],
+          "dn_kernel(seg_mm)": [
+            12.7273,
+            12.7631,
+            12.745
+          ],
+          "dn_finish_hadamard": [
+            2.1381,
+            2.1353,
+            2.1384
+          ],
+          "scatter(combine_in_block)": [
+            2.655,
+            2.6555,
+            2.633
+          ]
+        },
+        "whole_per_seed": [
+          63.9023,
+          52.4336,
+          53.1396
+        ]
+      },
+      "S512_topk6": {
+        "S": 512,
+        "kk": 6,
+        "path": "_prefill",
+        "whole_gpu_ms": 13.7866,
+        "sum_stages_ms": 17.5957,
+        "unattributed_ms": -3.8091,
+        "unique_experts_mean": 7.33,
+        "stages": {
+          "sort_gather_argsort": 0.0469,
+          "gu_prep_gather_hadamard": 1.2442,
+          "segtable": 0.0294,
+          "gu_kernel(seg_mm)": 11.5775,
+          "gu_finish_hadamard": 0.2035,
+          "act": 0.0843,
+          "dn_prep_hadamard": 0.1042,
+          "dn_kernel(seg_mm)": 3.4167,
+          "dn_finish_hadamard": 0.4042,
+          "scatter(combine_in_block)": 0.4848
+        },
+        "stage_per_seed": {
+          "sort_gather_argsort": [
+            0.0469,
+            0.0471,
+            0.0467
+          ],
+          "gu_prep_gather_hadamard": [
+            1.245,
+            1.2442,
+            1.2435
+          ],
+          "segtable": [
+            0.0294,
+            0.029,
+            0.0295
+          ],
+          "gu_kernel(seg_mm)": [
+            11.5775,
+            11.597,
+            11.5494
+          ],
+          "gu_finish_hadamard": [
+            0.2054,
+            0.2035,
+            0.2025
+          ],
+          "act": [
+            0.084,
+            0.0843,
+            0.0843
+          ],
+          "dn_prep_hadamard": [
+            0.1042,
+            0.1042,
+            0.1042
+          ],
+          "dn_kernel(seg_mm)": [
+            3.4167,
+            3.446,
+            3.4067
+          ],
+          "dn_finish_hadamard": [
+            0.4042,
+            0.4037,
+            0.4046
+          ],
+          "scatter(combine_in_block)": [
+            0.4837,
+            0.4848,
+            0.4852
+          ]
+        },
+        "whole_per_seed": [
+          13.7866,
+          13.9156,
+          13.7477
+        ]
+      }
+    },
+    "router": {
+      "R1": {
+        "R": 1,
+        "gpu_ms": 0.0404,
+        "per_seed": [
+          0.0401,
+          0.0404,
+          0.0405
+        ]
+      },
+      "R4": {
+        "R": 4,
+        "gpu_ms": 0.0477,
+        "per_seed": [
+          0.048,
+          0.0477,
+          0.0477
+        ]
+      },
+      "S2048": {
+        "R": 2048,
+        "gpu_ms": 0.8201,
+        "per_seed": [
+          0.8185,
+          0.8201,
+          0.8216
+        ]
+      }
+    }
+  },
+  "totals_x40": {
+    "n_moe_layers": 40,
+    "fused": {
+      "R1_topk6": {
+        "whole_x40_ms": 21.4
+      },
+      "R4_topk6": {
+        "whole_x40_ms": 37.592
+      },
+      "S2048_topk6": {
+        "whole_x40_ms": 2115.816
+      },
+      "S512_topk6": {
+        "whole_x40_ms": 550.14
+      },
+      "R1": {
+        "router_x40_ms": 1.648
+      },
+      "R4": {
+        "router_x40_ms": 1.924
+      },
+      "S2048": {
+        "router_x40_ms": 32.792
+      }
+    },
+    "unfused": {
+      "R1_topk6": {
+        "whole_x40_ms": 15.552
+      },
+      "R4_topk6": {
+        "whole_x40_ms": 36.848
+      },
+      "S2048_topk6": {
+        "whole_x40_ms": 2125.584
+      },
+      "S512_topk6": {
+        "whole_x40_ms": 551.464
+      },
+      "R1": {
+        "router_x40_ms": 1.616
+      },
+      "R4": {
+        "router_x40_ms": 1.908
+      },
+      "S2048": {
+        "router_x40_ms": 32.804
+      }
+    }
+  },
+  "verdict": {
+    "verify_shape": "R=4 topk6 (gamma+1, gamma=3)",
+    "fused_kernel_ms_gateup_plus_down": 0.8643,
+    "fused_prep_gather_hadamard_ms": 0.0089,
+    "fused_unattributed_ms": 0.0666,
+    "router_ms": 0.0481,
+    "whole_module_ms": 0.9398,
+    "kernel_x40_ms": 34.572,
+    "whole_x40_ms": 37.592,
+    "kernel_lt_25ms_x40": false,
+    "verdict": "KERNEL-DOMINATED",
+    "kernel_share_of_whole": 0.92,
+    "unfused_arm_R4_path": "_prefill"
+  }
+}
