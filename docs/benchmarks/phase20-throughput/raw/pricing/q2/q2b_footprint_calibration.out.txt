@@ -1,0 +1,147 @@
+step                       |  mlx act  mlx peak mlx cache |   fp now  fp peak |  vmm now vmm peak |   ru now  ru life  ru intv   (GB, decimal)
+t0_baseline                |    0.000    0.000    0.000 |    0.162    0.162 |    0.162    0.162 |    0.162    0.162    0.162
+t1_hold_A_4GB              |    4.000    4.000    0.000 |    4.162    4.162 |    4.188    4.188 |    4.162    4.162    4.162
+t2a_hold_A_plus_B_3GB      |    7.000    7.000    0.000 |    7.162    7.162 |    7.194    7.194 |    7.162    7.162    7.162
+t2b_B_freed_clear_cache    |    4.000    7.000    0.000 |    4.019    7.162 |    3.973    7.194 |    4.019    7.162    7.162
+t3_all_freed               |    0.000    7.000    0.000 |    0.019    7.162 |    0.019    7.194 |    0.019    7.162    7.162
+{
+ "pid": 78436,
+ "mlx_version": "0.32.0.dev20260804+ac73d0c9",
+ "rows": [
+  {
+   "tag": "t0_baseline",
+   "mlx": {
+    "active": 512,
+    "peak": 512,
+    "cache": 0
+   },
+   "footprint_tool": {
+    "now": 161825464,
+    "peak": 161825464,
+    "raw_aux": [
+     "phys_footprint: 161825464 B",
+     "phys_footprint_peak: 161825464 B"
+    ]
+   },
+   "vmmap_tool": {
+    "now": 161795276,
+    "peak": 161795276
+   },
+   "rusage": {
+    "now": 161825464,
+    "lifetime_max": 161825464,
+    "interval_max": 161825464,
+    "resident": 35504128,
+    "wired": 0
+   }
+  },
+  {
+   "tag": "t1_hold_A_4GB",
+   "mlx": {
+    "active": 4000006400,
+    "peak": 4000006400,
+    "cache": 256
+   },
+   "footprint_tool": {
+    "now": 4161929912,
+    "peak": 4161929912,
+    "raw_aux": [
+     "phys_footprint: 4161929912 B",
+     "phys_footprint_peak: 4161929912 B"
+    ]
+   },
+   "vmmap_tool": {
+    "now": 4187593113,
+    "peak": 4187593113
+   },
+   "rusage": {
+    "now": 4161929912,
+    "lifetime_max": 4161929912,
+    "interval_max": 4161929912,
+    "resident": 35651584,
+    "wired": 0
+   }
+  },
+  {
+   "tag": "t2a_hold_A_plus_B_3GB",
+   "mlx": {
+    "active": 7000015104,
+    "peak": 7000015104,
+    "cache": 256
+   },
+   "footprint_tool": {
+    "now": 7162036944,
+    "peak": 7162036944,
+    "raw_aux": [
+     "phys_footprint: 7162036944 B",
+     "phys_footprint_peak: 7162036944 B"
+    ]
+   },
+   "vmmap_tool": {
+    "now": 7194070220,
+    "peak": 7194070220
+   },
+   "rusage": {
+    "now": 7162053328,
+    "lifetime_max": 7162053328,
+    "interval_max": 7162053328,
+    "resident": 35749888,
+    "wired": 0
+   }
+  },
+  {
+   "tag": "t2b_B_freed_clear_cache",
+   "mlx": {
+    "active": 4000006144,
+    "peak": 7000015104,
+    "cache": 0
+   },
+   "footprint_tool": {
+    "now": 4019126992,
+    "peak": 7162069712,
+    "raw_aux": [
+     "phys_footprint: 4019126992 B",
+     "phys_footprint_peak: 7162069712 B"
+    ]
+   },
+   "vmmap_tool": {
+    "now": 3972844748,
+    "peak": 7194070220
+   },
+   "rusage": {
+    "now": 4019126992,
+    "lifetime_max": 7162069712,
+    "interval_max": 7162069712,
+    "resident": 35799040,
+    "wired": 0
+   }
+  },
+  {
+   "tag": "t3_all_freed",
+   "mlx": {
+    "active": 0,
+    "peak": 7000015104,
+    "cache": 0
+   },
+   "footprint_tool": {
+    "now": 19088080,
+    "peak": 7162069712,
+    "raw_aux": [
+     "phys_footprint: 19088080 B",
+     "phys_footprint_peak: 7162069712 B"
+    ]
+   },
+   "vmmap_tool": {
+    "now": 19084083,
+    "peak": 7194070220
+   },
+   "rusage": {
+    "now": 19088080,
+    "lifetime_max": 7162069712,
+    "interval_max": 7162069712,
+    "resident": 35766272,
+    "wired": 0
+   }
+  }
+ ]
+}

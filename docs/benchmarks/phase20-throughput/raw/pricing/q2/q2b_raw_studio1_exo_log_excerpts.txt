@@ -1,0 +1,388 @@
+# studio1 ~/exo.log excerpts (READ-ONLY copy via scp; current boot = exo pid 49282 started 2026-10-09 22:43:23 CDT)
+# filter: load/warmup/session/prefill lines only; timestamps are node-local CDT; full log is 147,873 lines at copy time
+
+843: [ 2026-10-09 22:43:40.127 | [33m[1mWARNING [0m | exo.worker.engines.mlx.utils_mlx:set_wired_limit_for_model:2125 ] [33m[1mGenerating with a model that requires 200951.6 MB which is close to the maximum recommended size of 120000.0 MB. This can be slow. Se
+844: [ 2026-10-09 22:43:40.127 | [1mINFO    [0m | exo.worker.engines.mlx.utils_mlx:set_wired_limit_for_model:2132 ] [1mWired limit set to 117.19 GiB GiB.[0m
+1370: [ 2026-10-09 22:44:44.174 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.load:load_dsv41:188 ] [1m[DSV41] body loaded in 64.0s: built=40/40 layers, rank=1/2, mtp_layers_skipped=3, vl_bias_loaded=True; active=104.7 GB[0m
+1465: [ 2026-10-09 22:44:46.862 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.load:build_draft_head:238 ] [1m[DSV41] DSpark draft head attached (3 stages, block=5, markov_rank=256, taps=[37, 38, 39])[0m
+1961: [ 2026-10-09 22:45:39.377 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=11, base=2048)[0m
+1978: [ 2026-10-09 22:45:39.934 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:warmup:440 ] [1m[DSV41] warmup: 2 token(s) in 0.6s (kernel compile); peak=110.5 GB[0m
+2326: [ 2026-10-09 22:46:23.440 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+2332: [ 2026-10-09 22:46:23.546 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='047acc4e-3c67-4fb6-87ea-bab2e6356700',
+2408: [ 2026-10-09 22:46:24.001 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 40189 rows from SSD (key=p:0e8b43afe48dbceb00d35c3ba79de982)[0m
+2409: [ 2026-10-09 22:46:24.002 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1216, base=2048)[0m
+2446: [ 2026-10-09 22:46:28.698 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40128 prefill=1216 reuse=38912 cache=40128 rewind=40189 UNCOMMITTED[0m
+2564: [ 2026-10-09 22:46:30.210 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='50bad09b-a1ef-480b-8099-307014f49387', finished_command_id='fe35a2a5-1532-4ce2-abc4-a267b5544153')[0m
+2568: [ 2026-10-09 22:46:30.233 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+2582: [ 2026-10-09 22:46:30.324 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='ef63dac3-d03c-49bc-ae4c-34922951352a',
+2658: [ 2026-10-09 22:46:30.436 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 40150-token prompt matches a resident conversation on 40127 rows[0m
+2659: [ 2026-10-09 22:46:30.437 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1238, base=2048)[0m
+2685: [ 2026-10-09 22:46:35.189 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40150 prefill=1238 reuse=38912 cache=40150 rewind=40179 UNCOMMITTED[0m
+2752: [ 2026-10-09 22:46:36.120 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='7b147945-4ec0-4c58-8b96-49ca679a9679', finished_command_id='8b78193b-738c-4507-9365-ec589d2fa258')[0m
+2754: [ 2026-10-09 22:46:36.151 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+2768: [ 2026-10-09 22:46:36.285 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='02814da5-5b6c-4df5-8f08-7a3075dd2463',
+2842: [ 2026-10-09 22:46:36.405 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 40144-token prompt matches a resident conversation on 40134 rows[0m
+2843: [ 2026-10-09 22:46:36.406 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1232, base=2048)[0m
+2875: [ 2026-10-09 22:46:41.159 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40144 prefill=1232 reuse=38912 cache=40144 rewind=40181 UNCOMMITTED[0m
+2955: [ 2026-10-09 22:46:42.561 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='73aa0fda-0952-4c04-a742-0fe1be70d374', finished_command_id='9c93c03c-3717-45b3-8a1f-2e7241c8ec7f')[0m
+2963: [ 2026-10-09 22:46:42.664 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+2969: [ 2026-10-09 22:46:42.762 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f97457fd-1c41-466c-a8fa-1d547c43876d',
+3043: [ 2026-10-09 22:46:42.880 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 40155-token prompt matches a resident conversation on 40133 rows[0m
+3044: [ 2026-10-09 22:46:42.881 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1243, base=2048)[0m
+3069: [ 2026-10-09 22:46:47.707 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40155 prefill=1243 reuse=38912 cache=40155 rewind=40181 UNCOMMITTED[0m
+3308: [ 2026-10-09 22:46:50.597 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='705ce409-6e59-466d-aa6a-7d5100296dae', finished_command_id='f58a65ac-0bd0-4d71-b89e-e9c454158716')[0m
+3317: [ 2026-10-09 22:46:50.727 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+3325: [ 2026-10-09 22:46:50.853 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='76f48bca-3d23-4351-b9ab-47caa3e1b9b2',
+3400: [ 2026-10-09 22:46:50.973 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 40158-token prompt matches a resident conversation on 40133 rows[0m
+3401: [ 2026-10-09 22:46:50.974 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1246, base=2048)[0m
+3430: [ 2026-10-09 22:46:55.851 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40158 prefill=1246 reuse=38912 cache=40158 rewind=40263 UNCOMMITTED[0m
+3711: [ 2026-10-09 22:46:58.974 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ed4a080c-ba9e-4271-9ff5-e40d2065dab1', finished_command_id='5306c8b5-cbe1-4c1d-89f6-a5dd72e8cc92')[0m
+3717: [ 2026-10-09 22:46:58.996 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+3724: [ 2026-10-09 22:46:59.151 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='135df41b-7f2a-49de-be64-ad37a521f1c7',
+3800: [ 2026-10-09 22:46:59.258 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 40147-token prompt matches a resident conversation on 40133 rows[0m
+3801: [ 2026-10-09 22:46:59.259 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1235, base=2048)[0m
+3830: [ 2026-10-09 22:47:04.076 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40147 prefill=1235 reuse=38912 cache=40147 rewind=40289 UNCOMMITTED[0m
+3898: [ 2026-10-09 22:47:04.840 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='a1580a1e-982c-4d9b-92b7-f047c5b51da1', finished_command_id='312a00e3-d710-4e6e-80b3-d8f2df42158a')[0m
+3904: [ 2026-10-09 22:47:04.861 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+3913: [ 2026-10-09 22:47:04.920 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='916829c3-c84d-46fd-b3d3-3eb9699ea0ec',
+3992: [ 2026-10-09 22:47:05.015 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 40148-token prompt matches a resident conversation on 40134 rows[0m
+3993: [ 2026-10-09 22:47:05.016 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1236, base=2048)[0m
+4014: [ 2026-10-09 22:47:09.821 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=40148 prefill=1236 reuse=38912 cache=40148 rewind=40178 UNCOMMITTED[0m
+4117: [ 2026-10-09 22:47:11.553 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='a16d89f1-f037-4ade-a05a-bec581f46375', finished_command_id='8ec9e2ee-1fa4-437a-b3c2-1da147e3a2ca')[0m
+4124: [ 2026-10-09 22:47:11.576 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+4130: [ 2026-10-09 22:47:11.592 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='e3d034b3-cc89-42b3-952c-da1740457fb4',
+4144: [ 2026-10-09 22:47:11.702 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+4145: [ 2026-10-09 22:47:11.704 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=18, base=2048)[0m
+4419: [ 2026-10-09 22:47:17.198 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='5e03d755-f336-45f6-a1c1-a7efa7717dd8', finished_command_id='68baff96-b998-4954-a39a-2d186d7fe8c4')[0m
+4427: [ 2026-10-09 22:47:17.290 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+4439: [ 2026-10-09 22:47:17.360 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='928e51f7-ef56-45e8-a048-5c6cc9de198b',
+4450: [ 2026-10-09 22:47:17.869 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (40189 rows)[0m
+4451: [ 2026-10-09 22:47:17.872 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=46, base=2048)[0m
+5771: [ 2026-10-09 22:47:39.099 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='c872031f-15d7-4b13-a0c2-0dfc1bbada58', finished_command_id='3ba89865-457e-4301-a2bd-4329ff5aa777')[0m
+5773: [ 2026-10-09 22:47:39.112 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+5794: [ 2026-10-09 22:47:39.212 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='7c57bb68-ef15-45c4-974e-9ba485cfb016',
+5802: [ 2026-10-09 22:47:39.253 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+5803: [ 2026-10-09 22:47:39.254 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=24, base=2048)[0m
+7459: [ 2026-10-09 22:48:07.059 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='47746fb2-3b2c-480e-b633-1cead4d010a8', finished_command_id='66358609-c3b2-4e01-a7b5-c52a32d01ed1')[0m
+7466: [ 2026-10-09 22:48:07.112 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+7472: [ 2026-10-09 22:48:07.125 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f254de8a-d01a-4d4d-ae78-fce487211183',
+7486: [ 2026-10-09 22:48:07.177 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+7487: [ 2026-10-09 22:48:07.177 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=14, base=2048)[0m
+9817: [ 2026-10-09 22:48:46.942 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='49a2b5f1-fd66-4b2a-9109-5e0dacbf8c28', finished_command_id='23c24e37-989f-46a3-aaf2-d2a6bd42c68a')[0m
+9828: [ 2026-10-09 22:48:47.054 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+9840: [ 2026-10-09 22:48:47.074 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='18929265-fd3a-4b09-b303-297851d53051',
+9848: [ 2026-10-09 22:48:47.137 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+9849: [ 2026-10-09 22:48:47.138 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=35, base=2048)[0m
+10694: [ 2026-10-09 22:48:57.429 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='5c757471-7efa-4a90-8adc-5b39fd871805', finished_command_id='cc4ddace-2636-4791-a09c-e378e05a6a55')[0m
+10701: [ 2026-10-09 22:48:57.451 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+10713: [ 2026-10-09 22:48:57.488 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f296f996-afd3-4f1d-bc13-b865df3dc01d',
+10721: [ 2026-10-09 22:48:57.530 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+10722: [ 2026-10-09 22:48:57.531 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=31, base=2048)[0m
+12129: [ 2026-10-09 22:49:22.098 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='49550ce1-0b39-450b-8974-18bef8a32b4a', finished_command_id='f4e1b381-02c0-4203-85c8-01c0ff0b47e3')[0m
+12136: [ 2026-10-09 22:49:22.228 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+12142: [ 2026-10-09 22:49:22.262 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='898c3c0d-6b47-444b-8338-8c676dfe4e99',
+12156: [ 2026-10-09 22:49:22.392 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+12157: [ 2026-10-09 22:49:22.393 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=21, base=2048)[0m
+14376: [ 2026-10-09 22:49:56.548 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='0d709649-7e44-490f-aee1-8c5fad92a09e', finished_command_id='3362bc64-41b4-4d90-a23e-f12bea8cd8ca')[0m
+14387: [ 2026-10-09 22:49:56.655 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+14401: [ 2026-10-09 22:49:56.755 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='c2515b62-b7ec-4391-91ae-9baa39676ba0',
+14409: [ 2026-10-09 22:49:56.839 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+14410: [ 2026-10-09 22:49:56.840 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=32, base=2048)[0m
+15206: [ 2026-10-09 22:50:09.254 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='447fb0cb-0974-4583-9238-a187b3e48f34', finished_command_id='d0fe10bb-b9ee-4f50-a71c-e9bd9729aa6a')[0m
+15213: [ 2026-10-09 22:50:09.278 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+15225: [ 2026-10-09 22:50:09.300 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='6fc87d7f-9af4-4c8a-b343-d06ce90083e4',
+15233: [ 2026-10-09 22:50:09.357 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+15234: [ 2026-10-09 22:50:09.357 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=26, base=2048)[0m
+16043: [ 2026-10-09 22:50:19.313 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='9ff41794-91ff-460d-8520-bce65ac84da7', finished_command_id='d750ee7b-a13f-45f7-a7cc-d947792e0a6d')[0m
+16050: [ 2026-10-09 22:50:19.330 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+16062: [ 2026-10-09 22:50:19.413 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='84d60b23-76ad-4e88-90f1-ca642e1724c0',
+16070: [ 2026-10-09 22:50:19.457 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+16071: [ 2026-10-09 22:50:19.458 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=25, base=2048)[0m
+16681: [ 2026-10-09 22:50:28.001 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ebff9f8b-f371-4c1b-886e-2896c95fc776', finished_command_id='ad7b8b8c-7d6d-417e-a089-8ac5f373c58f')[0m
+16690: [ 2026-10-09 22:50:28.175 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+16702: [ 2026-10-09 22:50:28.225 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='6bdf60ce-7dc9-4b9b-a1fb-b22048210b9a',
+16710: [ 2026-10-09 22:50:28.298 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+16711: [ 2026-10-09 22:50:28.298 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=21, base=2048)[0m
+19774: [ 2026-10-09 22:51:07.426 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='b0aad319-49d3-4429-84c9-e3de79039fb1', finished_command_id='f92614ee-7a87-4983-a9f0-d724e9ed4111')[0m
+19781: [ 2026-10-09 22:51:07.549 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+19787: [ 2026-10-09 22:51:07.568 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='e6cc0987-b17b-4394-b38d-3cd091a5bb86',
+19801: [ 2026-10-09 22:51:07.673 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+19802: [ 2026-10-09 22:51:07.674 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=20, base=2048)[0m
+21682: [ 2026-10-09 22:51:39.070 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='35d10448-3d60-49a2-9403-d976fff8d7ab', finished_command_id='31b20a03-802e-4148-a44f-39f09db04f86')[0m
+21689: [ 2026-10-09 22:51:39.098 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+21695: [ 2026-10-09 22:51:39.111 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='54b20bc9-d895-4aa7-9110-b742cb35abde',
+21709: [ 2026-10-09 22:51:39.201 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+21710: [ 2026-10-09 22:51:39.202 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=22, base=2048)[0m
+25462: [ 2026-10-09 22:52:42.451 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='2fd0d0da-ea65-484c-9a2c-ad6257dd008e', finished_command_id='55af4111-ae81-4a2f-b127-81b4abd9b576')[0m
+25469: [ 2026-10-09 22:52:42.476 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+25481: [ 2026-10-09 22:52:42.579 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='9b7860f1-6a7d-414c-9123-7ff04026a436',
+25490: [ 2026-10-09 22:52:42.648 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+25491: [ 2026-10-09 22:52:42.648 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=28, base=2048)[0m
+27622: [ 2026-10-09 22:53:14.807 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='88e9962a-1dec-4013-9488-389e68f8e895', finished_command_id='ca425415-5e0c-4b0f-a1b4-d84d9f412220')[0m
+27630: [ 2026-10-09 22:53:14.847 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+27642: [ 2026-10-09 22:53:14.933 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f6b6c6ed-8dc7-4986-b391-f03810761cfc',
+27650: [ 2026-10-09 22:53:15.000 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+27651: [ 2026-10-09 22:53:15.001 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=18, base=2048)[0m
+30651: [ 2026-10-09 22:54:03.668 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='0a2a3b53-1bd6-4064-85d2-5ccfa6e7d61e', finished_command_id='48f256d0-717e-4110-bf23-0933cd4b59af')[0m
+30660: [ 2026-10-09 22:54:03.719 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+30666: [ 2026-10-09 22:54:03.777 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='9480bec6-5be5-4736-b1ed-b93b2bcad63a',
+30680: [ 2026-10-09 22:54:03.863 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+30681: [ 2026-10-09 22:54:03.864 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=47, base=2048)[0m
+31394: [ 2026-10-09 22:54:14.082 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='dd30e2e0-7b4f-48b5-b34b-39c936bfa0c7', finished_command_id='51854f95-e021-4574-b973-b40254cdc99b')[0m
+31401: [ 2026-10-09 22:54:14.109 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+31413: [ 2026-10-09 22:54:14.187 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='e2fe1744-e5a3-45a4-9a50-7a195cc6a2e6',
+31421: [ 2026-10-09 22:54:14.233 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+31422: [ 2026-10-09 22:54:14.234 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=26, base=2048)[0m
+32411: [ 2026-10-09 22:54:29.890 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ba0be734-f070-4b87-aeab-3a2f123b1e3b', finished_command_id='297c8c5c-376b-489a-ab4e-0fa7632c7404')[0m
+32423: [ 2026-10-09 22:54:30.058 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+32435: [ 2026-10-09 22:54:30.163 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='74728a22-1a11-410a-98f3-c010bbafe575',
+32443: [ 2026-10-09 22:54:30.258 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+32444: [ 2026-10-09 22:54:30.259 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=12, base=2048)[0m
+34141: [ 2026-10-09 22:54:55.827 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='fbdb59cc-08a6-46eb-88c2-4dd285524fd7', finished_command_id='c3c72a65-787d-4550-8479-891a6462e648')[0m
+34148: [ 2026-10-09 22:54:55.851 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+34160: [ 2026-10-09 22:54:55.948 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='588aab5a-528a-40b6-92bf-d3af5cd56a13',
+34168: [ 2026-10-09 22:54:56.015 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+34169: [ 2026-10-09 22:54:56.016 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=30, base=2048)[0m
+35918: [ 2026-10-09 22:55:21.036 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='a64a3a7e-7f47-46c8-99cc-e9b856e324a3', finished_command_id='005ca172-6949-4f54-9459-6c1dd8fb0002')[0m
+35925: [ 2026-10-09 22:55:21.197 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+35931: [ 2026-10-09 22:55:21.243 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='64e5829c-8526-4417-8e70-38597d7c6caa',
+35945: [ 2026-10-09 22:55:21.339 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+35946: [ 2026-10-09 22:55:21.340 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=33, base=2048)[0m
+37647: [ 2026-10-09 22:55:51.255 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='552b43cb-451c-443e-b9e7-67302f3168d3', finished_command_id='8c87e0ae-425d-407c-87f4-cb4495094956')[0m
+37649: [ 2026-10-09 22:55:51.282 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+37669: [ 2026-10-09 22:55:51.374 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='d359a933-0e14-4164-a3b8-f564ea4b5b0d',
+37735: [ 2026-10-09 22:55:51.434 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+37736: [ 2026-10-09 22:55:51.434 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=512, base=2048)[0m
+37789: [ 2026-10-09 22:55:55.357 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='e9d52bf3-af6d-4c4b-b96a-3093a5b31dd3', finished_command_id='36d66966-ec40-4e16-a824-3b6790d898c7')[0m
+37796: [ 2026-10-09 22:55:55.388 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+37802: [ 2026-10-09 22:55:55.420 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='0d1b6779-2894-4e12-b437-661a52c92a4d',
+37876: [ 2026-10-09 22:55:55.471 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 511-token prompt matches a resident conversation on 499 rows[0m
+37877: [ 2026-10-09 22:55:55.471 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=511, base=2048)[0m
+38047: [ 2026-10-09 22:56:01.102 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='e7814580-3173-4df5-be44-d73a96309921', finished_command_id='f09b7c11-a973-4393-af2f-b7035a34e14d')[0m
+38054: [ 2026-10-09 22:56:01.153 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+38060: [ 2026-10-09 22:56:01.175 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='5961f460-e164-4abb-861f-6d7a9dd3005f',
+38132: [ 2026-10-09 22:56:01.230 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 511-token prompt matches a resident conversation on 499 rows[0m
+38133: [ 2026-10-09 22:56:01.231 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=511, base=2048)[0m
+38362: [ 2026-10-09 22:56:07.637 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='829619e4-9175-4c93-939a-9723cfd480f7', finished_command_id='9b128984-f90f-4f9b-85fe-b6fbc96820cc')[0m
+38369: [ 2026-10-09 22:56:07.660 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+38381: [ 2026-10-09 22:56:07.741 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='9404a5a8-45b4-4af2-93b5-1826b56d74ca',
+38447: [ 2026-10-09 22:56:07.768 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 509-token prompt matches a resident conversation on 499 rows[0m
+38448: [ 2026-10-09 22:56:07.769 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=509, base=2048)[0m
+38535: [ 2026-10-09 22:56:12.273 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='82bef24a-6e9d-496b-9b2c-5f6029ba04e4', finished_command_id='b48242ac-890a-4933-b5d3-4fbbed71cc29')[0m
+38547: [ 2026-10-09 22:56:12.387 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+38553: [ 2026-10-09 22:56:12.393 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='a2f20e58-319d-435c-a328-8ac3792bf277',
+38625: [ 2026-10-09 22:56:12.461 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 511-token prompt matches a resident conversation on 499 rows[0m
+38626: [ 2026-10-09 22:56:12.462 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=511, base=2048)[0m
+38906: [ 2026-10-09 22:56:20.065 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='abddb834-d7b6-4166-86a2-d812ff387d37', finished_command_id='9f71069b-3c30-4e7a-96a8-c5c670a462a4')[0m
+38913: [ 2026-10-09 22:56:20.172 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+38919: [ 2026-10-09 22:56:20.181 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='7a3a8555-b568-49ab-9759-d82f09ae17de',
+38991: [ 2026-10-09 22:56:20.249 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 515-token prompt matches a resident conversation on 499 rows[0m
+38992: [ 2026-10-09 22:56:20.249 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=515, base=2048)[0m
+39063: [ 2026-10-09 22:56:24.553 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='d4200b9e-0f90-45b8-b5fb-12eb8113b7e0', finished_command_id='edc46156-eb52-44b3-93e7-d9c09531f221')[0m
+39069: [ 2026-10-09 22:56:24.645 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+39075: [ 2026-10-09 22:56:24.668 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='fa58643e-94af-4212-be9e-8dbcc0680414',
+39147: [ 2026-10-09 22:56:24.726 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 512-token prompt matches a resident conversation on 499 rows[0m
+39148: [ 2026-10-09 22:56:24.726 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=512, base=2048)[0m
+39247: [ 2026-10-09 22:56:29.509 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='31cf2782-916c-421c-9f06-0074917baf33', finished_command_id='4d5777f1-9c65-4601-86ef-af2689bfbc1b')[0m
+39254: [ 2026-10-09 22:56:29.625 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+39266: [ 2026-10-09 22:56:29.719 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='49028265-6ac0-46f2-9294-326516f82019',
+39332: [ 2026-10-09 22:56:29.764 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 509-token prompt matches a resident conversation on 499 rows[0m
+39333: [ 2026-10-09 22:56:29.765 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=509, base=2048)[0m
+39415: [ 2026-10-09 22:56:33.842 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='e2763030-b5f8-456f-b1cc-456d1ec9a3c1', finished_command_id='cebd6738-f654-454e-9867-d2b88d7336ae')[0m
+39422: [ 2026-10-09 22:56:33.892 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+39434: [ 2026-10-09 22:56:33.967 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='39ed78cc-7eed-47bb-ad88-48bee7c779f2',
+39500: [ 2026-10-09 22:56:33.994 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 509-token prompt matches a resident conversation on 499 rows[0m
+39501: [ 2026-10-09 22:56:33.995 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=509, base=2048)[0m
+39729: [ 2026-10-09 22:56:39.436 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='9f95a6fe-abec-48a8-b7e5-19bd18e66483', finished_command_id='5b297421-3f08-4a9b-9753-fc52acf8ad4a')[0m
+39739: [ 2026-10-09 22:56:39.523 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+39745: [ 2026-10-09 22:56:39.530 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='e09c7f62-b244-4d3d-b579-1e67be3a505d',
+39817: [ 2026-10-09 22:56:39.595 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 520-token prompt matches a resident conversation on 499 rows[0m
+39818: [ 2026-10-09 22:56:39.595 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=520, base=2048)[0m
+39948: [ 2026-10-09 22:56:45.553 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='b2a20a60-4d71-437d-8ebd-5b888b751abb', finished_command_id='db8d0c58-dc30-40f1-aac0-8924746de575')[0m
+39956: [ 2026-10-09 22:56:45.615 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+39972: [ 2026-10-09 22:56:45.706 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='d66afdf9-6243-4ec8-999d-c250a0e311b2',
+39996: [ 2026-10-09 22:56:45.892 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 8079 rows from SSD (key=p:10eac1109ebc7fa368a598acf60147cb)[0m
+39997: [ 2026-10-09 22:56:45.893 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1868, base=2048)[0m
+40035: [ 2026-10-09 22:56:52.251 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=8012 prefill=1868 reuse=6144 cache=8012 rewind=8079 UNCOMMITTED[0m
+40235: [ 2026-10-09 22:56:55.682 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='f072ee84-7a7d-43e8-9ea6-83a5e1572186', finished_command_id='36f50636-8d5a-4830-8916-be782be629e7')[0m
+40238: [ 2026-10-09 22:56:55.701 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+40253: [ 2026-10-09 22:56:55.720 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='3113514b-5a84-45ad-8f07-10c0010f410b',
+40283: [ 2026-10-09 22:56:55.915 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 8043 rows from SSD (key=p:ac3486e552a422fb70d6b3d2ab607d5e)[0m
+40284: [ 2026-10-09 22:56:55.916 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=8011 prefill=0 reuse=8011 cache=8011 rewind=8043 UNCOMMITTED[0m
+40359: [ 2026-10-09 22:56:56.989 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='481f7f87-cada-4b21-8f70-295a2510dbf1', finished_command_id='b4b5e7d4-1914-438b-a473-de050caf2f50')[0m
+40369: [ 2026-10-09 22:56:57.153 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+40379: [ 2026-10-09 22:56:57.240 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='9667299a-2378-4c9c-83f7-6d32e7647f75',
+40411: [ 2026-10-09 22:56:57.426 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 8040 rows from SSD (key=p:7d8c60150a1093d55d51adf4a4d6b100)[0m
+40412: [ 2026-10-09 22:56:57.428 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=8009 prefill=0 reuse=8009 cache=8009 rewind=8040 UNCOMMITTED[0m
+40488: [ 2026-10-09 22:56:58.487 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='0b50ee67-7293-4f31-9f9e-924f4849e5a1', finished_command_id='67a3a648-da1e-4c49-ac3a-06f9198ec217')[0m
+40491: [ 2026-10-09 22:56:58.509 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+40501: [ 2026-10-09 22:56:58.557 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='16279783-9b1e-4d17-907d-859bb4ee944f',
+40531: [ 2026-10-09 22:56:58.614 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 8030-token prompt matches a resident conversation on 8011 rows[0m
+40532: [ 2026-10-09 22:56:58.615 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=1886, base=2048)[0m
+40569: [ 2026-10-09 22:57:05.055 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=8030 prefill=1886 reuse=6144 cache=8030 rewind=8102 UNCOMMITTED[0m
+40677: [ 2026-10-09 22:57:06.478 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ac34a9a6-3c6b-4f4f-92db-78b081edb612', finished_command_id='6a2c770c-59c8-406d-9e47-27f8a374410c')[0m
+44968: [ 2026-10-09 23:07:30.785 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+44983: [ 2026-10-09 23:07:30.902 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='b3b2e42d-8ab8-4f94-9a70-67d918cc4fc1',
+44999: [ 2026-10-09 23:07:30.993 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+45000: [ 2026-10-09 23:07:30.995 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+45001: [ 2026-10-09 23:07:31.294 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (8043 rows)[0m
+45002: [ 2026-10-09 23:07:31.508 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (8040 rows)[0m
+45003: [ 2026-10-09 23:07:31.510 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=20076, base=2048)[0m
+47234: [ 2026-10-09 23:08:59.064 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='d89ba038-8e03-4cd6-9f31-3c071e8a3b70', finished_command_id='66bfcfcf-7793-4089-b8ea-0868d38aa809')[0m
+47257: [ 2026-10-09 23:09:01.180 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+47269: [ 2026-10-09 23:09:01.294 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='265d0079-67b6-43f7-83e0-3345735f55dd',
+47289: [ 2026-10-09 23:09:01.757 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (8079 rows)[0m
+47290: [ 2026-10-09 23:09:01.760 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=20076, base=2048)[0m
+49521: [ 2026-10-09 23:10:29.612 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='b95b503d-e861-471a-8b4e-8fd574791a28', finished_command_id='3c31c569-3a20-4ae8-98ae-9e10210b43e7')[0m
+49547: [ 2026-10-09 23:10:31.630 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+49560: [ 2026-10-09 23:10:31.742 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='7a35f554-e10d-4aa4-b729-7d0dfc973245',
+49581: [ 2026-10-09 23:10:32.286 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (20876 rows)[0m
+49582: [ 2026-10-09 23:10:32.289 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=20076, base=2048)[0m
+51814: [ 2026-10-09 23:11:59.827 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='c856b5c1-8162-4f7c-996f-9b2d78e5efbb', finished_command_id='af7d511a-b447-42f1-9df0-98c6a359ca0f')[0m
+52051: [ 2026-10-09 23:12:22.922 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+52060: [ 2026-10-09 23:12:23.051 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='6cc10ffb-76f5-4f13-88d9-9a8205a42810',
+56340: [ 2026-10-09 23:12:23.782 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 91845 rows from SSD (key=p:8017e9772a009f48b92b48dfdf572d90)[0m
+56341: [ 2026-10-09 23:12:23.785 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=91043 prefill=0 reuse=91043 cache=91043 rewind=91845 UNCOMMITTED[0m
+58077: [ 2026-10-09 23:12:46.635 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='7f5b6388-4bb2-4774-9586-3faaa2514816', finished_command_id='109629bf-8a4f-47c0-b31f-93ff43f6fb2b')[0m
+58095: [ 2026-10-09 23:12:48.720 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+58102: [ 2026-10-09 23:12:48.849 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='3271f23d-a363-4437-81ba-cc14cf6d455a',
+62383: [ 2026-10-09 23:12:49.539 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 91843 rows from SSD (key=p:fbdd4f3d1083325d556949fef8e5d645)[0m
+62384: [ 2026-10-09 23:12:49.543 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=91043 prefill=0 reuse=91043 cache=91043 rewind=91843 UNCOMMITTED[0m
+64117: [ 2026-10-09 23:13:12.918 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='badf4385-94db-4508-9c72-131dd81319d3', finished_command_id='37775c1e-d726-4c35-b009-fe814f87ad0a')[0m
+64142: [ 2026-10-09 23:13:14.970 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+64150: [ 2026-10-09 23:13:15.087 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f908b31e-a2b1-4b50-81a9-0097c2b40843',
+68428: [ 2026-10-09 23:13:15.756 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_restore_parked:1072 ] [1m[DSV41] parked session restored: 91845 rows from SSD (key=p:97c9bda4e962bbf3ef440bf33e034880)[0m
+68429: [ 2026-10-09 23:13:15.760 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=91043 prefill=0 reuse=91043 cache=91043 rewind=91845 UNCOMMITTED[0m
+70271: [ 2026-10-09 23:13:39.392 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='13038b64-b340-4d7f-92b7-b8014b09392a', finished_command_id='83c0a221-573c-4c8f-a487-511b051089af')[0m
+71849: [ 2026-10-09 23:17:29.350 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+71861: [ 2026-10-09 23:17:29.426 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='cffb68fa-e6bd-45c8-bf38-967f306edb55',
+71929: [ 2026-10-09 23:17:29.797 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (20878 rows)[0m
+71931: [ 2026-10-09 23:17:30.050 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (20875 rows)[0m
+71938: [ 2026-10-09 23:17:30.556 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (91845 rows)[0m
+71948: [ 2026-10-09 23:17:31.103 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (91843 rows)[0m
+71949: [ 2026-10-09 23:17:31.108 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=512, base=2048)[0m
+72001: [ 2026-10-09 23:17:35.060 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='2cca1f02-9538-40d5-abc7-a20806686d1f', finished_command_id='8e41105e-848b-40a2-803d-b6e5faa7087f')[0m
+72008: [ 2026-10-09 23:17:35.147 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+72020: [ 2026-10-09 23:17:35.179 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='1e947278-b33f-434f-a17d-e7cf60722038',
+72086: [ 2026-10-09 23:17:35.214 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 511-token prompt matches a resident conversation on 499 rows[0m
+72087: [ 2026-10-09 23:17:35.215 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=511, base=2048)[0m
+72254: [ 2026-10-09 23:17:40.796 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ca9a2cd8-56b3-4d35-96c5-09c8d3f69108', finished_command_id='c134ce2d-e212-4cc4-bc5a-ea25dc16cd5e')[0m
+72263: [ 2026-10-09 23:17:40.892 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+72275: [ 2026-10-09 23:17:40.943 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f095eab8-61a0-47df-bef6-8fcd45a59fef',
+72341: [ 2026-10-09 23:17:40.976 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 511-token prompt matches a resident conversation on 499 rows[0m
+72342: [ 2026-10-09 23:17:40.977 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=511, base=2048)[0m
+72580: [ 2026-10-09 23:17:47.354 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ec6fe9c8-52df-4218-9ac2-3484027c50df', finished_command_id='5cf14236-0bc7-46f6-9c65-ab7601f4a328')[0m
+72587: [ 2026-10-09 23:17:47.382 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+72599: [ 2026-10-09 23:17:47.409 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='d62a17c8-17e8-426e-b737-6df4a7cb17f8',
+72665: [ 2026-10-09 23:17:47.435 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 509-token prompt matches a resident conversation on 499 rows[0m
+72666: [ 2026-10-09 23:17:47.436 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=509, base=2048)[0m
+72749: [ 2026-10-09 23:17:51.908 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='b39e1e75-cc5d-4fb3-8e06-efd13b71f757', finished_command_id='5ba3ef88-137b-4895-9cc0-a1d6ba13a97d')[0m
+72751: [ 2026-10-09 23:17:51.941 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+72759: [ 2026-10-09 23:17:51.961 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='6bc6bcf9-3fa8-4581-a3bb-0eed656d9ede',
+72837: [ 2026-10-09 23:17:52.000 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 511-token prompt matches a resident conversation on 499 rows[0m
+72838: [ 2026-10-09 23:17:52.000 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=511, base=2048)[0m
+73119: [ 2026-10-09 23:17:59.573 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='9794000f-0756-4e0c-ab8a-046492d07408', finished_command_id='88509877-d5ff-4ede-8148-62602aa493e6')[0m
+73124: [ 2026-10-09 23:17:59.744 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+73130: [ 2026-10-09 23:17:59.840 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='bae37194-0ecf-4a68-92bf-7a03c275a308',
+73202: [ 2026-10-09 23:17:59.908 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 515-token prompt matches a resident conversation on 499 rows[0m
+73203: [ 2026-10-09 23:17:59.908 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=515, base=2048)[0m
+73260: [ 2026-10-09 23:18:04.213 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='b653a0f4-3c86-4f7f-8ba8-c15e59f52f81', finished_command_id='4b89356a-6ad4-413e-b51d-49c2516b2cb6')[0m
+73268: [ 2026-10-09 23:18:04.430 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+73274: [ 2026-10-09 23:18:04.495 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='767b7ae7-5e7a-4d18-82db-654e3c85a2b4',
+73346: [ 2026-10-09 23:18:04.562 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 512-token prompt matches a resident conversation on 499 rows[0m
+73347: [ 2026-10-09 23:18:04.562 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=512, base=2048)[0m
+73447: [ 2026-10-09 23:18:09.329 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='c364bea0-2aa7-4462-8d5d-79d68cf4477e', finished_command_id='949b741f-844f-421e-aac8-d34917b40ffb')[0m
+73454: [ 2026-10-09 23:18:09.357 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+73461: [ 2026-10-09 23:18:09.448 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='bb597d12-08f5-4a5b-aeb7-a9d9abbc7cab',
+73533: [ 2026-10-09 23:18:09.489 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 509-token prompt matches a resident conversation on 499 rows[0m
+73534: [ 2026-10-09 23:18:09.489 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=509, base=2048)[0m
+73615: [ 2026-10-09 23:18:13.561 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='9efbe625-066f-4c14-bb71-96228e386f9c', finished_command_id='74b857b8-0377-430d-a78f-9d4f267abdc8')[0m
+73622: [ 2026-10-09 23:18:13.648 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+73628: [ 2026-10-09 23:18:13.696 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='92f92008-97ef-497d-ad49-6f1a957ea97f',
+73700: [ 2026-10-09 23:18:13.738 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 509-token prompt matches a resident conversation on 499 rows[0m
+73701: [ 2026-10-09 23:18:13.739 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=509, base=2048)[0m
+73821: [ 2026-10-09 23:18:19.185 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='116d05e8-9461-481a-be58-98bf1002c50f', finished_command_id='554ae8f8-f46c-40ed-89ac-101af93bc8ab')[0m
+73832: [ 2026-10-09 23:18:19.300 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+73838: [ 2026-10-09 23:18:19.356 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='88d21f34-7bac-45f9-8412-11edf09df2b6',
+73910: [ 2026-10-09 23:18:19.404 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 520-token prompt matches a resident conversation on 499 rows[0m
+73911: [ 2026-10-09 23:18:19.404 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=520, base=2048)[0m
+74045: [ 2026-10-09 23:18:25.390 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='db64be51-4201-4759-ac74-37b2cb3cb8d9', finished_command_id='e38b1a45-c9f2-4d7f-9758-5db3d0c91af6')[0m
+86999: [ 2026-10-09 23:49:49.911 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+87011: [ 2026-10-09 23:49:50.009 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='aa6a2f88-11cd-423c-8c2e-cf5a9ff3e215',
+87026: [ 2026-10-09 23:49:50.805 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (91845 rows)[0m
+87027: [ 2026-10-09 23:49:50.810 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=10, base=2048)[0m
+87055: [ 2026-10-09 23:49:51.496 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='30d899bc-6a33-4435-91f2-d4bec69928d3', finished_command_id='1c779c38-a035-4128-9cee-184f7983754e')[0m
+87113: [ 2026-10-09 23:49:59.803 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+87119: [ 2026-10-09 23:49:59.828 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='1a29dcce-6b4c-4d45-a252-886e2d862930',
+87134: [ 2026-10-09 23:49:59.916 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+87135: [ 2026-10-09 23:49:59.916 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=17, base=2048)[0m
+87193: [ 2026-10-09 23:50:00.936 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='40634510-9886-4571-a9c7-7d1f651f014c', finished_command_id='8f96bc84-5fa4-4964-911c-1f14c6345145')[0m
+103082: [ 2026-10-10 00:28:41.516 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+103095: [ 2026-10-10 00:28:41.771 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='eafedae4-642c-47a8-a1c7-ff89ead78cf1',
+103111: [ 2026-10-10 00:28:41.862 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+103112: [ 2026-10-10 00:28:41.862 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=18387, base=2048)[0m
+103513: [ 2026-10-10 00:29:45.483 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='5bab0e42-cbe4-4d4b-a245-6cdf3dae7de3', finished_command_id='1fb29df6-b0ba-4cc5-b958-973a71140a1b')[0m
+103637: [ 2026-10-10 00:29:47.061 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+103646: [ 2026-10-10 00:29:47.190 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='71550ae7-baa7-4378-90dd-242a241ca5c5',
+103672: [ 2026-10-10 00:29:47.308 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 20252-token prompt matches a resident conversation on 18386 rows[0m
+103673: [ 2026-10-10 00:29:47.308 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=3868, base=2048)[0m
+103754: [ 2026-10-10 00:30:01.848 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=20252 prefill=3868 reuse=16384 cache=20252 rewind=18387 UNCOMMITTED[0m
+103763: [ 2026-10-10 00:30:01.915 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='078984cf-96fb-409c-a84b-708f71cd9469', finished_command_id='cf9741e7-22a6-4f8e-ab7d-2148ce9cb95a')[0m
+103777: [ 2026-10-10 00:30:03.160 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+103792: [ 2026-10-10 00:30:03.275 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='913aa3c2-32bb-425d-a483-41fcf21bd358',
+103812: [ 2026-10-10 00:30:03.346 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 20284-token prompt matches a resident conversation on 18416 rows[0m
+103813: [ 2026-10-10 00:30:03.347 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=3900, base=2048)[0m
+103900: [ 2026-10-10 00:30:17.766 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=20284 prefill=3900 reuse=16384 cache=20284 rewind=20252 UNCOMMITTED[0m
+103909: [ 2026-10-10 00:30:17.832 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='6af89818-65b3-466c-aad5-97124144d8f5', finished_command_id='e4a82c9e-1c80-4d4b-8579-948d6c8ac031')[0m
+103921: [ 2026-10-10 00:30:19.190 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+103930: [ 2026-10-10 00:30:19.271 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='1cfc5a9e-b2b7-41c6-9cbc-2df4dd1f102f',
+103956: [ 2026-10-10 00:30:19.368 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 20240-token prompt matches a resident conversation on 18391 rows[0m
+103957: [ 2026-10-10 00:30:19.369 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=3856, base=2048)[0m
+104045: [ 2026-10-10 00:30:33.694 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=20240 prefill=3856 reuse=16384 cache=20240 rewind=20284 UNCOMMITTED[0m
+104053: [ 2026-10-10 00:30:33.761 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='10a7d728-685d-450c-9249-15cb3d7728ad', finished_command_id='e1c47e99-c766-4229-9ac8-9b83ba4a8bd0')[0m
+104064: [ 2026-10-10 00:30:35.102 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+104071: [ 2026-10-10 00:30:35.157 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='f75216f5-e302-4745-bdd2-afe73ea9a385',
+104093: [ 2026-10-10 00:30:35.324 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1125 ] [1m[DSV41] session store evicting an idle conversation[0m
+104094: [ 2026-10-10 00:30:35.326 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=45702, base=2048)[0m
+105364: [ 2026-10-10 00:33:17.374 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='148efb10-463d-4f54-bd3c-9a02e5f43174', finished_command_id='dc71f5c4-d89a-4109-a633-bc6bc0bd6900')[0m
+105379: [ 2026-10-10 00:33:18.995 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+105388: [ 2026-10-10 00:33:19.072 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='457a0d28-c0fe-45a6-9ecc-494c106e0221',
+105414: [ 2026-10-10 00:33:19.215 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 47559-token prompt matches a resident conversation on 45701 rows[0m
+105415: [ 2026-10-10 00:33:19.217 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=2503, base=2048)[0m
+105484: [ 2026-10-10 00:33:29.082 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=47559 prefill=2503 reuse=45056 cache=47559 rewind=45702 UNCOMMITTED[0m
+105493: [ 2026-10-10 00:33:29.153 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='ea7ed880-1a4e-4b39-b401-232cb6923cac', finished_command_id='a55b2853-781e-4c05-95bc-c325350d2cb9')[0m
+105511: [ 2026-10-10 00:33:30.564 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+105527: [ 2026-10-10 00:33:30.686 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='00b0a8e9-135b-419a-b39b-ca8a7b45cdbf',
+105552: [ 2026-10-10 00:33:30.784 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 47549-token prompt matches a resident conversation on 45706 rows[0m
+105553: [ 2026-10-10 00:33:30.785 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=2493, base=2048)[0m
+105719: [ 2026-10-10 00:33:40.626 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=47549 prefill=2493 reuse=45056 cache=47549 rewind=47559 UNCOMMITTED[0m
+105723: [ 2026-10-10 00:33:40.631 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='8cf4ba05-34bc-4588-a00b-e13330b5b77d', finished_command_id='6e27b99f-c659-4a8f-aee3-1f42ff739d79')[0m
+105739: [ 2026-10-10 00:33:42.065 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+105748: [ 2026-10-10 00:33:42.196 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='68ce015a-f35f-46df-bddd-5dac1ccf5dd2',
+105774: [ 2026-10-10 00:33:42.307 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 47590-token prompt matches a resident conversation on 45706 rows[0m
+105775: [ 2026-10-10 00:33:42.308 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=2534, base=2048)[0m
+105834: [ 2026-10-10 00:33:52.284 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=47590 prefill=2534 reuse=45056 cache=47590 rewind=47549 UNCOMMITTED[0m
+105841: [ 2026-10-10 00:33:52.352 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='dcacaeb8-be65-452a-ba88-bbcaab824398', finished_command_id='2fdc6f3b-3f2a-4e2e-ba1f-7bd86cc31957')[0m
+105950: [ 2026-10-10 00:34:10.668 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+105959: [ 2026-10-10 00:34:10.822 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='0f3dc193-5ac0-4562-b4e6-fedaa0f5f539',
+105991: [ 2026-10-10 00:34:11.456 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:_evict:1120 ] [1m[DSV41] parked an idle conversation to SSD (20240 rows)[0m
+105992: [ 2026-10-10 00:34:11.461 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=100497, base=2048)[0m
+108786: [ 2026-10-10 00:40:23.919 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='8028a1d1-3925-42d4-857a-4e79fd3ef5a6', finished_command_id='5e3e2e00-31d2-417c-ad2f-37e5f1cfcd1e')[0m
+108872: [ 2026-10-10 00:40:36.818 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+108883: [ 2026-10-10 00:40:37.278 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='4c6014fa-bc9d-4504-a08b-515e24732414',
+108914: [ 2026-10-10 00:40:37.445 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 102411-token prompt matches a resident conversation on 100496 rows[0m
+108915: [ 2026-10-10 00:40:37.447 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=2059, base=2048)[0m
+108971: [ 2026-10-10 00:40:46.084 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=102411 prefill=2059 reuse=100352 cache=102411 rewind=100497 UNCOMMITTED[0m
+108978: [ 2026-10-10 00:40:46.155 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='e24c77f2-d2a0-4fb6-9a32-4379682b5d5f', finished_command_id='3ed0ec2e-f091-4e7c-a329-b32fa2dd6f9d')[0m
+108991: [ 2026-10-10 00:40:47.813 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+109004: [ 2026-10-10 00:40:47.994 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='bcbf5c7f-9a45-453b-8716-d5770b6a846a',
+109035: [ 2026-10-10 00:40:48.236 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 102376-token prompt matches a resident conversation on 100501 rows[0m
+109036: [ 2026-10-10 00:40:48.238 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=2024, base=2048)[0m
+109090: [ 2026-10-10 00:40:56.285 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=102376 prefill=2024 reuse=100352 cache=102376 rewind=102411 UNCOMMITTED[0m
+109097: [ 2026-10-10 00:40:56.355 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='898bfae3-b458-4549-a7a5-45ff3c65137d', finished_command_id='4102082a-f534-4184-810c-92a46df883a3')[0m
+109107: [ 2026-10-10 00:40:57.550 | [34m[1mDEBUG   [0m | exo.api.main:_log_requests:340 ] [34m[1mAPI request: POST /v1/chat/completions[0m
+109120: [ 2026-10-10 00:40:57.801 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:814 ] [1mStarting task TextGeneration(task_id='6469f3d8-f71a-45c5-b4de-5cb8e32b1c66',
+109151: [ 2026-10-10 00:40:57.955 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:get:1004 ] [1m[DSV41] session reuse: this 102369-token prompt matches a resident conversation on 100501 rows[0m
+109152: [ 2026-10-10 00:40:57.957 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 ] [1m[DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=2017, base=2048)[0m
+109195: [ 2026-10-10 00:41:05.969 | [1mINFO    [0m | exo.worker.engines.mlx.dsv41.engine:_start_turn:1013 ] [1m[DSV41] turn reuse: prompt=102369 prefill=2017 reuse=100352 cache=102369 rewind=102376 UNCOMMITTED[0m
+109202: [ 2026-10-10 00:41:06.040 | [1mINFO    [0m | exo.master.main:_command_processor:213 ] [1mExecuting command: TaskFinished(command_id='05138686-11a8-4ade-8747-972b03e29d48', finished_command_id='0220d8f0-a13e-42f3-a530-b36466c6f3d7')[0m

@@ -1,0 +1,35 @@
+2026-10-10 04:27:45 CDT
+### host Adams-Mac-Studio-M4-2 runner pid 59829
+### sysctl
+iogpu.wired_limit_mb: 120000
+hw.memsize: 137438953472
+vm.swapusage: total = 10240.00M  used = 9652.38M  free = 587.62M  (encrypted)
+### vmmap -summary (read-only)
+Physical footprint:         106.0G
+Physical footprint (peak):  113.7G
+ReadOnly portion of Libraries: Total=2.4G resident=356.0M(15%) swapped_out_or_unallocated=2.0G(85%)
+Writable regions: Total=106.9G written=619.6M(1%) resident=105.4G(99%) swapped_out=19.2G(18%) unallocated=16777216.0T(16074735616%)
+REGION TYPE                        SIZE     SIZE     SIZE     SIZE     SIZE     SIZE     SIZE    COUNT (non-coalesced) 
+===========                     ======= ========    =====  ======= ========   ======    =====  ======= 
+IOAccelerator (graphics)         105.3G   105.3G    86.7G    18.7G       0K   105.3G    4864K     5063 
+===========                     ======= ========    =====  ======= ========   ======    =====  ======= 
+TOTAL                            494.6G   105.9G    86.8G    19.2G       0K   105.3G    4864K     8711 
+TOTAL, minus reserved VM space   494.6G   105.9G    86.8G    19.2G       0K   105.3G    4864K     8711 
+===========                      =======  =========  =========  =========  =========  =========  =========  ======  ======
+===========                      =======  =========  =========  =========  =========  =========  =========  ======  ======
+TOTAL                             601.3M      27.9M      15.7M     337.4M    1303341     402.6M         0K      0%     163
+### footprint -f bytes (read-only)
+python [59829]: 64-bit    Footprint: 113805869000 B (16384 bytes per page)
+113112285184 B           0 B           0 B       5063    IOAccelerator (graphics)
+    phys_footprint: 113805869000 B
+    phys_footprint_peak: 122104151408 B
+### vm_stat
+Pages free:                                  1388824.
+Pages wired down:                            5831551.
+Pages stored in compressor:                   622899.
+Pages occupied by compressor:                 617234.
+Swapins:                                    60949603.
+Swapouts:                                   62407707.
+### memory_pressure
+
+System-wide memory free percentage: 22%

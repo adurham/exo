@@ -1,0 +1,63 @@
+{
+ "fetched_at_local": "2026-10-10T06:05:08-05:00",
+ "source": "GET http://192.168.86.48:52415/state (read-only)",
+ "instances": {
+  "7aa2dbd3-3867-40b3-bbad-51b8c3519a26": {
+   "kind": "MlxJacclInstance",
+   "maxKvTokens": 1048576,
+   "kvCacheBits": 0,
+   "maxPrefixSessions": 4,
+   "maxPrefixBytes": 12884901888,
+   "modelCard_contextLength": [
+    1048576
+   ],
+   "modelId": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw"
+  }
+ },
+ "active_tasks": [
+  [
+   "f537bf18",
+   "CreateRunner",
+   "Complete"
+  ],
+  [
+   "3fe0acd2",
+   "CreateRunner",
+   "Complete"
+  ],
+  [
+   "aecee1f9",
+   "ConnectToGroup",
+   "Complete"
+  ],
+  [
+   "b9a85099",
+   "ConnectToGroup",
+   "Complete"
+  ],
+  [
+   "2a66aee6",
+   "LoadModel",
+   "Complete"
+  ],
+  [
+   "2c6dc1b0",
+   "LoadModel",
+   "Complete"
+  ],
+  [
+   "49179507",
+   "StartWarmup",
+   "Complete"
+  ],
+  [
+   "c5b2c4c8",
+   "StartWarmup",
+   "Complete"
+  ]
+ ],
+ "runners": {
+  "57e4804e": "RunnerReady",
+  "61cc5314": "RunnerReady"
+ }
+}

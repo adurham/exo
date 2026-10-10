@@ -1,0 +1,81 @@
+2026-10-10 06:05:12.979 | INFO     | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 - [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=off (rows=20480, base=2048)
+2026-10-10 06:05:12.990 | INFO     | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 - [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=off (rows=20480, base=2048)
+2026-10-10 06:05:13.005 | INFO     | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 - [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=off (rows=40960, base=2048)
+2026-10-10 06:05:13.016 | INFO     | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 - [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=off (rows=40960, base=2048)
+2026-10-10 06:05:13.046 | INFO     | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 - [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=off (rows=81920, base=2048)
+2026-10-10 06:05:13.063 | INFO     | exo.worker.engines.mlx.dsv41.session:engine_prefill:333 - [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=off (rows=81920, base=2048)
+tap bytes/row = 30720 (3 layers x 5120 x 2 B bf16)   chunk=2048
+   rows retain  sink | sum(nbytes) GB     B/row | peak-base GB active_end-base GB
+  20480  False     0 |         0.0000       0.0 |        0.126              0.063
+  20480   True    10 |         0.6291   30720.0 |        0.566              0.566
+  40960  False     0 |         0.0000       0.0 |        0.126              0.063
+  40960   True    20 |         1.2583   30720.0 |        1.196              1.195
+  81920  False     0 |         0.0000       0.0 |        0.126              0.000
+  81920   True    40 |         2.5166   30720.0 |        2.517              2.517
+
+per-row retained slope (retain=True minus retain=False, peak domain):
+  rows= 20480  delta_peak=  0.440 GB  =   21503.9 B/row
+  rows= 40960  delta_peak=  1.070 GB  =   26111.9 B/row
+  rows= 81920  delta_peak=  2.391 GB  =   29184.0 B/row
+[
+ {
+  "rows": 20480,
+  "chunks_consumed": 10,
+  "retain": false,
+  "peak_minus_base_B": 125995520,
+  "active_end_minus_base_B": 62915840,
+  "sink_len": 0,
+  "sink_nbytes_B": 0,
+  "expected_retained_B": null
+ },
+ {
+  "rows": 20480,
+  "chunks_consumed": 10,
+  "retain": true,
+  "peak_minus_base_B": 566394880,
+  "active_end_minus_base_B": 566229760,
+  "sink_len": 10,
+  "sink_nbytes_B": 629145600,
+  "expected_retained_B": 629145600
+ },
+ {
+  "rows": 40960,
+  "chunks_consumed": 20,
+  "retain": false,
+  "peak_minus_base_B": 126159360,
+  "active_end_minus_base_B": 62915840,
+  "sink_len": 0,
+  "sink_nbytes_B": 0,
+  "expected_retained_B": null
+ },
+ {
+  "rows": 40960,
+  "chunks_consumed": 20,
+  "retain": true,
+  "peak_minus_base_B": 1195704320,
+  "active_end_minus_base_B": 1195375360,
+  "sink_len": 20,
+  "sink_nbytes_B": 1258291200,
+  "expected_retained_B": 1258291200
+ },
+ {
+  "rows": 81920,
+  "chunks_consumed": 40,
+  "retain": false,
+  "peak_minus_base_B": 126487040,
+  "active_end_minus_base_B": 0,
+  "sink_len": 0,
+  "sink_nbytes_B": 0,
+  "expected_retained_B": null
+ },
+ {
+  "rows": 81920,
+  "chunks_consumed": 40,
+  "retain": true,
+  "peak_minus_base_B": 2517239040,
+  "active_end_minus_base_B": 2516583680,
+  "sink_len": 40,
+  "sink_nbytes_B": 2516582400,
+  "expected_retained_B": 2516582400
+ }
+]

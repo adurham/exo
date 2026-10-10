@@ -1,0 +1,1019 @@
+{
+ "schema": "q2b-memory-headroom/2",
+ "generated": "2026-10-10T07:23:13-05:00",
+ "W_gb": 125.82912,
+ "W_mib": 120000,
+ "W_gib": 117.188,
+ "phys_ram_gb": 137.439,
+ "gc_limit_gb": 119.538,
+ "weights_gb": 104.7,
+ "peak_102k_resident_gb": 122.126,
+ "peak_102k_allocator_gb": 116.26,
+ "peak_102k_resident_gb_as_reported_A2": 114.0,
+ "peak_102k_allocator_gb_as_reported_A2": 124.833,
+ "units_correction": {
+  "allocator": "VM gauge exo_peak_memory_bytes is x1.073741824 too high (Memory.from_gb(P/1e9)); 124.833 -> 116.260 e9 B",
+  "resident": "`footprint` prints binary units: '114 GB' = 113.74 GiB = 122.126 e9 B (lifetime max, libproc ri_lifetime_max_phys_footprint)"
+ },
+ "peak_102k_resident_note": "phys_footprint LIFETIME max of the runner process (load+warmup+serving); during serving it is most likely a plateau set by MLX gc_limit trimming (see md s2), not attributable to the 100K request alone",
+ "peak_102k_request": "the 100,497-row COLD prefill that finished 2026-10-10 00:40:23 CDT (not the 102,411-token follow-up, a 2,059-row delta)",
+ "transient_gb": {
+  "allocator": 11.56,
+  "resident": 17.426,
+  "as_reported_A2": {
+   "allocator": 20.133,
+   "resident": 9.3
+  }
+ },
+ "slope_gb_per_token": 4.1842e-05,
+ "slope_scope": "cold single-request prefill (D=N), allocator domain, GB per token of context",
+ "slope_gb_per_token_warm_turn": 1.1122e-05,
+ "slope_components_b_per_token": {
+  "retained_dspark_taps_per_prefilled_row": 30720,
+  "kv_comp_kv_plus_index_k": 3200,
+  "unattributed_O_N_fitted": 7922.0,
+  "rope_tables": 0,
+  "cold_total": 41842.0,
+  "warm_total": 11122.0
+ },
+ "breach_ctx_allocator": "~328K tokens, cold single-request prefill (band 272K-362K)",
+ "breach_ctx_resident": "~266K-286K tokens, cold prefill (UNKNOWN-grade: one footprint reading + plateau assumption)",
+ "breaches_shipped": "YES, conditionally: cap 1,048,576 admits cold prefills past W (>~328K); warm turns not predicted to cross but margin 2.0 GB < model error; budget breach, not a demonstrated crash",
+ "breach_ctx_allocator_detail": "~328K tokens (cold single-request prefill; band 272K-362K from unfitted-validation error -1.4..+2.3 GB, LOO 327K-329K); 2 of 3 measured cold-350K peaks already exceed W. Warm turns: no crossing inside the 1,048,576 cap (123.8 GB at cap, -2.0 GB vs W, inside the model error)",
+ "breach_ctx_resident_detail": "~266K-286K tokens (cold prefill; model band 211K-320K; LOW confidence: one footprint data point, plateau pinned at 122.1 GB until active passes gc_limit at ~178K)",
+ "breaches_shipped_detail": "YES, conditionally. The shipped cap (1,048,576) admits it: a single COLD prefill crosses W at ~328K (allocator) / ~266K-286K (OS footprint) and extrapolates to 156 GB at the cap (> 137 GB RAM; deep-cold UNVERIFIED). Warm turns do not cross inside the cap but leave only 2.0 GB (less than the model error) and a second deep resident session removes it. Not a demonstrated crash: past-W loads completed in soaks with OS compression/swap absorbing. Largest real prompt seen: 126,527 (state.db, 96 calls).",
+ "breach_ctx_allocator_tokens": {
+  "central": 328242,
+  "band": [
+   272413,
+   361749
+  ],
+  "loo": [
+   326975,
+   328968
+  ]
+ },
+ "breach_ctx_resident_tokens": {
+  "central_band": [
+   266376,
+   286130
+  ],
+  "model_band": [
+   210546,
+   319637
+  ]
+ },
+ "breach_ctx_warm_allocator_tokens": {
+  "D2048": 1302189,
+  "D25662": 1210618,
+  "note": "beyond the 1,048,576 cap -> no breach inside the admitted window"
+ },
+ "admitted_cap_ctx": 1048576,
+ "admitted_cap_source": "GET http://192.168.86.48:52415/state instances.*.maxKvTokens (read-only); Hermes pin context_length 1,048,576",
+ "hermes_compress_at_tokens": 734003,
+ "fit": {
+  "A_gb": 112.0949,
+  "t_b_per_token": 7922.0,
+  "sigma_gb": 0.212,
+  "n": 10,
+  "free_fit": {
+   "A": 112.22,
+   "cD_b_per_row": 28489.0,
+   "se_cD": 894.0,
+   "cN_b_per_token": 8559.0,
+   "se_cN": 297.0,
+   "sigma": 0.165,
+   "analytic_taps_b_per_row": 30720
+  },
+  "residuals_gb": {
+   "cur_20K_a": 0.064,
+   "cur_20K_b": 0.101,
+   "cur_18K": 0.248,
+   "cur_45K": -0.223,
+   "cur_100K": -0.138,
+   "n13_100K": 0.035,
+   "n13_160K": 0.077,
+   "n13_r500": -0.414,
+   "n13_r750": 0.178,
+   "n13_r1m": 0.071
+  }
+ },
+ "validation": [
+  {
+   "name": "n18 b8d90d57 188K",
+   "N": 188261,
+   "measured": 119.021,
+   "predicted": 119.972,
+   "err": -0.951,
+   "note": "next18 (shipped lineage), cold"
+  },
+  {
+   "name": "n13 75fa21d8 160K",
+   "N": 160007,
+   "measured": 121.126,
+   "predicted": 118.79,
+   "err": 2.336,
+   "note": "next13-era other instance, cold"
+  },
+  {
+   "name": "n17 49984332 91K",
+   "N": 91043,
+   "measured": 117.588,
+   "predicted": 116.032,
+   "err": 1.555,
+   "note": "next17 (lever-1 era), cold"
+  },
+  {
+   "name": "old 247fb3c8 160K",
+   "N": 159995,
+   "measured": 119.852,
+   "predicted": 118.789,
+   "err": 1.063,
+   "note": "10-06 build, cold"
+  },
+  {
+   "name": "old d301ea85 350K",
+   "N": 350124,
+   "measured": 125.343,
+   "predicted": 126.745,
+   "err": -1.402,
+   "note": "10-06 build, cold"
+  },
+  {
+   "name": "old 5689f0ba 350K",
+   "N": 350124,
+   "measured": 126.343,
+   "predicted": 126.745,
+   "err": -0.401,
+   "note": "10-06 build, cold"
+  },
+  {
+   "name": "old 30b396d2 350K",
+   "N": 350124,
+   "measured": 126.788,
+   "predicted": 126.745,
+   "err": 0.044,
+   "note": "10-07 build, cold"
+  }
+ ],
+ "validation_error_band_gb": [
+  -1.402,
+  2.336
+ ],
+ "upper_envelope_old_builds": [
+  {
+   "name": "OLD 867ef937 cold 500K",
+   "N": 499981,
+   "measured": 142.92
+  },
+  {
+   "name": "OLD 867ef937 cold 750K",
+   "N": 749983,
+   "measured": 152.06
+  }
+ ],
+ "two_anchor_cold350K": [
+  {
+   "name": "old d301ea85 350K",
+   "slope_B_per_row": 36387.0,
+   "N_star": 363486
+  },
+  {
+   "name": "old 5689f0ba 350K",
+   "slope_B_per_row": 40394.0,
+   "N_star": 337395
+  },
+  {
+   "name": "old 30b396d2 350K",
+   "slope_B_per_row": 42177.0,
+   "N_star": 327380
+  }
+ ],
+ "active_crosses_gc_limit_cold_tokens": 177880,
+ "active_crosses_physical_ram_cold_tokens": 605710,
+ "cold_N_star_if_taps_fixed_projection_tokens": 1310131,
+ "transient_gb_range": [
+  11.56,
+  17.426
+ ],
+ "N_star_free_fit_cold_allocator_tokens": 338141,
+ "N_star_cold_if_capacity_doubled_tokens": 304922,
+ "warm_turn_max_new_rows_before_W": [
+  {
+   "N": 200000,
+   "cap_exact": 200000,
+   "cap_doubled": 200000
+  },
+  {
+   "N": 328000,
+   "cap_exact": 328000,
+   "cap_doubled": 294161
+  },
+  {
+   "N": 400000,
+   "cap_exact": 302261,
+   "cap_doubled": 260594
+  },
+  {
+   "N": 500000,
+   "cap_exact": 266057,
+   "cap_doubled": 213973
+  },
+  {
+   "N": 734003,
+   "cap_exact": 181337,
+   "cap_doubled": 148569
+  },
+  {
+   "N": 900000,
+   "cap_exact": 121239,
+   "cap_doubled": 105763
+  },
+  {
+   "N": 1048576,
+   "cap_exact": 67448,
+   "cap_doubled": 67448
+  }
+ ],
+ "host_H_bounds_gb": [
+  1.762,
+  2.589
+ ],
+ "footprint_runner_studio1": {
+  "now_gb": 114.345,
+  "peak_gb": 122.126,
+  "ioaccelerator_gb": 112.583
+ },
+ "scenarios": {
+  "cold prefill (as shipped)": [
+   {
+    "N": 20076,
+    "alloc": 113.08,
+    "vsW": -12.749,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 116.398,
+    "vsW": -9.431,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 117.579,
+    "vsW": -8.25,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 120.463,
+    "vsW": -5.366,
+    "fp_lo": 122.225,
+    "fp_hi": 123.052
+   },
+   {
+    "N": 262144,
+    "alloc": 123.063,
+    "vsW": -2.766,
+    "fp_lo": 124.826,
+    "fp_hi": 125.652
+   },
+   {
+    "N": 300000,
+    "alloc": 124.647,
+    "vsW": -1.182,
+    "fp_lo": 126.409,
+    "fp_hi": 127.236
+   },
+   {
+    "N": 328000,
+    "alloc": 125.819,
+    "vsW": -0.01,
+    "fp_lo": 127.581,
+    "fp_hi": 128.408
+   },
+   {
+    "N": 400000,
+    "alloc": 128.832,
+    "vsW": 3.003,
+    "fp_lo": 130.594,
+    "fp_hi": 131.42
+   },
+   {
+    "N": 500000,
+    "alloc": 133.016,
+    "vsW": 7.187,
+    "fp_lo": 134.778,
+    "fp_hi": 135.604
+   },
+   {
+    "N": 734003,
+    "alloc": 142.807,
+    "vsW": 16.978,
+    "fp_lo": 144.569,
+    "fp_hi": 145.396
+   },
+   {
+    "N": 900000,
+    "alloc": 149.753,
+    "vsW": 23.924,
+    "fp_lo": 151.515,
+    "fp_hi": 152.341
+   },
+   {
+    "N": 1048576,
+    "alloc": 155.969,
+    "vsW": 30.14,
+    "fp_lo": 157.731,
+    "fp_hi": 158.558
+   }
+  ],
+  "warm turn, D=2,048 rows": [
+   {
+    "N": 20076,
+    "alloc": 112.527,
+    "vsW": -13.303,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 113.373,
+    "vsW": -12.456,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 113.616,
+    "vsW": -12.214,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 114.382,
+    "vsW": -11.447,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 262144,
+    "alloc": 115.073,
+    "vsW": -10.756,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 300000,
+    "alloc": 115.494,
+    "vsW": -10.335,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 328000,
+    "alloc": 115.806,
+    "vsW": -10.023,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 400000,
+    "alloc": 116.607,
+    "vsW": -9.223,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 500000,
+    "alloc": 117.719,
+    "vsW": -8.11,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 734003,
+    "alloc": 120.321,
+    "vsW": -5.508,
+    "fp_lo": 122.083,
+    "fp_hi": 122.91
+   },
+   {
+    "N": 900000,
+    "alloc": 122.168,
+    "vsW": -3.662,
+    "fp_lo": 123.93,
+    "fp_hi": 124.756
+   },
+   {
+    "N": 1048576,
+    "alloc": 123.82,
+    "vsW": -2.009,
+    "fp_lo": 125.582,
+    "fp_hi": 126.409
+   }
+  ],
+  "warm turn D=2,048, capacity rounded up 2x (upper bound)": [
+   {
+    "N": 20076,
+    "alloc": 112.527,
+    "vsW": -13.303,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 113.597,
+    "vsW": -12.232,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 114.035,
+    "vsW": -11.794,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 115.022,
+    "vsW": -10.807,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 262144,
+    "alloc": 115.912,
+    "vsW": -9.917,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 300000,
+    "alloc": 116.454,
+    "vsW": -9.375,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 328000,
+    "alloc": 116.855,
+    "vsW": -8.974,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 400000,
+    "alloc": 117.887,
+    "vsW": -7.943,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 500000,
+    "alloc": 119.319,
+    "vsW": -6.51,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 734003,
+    "alloc": 121.328,
+    "vsW": -4.501,
+    "fp_lo": 123.09,
+    "fp_hi": 123.917
+   },
+   {
+    "N": 900000,
+    "alloc": 122.643,
+    "vsW": -3.186,
+    "fp_lo": 124.405,
+    "fp_hi": 125.232
+   },
+   {
+    "N": 1048576,
+    "alloc": 123.82,
+    "vsW": -2.009,
+    "fp_lo": 125.582,
+    "fp_hi": 126.409
+   }
+  ],
+  "warm turn, D=25,662 (largest state.db growth)": [
+   {
+    "N": 20076,
+    "alloc": 113.252,
+    "vsW": -12.577,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 114.099,
+    "vsW": -11.73,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 114.341,
+    "vsW": -11.488,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 115.108,
+    "vsW": -10.722,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 262144,
+    "alloc": 115.799,
+    "vsW": -10.03,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 300000,
+    "alloc": 116.22,
+    "vsW": -9.609,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 328000,
+    "alloc": 116.531,
+    "vsW": -9.298,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 400000,
+    "alloc": 117.332,
+    "vsW": -8.497,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 500000,
+    "alloc": 118.444,
+    "vsW": -7.385,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 734003,
+    "alloc": 121.047,
+    "vsW": -4.782,
+    "fp_lo": 122.809,
+    "fp_hi": 123.635
+   },
+   {
+    "N": 900000,
+    "alloc": 122.893,
+    "vsW": -2.936,
+    "fp_lo": 124.655,
+    "fp_hi": 125.482
+   },
+   {
+    "N": 1048576,
+    "alloc": 124.545,
+    "vsW": -1.284,
+    "fp_lo": 126.307,
+    "fp_hi": 127.134
+   }
+  ],
+  "warm turn D=2,048 + 2nd resident session at 400K": [
+   {
+    "N": 20076,
+    "alloc": 113.807,
+    "vsW": -12.023,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 114.653,
+    "vsW": -11.176,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 114.896,
+    "vsW": -10.934,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 115.662,
+    "vsW": -10.167,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 262144,
+    "alloc": 116.353,
+    "vsW": -9.476,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 300000,
+    "alloc": 116.774,
+    "vsW": -9.055,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 328000,
+    "alloc": 117.086,
+    "vsW": -8.743,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 400000,
+    "alloc": 117.887,
+    "vsW": -7.943,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 500000,
+    "alloc": 118.999,
+    "vsW": -6.83,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 734003,
+    "alloc": 121.601,
+    "vsW": -4.228,
+    "fp_lo": 123.363,
+    "fp_hi": 124.19
+   },
+   {
+    "N": 900000,
+    "alloc": 123.448,
+    "vsW": -2.382,
+    "fp_lo": 125.21,
+    "fp_hi": 126.036
+   },
+   {
+    "N": 1048576,
+    "alloc": 125.1,
+    "vsW": -0.729,
+    "fp_lo": 126.862,
+    "fp_hi": 127.689
+   }
+  ],
+  "warm turn D=2,048 + 2nd resident session at cap": [
+   {
+    "N": 20076,
+    "alloc": 115.882,
+    "vsW": -9.947,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 116.729,
+    "vsW": -9.1,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 116.971,
+    "vsW": -8.858,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 117.738,
+    "vsW": -8.092,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 262144,
+    "alloc": 118.429,
+    "vsW": -7.4,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 300000,
+    "alloc": 118.85,
+    "vsW": -6.979,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 328000,
+    "alloc": 119.161,
+    "vsW": -6.668,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 400000,
+    "alloc": 119.962,
+    "vsW": -5.867,
+    "fp_lo": 121.724,
+    "fp_hi": 122.551
+   },
+   {
+    "N": 500000,
+    "alloc": 121.074,
+    "vsW": -4.755,
+    "fp_lo": 122.836,
+    "fp_hi": 123.663
+   },
+   {
+    "N": 734003,
+    "alloc": 123.677,
+    "vsW": -2.152,
+    "fp_lo": 125.439,
+    "fp_hi": 126.265
+   },
+   {
+    "N": 900000,
+    "alloc": 125.523,
+    "vsW": -0.306,
+    "fp_lo": 127.285,
+    "fp_hi": 128.112
+   },
+   {
+    "N": 1048576,
+    "alloc": 127.175,
+    "vsW": 1.346,
+    "fp_lo": 128.937,
+    "fp_hi": 129.764
+   }
+  ],
+  "cold prefill IF taps retention were fixed (projection)": [
+   {
+    "N": 20076,
+    "alloc": 112.464,
+    "vsW": -13.366,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 100497,
+    "alloc": 113.31,
+    "vsW": -12.519,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 131072,
+    "alloc": 113.553,
+    "vsW": -12.276,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 200000,
+    "alloc": 114.319,
+    "vsW": -11.51,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 262144,
+    "alloc": 115.01,
+    "vsW": -10.819,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 300000,
+    "alloc": 115.431,
+    "vsW": -10.398,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 328000,
+    "alloc": 115.743,
+    "vsW": -10.086,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 400000,
+    "alloc": 116.544,
+    "vsW": -9.285,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 500000,
+    "alloc": 117.656,
+    "vsW": -8.173,
+    "fp_lo": 122.126,
+    "fp_hi": 122.126
+   },
+   {
+    "N": 734003,
+    "alloc": 120.258,
+    "vsW": -5.571,
+    "fp_lo": 122.02,
+    "fp_hi": 122.847
+   },
+   {
+    "N": 900000,
+    "alloc": 122.105,
+    "vsW": -3.724,
+    "fp_lo": 123.867,
+    "fp_hi": 124.693
+   },
+   {
+    "N": 1048576,
+    "alloc": 123.757,
+    "vsW": -2.072,
+    "fp_lo": 125.519,
+    "fp_hi": 126.346
+   }
+  ]
+ },
+ "q1e_rederivation": {
+  "allocator_corrected": {
+   "non_weight": 11.56,
+   "demand": 18.07,
+   "headroom": 15.41,
+   "over": 2.66,
+   "over_with_margin": 4.66
+  },
+  "resident_corrected": {
+   "non_weight": 17.43,
+   "demand": 23.94,
+   "headroom": 15.41,
+   "over": 8.53,
+   "over_with_margin": 10.53
+  },
+  "allocator_A2_reported": {
+   "non_weight": 20.13,
+   "demand": 26.64,
+   "headroom": 15.41,
+   "over": 11.23,
+   "over_with_margin": 13.23
+  },
+  "resident_A2_reported": {
+   "non_weight": 9.3,
+   "demand": 15.81,
+   "headroom": 15.41,
+   "over": 0.4,
+   "over_with_margin": 2.4
+  },
+  "allocator_if_taps_fixed_projection": {
+   "non_weight": 8.47,
+   "over": -0.43
+  }
+ },
+ "system_ram_used_max_gb": {
+  "current": [
+   [
+    "cold 20K (23:07:30)",
+    125.836230656,
+    126.14672384,
+    0.032571392,
+    0.07929856
+   ],
+   [
+    "cold 20K (23:10:31)",
+    125.909762048,
+    126.272290816,
+    0.032571392,
+    0.07929856
+   ],
+   [
+    "cold 18K",
+    126.247272448,
+    126.506729472,
+    0.032571392,
+    0.07929856
+   ],
+   [
+    "cold 45.7K",
+    126.455087104,
+    126.958010368,
+    0.032571392,
+    0.07929856
+   ],
+   [
+    "cold 100.5K",
+    126.553767936,
+    127.113035776,
+    0.032571392,
+    0.07929856
+   ],
+   [
+    "idle 01:30-02:00",
+    119.564681216,
+    108.129632256,
+    0.032571392,
+    10.1548032
+   ]
+  ],
+  "soak13": [
+   [
+    "100K cold",
+    125.688037376,
+    125.890166784,
+    0.111280128,
+    0.110493696
+   ],
+   [
+    "160K cold",
+    125.849731072,
+    126.07168512,
+    0.10289152,
+    0.110493696
+   ],
+   [
+    "r500 delta (to 500K)",
+    133.220302848,
+    132.297392128,
+    0.162791424,
+    0.288161792
+   ],
+   [
+    "r750 delta (to 750K)",
+    133.639585792,
+    133.706596352,
+    2.15220224,
+    1.449852928
+   ],
+   [
+    "r1m delta (to 1.04M)",
+    133.121982464,
+    133.354995712,
+    4.102160384,
+    3.817406464
+   ]
+  ],
+  "soak13_ram_plus_swap": [
+   [
+    "100K cold",
+    125.799317504,
+    126.00066048
+   ],
+   [
+    "160K cold",
+    125.952622592,
+    126.182178816
+   ],
+   [
+    "r500 delta (to 500K)",
+    133.31480576,
+    132.407885824
+   ],
+   [
+    "r750 delta (to 750K)",
+    134.685917184,
+    134.802817024
+   ],
+   [
+    "r1m delta (to 1.04M)",
+    136.871739392,
+    135.216889856
+   ]
+  ]
+ },
+ "unit_crosscheck_soak13": [
+  {
+   "rung": "r500 delta",
+   "gauge_true": 127.69427006039766,
+   "gauge_labelled": 137.11067844899998,
+   "ram_plus_swap_m4_1": 133.31480576,
+   "ram_plus_swap_m4_2": 132.407885824
+  },
+  {
+   "rung": "r750 delta",
+   "gauge_true": 129.10258890222758,
+   "gauge_labelled": 138.62284929100002,
+   "ram_plus_swap_m4_1": 134.685917184,
+   "ram_plus_swap_m4_2": 134.802817024
+  },
+  {
+   "rung": "r1m delta",
+   "gauge_true": 132.6813551504165,
+   "gauge_labelled": 142.46552029,
+   "ram_plus_swap_m4_1": 136.871739392,
+   "ram_plus_swap_m4_2": 135.216889856
+  }
+ ],
+ "non_runner_system_ram_gb": 5.03
+}

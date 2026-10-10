@@ -1,0 +1,21 @@
+kv_source (2, 8, 14, 20) index_source (2, 8, 14, 20, 24, 28, 32, 36) ratios[:24] [0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1]
+comp_kv            cap65536= 167,772,160 cap131072= 335,544,320 per-token= 2560.000 B/token
+index_k            cap65536=  41,943,040 cap131072=  83,886,080 per-token=  640.000 B/token
+engram_host_numpy  cap65536=     524,288 cap131072=   1,048,576 per-token=    8.000 B/token
+GPU KV bytes/token/session (comp_kv+index_k) = 3200.0  -> @1,048,576 tokens = 3.3554 GB = 3.1250 GiB
+fixed per-session: win_kv 5242880 B (independent of context)
+
+ensure_capacity(N) from a fresh cache (initial capacity 65,536), exactly what SessionCache.append_turn calls:
+  ensure_capacity(   20076) -> capacity=   65536  KV= 0.2097 GB
+  ensure_capacity(   45702) -> capacity=   65536  KV= 0.2097 GB
+  ensure_capacity(   65536) -> capacity=   65536  KV= 0.2097 GB
+  ensure_capacity(   65537) -> capacity=  131072  KV= 0.4194 GB
+  ensure_capacity(  100497) -> capacity=  131072  KV= 0.4194 GB
+  ensure_capacity(  131072) -> capacity=  131072  KV= 0.4194 GB
+  ensure_capacity(  131073) -> capacity=  131073  KV= 0.4194 GB
+  ensure_capacity(  250000) -> capacity=  250000  KV= 0.8000 GB
+  ensure_capacity(  361000) -> capacity=  361000  KV= 1.1552 GB
+  ensure_capacity(  524288) -> capacity=  524288  KV= 1.6777 GB
+  ensure_capacity(  524289) -> capacity=  524289  KV= 1.6777 GB
+  ensure_capacity(  700000) -> capacity=  700000  KV= 2.2400 GB
+  ensure_capacity( 1048576) -> capacity= 1048576  KV= 3.3554 GB
