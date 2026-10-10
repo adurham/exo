@@ -26,6 +26,8 @@ explain WHY, across:
 | `q2fu1_capture.py` | the operator-staged in-process hook (monkeypatches Model/Block/Gate/ShardedHead + the exo engine request path at RUNTIME; mlx-lm source untouched). Must be scp'd to each node's `/tmp/q2fu1/`; imported by the engine bootstrap only when `DSV41_Q2FU1_CAPTURE` names an output dir. |
 | `q2fu1_driver.py` | the live driver: arm switch (verified gamma recipe) → capture requests → scp pull (bit-exact) → rank merge → gates + analysis report. |
 | `self_test.py` | the OFFLINE self-test (tiny real CPU model through the real `Dsv41Engine` request path): bootstrap gating, monkeypatch firing, pinned dump format, faithfulness (armed stream == unarmed stream), sweep integrity, cross-shape read-out, the rollback A/B discrimination, the speculative ms/rollback round path (real DSparkHead: probes must be stream-neutral), driver merge/analyze/gate logic. 100 checks. |
+| `q2fu1_analyze.py` | OFFLINE deep-analysis CLI (`--capdir <dir> --out <dir>` → `q2fu1_analysis.json` + `q2fu1_analysis.md`): the full reference-spec read-out — (a) first differing MoE-router layer + first residual-delta exceedance, (b) routing-identical vs routing-differed \|Δlogit\| buckets (the H1-vs-H2/H3 discriminator), (c) per-layer residual-delta curves (row0 + max-over-rows), (d) router margins at flips, (e) explicit H1/H2/H3 classification + the rollback A/B H3 test, (f) noise floor + allsum/fence arms. numpy only; reuses the driver's `_load`/`merge_all`. |
+| `test_q2fu1_analyze.py` | OFFLINE self-test for the analyzer: synthetic merged-npz fixtures (D=8, V=16, 4 layers, 6 rows) encoding each signature; asserts the first-differing-layer, bucket split, step detection, H1/H2/H3 classification, the rollback B-collapse, NaN rank-slice masking, single-rank fallback, missing-file handling, and the CLI outputs. 10 test fns / 44 assertions; numpy only (runs under the system python3, no venv/mlx). |
 | `README.md` / `RUNBOOK.md` | this file + the exact node-staging / eval-boot / restore sequence. |
 
 ## Engine wiring (the diff on this branch)
@@ -102,6 +104,23 @@ cd <worktree>
 PYTHONPATH=bench/phase20_q2_fu1 EXO_DASHBOARD_DIR=nonexistent \\
   /Users/adam.durham/repos/exo/.venv/bin/python bench/phase20_q2_fu1/self_test.py
 # -> SELF-TEST OK (100 checks)
+```
+
+Then the analyzer's own OFFLINE self-test (numpy only, no venv/mlx needed):
+
+```bash
+cd <worktree>
+PYTHONPATH=bench/phase20_q2_fu1 /usr/bin/python3 \
+  bench/phase20_q2_fu1/test_q2fu1_analyze.py
+# -> SELF-TEST OK (10/10 test fns, 44 assertions)   [or: pytest ... -q -> 10 passed]
+```
+
+And the deep-analysis read-out on a pulled capture dir:
+
+```bash
+PYTHONPATH=bench/phase20_q2_fu1 /usr/bin/python3 \
+  bench/phase20_q2_fu1/q2fu1_analyze.py --capdir <captures> --out <analysis>
+# -> q2fu1_analysis.json + q2fu1_analysis.md (per-M read-out + H1/H2/H3 verdict)
 ```
 
 Also run (no regression): 
