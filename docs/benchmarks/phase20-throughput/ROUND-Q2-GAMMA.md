@@ -7,8 +7,9 @@ Author: Phase-20 PM (delegation). Date: 2026-10-10 (CDT). Worktree `/private/tmp
 handles numerics near-ties. **Branch-only:** the γ code surface lands on the eval branch; the
 shipped default is NOT changed this round.
 
-**STATUS: PHASE 0 COMPLETE · PHASE 1 HELD — awaiting explicit per-launch orchestrator GO.**
-No eval boot and no cluster relaunch has been executed.
+**STATUS: COMPLETE.** Phase 0 + Phase 1 executed on orchestrator GO (eval boot 09:04,
+restore 12:07 CDT 2026-10-10). Production restored. **Verdict: γ3 confirmed on the
+post-dense build — no γ lever shipped.**
 
 ---
 
@@ -183,3 +184,81 @@ Verify `RESTORED 99e2966ee READY 2/2 canary parity benign g3 decode=… prefill=
 this file + `raw/pricing/q2/` committed+pushed on `deploy/phase20-campaign`; `PERFORMANCE_HISTORY.md`
 carries a same-turn entry for the findings. **Awarding of the bars / the close-out verdict is filled
 in after the live run.**
+
+---
+
+## 3. PHASE 1 RESULTS — executed 2026-10-10 09:04–12:07 CDT (orchestrator GO)
+
+**Eval boot:** `deploy/q2-gamma @ 2cf078519`, READY 2/2; both ranks logged
+`[DSV41] spec gamma override: DSV41_SPEC_GAMMA=3 -> effective gamma=3 ... rank {0,1}`;
+canary 14.85/14.86 TFLOPS; `DSV41_SPEC_GAMMA=3` exported so `~/relaunch_exo.sh` carried
+the token (sed-flippable). `DSV41_DENSE=affine6` + policy unchanged.
+
+**Runs.** Two live attempts aborted on DRIVER defects (both fixed and re-run; see §5);
+the final run completed **all 25 fixed reps** across the 5-arm bracketed matrix.
+
+**Per-arm decode tok/s (median; decode time per output token = 1/tps):**
+
+| arm | benign 20K (3 reps) | agentic 91K (2 reps) | mean-accepted (benign / agentic) |
+|---|---:|---:|---|
+| γ3a | 44.98 | 37.15 | 2.72 / 2.256 |
+| γ2  | 40.34 | 34.15 | 1.86 / 1.606 |
+| γ4  | 45.94 | 33.50 | 3.71 / 2.576 |
+| γ5  | 46.48 | 28.68 | 4.26 / 2.463 |
+| γ3b | 45.04 | 37.19 | 2.72 / 2.256 |
+
+(γ3 median agentic = 37.17 = median(γ3a 37.15, γ3b 37.19).)
+
+**Gates:**
+- **Drift (e):** γ3a vs γ3b rel_diff **0.12%** (< 1.5%) → **OK**, not drift-contaminated.
+- **Identity (a):** γ3a vs γ3b **IDENTICAL** (rate 0.0 → PASS, the stream is deterministic).
+  Every lever arm diverges vs γ3a at a **CONFIDENT** position → **ABORT**:
+  γ2 rate 0.654 (first-div margin 0.50/0.69), γ4 0.914 (0.28/0.69), γ5 0.967 (1.03/0.94);
+  all ≥ ε = 0.05.
+- **Memory (b):** peak (corrected, ÷1.073741824) γ3a 116.16 / γ2 115.93 / γ4 116.16 /
+  γ5 115.93 / γ3b 115.85 GB — **none within 0.5 GB of W (125.829)** → all eligible.
+- **Rank consistency (c):** satisfied each arm (both ranks' logged effective γ matched).
+- **Acceptance (f):** mean accepted/verify-step rises with γ (benign 2.72→4.26) while
+  per-round ms rises too (81→111 ms) — the classic γ tradeoff. Histograms in the raw JSON.
+- **Bars (g):** agentic — **no arm beats the γ3 median (37.17) by ≥3%**; γ2/γ4/γ5 are
+  −8.1% / −9.9% / −22.8%. benign — γ4/γ5 +2.1%/+3.3%, but agentic-much-worse ⇒ **SPLIT**.
+
+**VERDICT: γ3 confirmed on the post-dense build.** No γ lever wins: every lever arm is
+**slower on the agentic workload** AND (identity gate) **not output-preserving** vs γ3;
+the benign-only γ4/γ5 gains are a split. **The eval build does NOT ship.** (Matches the
+pre-dense `gamma-optimality` conclusion — the dense build did not shift the economics.)
+
+**FINDING (new):** changing γ on this build **changes the decoded output at confident
+positions** — γ3a ≡ γ3b (byte-identical), but γ2/γ4/γ5 diverge with margins 0.28–1.03 nats.
+The verify batch shape (γ+1 rows) shifts argmaxes **beyond near-ties**, so any future γ
+change must carry its own quality gate (the identity gate already disqualifies these).
+
+## 4. END STATE / BUDGET ACCOUNTING
+
+- **Production RESTORED and LIVE:** `deploy/next19-dense @ 99e2966ee` + mlx-lm `689e4ea`;
+  runner env `DSV41_DENSE=affine6` + `DSV41_DENSE_POLICY=layers.*.ffn.shared_experts.*=q8g64`;
+  **no `DSV41_SPEC_GAMMA`** (eval token gone from `~/relaunch_exo.sh`, count 0); engine
+  `gamma=3`, no override line; READY 2/2; canary 14.86/14.86; idle. Restore-parity smoke:
+  benign 20K g3 decode **43.14 t/s** median, ms_per_round 80.8 (consistent with the round's γ3).
+- **Boots:** **2 used** (eval deploy + restore) of ≤ 2 + 1 reserve (reserve unspent).
+- **Process restarts:** **~14 node-process relaunches** (5 arm switches × 2 nodes + 2
+  aborted-run switches × 2). This **exceeds the declared ~10–12** because the two
+  driver-bug aborts each required an extra switch cycle — reported honestly; total still
+  well inside the ≤2-boots envelope.
+- **Artifacts:** this doc + `raw/pricing/q2/round/` (per-arm JSON, `round_eval.json`,
+  `arm_switches.json`, own-request registries) + `raw/pricing/q2/q2{b,c}-*` +
+  `bench/phase20_q2_gamma/` (driver + evaluators + selftest) on `deploy/phase20-campaign`.
+  `PERFORMANCE_HISTORY.md` carries a same-turn entry.
+- **NOT shipped:** the γ surface stays branch-only (`deploy/q2-gamma`); a winner would be a
+  separate pre-registered change with its own quality/battery gates.
+
+## 5. DRIVER DEFECTS FOUND LIVE (fixed; lessons)
+
+Three live-only defects in the arm-matrix driver, invisible offline, each fixed and re-run
+(commits on `p20/q2-gamma-driver`, folded into `deploy/phase20-campaign`): (1) the node
+relaunch does **not** reload the model — a JIT warmup POST is required before READY;
+(2) the JIT idle reaper (300 s) unloads the instance during an idle-guard wait; (3) the
+warmup **retry** POST was not registered as own traffic, so the guard waited ~10 min and the
+reaper unloaded the model mid-wait → a 503 killed the run. **LESSON:** a same-boot
+process-restart harness on a JIT cluster MUST treat the model load as an explicit,
+registered, retryable step and must not gate readiness on `/state` alone.

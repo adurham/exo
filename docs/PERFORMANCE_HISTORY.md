@@ -11192,3 +11192,25 @@ batches): adjacent-window top-24 Jaccard median W1 0.371 → W32 0.171 (random f
 ε=0.05, memory 0.5 GB of W, rank consistency, drift >1.5% re-run, acceptance histogram, bars).
 Self-test 42 checks PASS. Declared budget: ≤2 boots + 1 reserve + ~10–12 restarts; agentic reps=2
 (drop disjoint-IQR) at the 135-min wall cap. **No boot executed.**
+
+### 2026-10-10 — ROUND Q2-GAMMA (EXECUTED): verdict — gamma 3 confirmed on the post-dense build
+
+Bracketed 5-arm matrix (g3a -> 2 -> 4 -> 5 -> 3b), fixed replays (benign 20K x3, agentic 91K x2),
+ONE eval boot; production restored (next19-dense 99e2966ee + mlx-lm 689e4ea, no DSV41_SPEC_GAMMA,
+affine6 + shared-experts@q8g64).
+
+- decode tok/s medians — benign: g3 44.98, g2 40.34, g4 45.94, g5 46.48; agentic: g3 37.17,
+  g2 34.15, g4 33.50, g5 28.68. **g3 is best on agentic by 8-23%**; the g4/g5 benign-only gains
+  (+2/+3%) are a SPLIT (below the bar).
+- Gates: drift g3a-vs-g3b rel_diff 0.12% (<1.5% = OK); IDENTITY g3a==g3b byte-identical but
+  g2/g4/g5 diverge from g3a at CONFIDENT positions (margins 0.28-1.03 nats) => ABORT; memory
+  peaks ~116 GB corrected (all < W-0.5); rank-consistency satisfied each arm.
+- **FINDING:** changing gamma shifts the DECODED OUTPUT at confident positions (the gamma+1-row
+  verify batch shape moves argmaxes BEYOND near-ties) => any future gamma change must carry its
+  own quality/battery gate. The eval build does NOT ship; the gamma surface stays branch-only
+  (deploy/q2-gamma @ 2cf078519).
+- Artifacts: ROUND-Q2-GAMMA.md + raw/pricing/q2/ (incl. round/ eval JSON) + bench/phase20_q2_gamma/.
+- Lessons (driver defects found live): a same-boot process-restart harness on a JIT cluster must
+  treat the model load as an explicit, registered, retryable step (the relaunch does NOT reload
+  the model; the 300 s JIT idle reaper races the idle guard; an unregistered warmup-retry POST
+  makes the guard wait ~10 min and the reaper unload mid-wait).
