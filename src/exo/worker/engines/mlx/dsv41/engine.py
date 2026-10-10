@@ -84,6 +84,7 @@ from exo.worker.engines.mlx.dsv41.errors import (
     Dsv41InvalidRequest,
     Dsv41UnsupportedFeature,
     reclassify_input_error,
+    reclassify_splice_error,
 )
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.output import dsv41_output_parser
@@ -102,6 +103,7 @@ from exo.worker.engines.mlx.dsv41.rounds import (
 from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
 from exo.worker.engines.mlx.dsv41.vision import (
     Dsv41Vision,
+    VisionSpliceError,
     build_embeddings,
     image_spans,
     prompt_tokens_for_request,
@@ -961,10 +963,23 @@ class Dsv41Engine(Engine):
         if embeddings is None:
             turn = session.prefill(tokens, chunk_plan=plan)
         else:
-            with splice_embeddings(
-                self.loaded.model, embeddings, 0, image_span_end, token_types
-            ):
-                turn = session.prefill(tokens, chunk_plan=plan)
+            try:
+                with splice_embeddings(
+                    self.loaded.model, embeddings, 0, image_span_end, token_types
+                ):
+                    turn = session.prefill(tokens, chunk_plan=plan)
+            except VisionSpliceError as e:
+                # An invariant breach, not input validation -- see
+                # ``errors.reclassify_splice_error``. Classify it request-level
+                # so the image request fails ALONE (error chunk) instead of the
+                # RuntimeError escaping step() and killing both ranks, which
+                # cost a ~2 min instance reload. The warning keeps it observable.
+                logger.warning(  # pyright: ignore[reportUnknownMemberType]
+                    f"[DSV41] vision splice violation (image span_end="
+                    f"{image_span_end}, cache offset {session.offset}): failing "
+                    f"this request instead of crashing the runner -- {e}"
+                )
+                reclassify_splice_error(e)
         if turn.reused_tokens:  # pyright: ignore[reportAny]
             logger.info(f"[DSV41] turn reuse: {turn}")
             if turn.prefill_tokens > 256:  # pyright: ignore[reportAny]

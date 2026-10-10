@@ -1297,3 +1297,92 @@ def test_engine_routes_an_image_request_to_a_cold_session(monkeypatch: pytest.Mo
     )
     assert engine._sessions.stats["cold"] == 2
     assert engine._active is None
+
+
+class _SpliceProbeModel(ScriptedModel):
+    """``ScriptedModel`` whose forward reads ``self.embed`` like the real body.
+
+    ``ScriptedModel`` ignores embeddings (right for the selection tests), so the
+    vision splice -- installed as ``model.embed`` -- never runs. This variant
+    calls it during every forward, which is what lets a test exercise a REAL
+    splice violation.
+    """
+
+    def __init__(self, script: list[int], *, prompt_tokens: int = 3) -> None:
+        super().__init__(script, prompt_tokens=prompt_tokens)
+        #: The real body embeds the ids it is handed; stand in for the table.
+        self.embed: Any = lambda ids: mx.zeros((1, int(ids.shape[-1]), 4))
+
+    def __call__(
+        self,
+        input_ids: mx.array,
+        cache: MockCache,
+        last_logit_only: bool = False,
+        return_taps: bool = False,
+        argmax: bool = False,
+        logprobs: int = 0,
+    ):
+        self.embed(input_ids)  # the splice, when ``splice_embeddings`` installed it
+        return super().__call__(
+            input_ids,
+            cache,
+            last_logit_only=last_logit_only,
+            return_taps=return_taps,
+            argmax=argmax,
+            logprobs=logprobs,
+        )
+
+
+def test_vision_splice_violation_fails_the_request_alone(monkeypatch: pytest.MonkeyPatch):
+    """(2) A vision splice violation surfaces as a REQUEST-level error.
+
+    The splice raises when a request's image span is not covered by the forward
+    that starts at position 0 -- the failure that used to escape step() and kill
+    both ranks (~2 min instance reload). With the classification in place it must
+    fail the image request ALONE (ErrorChunk + FinishedResponse) and leave the
+    runner serving. Uses a span whose end is past the token count so the very
+    first (only) prefill piece cannot cover it.
+    """
+    model = _SpliceProbeModel([34, 1])
+    sender = _Sender()
+    engine = Dsv41Engine(
+        loaded=Dsv41Loaded(
+            model=model,
+            tokenizer=FakeTokenizer(text_of=ANSWER_TEXT),
+            args=model.args,
+            model_path=Path("/nonexistent-checkpoint"),
+            built_layers=list(range(40)),
+            full_stack=True,
+            rank=0,
+            world=1,
+            load_seconds=0.0,
+            head=None,
+        ),
+        model_id=MODEL,
+        group=None,
+        cancel_receiver=_Receiver(),  # type: ignore[arg-type]
+        event_sender=sender,  # type: ignore[arg-type]
+        device_rank=0,
+        speculative=False,
+        prefill_chunk_size=2,
+    )
+
+    class _Vision:
+        placeholder = "<\uff5cdeepseek_image\uff5c>"
+
+    engine.vision_processor = _Vision()  # type: ignore[assignment]
+    # Span [1, 6) with only 3 tokens: the first prefill piece (the whole prompt)
+    # cannot cover it -> the splice raises VisionSpliceError during prefill.
+    _stub_image_expansion(monkeypatch, [10, 11, 12], (1, 6))
+
+    _submit(engine, "task-1", content="hello", max_output_tokens=8,
+            images=[Base64Image("A")])
+    pairs = _drain_pairs(engine)  # must NOT raise (no runner crash)
+
+    assert engine._active is None
+    assert [tid for tid, item in pairs if isinstance(item, FinishedResponse)] == [
+        TaskId("task-1")
+    ]
+    assert not any(isinstance(item, TokenChunk) for _tid, item in pairs)
+    errs = _errors_for(sender.events, "cmd-task-1")
+    assert errs and "image span" in (errs[0].error_message or "")

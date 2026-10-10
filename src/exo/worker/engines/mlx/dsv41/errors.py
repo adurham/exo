@@ -8,6 +8,8 @@ something DSv4.1 supports" from a genuine bug.
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 
 class Dsv41Error(Exception):
     """Base class for DSv4.1 engine errors."""
@@ -98,3 +100,20 @@ def reclassify_input_error(e: ValueError) -> None:
     message = str(e)
     if any(marker in message for marker in _INPUT_ERROR_MARKERS):
         raise Dsv41InvalidRequest(message) from e
+
+
+def reclassify_splice_error(e: Exception) -> NoReturn:
+    """Raise :class:`Dsv41InvalidRequest` for a vision splice violation.
+
+    DEFENSE IN DEPTH, NOT INPUT VALIDATION. The splice refuses a forward that
+    does not carry the whole image span from position 0. With image-carrying
+    requests now forced cold (``session.get(reuse=False)``), reaching this means
+    an engine invariant broke or the request's image span is longer than its
+    prompt -- the maintainers' taxonomy would call that an ENGINE bug and keep
+    it crashing loudly. Classifying it here deliberately trades that for a
+    smaller blast radius: the one request fails (error chunk + FinishedResponse)
+    instead of the RuntimeError escaping ``step()`` and killing BOTH ranks, which
+    cost a ~2 min instance reload. The caller logs a warning so the breach stays
+    observable; drop this function (and its call site) to restore the loud crash.
+    """
+    raise Dsv41InvalidRequest(str(e)) from e

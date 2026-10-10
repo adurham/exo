@@ -58,6 +58,7 @@ from exo.worker.runner.bootstrap import logger
 __all__ = [
     "Dsv41Vision",
     "IMAGE_PLACEHOLDER",
+    "VisionSpliceError",
     "build_embeddings",
     "image_row_mask",
     "image_spans",
@@ -74,6 +75,20 @@ __all__ = [
 #: the "does it re-encode to the same id" check), so this constant is only the
 #: fallback for a checkpoint that moved the token.
 IMAGE_PLACEHOLDER = "<\uff5cdeepseek_image\uff5c>"
+
+
+class VisionSpliceError(RuntimeError):
+    """The image span could not be prefilled from cache position 0.
+
+    Raised by the embedding splice when a request's image span is not fully
+    covered by the forward that starts at offset 0 -- either the prefill reused
+    a conversation whose cache was already advanced, or the span is longer than
+    the prompt itself. It subclasses ``RuntimeError`` so callers that only know
+    the old type are unaffected, and it exists as its own type so the engine can
+    classify it (see ``errors.reclassify_splice_error``): the live failure mode
+    of an UNclassified splice violation is this exception escaping ``step()`` and
+    killing both ranks (~2 min instance reload).
+    """
 
 
 @dataclass
@@ -282,7 +297,7 @@ class _InjectedEmbed:
             self.pos = rows
             return self.embeddings[:, :rows]
         if self.pos < self.span_end and rows > 0:
-            raise RuntimeError(
+            raise VisionSpliceError(
                 f"DSv4.1 vision: image span [{self.span_start}, {self.span_end}) "
                 f"was not covered by the first prefill piece; the whole span must "
                 "be prefilled in ONE forward from position 0 (the reference "
