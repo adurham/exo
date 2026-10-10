@@ -12060,3 +12060,26 @@ verify forward is NOT equivalent to L sequential steps … cumulative drift ~1.7
   **≤1 eval boot + 1 restore, ~1–2 GPU-h, 0 encode**. Artifacts: `ROUND-Q2-FU1.md` (deploy/phase20-
   campaign @ `0808e3507`) + `bench/phase20_q2_fu1/` (capture + driver + analyzer + self-tests).
   **No boot executed; production LIVE `99e2966ee`.**
+
+## 2026-10-10 — SHIPPED TO PRODUCTION: next20-vision — image-carrying requests never reuse a conversation session (warm-session vision splice crash fix)
+
+**Production artifact:** exo `deploy/next20-vision` @ `b5f0551856c02a9cafff235bcc7a944e6a57ccaf` = next19 production tip `99e2966eec26891b59e1af5467d8f0ddaad38577` + ONE cherry-pick (`b5f055185`); mlx-lm gitlink unchanged `689e4eafd3cf2925a1cf78ba81375a3c098a0eef`.
+
+**Bug:** A warm/resident KV conversation was reused for an image-carrying request — the reuse selection matched the prompt prefix (or the client conversation key) with no regard for images, so the session delta-prefilled from a NONZERO cache offset. The vision splice refuses that ("the whole image span must be prefilled in ONE forward from position 0"); the RuntimeError escaped `step()` and killed BOTH ranks (~2 min instance reload).
+
+**Fix (single commit):** `session.py` `Dsv41Sessions.get` gains keyword-only `reuse=True`; `reuse=False` skips BOTH the resident prefix match AND the parked-store restore and opens a cold conversation, logging it loudly. `engine.py` `_generate` passes `reuse=embeddings is None` — the same signal that logs "prompt expanded with N image(s)", i.e. that this prefill carries image spans. `keep` is already False for these requests, so the cold one-off is still dropped when the request finishes. Tests: full dsv41 suite **185 passed, 1 skipped**.
+
+**Deploy (1 boot):** shared checkout `git fetch origin && git reset --hard b5f055185` on BOTH nodes (HEAD=`b5f055185`, mlx-lm `689e4ea` no `+/-` prefix, tracked tree clean); exo-screen relaunch (`~/relaunch_exo.sh`) on both nodes; JIT warmup POST auto-placed DSv4 with sharding=Tensor / meta=MlxJaccl / min_nodes=2 (TP2) → **READY (2/2)**. Post-boot canary **healthy**: studio1 14.85/14.86/14.86 (med 14.86) / studio2 14.83/14.85/14.86 (med 14.86).
+
+**Live repro (image × session-reuse; identical lines on BOTH nodes):**
+- Warm long text conversation (~4999 tokens) → `[DSV41] session reuse: this 4999-token prompt matches a resident conversation on 4982 rows` + `[DSV41] turn reuse: prompt=4999 prefill=903 reuse=4096 cache=4999` — proves a LARGE resident conversation exists.
+- Image request on that SAME conversation → `[DSV41] prompt expanded with 1 image(s): 5201 tokens, span(s)=[(5015, 5199)]` then `[DSV41] session forced cold: image-carrying request must not reuse a resident conversation (this 5201-token prompt)` → HTTP 200, correct answer, **NO crash**.
+- Text follow-up → `session reuse ... 4998 rows` + coherent long-context recall (ORCHID-7734) → HTTP 200.
+- Image request with NO prior session → forced cold → HTTP 200.
+- **ZERO `VisionSpliceError`/`RuntimeError`/`Traceback`/splice** in the window on BOTH nodes; runners still **READY 2/2** after the image requests (the pre-fix path killed both ranks).
+
+**Tag:** `known-good-vision-20261010-174510` → exo `b5f055185...` (`adurham/exo`).
+
+**Rollback (pre-authorized, UNSPENT):** `git fetch origin && git reset --hard 99e2966ee` + `~/relaunch_exo.sh` on BOTH nodes; the prod tip `99e2966ee` is the existing `known-good-dense-q68-20261009-231842` tag.
+
+**Deviation (noted):** DSv4 was auto-placed as a JIT instance (`jit=True`, reaper-eligible, 300 s idle-unload) rather than the pinned at-boot instance `start_cluster.sh` places, because the deploy used the exo-screen `~/relaunch_exo.sh` restart + a JIT warmup (per the brief's HOW-TO-LAUNCH) instead of the full `start_cluster.sh` bring-up. Served config is identical (TP2, Tensor/MlxJaccl, min_nodes=2). Boots used: 1 of 2 (rollback reserve held).
