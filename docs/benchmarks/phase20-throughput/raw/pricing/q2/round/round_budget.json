@@ -1,0 +1,32 @@
+{
+ "agentic_reps": 2,
+ "benign_reps": 3,
+ "iqr_enabled": false,
+ "budget_wall_min": 135.0,
+ "arithmetic": {
+  "n_arms": 5,
+  "benign_reps": 3,
+  "agentic_reps": 2,
+  "agentic_s": 3850.0,
+  "benign_s": 1357.5,
+  "warmup_s": 600.0,
+  "overhead_s": 2550.0,
+  "total_s": 7757.5,
+  "total_min": 129.29166666666666
+ },
+ "dropped_criteria": [
+  "disjoint-IQR criterion (agentic reps < 3)"
+ ],
+ "lines": [
+  "Q2-Gamma DECLARED BUDGET (fixed BEFORE spending)",
+  "  boot: 1 (eval boot)  |  arm switches: 5 (graceful node-process relaunches, NOT reboots)",
+  "  measurement wall cap: 135 min",
+  "  anchors: benign 20K 90.5 s/rep, agentic 91K 385.0 s/rep (frozen r1kit control)",
+  "  agentic: 385 s/rep x 2 reps x 5 arms = 3850 s = 64.2 min",
+  "  benign:  90.5 s/rep x 3 reps x 5 arms = 1358 s = 22.6 min",
+  "  warmup:  120 s/arm x 5 arms (JIT-load POST after each relaunch) = 600 s = 10.0 min",
+  "  overhead: (relaunch 300s + idle 90s + warmup 120s) x 5 = 2550 s = 42.5 min",
+  "  TOTAL: 7758 s = 129.3 min  vs cap 135 min => FITS",
+  "  DECISION: agentic_reps=2, iqr_enabled=False; DROP disjoint-IQR criterion (agentic reps < 3)"
+ ]
+}

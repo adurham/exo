@@ -1,0 +1,16 @@
+{
+ "label": "q2gamma_gamma5_benign",
+ "t_start": 1791649472.6233358,
+ "t_end": 1791649531.402486,
+ "aborted": false,
+ "reason": null,
+ "wall_cap_hit": false,
+ "own_requests": [
+  1791649341.5618439,
+  1791649466.785603,
+  1791649472.62395,
+  1791649492.5925078,
+  1791649512.2231731
+ ],
+ "signals_seen": []
+}

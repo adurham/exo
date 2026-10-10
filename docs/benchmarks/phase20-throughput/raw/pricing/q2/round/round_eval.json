@@ -1,0 +1,268 @@
+{
+ "memory_gate": {
+  "gamma3a": {
+   "eligible": true,
+   "no_reading": false,
+   "worst": {
+    "node": "studio2",
+    "kind": "resident",
+    "bytes": 113444995072
+   },
+   "reads": [
+    {
+     "node": "studio1",
+     "kind": "resident",
+     "bytes": 112729997312
+    },
+    {
+     "node": "studio2",
+     "kind": "resident",
+     "bytes": 113444995072
+    }
+   ],
+   "headroom_gb": 12.384
+  },
+  "gamma2": {
+   "eligible": true,
+   "no_reading": false,
+   "worst": {
+    "node": "studio2",
+    "kind": "resident",
+    "bytes": 113334960128
+   },
+   "reads": [
+    {
+     "node": "studio1",
+     "kind": "resident",
+     "bytes": 112968204288
+    },
+    {
+     "node": "studio2",
+     "kind": "resident",
+     "bytes": 113334960128
+    }
+   ],
+   "headroom_gb": 12.494
+  },
+  "gamma4": {
+   "eligible": true,
+   "no_reading": false,
+   "worst": {
+    "node": "studio1",
+    "kind": "resident",
+    "bytes": 113083318272
+   },
+   "reads": [
+    {
+     "node": "studio1",
+     "kind": "resident",
+     "bytes": 113083318272
+    },
+    {
+     "node": "studio2",
+     "kind": "resident",
+     "bytes": 112730177536
+    }
+   ],
+   "headroom_gb": 12.746
+  },
+  "gamma5": {
+   "eligible": true,
+   "no_reading": false,
+   "worst": {
+    "node": "studio1",
+    "kind": "resident",
+    "bytes": 113015865344
+   },
+   "reads": [
+    {
+     "node": "studio1",
+     "kind": "resident",
+     "bytes": 113015865344
+    },
+    {
+     "node": "studio2",
+     "kind": "resident",
+     "bytes": 112872472576
+    }
+   ],
+   "headroom_gb": 12.813
+  },
+  "gamma3b": {
+   "eligible": true,
+   "no_reading": false,
+   "worst": {
+    "node": "studio2",
+    "kind": "resident",
+    "bytes": 112905519104
+   },
+   "reads": [
+    {
+     "node": "studio1",
+     "kind": "resident",
+     "bytes": 112730210304
+    },
+    {
+     "node": "studio2",
+     "kind": "resident",
+     "bytes": 112905519104
+    }
+   ],
+   "headroom_gb": 12.924
+  }
+ },
+ "bars": {
+  "control_agentic_median_tok_s": 37.14983168624374,
+  "control_benign_median_tok_s": 45.009662236664155,
+  "iqr_enabled": false,
+  "results": {
+   "gamma2": {
+    "classification": "no-win",
+    "agentic_median_tok_s": 34.148518745565504,
+    "benign_median_tok_s": 40.33784841248605,
+    "agentic_vs_control_pct": -8.079,
+    "benign_vs_control_pct": -10.38,
+    "agentic_win_median": false,
+    "agentic_win_iqr": false,
+    "benign_ok_median": false,
+    "benign_iqr_ok": true,
+    "memory_eligible": true
+   },
+   "gamma4": {
+    "classification": "no-win",
+    "agentic_median_tok_s": 33.50253890164516,
+    "benign_median_tok_s": 45.938285162336356,
+    "agentic_vs_control_pct": -9.818,
+    "benign_vs_control_pct": 2.063,
+    "agentic_win_median": false,
+    "agentic_win_iqr": false,
+    "benign_ok_median": true,
+    "benign_iqr_ok": true,
+    "memory_eligible": true
+   },
+   "gamma5": {
+    "classification": "no-win",
+    "agentic_median_tok_s": 28.683767024868093,
+    "benign_median_tok_s": 46.47672673546075,
+    "agentic_vs_control_pct": -22.789,
+    "benign_vs_control_pct": 3.259,
+    "agentic_win_median": false,
+    "agentic_win_iqr": false,
+    "benign_ok_median": true,
+    "benign_iqr_ok": true,
+    "memory_eligible": true
+   }
+  },
+  "winner": null,
+  "split": null,
+  "verdict": "gamma3 confirmed on the post-dense build"
+ },
+ "identity_gate": {
+  "reference": "gamma3a",
+  "control": "gamma3b",
+  "signal": "logprobs",
+  "control_rate": 0.0,
+  "allowed_rate": 0.05,
+  "arms": {
+   "gamma2": {
+    "first_divergence": [
+     {
+      "rep": 0,
+      "index": 159,
+      "tok_ref": " auto",
+      "tok_arm": "=",
+      "margin": 0.5
+     },
+     {
+      "rep": 1,
+      "index": 12,
+      "tok_ref": " the",
+      "tok_arm": " its",
+      "margin": 0.6875
+     }
+    ],
+    "rate": 0.654296875,
+    "allowed_rate": 0.05,
+    "identical": false,
+    "confident": true,
+    "verdict": "ABORT",
+    "reasons": [
+     "confident-position divergence: rep 0 idx 159 margin 0.5000 >= 0.05"
+    ]
+   },
+   "gamma4": {
+    "first_divergence": [
+     {
+      "rep": 0,
+      "index": 14,
+      "tok_ref": " and",
+      "tok_arm": ".\n\n",
+      "margin": 0.28125
+     },
+     {
+      "rep": 1,
+      "index": 12,
+      "tok_ref": " the",
+      "tok_arm": " its",
+      "margin": 0.6875
+     }
+    ],
+    "rate": 0.9140625,
+    "allowed_rate": 0.05,
+    "identical": false,
+    "confident": true,
+    "verdict": "ABORT",
+    "reasons": [
+     "confident-position divergence: rep 0 idx 14 margin 0.2812 >= 0.05"
+    ]
+   },
+   "gamma5": {
+    "first_divergence": [
+     {
+      "rep": 0,
+      "index": 6,
+      "tok_ref": " and",
+      "tok_arm": ".\n\n",
+      "margin": 1.03125
+     },
+     {
+      "rep": 1,
+      "index": 6,
+      "tok_ref": " and",
+      "tok_arm": ".\n\n",
+      "margin": 0.9375
+     }
+    ],
+    "rate": 0.966796875,
+    "allowed_rate": 0.05,
+    "identical": false,
+    "confident": true,
+    "verdict": "ABORT",
+    "reasons": [
+     "confident-position divergence: rep 0 idx 6 margin 1.0312 >= 0.05"
+    ]
+   },
+   "gamma3b": {
+    "first_divergence": [],
+    "rate": 0.0,
+    "allowed_rate": 0.05,
+    "identical": true,
+    "confident": false,
+    "verdict": "PASS",
+    "reasons": []
+   }
+  },
+  "reasons": [
+   "ABORT arms: gamma2, gamma4, gamma5"
+  ],
+  "verdict": "ABORT"
+ },
+ "drift_control": {
+  "median_a": 37.14983168624374,
+  "median_b": 37.19324744970136,
+  "rel_diff": 0.0011686664915279586,
+  "threshold": 0.015,
+  "flagged": false,
+  "verdict": "ok"
+ }
+}

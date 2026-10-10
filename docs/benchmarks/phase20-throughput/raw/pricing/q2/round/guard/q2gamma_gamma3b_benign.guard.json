@@ -1,0 +1,15 @@
+{
+ "label": "q2gamma_gamma3b_benign",
+ "t_start": 1791650501.8040571,
+ "t_end": 1791650562.555893,
+ "aborted": false,
+ "reason": null,
+ "wall_cap_hit": false,
+ "own_requests": [
+  1791650368.903876,
+  1791650501.804533,
+  1791650522.5876858,
+  1791650542.7315369
+ ],
+ "signals_seen": []
+}
