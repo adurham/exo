@@ -1,0 +1,32 @@
+[t1_weather_celsius] rep0 PASS 200  finish=tool_calls names=['get_weather'] elapsed=5.8s logprobs=True
+     reasoning(54 tok): 'We need answer weather Paris celsius. Use get_weather.'
+     content(2 tok): '\n\n'
+[t2_forecast_tokyo] rep0 PASS 200  finish=tool_calls names=['get_forecast'] elapsed=5.7s logprobs=True
+     reasoning(264 tok): "The user wants a 5-day forecast for Tokyo. I need to call get_forecast with city Tokyo and days 5. Unit isn't specified but it's required... actually unit is not in required list for get_forecast (required: city, days). Let me include celsius as a sensible choice."
+     content(2 tok): '\n\n'
+[t3_thermostat_berlin] rep0 PASS 200  finish=tool_calls names=['set_thermostat'] elapsed=6.5s logprobs=True
+     reasoning(401 tok): 'et it. But should I check the weather first? The task is simple: set thermostat to 21 degrees in Berlin. Unit is ambiguous — 21 degrees could be Celsius or Fahrenheit. Berlin typically uses Celsius, so 21°C makes sense.\n\nLet me just call set_thermostat with city Berlin, target_temp 21, unit celsius.'
+     content(2 tok): '\n\n'
+[t4_raining_london] rep0 PASS 200  finish=tool_calls names=['get_weather'] elapsed=4.6s logprobs=True
+     reasoning(106 tok): "We need answer. Need call get_weather London. Need unit? User asks raining. Use celsius maybe. Let's call."
+     content(2 tok): '\n\n'
+[t5_nyc_tomorrow] rep0 PASS 200  finish=tool_calls names=['get_forecast'] elapsed=7.8s logprobs=True
+     reasoning(480 tok): 'ow specifically. Let me get 2 days.\n\nUnit not specified, let me use celsius or fahrenheit. I\'ll use fahrenheit since NYC commonly uses it. Actually, let me just pick one. Let me use celsius... hmm. I\'ll go with fahrenheit.\n\nLet me call get_forecast with city "New York City", days 2, unit fahrenheit.'
+     content(2 tok): '\n\n'
+[t6_forecast_madrid_3] rep0 PASS 200  finish=tool_calls names=['get_forecast'] elapsed=4.7s logprobs=True
+     reasoning(0 tok): ''
+     content(52 tok): "I'll get the 3-day forecast for Madrid in celsius.\n\n"
+[t7_heat_rome] rep0 PASS 200  finish=tool_calls names=['set_thermostat'] elapsed=4.9s logprobs=True
+     reasoning(129 tok): 'The user wants to set thermostat to 23 degrees in Rome. Unit? 23 degrees — likely Celsius since Rome uses Celsius. Let me set it.'
+     content(2 tok): '\n\n'
+[t8_sydney_fahrenheit] rep0 PASS 200  finish=tool_calls names=['get_weather'] elapsed=4.3s logprobs=True
+     reasoning(106 tok): 'We need answer current weather in Sydney in fahrenheit. Need call get_weather city Sydney unit fahrenheit.'
+     content(2 tok): '\n\n'
+[t9_sydney_2day] rep0 PASS 200  finish=tool_calls names=['get_forecast'] elapsed=5.6s logprobs=True
+     reasoning(188 tok): 'We need answer user asks "A 2-day forecast for Sydney." Need call get_forecast city days=2. Need unit? Not specified. Could choose celsius likely Sydney Australia. Use celsius. Let\'s call.'
+     content(2 tok): '\n\n'
+[t10_unit_vs_days_confusion] rep0 PASS 200  finish=tool_calls names=['get_weather', 'get_forecast'] elapsed=6.1s logprobs=True
+     reasoning(169 tok): "We need answer user asks weather now and 4-day outlook Madrid celsius. Need call tools. We can call get_weather and get_forecast in parallel. Need use celsius. Let's do."
+     content(2 tok): '\n\n'
+
+=== q1b_ship_t2: 10/10 pass ===

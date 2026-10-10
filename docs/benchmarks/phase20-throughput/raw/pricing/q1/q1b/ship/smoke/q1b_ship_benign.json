@@ -1,0 +1,194 @@
+{
+ "summary": {
+  "label": "q1b_ship_benign",
+  "arm": "benign",
+  "salt_base": "q1b",
+  "round_prof": null,
+  "reps": 3,
+  "depth": 20000,
+  "max_tokens": 800,
+  "decode_tps_median": 45.159,
+  "decode_tps_all": [
+   45.159,
+   44.574,
+   45.6
+  ],
+  "ms_per_round_median": 81.3,
+  "ms_per_round_all": [
+   81.48,
+   81.12
+  ],
+  "mean_accepted_median": 2.6723,
+  "aborted": false,
+  "abort_reason": null
+ },
+ "recs": [
+  {
+   "wall_s": 88.3,
+   "ttft_s": 70.6068,
+   "decode_s": 17.6932,
+   "content_chars": 1602,
+   "usage": {
+    "prompt_tokens": 20076,
+    "completion_tokens": 800,
+    "total_tokens": 20876,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 60,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 287.2760115619175,
+    "generation_tps": 0.0,
+    "prompt_tokens": 20076,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 121488330877
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 21375,
+    "mtp_accepted_drafts_cumulative": 10123,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 20076,
+   "completion_tokens": 800,
+   "reasoning_tokens": 60,
+   "cycles_cum": 21375,
+   "accepted_cum": 10123,
+   "prefix_hit": "none",
+   "prompt_tps": 287.3,
+   "decode_tps": 45.159,
+   "rounds": null,
+   "mean_accepted": null,
+   "ms_per_round": null,
+   "gamma_implied": null,
+   "rep": 0,
+   "arm": "benign",
+   "chunk": "q1b_ship_benign_c0",
+   "salt": "q1b-0",
+   "meta": {
+    "prompt_chars": 111993
+   }
+  },
+  {
+   "wall_s": 88.535,
+   "ttft_s": 70.6095,
+   "decode_s": 17.9251,
+   "content_chars": 1664,
+   "usage": {
+    "prompt_tokens": 20076,
+    "completion_tokens": 800,
+    "total_tokens": 20876,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 99,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 287.00265667602986,
+    "generation_tps": 0.0,
+    "prompt_tokens": 20076,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 121488330877
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 22035,
+    "mtp_accepted_drafts_cumulative": 10705,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 20076,
+   "completion_tokens": 800,
+   "reasoning_tokens": 99,
+   "cycles_cum": 22035,
+   "accepted_cum": 10705,
+   "prefix_hit": "none",
+   "prompt_tps": 287.0,
+   "decode_tps": 44.574,
+   "rounds": 220.0,
+   "mean_accepted": 2.6455,
+   "ms_per_round": 81.48,
+   "gamma_implied": 1.553,
+   "rounds_est": 425.1,
+   "rep": 1,
+   "arm": "benign",
+   "chunk": "q1b_ship_benign_c0",
+   "salt": "q1b-1",
+   "meta": {
+    "prompt_chars": 111993
+   }
+  },
+  {
+   "wall_s": 88.213,
+   "ttft_s": 70.6911,
+   "decode_s": 17.5219,
+   "content_chars": 1720,
+   "usage": {
+    "prompt_tokens": 20076,
+    "completion_tokens": 800,
+    "total_tokens": 20876,
+    "prompt_tokens_details": {
+     "cached_tokens": 0,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 286.7247646178519,
+    "generation_tps": 0.0,
+    "prompt_tokens": 20076,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 121527341824
+    },
+    "prefix_cache_hit": "none",
+    "mtp_cycles_cumulative": 22683,
+    "mtp_accepted_drafts_cumulative": 11288,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 20076,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 22683,
+   "accepted_cum": 11288,
+   "prefix_hit": "none",
+   "prompt_tps": 286.7,
+   "decode_tps": 45.6,
+   "rounds": 216.0,
+   "mean_accepted": 2.6991,
+   "ms_per_round": 81.12,
+   "gamma_implied": 1.539,
+   "rounds_est": 421.1,
+   "rep": 2,
+   "arm": "benign",
+   "chunk": "q1b_ship_benign_c0",
+   "salt": "q1b-2",
+   "meta": {
+    "prompt_chars": 111993
+   }
+  }
+ ]
+}

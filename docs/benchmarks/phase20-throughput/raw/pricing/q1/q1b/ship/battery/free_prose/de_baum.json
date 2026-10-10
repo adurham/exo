@@ -1,0 +1,33 @@
+{
+  "id": "de_baum",
+  "tag": "multilingual",
+  "prompt": "Schreibe zwei Sätze auf Deutsch über einen alten Baum, dann gib eine englische Übersetzung dazu.",
+  "http_status": 200,
+  "elapsed_s": 10.051432847976685,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 26,
+    "completion_tokens": 322,
+    "total_tokens": 348,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 234,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Der alte Baum steht seit Jahrhunderten am Rand des Dorfes und trotzt jedem Sturm.  \nSeine knorrigen Äste erzählen Geschichten aus vergangenen Zeiten, während Kinder in seinem Schatten spielen.\n\nThe old tree has stood at the edge of the village for centuries and defies every storm.  \nIts gnarled branches tell stories from times past while children play in its shade.",
+  "reasoning": "We need answer in German? User asks: \"Schreibe zwei Sätze auf Deutsch über einen alten Baum, dann gib eine englische Übersetzung dazu.\" Means write two sentences in German about an old tree, then give English translation. Need comply. We can produce two German sentences, then English translation. Need maybe about old tree. Ensure two sentences. Then English translation. Could be simple. Need maybe no extra. Let's craft.\n\nGerman:\nDer alte Baum steht seit Jahrhunderten am Rand des Dorfes und trotzt jedem Sturm.\nSeine knorrigen Äste erzählen Geschichten von vergangenen Zeiten, während Kinder in seinem Schatten spielen.\n\nEnglish:\nThe old tree has stood at the edge of the village for centuries and defies every storm.\nIts gnarled branches tell stories of times past while children play in its sha",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

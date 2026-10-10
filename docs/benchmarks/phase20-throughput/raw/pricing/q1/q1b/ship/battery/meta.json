@@ -1,0 +1,9 @@
+{
+  "label": "q1b_ship",
+  "api": "http://macstudio-m4-1.tail19c543.ts.net:52415",
+  "model": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+  "depth": 40000,
+  "started": "2026-10-09T22:46:23.414136-05:00",
+  "env_hint": "DSV41_INDEXER_ROW_BF16 is read at import; phase control is via the LAUNCHED process env (see runbook.md)",
+  "finished": "2026-10-09T22:57:06.571301-05:00"
+}

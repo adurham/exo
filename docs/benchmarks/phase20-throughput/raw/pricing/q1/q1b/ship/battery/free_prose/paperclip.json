@@ -1,0 +1,45 @@
+{
+  "id": "paperclip",
+  "tag": "list",
+  "prompt": "List ten genuinely different uses for a paperclip.",
+  "http_status": 200,
+  "elapsed_s": 39.93451690673828,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 1049,
+    "total_tokens": 1063,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 799,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. **SIM-card tray ejector** — straighten it and push into the tiny pinhole to pop out the tray.  \n2. **Reset-button tool** — use the tip to reach recessed reset buttons on routers, cameras, or gadgets.  \n3. **Emergency zipper pull** — loop it through a broken zipper slider to make a temporary tab.  \n4. **Cable organizer** — bend it around a coiled cord to keep headphones or charging cables tidy.  \n5. **Temporary S-hook** — bend into an S shape to hang lightweight keys, ornaments, or tags.  \n6. **Tiny crevice cleaner** — use it to dig lint/dust from keyboard gaps, phone ports, and seams.  \n7. **Circuit jumper/test probe** — use it as a conductive bridge on a breadboard or to test contacts.  \n8. **Makeshift lock pick/tension wrench** — bend it to help pick simple pin-tumbler locks.  \n9. **Plant tie** — bend around a stem and stake to support a leaning seedling.  \n10. **Backup earring hook** — bend into a small hook for a lightweight earring or pendant.",
+  "reasoning": "We need answer. Need list ten genuinely different uses for a paperclip. Need ensure distinct, not variations. We can think creative practical. Need maybe explain briefly. \"Genuinely different\" means not just bookmark vs page marker? Let's list ten uses across categories: 1 temporary zipper pull replacement. 2 SIM card ejector tool. 3 reset button presser for electronics. 4 cable organizer / cord keeper. 5 makeshift hook for hanging lightweight ornaments. 6 fuse replacement? Actually paperclip can replace car fuse? Maybe. 7 lock pick? 8 antenna? 9 cleaning tool for small crevices/keyboard. 10 toothpick? 11 staple remover? 12 book stand? 13 earring? 14 keychain? 15 circuit jumper. Need ten genuinely different. Let's craft concise.\n\nMaybe \"SIM ejector\" and \"reset button\" both pressing. \"Zippe",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "cameras",
+        "token_index": 32,
+        "head": "came",
+        "tail": "ras",
+        "context": "cameras,"
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

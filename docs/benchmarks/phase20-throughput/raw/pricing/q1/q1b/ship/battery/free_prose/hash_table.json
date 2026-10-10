@@ -1,0 +1,54 @@
+{
+  "id": "hash_table",
+  "tag": "technical",
+  "prompt": "Explain how a hash table works, in plain language, as if to a curious teenager.",
+  "http_status": 200,
+  "elapsed_s": 63.36893582344055,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 22,
+    "completion_tokens": 1691,
+    "total_tokens": 1713,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1078,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Imagine a giant wall of numbered lockers — say, 1,000 of them. You want to store stuff using names like “pikachu” or “alice” instead of locker numbers.\n\nSo you make a weird calculator rule: turn the letters of a name into a number, then divide by 1,000 and keep the remainder. That gives a locker number from 0 to 999. “alice” might become 42. You put Alice’s stuff in locker 42.\n\nTo find Alice later, you don’t search all 1,000 lockers. You run the same calculator rule: “alice” → 42. You go straight to locker 42. That’s the core idea of a hash table: a key gets converted into an index, and the value is stored there.\n\nThe pieces:\n  - **Key**: the thing you look up, like “alice”.\n  - **Value**: what you store, like Alice’s phone number.\n  - **Hash function**: the calculator rule. Same key must always give the same number.\n  - **Bucket**: the locker/slot where the value lives.\n\nThe collision problem: two different keys might turn into the same locker number. “alice” and “bob” could both become 42. That’s called a collision. A hash table doesn’t explode; it handles it. Locker 42 can hold a small list of pairs: `(\"alice\", ...)`, `(\"bob\", ...)`. To find Bob, you go to locker 42 and scan the list, comparing names until you find “bob”. If the list is empty, the key isn’t there.\n\nInsert, lookup, and delete all work the same way: hash the key, go to that bucket, then add/find/remove the matching key-value pair.\n\nIf the lockers get too crowded, the table makes a bigger wall — say, 2,000 lockers — and rehashes everything into new spots. That keeps lookups fast.\n\nWhy is it fast? On average, you jump almost directly to the right spot instead of scanning everything. In computer terms, that’s roughly O(1): constant time, even as it gets big. But if the hash function is bad and everything collides into one bucket, it can slow down to O(n), like searching a list.\n\nA good hash function is consistent and spreads keys evenly. It’s not encryption; it just scrambles keys into numbers.\n\nHash tables are used for dictionaries, caches, sets, database indexes, and lots of everyday programming. They’re great for “find this key fast.” They’re not great if you need things in sorted order or want to search by ranges like “all names between M and Z.”\n\nSo the whole trick is: turn a key into a locker number, handle collisions with a small list, and resize when crowded. That’s a hash table.",
+  "reasoning": "We need answer explain hash table plain language to curious teenager. Need likely include analogy, key concepts: keys, hash function, buckets, collisions, operations, why fast, tradeoffs. Avoid too technical but accurate. Could use library/bookcase analogy? Hash table like magic locker system. Need explain: you have key-value pairs. Hash function turns key into number (index). Store value in bucket at that index. Lookup: hash key, go to bucket, find matching key. Collisions: two keys same index; use list in bucket or probing. Load factor, resizing. Security? Maybe mention average O(1), worst O(n). Plain language. Teenager curious. Maybe \"Imagine a giant wall of lockers numbered 0 to N-1. You want to store stuff by name. Instead of searching every locker, you have a weird calculator: 'Alice",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "handles",
+        "token_index": 189,
+        "head": "hand",
+        "tail": "les",
+        "context": "handles"
+      },
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "lookups",
+        "token_index": 278,
+        "head": "look",
+        "tail": "ups",
+        "context": "lookups"
+      }
+    ],
+    "counts": {
+      "same_script_glue": 2
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

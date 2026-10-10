@@ -1,0 +1,45 @@
+{
+  "id": "market_dawn",
+  "tag": "prose",
+  "prompt": "Describe a street market at dawn in vivid sensory detail, at least 150 words.",
+  "http_status": 200,
+  "elapsed_s": 39.37625598907471,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 21,
+    "completion_tokens": 1421,
+    "total_tokens": 1442,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 1178,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "At dawn, the street market rises from sleep like a slow tide. The sky is a bruised violet, bleeding peach at the edges, and the cobblestones still hold last night’s chill, slick underfoot. Vendors arrive in layers of wool and canvas, their breath blooming white as they haul crates of oranges, bruised mint, wet spinach. Metal shutters rattle up; wooden tables knock into place; a hand-cart wheel squeaks like a hungry gull. Somewhere a gas burner hisses, and the first onions hit oil with a sharp, sweet sizzle. The air is a thick braid of yeast, coriander, diesel, and rain-soaked cardboard. A baker lifts a tray of sesame bread, steam curling into the blue hour. Fishmongers arrange silver rows, scales glinting like scattered coins. A woman in a red apron calls out prices in a voice still rough with morning. Coffee drips into small glasses, bitter and black. The taste of a warm bun, salt on the tongue. Pigeons strut between feet, pecking crumbs. As the sun finally cracks the rooftops, the market stops whispering and begins to roar.",
+  "reasoning": "We need answer. Need describe street market at dawn vivid sensory detail at least 150 words. Need likely prose. We can craft. Need sensory: sight, sound, smell, touch, taste maybe. Dawn street market. Vivid. At least 150 words. Let's write maybe 200-250. Ensure no markdown? Fine. We can include sensory details. Need maybe first-person? \"The market wakes before the sun...\" Use dawn. Include colors, sounds, smells, textures, temperature, tastes. Street market maybe vendors setting up. Vivid. At least 150 words. Let's compose.\n\nNeed count? We can ensure >150. Let's draft:\n\nAt dawn, the street market rises from sleep like a slow tide. The sky is a bruised violet, bleeding peach at the edges, and the cobblestones still hold last night's chill, slick underfoot. Vendors arrive in layers of wool a",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "underfoot",
+        "token_index": 32,
+        "head": "under",
+        "tail": "foot",
+        "context": "underfoot."
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

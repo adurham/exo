@@ -1,0 +1,20 @@
+{
+ "ok": true,
+ "state": "healthy",
+ "per_node": {
+  "studio1": [
+   14.88,
+   14.86,
+   14.86
+  ],
+  "studio2": [
+   14.83,
+   14.86,
+   14.87
+  ]
+ },
+ "median": {
+  "studio1": 14.86,
+  "studio2": 14.86
+ }
+}

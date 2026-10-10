@@ -1,0 +1,33 @@
+{
+  "id": "zh_en_teapot",
+  "tag": "multilingual",
+  "prompt": "Write a bilingual product description for a handmade ceramic teapot: the first half in English, the second half in Chinese (中文).",
+  "http_status": 200,
+  "elapsed_s": 24.773624897003174,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 31,
+    "completion_tokens": 636,
+    "total_tokens": 667,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 281,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "**English**\n\nThis handmade ceramic teapot is a quiet celebration of slow living. Thrown by hand on the potter's wheel and fired at high temperature, each piece carries the subtle irregularities that only human hands can create. The body is shaped from stoneware clay, glazed in a soft, speckled finish inspired by morning mist over distant hills. Its rounded form retains heat gently and pours cleanly through a precisely fitted spout, while the ergonomic handle sits comfortably in the palm. No two teapots are exactly alike—small variations in glaze, curve, and texture make yours truly one of a kind. Perfect for steeping oolong, black tea, or herbal blends, it invites you to slow down, breathe, and savor the ritual of tea. Capacity: approximately 600 ml. Dishwasher safe, though hand washing is recommended to preserve its finish.\n\n**中文**\n\n这款手工陶瓷茶壶，是对慢生活的一次静默致敬。壶身经陶艺师在轮盘上手工拉坯、高温烧制而成，每一处细微的不规则，都是机器无法复制的温度与痕迹。壶体以炻器陶土塑形，釉色柔和斑驳，灵感源自远山晨雾。圆润的壶身能温和地保温，精准契合的壶嘴出水流畅利落，符合人体工学的手柄握感自然舒适。没有两只茶壶完全相同——釉色、弧度与肌理的变化，让您手中的这一只独一无二。无论是乌龙、红茶还是花草茶，它都能从容以对，邀您放慢节奏、静心品味泡茶的仪式感。容量约600毫升。可放入洗碗机清洗，但建议手洗以更好地养护釉面。",
+  "reasoning": "The user wants a bilingual product description for a handmade ceramic teapot, with English first and Chinese second. This is a content creation task rather than pure translation, so I need to craft an appealing description in both languages.\n\nFor the English portion, I should highlight the artisanal nature of the teapot, emphasizing craftsmanship, materials, and aesthetic qualities. Words like \"handcrafted,\" \"artisan,\" and sensory details about the ceramic texture and glaze would work well. The tone should be elegant and inviting, appealing to someone who appreciates fine tea culture.\n\nFor the Chinese portion, I need to create a parallel description that feels natural in Chinese rather than a literal translation. Chinese product descriptions often emphasize craftsmanship, tradition, and po",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

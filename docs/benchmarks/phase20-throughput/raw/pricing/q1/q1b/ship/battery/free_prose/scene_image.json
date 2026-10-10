@@ -1,0 +1,54 @@
+{
+  "id": "scene_image",
+  "tag": "prose",
+  "prompt": "Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.",
+  "http_status": 200,
+  "elapsed_s": 30.176950931549072,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 33,
+    "completion_tokens": 764,
+    "total_tokens": 797,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 560,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "In the photograph, a narrow street market stretches back under a flat gray light. The pavement is soaked, glossy as a wet slate, reflecting every color and shape above it. In the foreground, three pigeons stand close together on the shining ground, one pecking at nothing, one turned sideways, one still as a small stone. Their reflections blur beneath them like soft gray smudges.\n\nAbove them, at the center of the frame, a red umbrella burns through the muted scene. It is open, tilted over a vendor’s cart, impossibly bright against the wet awnings and dark coats of passing shoppers. Around it, the market continues—crates of fruit, plastic sheeting dripping at the edges, voices and motion suggested by blurred figures. The rain has stopped, but everything still glistens. The pigeons hold the bottom of the image like anchors, while the red umbrella holds the middle like a heartbeat. It is an ordinary moment, paused just long enough to become a picture.",
+  "reasoning": "We need answer. User asks: \"Describe this scene as if narrating an image you are looking at: a street market, a red umbrella, three pigeons on a wet pavement.\" Need produce descriptive narration. We need likely write in first-person observer, present tense, image-like. Include street market, red umbrella, three pigeons on wet pavement. Should be vivid. Maybe mention composition, colors, reflections, atmosphere. \"In the foreground...\" etc. As if narrating an image. Need maybe no overlong. We can craft. Ensure all elements included. Could be a photograph. Maybe: \"The frame opens on a narrow street market...\" Red umbrella focal point. Pigeons on wet pavement. Maybe rainy aftermath. Use sensory details. \"A red umbrella blooms...\" Three pigeons huddled. Wet pavement mirrors stalls. Vendors, awn",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "sideways",
+        "token_index": 48,
+        "head": "side",
+        "tail": "ways",
+        "context": "sideways,"
+      },
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "stopped",
+        "token_index": 123,
+        "head": "stop",
+        "tail": "ped",
+        "context": "stopped,"
+      }
+    ],
+    "counts": {
+      "same_script_glue": 2
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

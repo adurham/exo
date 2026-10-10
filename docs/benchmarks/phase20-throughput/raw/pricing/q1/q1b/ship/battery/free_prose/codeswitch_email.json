@@ -1,0 +1,33 @@
+{
+  "id": "codeswitch_email",
+  "tag": "multilingual",
+  "prompt": "Write a friendly email that opens with a Spanish greeting, includes a French compliment in the middle, and closes in English.",
+  "http_status": 200,
+  "elapsed_s": 32.374346017837524,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 28,
+    "completion_tokens": 925,
+    "total_tokens": 953,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 803,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Subject: A quick note to say hello\n\n¡Hola, [Name]!\n\nI hope you’re having a lovely week. I just wanted to reach out and say how much I enjoyed our conversation. You have such a thoughtful way of connecting with people, and it really stood out to me.\n\nEn fait, tu as une énergie chaleureuse et un talent naturel pour rendre les choses plus simples et plus agréables.\n\nAnyway, I’d love to stay in touch. If you ever want to catch up or brainstorm, just let me know.\n\nBest,\n[Your Name]",
+  "reasoning": "We need answer. Need craft friendly email. Requirements: opens with Spanish greeting, includes French compliment in middle, closes in English. Need likely email. We can write. Need maybe \"¡Hola!\" greeting. Then English body? Opens with Spanish greeting. Includes French compliment in middle. Closes in English. Friendly. Could be to someone. Need maybe subject? Email format. We can include Spanish greeting, then English, French compliment, then English closing. Ensure French compliment in middle. Maybe \"Tu as un talent incroyable pour...\" or \"J'adore ton énergie...\" Need friendly. Close in English: \"Best,\" \"Warmly,\" etc. The entire email can be mostly English except Spanish greeting and French compliment. But \"opens with Spanish greeting\" means first line Spanish. \"closes in English\" means s",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

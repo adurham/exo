@@ -1,0 +1,33 @@
+{
+  "id": "tests_opinion",
+  "tag": "opinion",
+  "prompt": "Are standardized tests a good measure of intelligence? Write two paragraphs arguing a position.",
+  "http_status": 200,
+  "elapsed_s": 31.549484729766846,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 789,
+    "total_tokens": 809,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 571,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "Standardized tests are not a good measure of intelligence because they capture only a narrow slice of cognitive ability—usually verbal and mathematical skills—while intelligence is much broader. A high score often reflects test-taking strategy, preparation, familiarity with the format, and socioeconomic advantages rather than raw mental capacity. Factors like language fluency, cultural context, anxiety, and access to tutoring can dramatically change results. As a result, standardized tests measure how well someone performs on a specific kind of timed academic task, not intelligence itself. Intelligence includes creativity, practical problem-solving, adaptability, social-emotional reasoning, and the capacity to learn in real-world situations, none of which are fully assessed by a multiple-choice exam. Standardized tests may predict school readiness and correlate with certain IQ components, but they miss too many dimensions to be considered a good standalone measure of intelligence. A more accurate assessment would combine test scores with portfolios, performance tasks, projects, teacher observations, and problem-solving in novel situations. Therefore, standardized tests are useful tools, but they should not be treated as a true or complete measure of intelligence.",
+  "reasoning": "We need answer user asks: \"Are standardized tests a good measure of intelligence? Write two paragraphs arguing a position.\" Need write two paragraphs arguing a position. Need likely take position. Need two paragraphs. Should argue maybe standardized tests are not a good measure of intelligence, or are a good measure? Need choose. We can argue they are not a good measure of intelligence. Need two paragraphs. Should be coherent, persuasive. Need mention intelligence multifaceted, tests measure narrow cognitive skills, prep, socioeconomic bias, test-taking skills, not creativity, emotional/social intelligence, practical intelligence. But also acknowledge maybe correlate with academic performance. Position: standardized tests are not a good measure of intelligence. Two paragraphs. Second maybe",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

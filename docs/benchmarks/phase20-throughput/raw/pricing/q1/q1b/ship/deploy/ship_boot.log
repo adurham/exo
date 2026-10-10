@@ -1,0 +1,901 @@
+Discovery over Tailscale: m4-1=100.91.246.26  m4-2=100.66.38.13
+Unknown host IPs: 192.168.86.46
+100.66.19.20
+10.211.55.2
+10.37.129.2. Running as remote controller.
+Starting cluster setup...
+-----------------------------------------------------
+Discovering active Thunderbolt IPs...
+Fetching active Thunderbolt IPs from all nodes...
+macstudio-m4-1 routes: -> M4-2 (192.168.200.1)
+macstudio-m4-2 routes: -> M4-1 (192.168.201.2)
+Verifying direct Thunderbolt links...
+  macstudio-m4-1: 2 active TB interfaces ✓
+  macstudio-m4-2: 2 active TB interfaces ✓
+Testing direct-link connectivity (clearing stale routes first)...
+All direct Thunderbolt links verified ✓
+Checking per-device RDMA port states (active TB interfaces only)...
+  macstudio-m4-1: rdma_en3(en3=192.168.200.1)=PORT_ACTIVE rdma_en4(en4=192.168.201.1)=PORT_ACTIVE 
+  macstudio-m4-2: rdma_en3(en3=192.168.201.2)=PORT_ACTIVE rdma_en4(en4=192.168.200.2)=PORT_ACTIVE 
+  All active-link RDMA ports active \u2713
+Skipping IP forwarding (not needed for 2-node direct Thunderbolt link)...
+Cross-subnet routes skipped (2-node direct link).
+Verifying local commits are pushed to origin/deploy/next19-dense...
+  Local HEAD (99e2966eec26891b59e1af5467d8f0ddaad38577) is on origin/deploy/next19-dense ✓
+Preparing macstudio-m4-1...
+Setting Metal memory limit on macstudio-m4-1...
+iogpu.wired_limit_mb: 120000 -> 120000
+iogpu.disable_wired_collector: 1 -> 1
+Killing existing Exo processes on macstudio-m4-1...
+  [Adams-Mac-Studio-M4-1] shutdown gate: proc='[p]ython.*exo' main='[e]xo.main' ports='52415,52416' grace=15s
+  [Adams-Mac-Studio-M4-1] live: 43960 43961 43962 43973 
+  [Adams-Mac-Studio-M4-1] SIGTERM -> 43960 43961 43962 43973 
+  [Adams-Mac-Studio-M4-1] CLEAN_EXIT after 1s (NO SIGKILL — destructors ran, RDMA QPs released)
+EXO_SHUTDOWN_VERDICT=CLEAN_EXIT
+No Sockets found in /var/folders/w6/9crwsl1n217bq0y62qk2d2h00000gn/T/.screen.
+
+Ensuring Xcode developer directory on macstudio-m4-1...
+Syncing repo to macstudio-m4-1 via rsync (canonical source: adams-macbook-pro-m4)...
+rsync(46406): warning: /Users/adam.durham/repos/exo//mlx/build/temp.macosx-11.0-arm64-cpython-313/mlx.core/CMakeFiles/4.4.3/CompilerIdC: not empty, cannot delete
+rsync(46406): warning: /Users/adam.durham/repos/exo//mlx/build/temp.macosx-11.0-arm64-cpython-313/mlx.core/CMakeFiles/4.4.3/CompilerIdCXX: not empty, cannot delete
+rsync(46406): warning: /Users/adam.durham/repos/exo//mlx/build/temp.macosx-11.0-arm64-cpython-313/mlx.core/CMakeFiles/4.4.3: not empty, cannot delete
+rsync(46406): warning: /Users/adam.durham/repos/exo//mlx/build/_deps/nanobind-subbuild/nanobind-populate-prefix: not empty, cannot delete
+rsync(46406): warning: /Users/adam.durham/repos/exo//mlx/build/_deps/nanobind-subbuild: not empty, cannot delete
+rsync(46406): warning: /Users/adam.durham/repos/exo//src/exo/worker/engines/mlx/patches/deepseek_v4_moe: not empty, cannot delete
+Ensuring build dependencies on macstudio-m4-1...
+Syncing dependencies on macstudio-m4-1...
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 187 packages in 843ms
+   Building exo @ file:///Users/adam.durham/repos/exo
+   Building exo-bench @ file:///Users/adam.durham/repos/exo/bench
+   Building exo-rs @ file:///Users/adam.durham/repos/exo/rust/exo_rs
+   Building exo-tools @ file:///Users/adam.durham/repos/exo/tools
+      Built exo-bench @ file:///Users/adam.durham/repos/exo/bench
+      Built exo-tools @ file:///Users/adam.durham/repos/exo/tools
+      Built exo @ file:///Users/adam.durham/repos/exo
+      Built exo-rs @ file:///Users/adam.durham/repos/exo/rust/exo_rs
+Prepared 4 packages in 52.62s
+Uninstalled 5 packages in 18ms
+Installed 5 packages in 16ms
+ ~ exo==0.3.70 (from file:///Users/adam.durham/repos/exo)
+ ~ exo-bench==0.1.0 (from file:///Users/adam.durham/repos/exo/bench)
+ ~ exo-rs==0.3.0 (from file:///Users/adam.durham/repos/exo/rust/exo_rs)
+ ~ exo-tools==0.1.0 (from file:///Users/adam.durham/repos/exo/tools)
+ - mlx-lm==0.32.0 (from file:///Users/adam.durham/repos/exo/mlx-lm)
+ + mlx-lm==0.32.0 (from git+https://github.com/adurham/mlx-lm.git@6cc9c1e8709e228fca99ac152cd5e681ddcce65d)
+  mlx unchanged (sha 603f16eb, clean, importable, local-checkout provenance) -- skipping rebuild
+Pinning mlx-lm to vendored submodule on macstudio-m4-1...
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 1 package in 274ms
+   Building mlx-lm @ file:///Users/adam.durham/repos/exo/mlx-lm
+      Built mlx-lm @ file:///Users/adam.durham/repos/exo/mlx-lm
+Prepared 1 package in 259ms
+Uninstalled 1 package in 6ms
+Installed 1 package in 13ms
+ - mlx-lm==0.32.0 (from git+https://github.com/adurham/mlx-lm.git@6cc9c1e8709e228fca99ac152cd5e681ddcce65d)
+ + mlx-lm==0.32.0 (from file:///Users/adam.durham/repos/exo/mlx-lm)
+Rebuilding Rust pyo3 bindings on macstudio-m4-1...
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+🐍 Found CPython 3.13 at /Users/adam.durham/repos/exo/.venv/bin/python
+🔗 Found pyo3 bindings
+📡 Using build options features from pyproject.toml
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 19 packages in 62ms
+Audited 19 packages in 0.29ms
+   Compiling pyo3-build-config v0.28.3
+   Compiling pyo3-macros-backend v0.28.3
+   Compiling pyo3-ffi v0.28.3
+   Compiling pyo3 v0.28.3
+   Compiling numpy v0.28.0
+   Compiling pyo3-macros v0.28.3
+   Compiling pyo3-log v0.13.3
+   Compiling pyo3-async-runtimes v0.28.0
+   Compiling pyo3-stub-gen v0.22.3
+   Compiling exo_rs v0.0.1 (/Users/adam.durham/repos/exo/rust/exo_rs)
+    Finished `release` profile [optimized] target(s) in 7.81s
+📖 Found type stub file at exo_rs.pyi
+📦 Built wheel for CPython 3.13 to /var/folders/w6/9crwsl1n217bq0y62qk2d2h00000gn/T/.tmpIAiVQx/exo_rs-0.3.0-cp313-cp313-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed exo_rs-0.3.0
+Building dashboard on macstudio-m4-1...
+[0mdirenv: loading ~/repos/exo/.envrc
+[0mdirenv: using flake
+/opt/homebrew/opt/bash/bin/bash:1330: nix: command not found
+/opt/homebrew/opt/bash/bin/bash:1331: nix: command not found
+
+> exo-dashboard@1.0.0 prepare
+> svelte-kit sync || echo ''
+
+
+up to date, audited 157 packages in 1s
+
+18 packages are looking for funding
+  run `npm fund` for details
+
+12 vulnerabilities (2 low, 1 moderate, 9 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> exo-dashboard@1.0.0 build
+> vite build
+
+vite v6.4.1 building SSR bundle for production...
+transforming...
+10:41:52 PM [vite-plugin-svelte] src/lib/components/ChatModelSelector.svelte:291:14 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+289:             <!-- Info tooltip -->
+290:             <div class="ml-auto flex-shrink-0">
+291:               <span
+                        ^
+292:                 role="button"
+293:                 tabindex="-1"
+10:41:52 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:11:27 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 9: 
+10:   if (!browser) {
+11:     setContext('__svelte__', stores);
+                                       ^
+12:   }
+13: 
+10:41:52 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:2 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+              ^
+18:   }
+19:   $effect(() => {
+10:41:52 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:18 This reference only captures the initial value of `page`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+                            ^
+18:   }
+19:   $effect(() => {
+10:41:52 PM [vite-plugin-svelte] src/lib/components/ChatSidebar.svelte:339:18 Avoid using autofocus
+https://svelte.dev/e/a11y_autofocus
+337:                   onkeydown={handleEditKeydown}
+338:                   class="w-full bg-exo-black/60 border border-exo-yellow/30 rounded px-2 py-1.5 text-xs text-exo-light-gray focus:outline-none focus:border-exo-yellow/50 mb-2"
+339:                   autofocus
+                                ^
+340:                 />
+341:                 <div class="flex gap-2">
+10:41:52 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Elements with the 'dialog' interactive role must have a tabindex value
+https://svelte.dev/e/a11y_interactive_supports_focus
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:41:52 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:41:52 PM [vite-plugin-svelte] src/lib/components/TokenHeatmap.svelte:152:2 `<div>` with a mouseenter or mouseleave handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions
+150: <!-- Tooltip -->
+151: {#if hoveredToken}
+152:   <div
+           ^
+153:     class="fixed z-50 pb-2"
+154:     style="left: {hoveredToken.x}px; top: {hoveredToken.y}px; transform: translate(-50%, -100%);"
+✓ 243 modules transformed.
+rendering chunks...
+vite v6.4.1 building for production...
+transforming...
+10:41:53 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:11:27 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 9: 
+10:   if (!browser) {
+11:     setContext('__svelte__', stores);
+                                       ^
+12:   }
+13: 
+10:41:53 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:2 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+              ^
+18:   }
+19:   $effect(() => {
+10:41:53 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:18 This reference only captures the initial value of `page`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+                            ^
+18:   }
+19:   $effect(() => {
+10:41:53 PM [vite-plugin-svelte] src/lib/components/ChatModelSelector.svelte:291:14 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+289:             <!-- Info tooltip -->
+290:             <div class="ml-auto flex-shrink-0">
+291:               <span
+                        ^
+292:                 role="button"
+293:                 tabindex="-1"
+10:41:53 PM [vite-plugin-svelte] src/lib/components/ChatSidebar.svelte:339:18 Avoid using autofocus
+https://svelte.dev/e/a11y_autofocus
+337:                   onkeydown={handleEditKeydown}
+338:                   class="w-full bg-exo-black/60 border border-exo-yellow/30 rounded px-2 py-1.5 text-xs text-exo-light-gray focus:outline-none focus:border-exo-yellow/50 mb-2"
+339:                   autofocus
+                                ^
+340:                 />
+341:                 <div class="flex gap-2">
+10:41:53 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Elements with the 'dialog' interactive role must have a tabindex value
+https://svelte.dev/e/a11y_interactive_supports_focus
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:41:53 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:41:53 PM [vite-plugin-svelte] src/lib/components/TokenHeatmap.svelte:152:2 `<div>` with a mouseenter or mouseleave handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions
+150: <!-- Tooltip -->
+151: {#if hoveredToken}
+152:   <div
+           ^
+153:     class="fixed z-50 pb-2"
+154:     style="left: {hoveredToken.x}px; top: {hoveredToken.y}px; transform: translate(-50%, -100%);"
+✓ 984 modules transformed.
+rendering chunks...
+computing gzip size...
+.svelte-kit/output/client/_app/version.json                                                   0.03 kB │ gzip:   0.05 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size3-Regular.CTq5MqoE.woff             4.42 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size4-Regular.Dl5lxZxV.woff2            4.93 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size2-Regular.Dy4dx90m.woff2            5.21 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size1-Regular.mCD8mA8B.woff2            5.47 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size4-Regular.BF-4gkZK.woff             5.98 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size2-Regular.oD1tc_U0.woff             6.19 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size1-Regular.C195tn64.woff             6.50 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Regular.Di6jR-x-.woff2      6.91 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Bold.Dq_IR9rO.woff2         6.91 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size3-Regular.DgpXs0kz.ttf              7.59 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Regular.CTRA-rTL.woff       7.66 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Bold.BEiXGLvX.woff          7.72 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Script-Regular.D3wIWfF6.woff2           9.64 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Regular.DDBCnlJ7.woff2       10.34 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size4-Regular.DWFBv043.ttf             10.36 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Script-Regular.D5yQViql.woff           10.59 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Regular.CTYiF6lA.woff2         11.32 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Bold.CL6g_b3V.woff2            11.35 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size2-Regular.B7gKUWhC.ttf             11.51 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Italic.C3H0VqGB.woff2        12.03 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Bold.D1sUS0GD.woff2          12.22 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size1-Regular.Dbsnue_I.ttf             12.23 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Regular.CS6fqUqJ.woff        12.32 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Regular.wX97UBjC.ttf       12.34 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Bold.ATXxdsX0.ttf          12.37 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Regular.Dxdc4cR9.woff          13.21 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Bold.BsDP51OF.woff             13.30 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Typewriter-Regular.CO6r4hn1.woff2      13.57 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Italic.DN2j7dab.woff         14.11 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Bold.DbIhKOiC.woff           14.41 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Typewriter-Regular.C0xS9mPB.woff       16.03 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-BoldItalic.CZnvNsCZ.woff2         16.40 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-Italic.t53AETM-.woff2             16.44 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Script-Regular.C5JkGWo-.ttf            16.65 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-BoldItalic.DxDJ3AOS.woff2         16.78 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Italic.NWA7e6Wa.woff2             16.99 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-BoldItalic.iY-2wyZ7.woff          18.67 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-Italic.DA0__PXp.woff              18.75 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-BoldItalic.SpSLRI95.woff          19.41 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Regular.BNo7hRIc.ttf         19.44 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Regular.CB_wures.ttf           19.57 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Bold.BdnERNNW.ttf              19.58 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Italic.BMLOBm91.woff              19.68 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Italic.YYjJ1zSn.ttf          22.36 kB
+.svelte-kit/output/client/.vite/manifest.json                                                23.69 kB │ gzip:   2.47 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Bold.CFMepnvq.ttf            24.50 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Bold.Cx986IdX.woff2               25.32 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Regular.B22Nviop.woff2            26.27 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Typewriter-Regular.D3Ib7_Hf.ttf        27.56 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_AMS-Regular.BQhdFMY1.woff2             28.08 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Bold.Jm3AIy58.woff                29.91 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Regular.Dr94JaBh.woff             30.77 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-BoldItalic.B3XSjfu4.ttf           31.20 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-Italic.flOr_0UB.ttf               31.31 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-BoldItalic.DzxPMmG6.ttf           32.97 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_AMS-Regular.DMm9YOAa.woff              33.52 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Italic.3WenGoN9.ttf               33.58 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Bold.waoOVXN0.ttf                 51.34 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Regular.ypZvNtVU.ttf              53.58 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_AMS-Regular.DRggAlZN.ttf               63.63 kB
+.svelte-kit/output/client/_app/immutable/assets/4.D9Ehykxl.css                                0.04 kB │ gzip:   0.06 kB
+.svelte-kit/output/client/_app/immutable/assets/2.BCJsMpKt.css                               40.80 kB │ gzip:  10.36 kB
+.svelte-kit/output/client/_app/immutable/assets/0.EyjhCUCW.css                               94.07 kB │ gzip:  14.30 kB
+.svelte-kit/output/client/_app/immutable/entry/start.DNKNIaDF.js                              0.08 kB │ gzip:   0.09 kB
+.svelte-kit/output/client/_app/immutable/chunks/D1837lHi.js                                   0.15 kB │ gzip:   0.13 kB
+.svelte-kit/output/client/_app/immutable/chunks/B4PhB77z.js                                   0.26 kB │ gzip:   0.21 kB
+.svelte-kit/output/client/_app/immutable/chunks/CiXgTDUu.js                                   0.31 kB │ gzip:   0.23 kB
+.svelte-kit/output/client/_app/immutable/chunks/CIezFJiJ.js                                   0.67 kB │ gzip:   0.43 kB
+.svelte-kit/output/client/_app/immutable/chunks/BbcnNBJs.js                                   0.88 kB │ gzip:   0.42 kB
+.svelte-kit/output/client/_app/immutable/chunks/Z7a-fpqb.js                                   0.89 kB │ gzip:   0.51 kB
+.svelte-kit/output/client/_app/immutable/nodes/1.Br4p1cCc.js                                  0.99 kB │ gzip:   0.59 kB
+.svelte-kit/output/client/_app/immutable/chunks/2A7zQCf_.js                                   1.50 kB │ gzip:   0.83 kB
+.svelte-kit/output/client/_app/immutable/chunks/BehJo0wR.js                                   2.58 kB │ gzip:   1.17 kB
+.svelte-kit/output/client/_app/immutable/chunks/R3p1rra-.js                                   3.34 kB │ gzip:   1.67 kB
+.svelte-kit/output/client/_app/immutable/nodes/0.VuS4TE5H.js                                  5.18 kB │ gzip:   2.62 kB
+.svelte-kit/output/client/_app/immutable/chunks/CJTVcbjL.js                                   5.33 kB │ gzip:   2.41 kB
+.svelte-kit/output/client/_app/immutable/nodes/6.CPB5rNMB.js                                  6.41 kB │ gzip:   2.58 kB
+.svelte-kit/output/client/_app/immutable/entry/app.CdhbEUgE.js                                7.03 kB │ gzip:   3.09 kB
+.svelte-kit/output/client/_app/immutable/chunks/CqkHoFPi.js                                   7.84 kB │ gzip:   2.44 kB
+.svelte-kit/output/client/_app/immutable/chunks/B8oQM39G.js                                   8.85 kB │ gzip:   3.73 kB
+.svelte-kit/output/client/_app/immutable/nodes/7.DSIHJg4l.js                                  9.03 kB │ gzip:   3.34 kB
+.svelte-kit/output/client/_app/immutable/nodes/5.jhkxyr9F.js                                 17.38 kB │ gzip:   6.73 kB
+.svelte-kit/output/client/_app/immutable/nodes/3.C8SBgQlB.js                                 17.88 kB │ gzip:   5.87 kB
+.svelte-kit/output/client/_app/immutable/nodes/4.D6mrxdxW.js                                 20.26 kB │ gzip:   6.77 kB
+.svelte-kit/output/client/_app/immutable/chunks/DbdvsNwM.js                                  21.40 kB │ gzip:   8.37 kB
+.svelte-kit/output/client/_app/immutable/chunks/NEOZbK9S.js                                  24.77 kB │ gzip:   9.55 kB
+.svelte-kit/output/client/_app/immutable/chunks/VTZNdIaS.js                                  27.53 kB │ gzip:  10.67 kB
+.svelte-kit/output/client/_app/immutable/chunks/DxSG08GM.js                                  53.80 kB │ gzip:  15.24 kB
+.svelte-kit/output/client/_app/immutable/nodes/2.GGuVkjzJ.js                              2,092.32 kB │ gzip: 636.43 kB
+✓ built in 2.33s
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size3-Regular.CTq5MqoE.woff           4.42 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size4-Regular.Dl5lxZxV.woff2          4.93 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size2-Regular.Dy4dx90m.woff2          5.21 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size1-Regular.mCD8mA8B.woff2          5.47 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size4-Regular.BF-4gkZK.woff           5.98 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size2-Regular.oD1tc_U0.woff           6.19 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size1-Regular.C195tn64.woff           6.50 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Regular.Di6jR-x-.woff2    6.91 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Bold.Dq_IR9rO.woff2       6.91 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size3-Regular.DgpXs0kz.ttf            7.59 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Regular.CTRA-rTL.woff     7.66 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Bold.BEiXGLvX.woff        7.72 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Script-Regular.D3wIWfF6.woff2         9.64 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Regular.DDBCnlJ7.woff2     10.34 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size4-Regular.DWFBv043.ttf           10.36 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Script-Regular.D5yQViql.woff         10.59 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Regular.CTYiF6lA.woff2       11.32 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Bold.CL6g_b3V.woff2          11.35 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size2-Regular.B7gKUWhC.ttf           11.51 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Italic.C3H0VqGB.woff2      12.03 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Bold.D1sUS0GD.woff2        12.22 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size1-Regular.Dbsnue_I.ttf           12.23 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Regular.CS6fqUqJ.woff      12.32 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Regular.wX97UBjC.ttf     12.34 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Bold.ATXxdsX0.ttf        12.37 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Regular.Dxdc4cR9.woff        13.21 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Bold.BsDP51OF.woff           13.30 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Typewriter-Regular.CO6r4hn1.woff2    13.57 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Italic.DN2j7dab.woff       14.11 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Bold.DbIhKOiC.woff         14.41 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Typewriter-Regular.C0xS9mPB.woff     16.03 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-BoldItalic.CZnvNsCZ.woff2       16.40 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-Italic.t53AETM-.woff2           16.44 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Script-Regular.C5JkGWo-.ttf          16.65 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-BoldItalic.DxDJ3AOS.woff2       16.78 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Italic.NWA7e6Wa.woff2           16.99 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-BoldItalic.iY-2wyZ7.woff        18.67 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-Italic.DA0__PXp.woff            18.75 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-BoldItalic.SpSLRI95.woff        19.41 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Regular.BNo7hRIc.ttf       19.44 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Regular.CB_wures.ttf         19.57 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Bold.BdnERNNW.ttf            19.58 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Italic.BMLOBm91.woff            19.68 kB
+.svelte-kit/output/server/.vite/manifest.json                                              21.51 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Italic.YYjJ1zSn.ttf        22.36 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Bold.CFMepnvq.ttf          24.50 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Bold.Cx986IdX.woff2             25.32 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Regular.B22Nviop.woff2          26.27 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Typewriter-Regular.D3Ib7_Hf.ttf      27.56 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_AMS-Regular.BQhdFMY1.woff2           28.08 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Bold.Jm3AIy58.woff              29.91 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Regular.Dr94JaBh.woff           30.77 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-BoldItalic.B3XSjfu4.ttf         31.20 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-Italic.flOr_0UB.ttf             31.31 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-BoldItalic.DzxPMmG6.ttf         32.97 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_AMS-Regular.DMm9YOAa.woff            33.52 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Italic.3WenGoN9.ttf             33.58 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Bold.waoOVXN0.ttf               51.34 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Regular.ypZvNtVU.ttf            53.58 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_AMS-Regular.DRggAlZN.ttf             63.63 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.D9Ehykxl.css                          0.04 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.LrrgoZVY.css                         42.02 kB
+.svelte-kit/output/server/_app/immutable/assets/_layout.BeLE-Oy2.css                       93.50 kB
+.svelte-kit/output/server/chunks/false.js                                                   0.05 kB
+.svelte-kit/output/server/internal.js                                                       0.33 kB
+.svelte-kit/output/server/chunks/state.svelte.js                                            0.39 kB
+.svelte-kit/output/server/chunks/environment.js                                             0.62 kB
+.svelte-kit/output/server/entries/pages/advanced/_page.svelte.js                            0.74 kB
+.svelte-kit/output/server/chunks/toast.svelte.js                                            0.96 kB
+.svelte-kit/output/server/entries/fallbacks/error.svelte.js                                 1.09 kB
+.svelte-kit/output/server/chunks/utils.js                                                   1.15 kB
+.svelte-kit/output/server/chunks/index.js                                                   1.43 kB
+.svelte-kit/output/server/entries/pages/traces/_page.svelte.js                              1.84 kB
+.svelte-kit/output/server/entries/pages/traces/_taskId_/_page.svelte.js                     2.71 kB
+.svelte-kit/output/server/chunks/context.js                                                 2.92 kB
+.svelte-kit/output/server/entries/pages/_layout.svelte.js                                   4.69 kB
+.svelte-kit/output/server/chunks/exports.js                                                 5.52 kB
+.svelte-kit/output/server/chunks/HeaderNav.js                                               8.50 kB
+.svelte-kit/output/server/entries/pages/integrations/_page.svelte.js                       12.95 kB
+.svelte-kit/output/server/entries/pages/downloads/_page.svelte.js                          14.32 kB
+.svelte-kit/output/server/chunks/shared.js                                                 17.66 kB
+.svelte-kit/output/server/remote-entry.js                                                  18.87 kB
+.svelte-kit/output/server/chunks/internal.js                                               28.27 kB
+.svelte-kit/output/server/chunks/index2.js                                                 76.55 kB
+.svelte-kit/output/server/chunks/app.svelte.js                                             82.12 kB
+.svelte-kit/output/server/index.js                                                        126.24 kB
+.svelte-kit/output/server/entries/pages/_page.svelte.js                                   325.13 kB
+✓ built in 3.85s
+
+Run npm run preview to preview your production build locally.
+
+> Using @sveltejs/adapter-static
+Overwriting build/index.html with fallback page. Consider using a different name for the fallback.
+  Wrote site to "build"
+  ✔ done
+Preparing macstudio-m4-2...
+Setting Metal memory limit on macstudio-m4-2...
+iogpu.wired_limit_mb: 120000 -> 120000
+iogpu.disable_wired_collector: 1 -> 1
+Killing existing Exo processes on macstudio-m4-2...
+  [Adams-Mac-Studio-M4-2] shutdown gate: proc='[p]ython.*exo' main='[e]xo.main' ports='52415,52416' grace=15s
+  [Adams-Mac-Studio-M4-2] live: 54038 54039 54040 54050 
+  [Adams-Mac-Studio-M4-2] SIGTERM -> 54038 54039 54040 54050 
+  [Adams-Mac-Studio-M4-2] CLEAN_EXIT after 1s (NO SIGKILL — destructors ran, RDMA QPs released)
+EXO_SHUTDOWN_VERDICT=CLEAN_EXIT
+No Sockets found in /var/folders/_v/f6dgc0056znfw21n8_zhr6000000gn/T/.screen.
+
+Ensuring Xcode developer directory on macstudio-m4-2...
+Syncing repo to macstudio-m4-2 via rsync (canonical source: adams-macbook-pro-m4)...
+rsync(56635): warning: /Users/adam.durham/repos/exo//mlx/build/temp.macosx-11.0-arm64-cpython-313/mlx.core/CMakeFiles/4.4.3/CompilerIdC: not empty, cannot delete
+rsync(56635): warning: /Users/adam.durham/repos/exo//mlx/build/temp.macosx-11.0-arm64-cpython-313/mlx.core/CMakeFiles/4.4.3/CompilerIdCXX: not empty, cannot delete
+rsync(56635): warning: /Users/adam.durham/repos/exo//mlx/build/temp.macosx-11.0-arm64-cpython-313/mlx.core/CMakeFiles/4.4.3: not empty, cannot delete
+rsync(56635): warning: /Users/adam.durham/repos/exo//mlx/build/_deps/nanobind-subbuild/nanobind-populate-prefix: not empty, cannot delete
+rsync(56635): warning: /Users/adam.durham/repos/exo//mlx/build/_deps/nanobind-subbuild: not empty, cannot delete
+rsync(56635): warning: /Users/adam.durham/repos/exo//src/exo/worker/engines/mlx/patches/deepseek_v4_moe: not empty, cannot delete
+Ensuring build dependencies on macstudio-m4-2...
+Syncing dependencies on macstudio-m4-2...
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 187 packages in 644ms
+   Building exo @ file:///Users/adam.durham/repos/exo
+   Building exo-bench @ file:///Users/adam.durham/repos/exo/bench
+   Building exo-rs @ file:///Users/adam.durham/repos/exo/rust/exo_rs
+   Building exo-tools @ file:///Users/adam.durham/repos/exo/tools
+      Built exo-bench @ file:///Users/adam.durham/repos/exo/bench
+      Built exo-tools @ file:///Users/adam.durham/repos/exo/tools
+      Built exo @ file:///Users/adam.durham/repos/exo
+      Built exo-rs @ file:///Users/adam.durham/repos/exo/rust/exo_rs
+Prepared 4 packages in 52.58s
+Uninstalled 5 packages in 19ms
+Installed 5 packages in 17ms
+ ~ exo==0.3.70 (from file:///Users/adam.durham/repos/exo)
+ ~ exo-bench==0.1.0 (from file:///Users/adam.durham/repos/exo/bench)
+ ~ exo-rs==0.3.0 (from file:///Users/adam.durham/repos/exo/rust/exo_rs)
+ ~ exo-tools==0.1.0 (from file:///Users/adam.durham/repos/exo/tools)
+ - mlx-lm==0.32.0 (from file:///Users/adam.durham/repos/exo/mlx-lm)
+ + mlx-lm==0.32.0 (from git+https://github.com/adurham/mlx-lm.git@6cc9c1e8709e228fca99ac152cd5e681ddcce65d)
+  mlx unchanged (sha 603f16eb, clean, importable, local-checkout provenance) -- skipping rebuild
+Pinning mlx-lm to vendored submodule on macstudio-m4-2...
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 1 package in 270ms
+   Building mlx-lm @ file:///Users/adam.durham/repos/exo/mlx-lm
+      Built mlx-lm @ file:///Users/adam.durham/repos/exo/mlx-lm
+Prepared 1 package in 226ms
+Uninstalled 1 package in 6ms
+Installed 1 package in 13ms
+ - mlx-lm==0.32.0 (from git+https://github.com/adurham/mlx-lm.git@6cc9c1e8709e228fca99ac152cd5e681ddcce65d)
+ + mlx-lm==0.32.0 (from file:///Users/adam.durham/repos/exo/mlx-lm)
+Rebuilding Rust pyo3 bindings on macstudio-m4-2...
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+🐍 Found CPython 3.13 at /Users/adam.durham/repos/exo/.venv/bin/python
+🔗 Found pyo3 bindings
+📡 Using build options features from pyproject.toml
+warning: The `extra-build-dependencies` option is experimental and may change without warning. Pass `--preview-features extra-build-dependencies` to disable this warning.
+Resolved 19 packages in 134ms
+Audited 19 packages in 0.45ms
+   Compiling pyo3-build-config v0.28.3
+   Compiling pyo3-macros-backend v0.28.3
+   Compiling pyo3-ffi v0.28.3
+   Compiling pyo3 v0.28.3
+   Compiling numpy v0.28.0
+   Compiling pyo3-macros v0.28.3
+   Compiling pyo3-async-runtimes v0.28.0
+   Compiling pyo3-log v0.13.3
+   Compiling pyo3-stub-gen v0.22.3
+   Compiling exo_rs v0.0.1 (/Users/adam.durham/repos/exo/rust/exo_rs)
+    Finished `release` profile [optimized] target(s) in 7.82s
+📖 Found type stub file at exo_rs.pyi
+📦 Built wheel for CPython 3.13 to /var/folders/_v/f6dgc0056znfw21n8_zhr6000000gn/T/.tmpV3PeQq/exo_rs-0.3.0-cp313-cp313-macosx_11_0_arm64.whl
+✏️ Setting installed package as editable
+🛠 Installed exo_rs-0.3.0
+Building dashboard on macstudio-m4-2...
+[0mdirenv: loading ~/repos/exo/.envrc
+[0mdirenv: using flake
+/opt/homebrew/opt/bash/bin/bash:1330: nix: command not found
+/opt/homebrew/opt/bash/bin/bash:1331: nix: command not found
+
+> exo-dashboard@1.0.0 prepare
+> svelte-kit sync || echo ''
+
+
+up to date, audited 157 packages in 1s
+
+18 packages are looking for funding
+  run `npm fund` for details
+
+12 vulnerabilities (2 low, 1 moderate, 9 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> exo-dashboard@1.0.0 build
+> vite build
+
+vite v6.4.1 building SSR bundle for production...
+transforming...
+10:43:17 PM [vite-plugin-svelte] src/lib/components/ChatModelSelector.svelte:291:14 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+289:             <!-- Info tooltip -->
+290:             <div class="ml-auto flex-shrink-0">
+291:               <span
+                        ^
+292:                 role="button"
+293:                 tabindex="-1"
+10:43:17 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:11:27 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 9: 
+10:   if (!browser) {
+11:     setContext('__svelte__', stores);
+                                       ^
+12:   }
+13: 
+10:43:17 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:2 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+              ^
+18:   }
+19:   $effect(() => {
+10:43:17 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:18 This reference only captures the initial value of `page`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+                            ^
+18:   }
+19:   $effect(() => {
+10:43:17 PM [vite-plugin-svelte] src/lib/components/ChatSidebar.svelte:339:18 Avoid using autofocus
+https://svelte.dev/e/a11y_autofocus
+337:                   onkeydown={handleEditKeydown}
+338:                   class="w-full bg-exo-black/60 border border-exo-yellow/30 rounded px-2 py-1.5 text-xs text-exo-light-gray focus:outline-none focus:border-exo-yellow/50 mb-2"
+339:                   autofocus
+                                ^
+340:                 />
+341:                 <div class="flex gap-2">
+10:43:17 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Elements with the 'dialog' interactive role must have a tabindex value
+https://svelte.dev/e/a11y_interactive_supports_focus
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:43:17 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:43:17 PM [vite-plugin-svelte] src/lib/components/TokenHeatmap.svelte:152:2 `<div>` with a mouseenter or mouseleave handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions
+150: <!-- Tooltip -->
+151: {#if hoveredToken}
+152:   <div
+           ^
+153:     class="fixed z-50 pb-2"
+154:     style="left: {hoveredToken.x}px; top: {hoveredToken.y}px; transform: translate(-50%, -100%);"
+✓ 243 modules transformed.
+rendering chunks...
+vite v6.4.1 building for production...
+transforming...
+10:43:18 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:11:27 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+ 9: 
+10:   if (!browser) {
+11:     setContext('__svelte__', stores);
+                                       ^
+12:   }
+13: 
+10:43:18 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:2 This reference only captures the initial value of `stores`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+              ^
+18:   }
+19:   $effect(() => {
+10:43:18 PM [vite-plugin-svelte] .svelte-kit/generated/root.svelte:17:18 This reference only captures the initial value of `page`. Did you mean to reference it inside a closure instead?
+https://svelte.dev/e/state_referenced_locally
+15:     $effect.pre(() => stores.page.set(page));
+16:   } else {
+17:     stores.page.set(page);
+                            ^
+18:   }
+19:   $effect(() => {
+10:43:18 PM [vite-plugin-svelte] src/lib/components/ChatModelSelector.svelte:291:14 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+289:             <!-- Info tooltip -->
+290:             <div class="ml-auto flex-shrink-0">
+291:               <span
+                        ^
+292:                 role="button"
+293:                 tabindex="-1"
+10:43:18 PM [vite-plugin-svelte] src/lib/components/ChatSidebar.svelte:339:18 Avoid using autofocus
+https://svelte.dev/e/a11y_autofocus
+337:                   onkeydown={handleEditKeydown}
+338:                   class="w-full bg-exo-black/60 border border-exo-yellow/30 rounded px-2 py-1.5 text-xs text-exo-light-gray focus:outline-none focus:border-exo-yellow/50 mb-2"
+339:                   autofocus
+                                ^
+340:                 />
+341:                 <div class="flex gap-2">
+10:43:18 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Elements with the 'dialog' interactive role must have a tabindex value
+https://svelte.dev/e/a11y_interactive_supports_focus
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:43:18 PM [vite-plugin-svelte] src/lib/components/ModelFilterPopover.svelte:75:0 Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type="button">` or `<a>` might be more appropriate
+https://svelte.dev/e/a11y_click_events_have_key_events
+73: 
+74: <!-- svelte-ignore a11y_no_static_element_interactions -->
+75: <div
+        ^
+76:   class="filter-popover absolute right-0 top-full mt-2 w-64 bg-exo-dark-gray border border-exo-yellow/10 rounded-lg shadow-xl z-20"
+77:   transition:fly={{ y: -10, duration: 200, easing: cubicOut }}
+10:43:18 PM [vite-plugin-svelte] src/lib/components/TokenHeatmap.svelte:152:2 `<div>` with a mouseenter or mouseleave handler must have an ARIA role
+https://svelte.dev/e/a11y_no_static_element_interactions
+150: <!-- Tooltip -->
+151: {#if hoveredToken}
+152:   <div
+           ^
+153:     class="fixed z-50 pb-2"
+154:     style="left: {hoveredToken.x}px; top: {hoveredToken.y}px; transform: translate(-50%, -100%);"
+✓ 984 modules transformed.
+rendering chunks...
+computing gzip size...
+.svelte-kit/output/client/_app/version.json                                                   0.03 kB │ gzip:   0.05 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size3-Regular.CTq5MqoE.woff             4.42 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size4-Regular.Dl5lxZxV.woff2            4.93 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size2-Regular.Dy4dx90m.woff2            5.21 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size1-Regular.mCD8mA8B.woff2            5.47 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size4-Regular.BF-4gkZK.woff             5.98 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size2-Regular.oD1tc_U0.woff             6.19 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size1-Regular.C195tn64.woff             6.50 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Regular.Di6jR-x-.woff2      6.91 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Bold.Dq_IR9rO.woff2         6.91 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size3-Regular.DgpXs0kz.ttf              7.59 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Regular.CTRA-rTL.woff       7.66 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Bold.BEiXGLvX.woff          7.72 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Script-Regular.D3wIWfF6.woff2           9.64 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Regular.DDBCnlJ7.woff2       10.34 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size4-Regular.DWFBv043.ttf             10.36 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Script-Regular.D5yQViql.woff           10.59 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Regular.CTYiF6lA.woff2         11.32 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Bold.CL6g_b3V.woff2            11.35 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size2-Regular.B7gKUWhC.ttf             11.51 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Italic.C3H0VqGB.woff2        12.03 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Bold.D1sUS0GD.woff2          12.22 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Size1-Regular.Dbsnue_I.ttf             12.23 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Regular.CS6fqUqJ.woff        12.32 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Regular.wX97UBjC.ttf       12.34 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Caligraphic-Bold.ATXxdsX0.ttf          12.37 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Regular.Dxdc4cR9.woff          13.21 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Bold.BsDP51OF.woff             13.30 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Typewriter-Regular.CO6r4hn1.woff2      13.57 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Italic.DN2j7dab.woff         14.11 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Bold.DbIhKOiC.woff           14.41 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Typewriter-Regular.C0xS9mPB.woff       16.03 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-BoldItalic.CZnvNsCZ.woff2         16.40 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-Italic.t53AETM-.woff2             16.44 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Script-Regular.C5JkGWo-.ttf            16.65 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-BoldItalic.DxDJ3AOS.woff2         16.78 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Italic.NWA7e6Wa.woff2             16.99 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-BoldItalic.iY-2wyZ7.woff          18.67 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-Italic.DA0__PXp.woff              18.75 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-BoldItalic.SpSLRI95.woff          19.41 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Regular.BNo7hRIc.ttf         19.44 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Regular.CB_wures.ttf           19.57 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Fraktur-Bold.BdnERNNW.ttf              19.58 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Italic.BMLOBm91.woff              19.68 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Italic.YYjJ1zSn.ttf          22.36 kB
+.svelte-kit/output/client/.vite/manifest.json                                                23.69 kB │ gzip:   2.47 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_SansSerif-Bold.CFMepnvq.ttf            24.50 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Bold.Cx986IdX.woff2               25.32 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Regular.B22Nviop.woff2            26.27 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Typewriter-Regular.D3Ib7_Hf.ttf        27.56 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_AMS-Regular.BQhdFMY1.woff2             28.08 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Bold.Jm3AIy58.woff                29.91 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Regular.Dr94JaBh.woff             30.77 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-BoldItalic.B3XSjfu4.ttf           31.20 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Math-Italic.flOr_0UB.ttf               31.31 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-BoldItalic.DzxPMmG6.ttf           32.97 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_AMS-Regular.DMm9YOAa.woff              33.52 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Italic.3WenGoN9.ttf               33.58 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Bold.waoOVXN0.ttf                 51.34 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_Main-Regular.ypZvNtVU.ttf              53.58 kB
+.svelte-kit/output/client/_app/immutable/assets/KaTeX_AMS-Regular.DRggAlZN.ttf               63.63 kB
+.svelte-kit/output/client/_app/immutable/assets/4.D9Ehykxl.css                                0.04 kB │ gzip:   0.06 kB
+.svelte-kit/output/client/_app/immutable/assets/2.BCJsMpKt.css                               40.80 kB │ gzip:  10.36 kB
+.svelte-kit/output/client/_app/immutable/assets/0.EyjhCUCW.css                               94.07 kB │ gzip:  14.30 kB
+.svelte-kit/output/client/_app/immutable/entry/start.BfaRBuPj.js                              0.08 kB │ gzip:   0.09 kB
+.svelte-kit/output/client/_app/immutable/chunks/D1837lHi.js                                   0.15 kB │ gzip:   0.13 kB
+.svelte-kit/output/client/_app/immutable/chunks/B4PhB77z.js                                   0.26 kB │ gzip:   0.21 kB
+.svelte-kit/output/client/_app/immutable/chunks/CiXgTDUu.js                                   0.31 kB │ gzip:   0.23 kB
+.svelte-kit/output/client/_app/immutable/chunks/CIezFJiJ.js                                   0.67 kB │ gzip:   0.43 kB
+.svelte-kit/output/client/_app/immutable/chunks/BbcnNBJs.js                                   0.88 kB │ gzip:   0.42 kB
+.svelte-kit/output/client/_app/immutable/chunks/Z7a-fpqb.js                                   0.89 kB │ gzip:   0.51 kB
+.svelte-kit/output/client/_app/immutable/nodes/1.DW0AHGn8.js                                  0.99 kB │ gzip:   0.58 kB
+.svelte-kit/output/client/_app/immutable/chunks/2A7zQCf_.js                                   1.50 kB │ gzip:   0.83 kB
+.svelte-kit/output/client/_app/immutable/chunks/BehJo0wR.js                                   2.58 kB │ gzip:   1.17 kB
+.svelte-kit/output/client/_app/immutable/chunks/R3p1rra-.js                                   3.34 kB │ gzip:   1.67 kB
+.svelte-kit/output/client/_app/immutable/nodes/0.VuS4TE5H.js                                  5.18 kB │ gzip:   2.62 kB
+.svelte-kit/output/client/_app/immutable/chunks/CJTVcbjL.js                                   5.33 kB │ gzip:   2.41 kB
+.svelte-kit/output/client/_app/immutable/nodes/6.CPB5rNMB.js                                  6.41 kB │ gzip:   2.58 kB
+.svelte-kit/output/client/_app/immutable/entry/app.BZBdFnD8.js                                7.03 kB │ gzip:   3.10 kB
+.svelte-kit/output/client/_app/immutable/chunks/CqkHoFPi.js                                   7.84 kB │ gzip:   2.44 kB
+.svelte-kit/output/client/_app/immutable/chunks/B8oQM39G.js                                   8.85 kB │ gzip:   3.73 kB
+.svelte-kit/output/client/_app/immutable/nodes/7.BzveUgAO.js                                  9.03 kB │ gzip:   3.34 kB
+.svelte-kit/output/client/_app/immutable/nodes/5.jhkxyr9F.js                                 17.38 kB │ gzip:   6.73 kB
+.svelte-kit/output/client/_app/immutable/nodes/3.C8SBgQlB.js                                 17.88 kB │ gzip:   5.87 kB
+.svelte-kit/output/client/_app/immutable/nodes/4.D6mrxdxW.js                                 20.26 kB │ gzip:   6.77 kB
+.svelte-kit/output/client/_app/immutable/chunks/DbdvsNwM.js                                  21.40 kB │ gzip:   8.37 kB
+.svelte-kit/output/client/_app/immutable/chunks/NEOZbK9S.js                                  24.77 kB │ gzip:   9.55 kB
+.svelte-kit/output/client/_app/immutable/chunks/gDtO6u32.js                                  27.53 kB │ gzip:  10.66 kB
+.svelte-kit/output/client/_app/immutable/chunks/DxSG08GM.js                                  53.80 kB │ gzip:  15.24 kB
+.svelte-kit/output/client/_app/immutable/nodes/2.GGuVkjzJ.js                              2,092.32 kB │ gzip: 636.43 kB
+✓ built in 2.37s
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size3-Regular.CTq5MqoE.woff           4.42 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size4-Regular.Dl5lxZxV.woff2          4.93 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size2-Regular.Dy4dx90m.woff2          5.21 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size1-Regular.mCD8mA8B.woff2          5.47 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size4-Regular.BF-4gkZK.woff           5.98 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size2-Regular.oD1tc_U0.woff           6.19 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size1-Regular.C195tn64.woff           6.50 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Regular.Di6jR-x-.woff2    6.91 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Bold.Dq_IR9rO.woff2       6.91 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size3-Regular.DgpXs0kz.ttf            7.59 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Regular.CTRA-rTL.woff     7.66 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Bold.BEiXGLvX.woff        7.72 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Script-Regular.D3wIWfF6.woff2         9.64 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Regular.DDBCnlJ7.woff2     10.34 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size4-Regular.DWFBv043.ttf           10.36 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Script-Regular.D5yQViql.woff         10.59 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Regular.CTYiF6lA.woff2       11.32 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Bold.CL6g_b3V.woff2          11.35 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size2-Regular.B7gKUWhC.ttf           11.51 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Italic.C3H0VqGB.woff2      12.03 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Bold.D1sUS0GD.woff2        12.22 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Size1-Regular.Dbsnue_I.ttf           12.23 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Regular.CS6fqUqJ.woff      12.32 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Regular.wX97UBjC.ttf     12.34 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Caligraphic-Bold.ATXxdsX0.ttf        12.37 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Regular.Dxdc4cR9.woff        13.21 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Bold.BsDP51OF.woff           13.30 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Typewriter-Regular.CO6r4hn1.woff2    13.57 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Italic.DN2j7dab.woff       14.11 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Bold.DbIhKOiC.woff         14.41 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Typewriter-Regular.C0xS9mPB.woff     16.03 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-BoldItalic.CZnvNsCZ.woff2       16.40 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-Italic.t53AETM-.woff2           16.44 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Script-Regular.C5JkGWo-.ttf          16.65 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-BoldItalic.DxDJ3AOS.woff2       16.78 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Italic.NWA7e6Wa.woff2           16.99 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-BoldItalic.iY-2wyZ7.woff        18.67 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-Italic.DA0__PXp.woff            18.75 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-BoldItalic.SpSLRI95.woff        19.41 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Regular.BNo7hRIc.ttf       19.44 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Regular.CB_wures.ttf         19.57 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Fraktur-Bold.BdnERNNW.ttf            19.58 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Italic.BMLOBm91.woff            19.68 kB
+.svelte-kit/output/server/.vite/manifest.json                                              21.51 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Italic.YYjJ1zSn.ttf        22.36 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_SansSerif-Bold.CFMepnvq.ttf          24.50 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Bold.Cx986IdX.woff2             25.32 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Regular.B22Nviop.woff2          26.27 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Typewriter-Regular.D3Ib7_Hf.ttf      27.56 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_AMS-Regular.BQhdFMY1.woff2           28.08 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Bold.Jm3AIy58.woff              29.91 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Regular.Dr94JaBh.woff           30.77 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-BoldItalic.B3XSjfu4.ttf         31.20 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Math-Italic.flOr_0UB.ttf             31.31 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-BoldItalic.DzxPMmG6.ttf         32.97 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_AMS-Regular.DMm9YOAa.woff            33.52 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Italic.3WenGoN9.ttf             33.58 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Bold.waoOVXN0.ttf               51.34 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_Main-Regular.ypZvNtVU.ttf            53.58 kB
+.svelte-kit/output/server/_app/immutable/assets/KaTeX_AMS-Regular.DRggAlZN.ttf             63.63 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.D9Ehykxl.css                          0.04 kB
+.svelte-kit/output/server/_app/immutable/assets/_page.LrrgoZVY.css                         42.02 kB
+.svelte-kit/output/server/_app/immutable/assets/_layout.BeLE-Oy2.css                       93.50 kB
+.svelte-kit/output/server/chunks/false.js                                                   0.05 kB
+.svelte-kit/output/server/internal.js                                                       0.33 kB
+.svelte-kit/output/server/chunks/state.svelte.js                                            0.39 kB
+.svelte-kit/output/server/chunks/environment.js                                             0.62 kB
+.svelte-kit/output/server/entries/pages/advanced/_page.svelte.js                            0.74 kB
+.svelte-kit/output/server/chunks/toast.svelte.js                                            0.96 kB
+.svelte-kit/output/server/entries/fallbacks/error.svelte.js                                 1.09 kB
+.svelte-kit/output/server/chunks/utils.js                                                   1.15 kB
+.svelte-kit/output/server/chunks/index.js                                                   1.43 kB
+.svelte-kit/output/server/entries/pages/traces/_page.svelte.js                              1.84 kB
+.svelte-kit/output/server/entries/pages/traces/_taskId_/_page.svelte.js                     2.71 kB
+.svelte-kit/output/server/chunks/context.js                                                 2.92 kB
+.svelte-kit/output/server/entries/pages/_layout.svelte.js                                   4.69 kB
+.svelte-kit/output/server/chunks/exports.js                                                 5.52 kB
+.svelte-kit/output/server/chunks/HeaderNav.js                                               8.50 kB
+.svelte-kit/output/server/entries/pages/integrations/_page.svelte.js                       12.95 kB
+.svelte-kit/output/server/entries/pages/downloads/_page.svelte.js                          14.32 kB
+.svelte-kit/output/server/chunks/shared.js                                                 17.66 kB
+.svelte-kit/output/server/remote-entry.js                                                  18.87 kB
+.svelte-kit/output/server/chunks/internal.js                                               28.27 kB
+.svelte-kit/output/server/chunks/index2.js                                                 76.55 kB
+.svelte-kit/output/server/chunks/app.svelte.js                                             82.12 kB
+.svelte-kit/output/server/index.js                                                        126.24 kB
+.svelte-kit/output/server/entries/pages/_page.svelte.js                                   325.13 kB
+✓ built in 3.92s
+
+Run npm run preview to preview your production build locally.
+
+> Using @sveltejs/adapter-static
+Overwriting build/index.html with fallback page. Consider using a different name for the fallback.
+  Wrote site to "build"
+  ✔ done
+Verifying commit consistency between nodes...
+Nodes synchronized on commit 99e2966ee.
+Starting Exo on macstudio-m4-1...
+  Memory reclaim on macstudio-m4-1 complete (wired+compressor 3 GB <= 25 GB).
+Starting Exo on macstudio-m4-2...
+  Memory reclaim on macstudio-m4-2 complete (wired+compressor 3 GB <= 25 GB).
+Waiting for cluster to stabilize...... HEALTHY! (Nodes: 2, Identities: 2)
+Looking up node IDs from cluster state...
+  Mac Studio M4-1: f8754a0efa6de1b552b21401d403df84
+  Mac Studio M4-2: e662cd7712e6cd0b0a709d4c8b905fdf
+
+Auto-placing DeepSeek V4 Flash (dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw) across both Studios via RDMA...
+  Attempt 1/30: placement not ready (No cycles found with sufficient memory), retrying in 5s...
+  Command received.
+Waiting for 2 DeepSeek V4 runner(s) to become Ready.............................................................. READY (2/2)

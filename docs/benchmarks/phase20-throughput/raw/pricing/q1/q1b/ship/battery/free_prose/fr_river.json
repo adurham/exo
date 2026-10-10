@@ -1,0 +1,33 @@
+{
+  "id": "fr_river",
+  "tag": "multilingual",
+  "prompt": "Translate this to French, then add one short comment in English: 'The river runs cold in November.'",
+  "http_status": 200,
+  "elapsed_s": 8.835822105407715,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 25,
+    "completion_tokens": 279,
+    "total_tokens": 304,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 246,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "La rivière coule froide en novembre.\n\nComment: “La rivière est froide en novembre” may sound more natural in everyday French.",
+  "reasoning": "We need answer. User: \"Translate this to French, then add one short comment in English: 'The river runs cold in November.'\" Need translate to French then add short comment in English. Need likely \"La rivière coule froide en novembre.\" Or \"La rivière devient froide en novembre\"? \"runs cold\" idiom? In French, \"La rivière est froide en novembre\" maybe. \"The river runs cold in November\" means water is cold. Translate: \"La rivière coule froide en novembre.\" That's literal. Could be \"La rivière est froide en novembre.\" Need then English comment. Short comment: \"In French, rivers 'run' but 'cold' often sounds more natural as 'est froide'.\" But user asks add one short comment in English. We can provide translation and comment. Ensure no extra? Maybe:\n\nLa rivière coule froide en novembre.\n\nComment:",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}

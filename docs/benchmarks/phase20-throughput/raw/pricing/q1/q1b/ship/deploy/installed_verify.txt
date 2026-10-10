@@ -1,0 +1,18 @@
+########## studio1 ##########
+EXO_HEAD=99e2966eec26891b59e1af5467d8f0ddaad38577
+MLX_WT=689e4eafd3cf2925a1cf78ba81375a3c098a0eef
+EXL3BUILD=/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/exl3_build.py
+PARSE_FN=2
+RESOLVE_FN=3
+--- runner DSV41_ env ---
+DSV41_DENSE_POLICY=layers.*.ffn.shared_experts.*=q8g64
+DSV41_DENSE=affine6
+########## studio2 ##########
+EXO_HEAD=99e2966eec26891b59e1af5467d8f0ddaad38577
+MLX_WT=689e4eafd3cf2925a1cf78ba81375a3c098a0eef
+EXL3BUILD=/Users/adam.durham/repos/exo/.venv/lib/python3.13/site-packages/mlx_lm/models/deepseek_v41/exl3_build.py
+PARSE_FN=2
+RESOLVE_FN=3
+--- runner DSV41_ env ---
+DSV41_DENSE_POLICY=layers.*.ffn.shared_experts.*=q8g64
+DSV41_DENSE=affine6

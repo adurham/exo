@@ -1,0 +1,4 @@
+# es_continue [multilingual]
+PROMPT: Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'
+
+El viento soplaba fuerte sobre las colinas, y las ramas de los robles se retorcían como dedos nerviosos. La hierba, ya crecida y plateada por la escarcha, corría en ondas hacia el sur, y un olor a tierra húmeda y a humo lejano subía desde el valle. En lo alto, los pájaros volaban bajo, en silencio, y las nubes se acumulaban tras la cresta como una marea oscura. Alguien, en alguna parte, cerró una puerta; el golpe llegó débil, casi tragado por el vendaval. La noche se anunciaba larga, y el camino, apenas visible entre los matorrales, parecía aguardar a que diera el primer paso.

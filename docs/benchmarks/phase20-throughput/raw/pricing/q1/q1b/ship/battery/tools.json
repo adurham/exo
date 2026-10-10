@@ -1,0 +1,591 @@
+{
+  "n": 10,
+  "n_pass": 10,
+  "results": [
+    {
+      "id": "t1_weather_celsius",
+      "prompt": "What is the current weather in Paris, in celsius?",
+      "expect_names": [
+        "get_weather"
+      ],
+      "expect_args": {
+        "city": "paris",
+        "unit": "celsius"
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 4.104817867279053,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 512,
+        "completion_tokens": 68,
+        "total_tokens": 580,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 12,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "5e41f8b3-70a6-437c-b6af-4f3d4d6893a1",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "5e41f8b3-70a6-437c-b6af-4f3d4d6893a1",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_weather",
+            "args": {
+              "city": "Paris",
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t2_forecast_tokyo",
+      "prompt": "Give me a 5-day forecast for Tokyo.",
+      "expect_names": [
+        "get_forecast"
+      ],
+      "expect_args": {
+        "city": "tokyo",
+        "days": 5
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 5.730607032775879,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 511,
+        "completion_tokens": 137,
+        "total_tokens": 648,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 64,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "964298a4-0c12-4a64-b3a3-7ae53352133d",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "964298a4-0c12-4a64-b3a3-7ae53352133d",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Tokyo\", \"days\": 5, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_forecast",
+            "args": {
+              "city": "Tokyo",
+              "days": 5,
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Tokyo\", \"days\": 5, \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t3_thermostat_berlin",
+      "prompt": "Set the thermostat to 21 degrees in Berlin.",
+      "expect_names": [
+        "set_thermostat"
+      ],
+      "expect_args": {
+        "city": "berlin",
+        "target_temp": 21
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 6.534070014953613,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 511,
+        "completion_tokens": 170,
+        "total_tokens": 681,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 95,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "2abece00-ccf8-424c-b263-90fe99cb232d",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "2abece00-ccf8-424c-b263-90fe99cb232d",
+            "name": "set_thermostat",
+            "arguments": "{\"city\": \"Berlin\", \"target_temp\": 21, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "set_thermostat",
+            "args": {
+              "city": "Berlin",
+              "target_temp": 21,
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Berlin\", \"target_temp\": 21, \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t4_raining_london",
+      "prompt": "Is it raining in London right now?",
+      "expect_names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "expect_args": {
+        "city": "london"
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 4.729806184768677,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 509,
+        "completion_tokens": 82,
+        "total_tokens": 591,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 26,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "0b7b995c-f7b3-4713-b4b5-d7eb836e51fc",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "0b7b995c-f7b3-4713-b4b5-d7eb836e51fc",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"London\", \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_weather",
+            "args": {
+              "city": "London",
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"London\", \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t5_nyc_tomorrow",
+      "prompt": "What is the temperature in New York City tomorrow?",
+      "expect_names": [
+        "get_forecast",
+        "get_weather"
+      ],
+      "expect_args": {
+        "city": "new york"
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 7.782833814620972,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 511,
+        "completion_tokens": 192,
+        "total_tokens": 703,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 117,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "04393bc2-2a5c-4213-8d94-594b61f4eee7",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "04393bc2-2a5c-4213-8d94-594b61f4eee7",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"New York City\", \"days\": 2, \"unit\": \"fahrenheit\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_forecast",
+            "args": {
+              "city": "New York City",
+              "days": 2,
+              "unit": "fahrenheit"
+            },
+            "raw_arguments": "{\"city\": \"New York City\", \"days\": 2, \"unit\": \"fahrenheit\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t6_forecast_madrid_3",
+      "prompt": "Forecast for Madrid for the next 3 days, in celsius.",
+      "expect_names": [
+        "get_forecast"
+      ],
+      "expect_args": {
+        "city": "madrid",
+        "days": 3
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 4.46736216545105,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 515,
+        "completion_tokens": 86,
+        "total_tokens": 601,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "04dfdc1f-01e2-427f-84a0-e7406db6237d",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "04dfdc1f-01e2-427f-84a0-e7406db6237d",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Madrid\", \"days\": 3, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_forecast",
+            "args": {
+              "city": "Madrid",
+              "days": 3,
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Madrid\", \"days\": 3, \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "I'll get the 3-day forecast for Madrid in celsius.\n\n"
+    },
+    {
+      "id": "t7_heat_rome",
+      "prompt": "Turn the heat up to 23 degrees in Rome.",
+      "expect_names": [
+        "set_thermostat"
+      ],
+      "expect_args": {
+        "city": "rome",
+        "target_temp": 23
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 4.9425318241119385,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 512,
+        "completion_tokens": 106,
+        "total_tokens": 618,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 31,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "192b215c-f682-44d8-8dd3-a2363ae3fc6e",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "192b215c-f682-44d8-8dd3-a2363ae3fc6e",
+            "name": "set_thermostat",
+            "arguments": "{\"city\": \"Rome\", \"target_temp\": 23, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "set_thermostat",
+            "args": {
+              "city": "Rome",
+              "target_temp": 23,
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Rome\", \"target_temp\": 23, \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t8_sydney_fahrenheit",
+      "prompt": "Current weather in Sydney in fahrenheit.",
+      "expect_names": [
+        "get_weather"
+      ],
+      "expect_args": {
+        "city": "sydney",
+        "unit": "fahrenheit"
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 4.307852029800415,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 509,
+        "completion_tokens": 78,
+        "total_tokens": 587,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 22,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "73d5d29b-828a-431b-98c8-aff1b0b7ad73",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "73d5d29b-828a-431b-98c8-aff1b0b7ad73",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Sydney\", \"unit\": \"fahrenheit\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_weather",
+            "args": {
+              "city": "Sydney",
+              "unit": "fahrenheit"
+            },
+            "raw_arguments": "{\"city\": \"Sydney\", \"unit\": \"fahrenheit\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t9_sydney_2day",
+      "prompt": "A 2-day forecast for Sydney.",
+      "expect_names": [
+        "get_forecast"
+      ],
+      "expect_args": {
+        "city": "sydney",
+        "days": 2
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 5.6263487339019775,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 509,
+        "completion_tokens": 118,
+        "total_tokens": 627,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 45,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "e1224c11-9828-420a-b120-bb61231367ac",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "e1224c11-9828-420a-b120-bb61231367ac",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Sydney\", \"days\": 2, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_forecast",
+            "args": {
+              "city": "Sydney",
+              "days": 2,
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Sydney\", \"days\": 2, \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    },
+    {
+      "id": "t10_unit_vs_days_confusion",
+      "prompt": "For Madrid, I want the weather right now and separately a 4-day outlook in celsius.",
+      "expect_names": [
+        "get_weather",
+        "get_forecast"
+      ],
+      "expect_args": {
+        "city": "madrid"
+      },
+      "pass": true,
+      "http_status": 200,
+      "elapsed_s": 6.089010953903198,
+      "error": null,
+      "finish_reason": "tool_calls",
+      "usage": {
+        "prompt_tokens": 520,
+        "completion_tokens": 162,
+        "total_tokens": 682,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 41,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "tool_calls": [
+        {
+          "id": "69ee5daa-5a59-4c1e-9664-4a6ebc88cec0",
+          "index": 0,
+          "type": "function",
+          "function": {
+            "id": "69ee5daa-5a59-4c1e-9664-4a6ebc88cec0",
+            "name": "get_weather",
+            "arguments": "{\"city\": \"Madrid\", \"unit\": \"celsius\"}"
+          }
+        },
+        {
+          "id": "6bee2b1e-7928-42d3-a7a4-245fbbf2ede2",
+          "index": 1,
+          "type": "function",
+          "function": {
+            "id": "6bee2b1e-7928-42d3-a7a4-245fbbf2ede2",
+            "name": "get_forecast",
+            "arguments": "{\"city\": \"Madrid\", \"days\": 4, \"unit\": \"celsius\"}"
+          }
+        }
+      ],
+      "detail": {
+        "tool_calls": [
+          {
+            "name": "get_weather",
+            "args": {
+              "city": "Madrid",
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Madrid\", \"unit\": \"celsius\"}"
+          },
+          {
+            "name": "get_forecast",
+            "args": {
+              "city": "Madrid",
+              "days": 4,
+              "unit": "celsius"
+            },
+            "raw_arguments": "{\"city\": \"Madrid\", \"days\": 4, \"unit\": \"celsius\"}"
+          }
+        ]
+      },
+      "content": "\n\n"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "id": "limerick",
+  "tag": "prose",
+  "prompt": "Write a limerick about the moon.",
+  "http_status": 200,
+  "elapsed_s": 25.79192018508911,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 774,
+    "total_tokens": 786,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 732,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "There once was a moon in the sky,  \nWho watched all the lovers go by.  \nShe’d glow with delight  \nFor lovers at night,  \nThen yawn as the sun waved goodbye.",
+  "reasoning": "We need answer user asks write a limerick about moon. Need produce limerick. Limerick structure AABBA, anapestic meter, 5 lines. Need likely witty. Let's craft. Ensure rhyme. Example:\n\nThere once was a moon in the sky,\nWho watched all the lovers go by.\nShe'd wink with a beam,\nAnd polish her dream,\nThen sigh as the dawn said goodbye.\n\nCheck limerick: lines 1,2,5 rhyme sky/by/goodbye. lines 3,4 rhyme beam/dream. Meter? \"There ONCE was a MOON in the SKY\" (3 stresses). \"Who WATCHED all the LOVers go BY\" (3). \"She'd WINK with a BEAM\" (2? actually 2 stresses). \"And POLish her DREAM\" (2). \"Then SIGH as the DAWN said goodBYE\" (3). Good. But \"polish her dream\" maybe okay. Need maybe moon limerick. Could be more classic. Let's final with just limerick. Ensure no extra? We can present. \n\nMaybe \"There",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "goodbye",
+        "token_index": 29,
+        "head": "good",
+        "tail": "bye",
+        "context": "goodbye."
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

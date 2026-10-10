@@ -1,0 +1,45 @@
+{
+  "id": "zh_autumn",
+  "tag": "multilingual",
+  "prompt": "先用一句中文描写秋雨的声音，然后用英文解释这句话的意思。(Write one Chinese sentence describing the sound of autumn rain, then explain it in English.)",
+  "http_status": 200,
+  "elapsed_s": 10.406118869781494,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 35,
+    "completion_tokens": 336,
+    "total_tokens": 371,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 263,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "秋雨淅淅沥沥地落在枯黄的梧桐叶上，像无数细碎的叹息。\n\nEnglish explanation: This sentence describes the sound of autumn rain as a soft, continuous pattering (“淅淅沥沥”) on withered yellow plane leaves, comparing it to countless tiny sighs. It conveys a cool, quiet, and slightly melancholic autumn atmosphere.",
+  "reasoning": "We need answer in Chinese sentence describing sound of autumn rain, then English explanation. Need comply. We need produce one Chinese sentence, then English explanation. Need likely poetic. Need ensure Chinese sentence describes sound. Then English explains meaning. Could be: 秋雨淅淅沥沥地敲在枯黄的梧桐叶上，像无数细碎的叹息。 Then English: \"The autumn rain patters softly on withered yellow parasol leaves, like countless tiny sighs.\" Explain: It describes... Need maybe \"sound of autumn rain\" specifically. Chinese sentence includes onomatopoeia 淅淅沥沥. English explanation. Need maybe one Chinese sentence only. Then English explanation. We can do.\n\nNeed be careful: \"用一句中文描写\" means one Chinese sentence. Then English explanation. We can provide. Maybe final answer:\n\n秋雨淅淅沥沥地落在枯黄的梧桐叶上，像无数细碎的叹息。\n\nEnglish explanation: This",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "withered",
+        "token_index": 18,
+        "head": "with",
+        "tail": "ered",
+        "context": "withered"
+      }
+    ],
+    "counts": {
+      "same_script_glue": 1
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

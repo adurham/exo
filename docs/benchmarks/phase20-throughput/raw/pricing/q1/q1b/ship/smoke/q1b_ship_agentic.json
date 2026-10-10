@@ -1,0 +1,206 @@
+{
+ "summary": {
+  "label": "q1b_ship_agentic",
+  "arm": "agentic",
+  "salt_base": "q1b",
+  "round_prof": null,
+  "reps": 3,
+  "depth": 20000,
+  "max_tokens": 800,
+  "decode_tps_median": 34.299,
+  "decode_tps_all": [
+   34.964,
+   34.299,
+   33.874
+  ],
+  "ms_per_round_median": 86.03,
+  "ms_per_round_all": [
+   85.96,
+   86.09
+  ],
+  "mean_accepted_median": 1.9395,
+  "aborted": false,
+  "abort_reason": null
+ },
+ "recs": [
+  {
+   "wall_s": 23.728,
+   "ttft_s": 0.8761,
+   "decode_s": 22.8519,
+   "content_chars": 2645,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 91043,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 0.0,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 121527341824
+    },
+    "prefix_cache_hit": "partial",
+    "mtp_cycles_cumulative": 23475,
+    "mtp_accepted_drafts_cumulative": 11826,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 23475,
+   "accepted_cum": 11826,
+   "prefix_hit": "partial",
+   "prompt_tps": 0,
+   "decode_tps": 34.964,
+   "rounds": null,
+   "mean_accepted": null,
+   "ms_per_round": null,
+   "gamma_implied": null,
+   "rep": 0,
+   "arm": "agentic",
+   "chunk": "q1b_ship_agentic_c0",
+   "salt": "q1b-0",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308976,
+    "pred_tokens_3p48": 88811
+   }
+  },
+  {
+   "wall_s": 24.294,
+   "ttft_s": 0.9989,
+   "decode_s": 23.2954,
+   "content_chars": 2587,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 91043,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 0.0,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 121527341824
+    },
+    "prefix_cache_hit": "partial",
+    "mtp_cycles_cumulative": 24288,
+    "mtp_accepted_drafts_cumulative": 12355,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 24288,
+   "accepted_cum": 12355,
+   "prefix_hit": "partial",
+   "prompt_tps": 0,
+   "decode_tps": 34.299,
+   "rounds": 271.0,
+   "mean_accepted": 1.952,
+   "ms_per_round": 85.96,
+   "gamma_implied": 1.678,
+   "rounds_est": 484.6,
+   "rep": 1,
+   "arm": "agentic",
+   "chunk": "q1b_ship_agentic_c0",
+   "salt": "q1b-1",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308976,
+    "pred_tokens_3p48": 88811
+   }
+  },
+  {
+   "wall_s": 24.446,
+   "ttft_s": 0.8583,
+   "decode_s": 23.5874,
+   "content_chars": 2773,
+   "usage": {
+    "prompt_tokens": 91043,
+    "completion_tokens": 800,
+    "total_tokens": 91843,
+    "prompt_tokens_details": {
+     "cached_tokens": 91043,
+     "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+     "reasoning_tokens": 800,
+     "audio_tokens": 0,
+     "accepted_prediction_tokens": 0,
+     "rejected_prediction_tokens": 0
+    }
+   },
+   "stats": {
+    "prompt_tps": 0.0,
+    "generation_tps": 0.0,
+    "prompt_tokens": 91043,
+    "generation_tokens": 800,
+    "peak_memory_usage": {
+     "in_bytes": 121527341824
+    },
+    "prefix_cache_hit": "partial",
+    "mtp_cycles_cumulative": 25110,
+    "mtp_accepted_drafts_cumulative": 12883,
+    "phase_marks_ms": null,
+    "api_phase_marks_ms": null
+   },
+   "finish_reason": "length",
+   "prompt_tokens": 91043,
+   "completion_tokens": 800,
+   "reasoning_tokens": 800,
+   "cycles_cum": 25110,
+   "accepted_cum": 12883,
+   "prefix_hit": "partial",
+   "prompt_tps": 0,
+   "decode_tps": 33.874,
+   "rounds": 274.0,
+   "mean_accepted": 1.927,
+   "ms_per_round": 86.09,
+   "gamma_implied": 1.688,
+   "rounds_est": 487.1,
+   "rep": 2,
+   "arm": "agentic",
+   "chunk": "q1b_ship_agentic_c0",
+   "salt": "q1b-2",
+   "meta": {
+    "n_messages_total": 98,
+    "n_messages_used": 98,
+    "preamble_chars": 22770,
+    "prompt_chars": 308976,
+    "pred_tokens_3p48": 88811
+   }
+  }
+ ]
+}

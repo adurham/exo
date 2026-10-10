@@ -232,3 +232,47 @@ written, git-only, resumable doc). Restore was neither needed nor attempted (pro
 
 
 
+
+
+---
+
+## §PROMOTION (SHIPPED) — next19-dense production ship (2026-10-09)
+
+Owner directive (verbatim): *"Promote to production — full ship ceremony (production branch, known-good tags, PH shipped line)."*
+
+**Ceremony result: SHIPPED.** exo `deploy/next19-dense` @ `99e2966eec26891b59e1af5467d8f0ddaad38577` (union merge of the production lineage `fb4f9290b` and the dense eval lineage `cfd74d49f`, then the mlx-lm bump commit) + mlx-lm `689e4ea`, LIVE on both Studios with the dense defaults baked. Tag on both forks: **`known-good-dense-q68-20261009-231842`** (exo `99e2966ee`, mlx-lm `689e4ea`).
+
+### Union-merge resolution notes
+- Merge **CLEAN** (git `ort`, no conflicts) — the two sides touched disjoint regions.
+- `start_cluster.sh` = the **union** of both lineages: eval dense bake + `DSV41_DENSE`/`DSV41_DENSE_TP`/`DSV41_DENSE_POLICY` forwardings **AND** the next18 `M4_1_IP=192.168.86.48` / `M4_2_IP=192.168.86.47` pins + `DSV41_NEXT18_CAPTURE*` + `DSV41_INDEXER_L2_FULL`/`SMALLN_ROW_BF16` forwardings.
+- `engine.py` kept the next18 capture bootstrap (`_maybe_install_next18_capture`); `builder.py` kept the eval load-warmup liveness fix (`_LOAD_HEARTBEAT_SECONDS`); the new liveness test + the dispatch tweak kept.
+- Bake comment reworded from the eval-branch wording to the production default.
+- mlx-lm gitlink → `689e4ea`; **uv.lock left unchanged** (matches the `fb4f9290b` gitlink-only bump precedent; the launcher force-reinstalls mlx-lm from the `./mlx-lm` submodule, not uv.lock).
+- **Additional src/submodule diffs found beyond the brief's list: NONE** (the src delta is exactly builder.py liveness + engine.py bootstrap retention + the two tests + the gitlink).
+- Deviations: (1) the bake-comment reword was folded into the bump commit (2 files) rather than a separate commit (tree content identical); (2) the build-time test run needed the worktree's mlx-lm submodule populated via rsync for the root `conftest.py` landmine guard (dev worktree only; the shipped tree carries the gitlink, verified).
+
+### Verification table (union)
+| check | result |
+|---|---|
+| `git diff --stat fb4f9290b..HEAD` | dense work + docs/bench + gitlink bump; **engine.py ABSENT** (bootstrap retained) — 13 files, +1955/−7 |
+| `git diff --stat cfd74d49f..HEAD` | carried-forward next18 launcher/engine bits + gitlink + comment — 3 files, +96/−8 |
+| `start_cluster.sh` tokens | DSV41_DENSE 12, DSV41_DENSE_POLICY 4, DSV41_DENSE_TP 3, 192.168.86.48 1, 192.168.86.47 1, DSV41_NEXT18_CAPTURE 9, DSV41_INDEXER_L2_FULL 2, DSV41_INDEXER_SMALLN_ROW_BF16 2 — **all present** |
+| `engine.py` `_maybe_install_next18_capture` | present (2) |
+| `builder.py` `_LOAD_HEARTBEAT_SECONDS` | present (2) |
+| `git ls-tree HEAD mlx-lm` | `689e4ea` ✓ |
+| residual "eval-branch" / "NOT a production ship" | 0 |
+| uv.lock | unchanged (`245cef7b`) |
+| single-file tests | liveness 5 passed; dispatch 13 passed; mlx-lm dense_policy 22 passed |
+
+### Deploy + gates (live build)
+- Deploy: shared checkout detached at `99e2966ee` + mlx-lm `689e4ea`; `EXO_TARGET_BRANCH=deploy/next19-dense ./start_cluster.sh` → `Nodes synchronized on commit 99e2966ee.`, HEALTHY, **READY (2/2)**; post-boot canary studio1 med 14.77 / studio2 med 14.85 healthy; installed `exl3_build.py` carries `_parse_dense_policy`+`resolve_dense_mode` on BOTH nodes; runner env exactly `DSV41_DENSE=affine6` + `DSV41_DENSE_POLICY=layers.*.ffn.shared_experts.*=q8g64` (no strays).
+- **Battery CLEAN** (depth 40000, label `q1b_ship`): needles 6/6, tools 10/10 (t2 PASS), prose 0 DIRTY / 0 REVIEW, park PASS.
+- **Parity smoke** (salt `q1b`): benign 20K **81.30 ms** (ctl 94.56, exp 80.97); agentic 91K **86.03 ms** (ctl 101.07, exp 87.24) — both within ±2 ms.
+- **t2 probe** 10/10 structured (no XML leak).
+- **Pre-registered falsifier: did NOT fire.**
+
+### Rollback target
+exo `deploy/q1-dense-qn` @ `cfd74d49f` + mlx-lm `689e4ea` (same detach-checkout procedure); instant in-place fallback `DSV41_DENSE=exl3`.
+
+### Budget
+1 ship boot + 0 arm restarts + 1 reserve (held/unspent).

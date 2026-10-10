@@ -1,0 +1,194 @@
+{
+  "n": 6,
+  "n_pass": 6,
+  "results": [
+    {
+      "id": "exact",
+      "question": "Question: What is the vault code? Reply with just the 4-digit number.",
+      "expect": "contains 8492",
+      "keywords": [
+        "8492"
+      ],
+      "pass": true,
+      "answered_in_reasoning": false,
+      "http_status": 200,
+      "elapsed_s": 5.903085947036743,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 40150,
+        "completion_tokens": 30,
+        "total_tokens": 40180,
+        "prompt_tokens_details": {
+          "cached_tokens": 38912,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 27,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "8492",
+      "reasoning": "The user asks: What is the vault code? Reply with just the 4-digit number. The vault code is 8492."
+    },
+    {
+      "id": "paraphrase",
+      "question": "Question: What code opens the vault? Answer briefly.",
+      "expect": "contains 8492",
+      "keywords": [
+        "8492"
+      ],
+      "pass": true,
+      "answered_in_reasoning": false,
+      "http_status": 200,
+      "elapsed_s": 6.438460826873779,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 40144,
+        "completion_tokens": 36,
+        "total_tokens": 40180,
+        "prompt_tokens_details": {
+          "cached_tokens": 38912,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 33,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "8492",
+      "reasoning": "We need answer. Need identify vault code from context: vault code is 8492. Distractor 8493 not. Answer: 8492. Brief."
+    },
+    {
+      "id": "negation",
+      "question": "Question: Is the vault code 8493? Answer yes or no, then state the correct vault code.",
+      "expect": "contains 8492 (and should not affirm 8493)",
+      "keywords": [
+        "8492"
+      ],
+      "pass": true,
+      "answered_in_reasoning": false,
+      "http_status": 200,
+      "elapsed_s": 8.146857976913452,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 40155,
+        "completion_tokens": 108,
+        "total_tokens": 40263,
+        "prompt_tokens_details": {
+          "cached_tokens": 38912,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 96,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "No. The correct vault code is 8492.",
+      "reasoning": "We need answer. Need determine vault code. Facts: [FACT] vault code is 8492. [CLARIFY] not 8493, it is 8492. [DISTRACTOR] 8493 appears but not vault code. So answer no, correct 8492. Need exactly? User asks answer yes or no, then state correct vault code. So \"No. The correct vault code is 8492.\" Ensure no extra."
+    },
+    {
+      "id": "distractor",
+      "question": "Question: A number 8493 appears in the document. Is that the vault code? What is the actual vault code?",
+      "expect": "contains 8492",
+      "keywords": [
+        "8492"
+      ],
+      "pass": true,
+      "answered_in_reasoning": false,
+      "http_status": 200,
+      "elapsed_s": 8.266762018203735,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 40158,
+        "completion_tokens": 130,
+        "total_tokens": 40288,
+        "prompt_tokens_details": {
+          "cached_tokens": 38912,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 103,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "No. The number 8493 is a distractor, not the vault code. The actual vault code is **8492**.",
+      "reasoning": "We need answer. Need parse. User asks: \"Question: A number 8493 appears in the document. Is that the vault code? What is the actual vault code?\" Need answer based on document. Document has facts: vault code is 8492. Clarify says NOT 8493, it is 8492. Distractor says 8493 appears but NOT vault code. So answer: No, 8493 is not vault code; actual vault code is 8492. Need concise."
+    },
+    {
+      "id": "control",
+      "question": "Question: What is the verification token? Reply with the exact token.",
+      "expect": "contains QK-7731",
+      "keywords": [
+        "qk-7731",
+        "qk 7731",
+        "7731"
+      ],
+      "pass": true,
+      "answered_in_reasoning": false,
+      "http_status": 200,
+      "elapsed_s": 5.865402698516846,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 40147,
+        "completion_tokens": 30,
+        "total_tokens": 40177,
+        "prompt_tokens_details": {
+          "cached_tokens": 38912,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 24,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "QK-7731",
+      "reasoning": "We need answer exact token. Need identify from text. Verification token is QK-7731. Reply exact token."
+    },
+    {
+      "id": "multihop",
+      "question": "Question: What month does the project launch? Answer with the month name.",
+      "expect": "contains November",
+      "keywords": [
+        "november"
+      ],
+      "pass": true,
+      "answered_in_reasoning": false,
+      "http_status": 200,
+      "elapsed_s": 6.712006092071533,
+      "error": null,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 40148,
+        "completion_tokens": 40,
+        "total_tokens": 40188,
+        "prompt_tokens_details": {
+          "cached_tokens": 38912,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 38,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      },
+      "content": "November",
+      "reasoning": "We need answer. Need determine from facts: launch month is November. Need answer month name. Exactly? User asks answer with month name. So \"November\". Ensure no extra? likely."
+    }
+  ]
+}

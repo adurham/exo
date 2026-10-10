@@ -1,0 +1,54 @@
+{
+  "id": "rank_langs",
+  "tag": "ranking",
+  "prompt": "Rank these five programming languages by how pleasant they are for a beginner, best to worst: Rust, Python, C, JavaScript, Haskell. Give a one-sentence reason for each, in your ranked order.",
+  "http_status": 200,
+  "elapsed_s": 21.825494050979614,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 46,
+    "completion_tokens": 543,
+    "total_tokens": 589,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 404,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "1. **Python** — Its clean, readable syntax and immediate REPL feedback let beginners focus on ideas rather than boilerplate.  \n2. **JavaScript** — It runs instantly in any browser and is forgiving enough for quick visual results, despite some quirky semantics.  \n3. **C** — Its small core is learnable, but manual memory management and pointers quickly add friction for beginners.  \n4. **Rust** — The compiler is exceptionally helpful, yet ownership, borrowing, and lifetimes impose a steep early cognitive load.  \n5. **Haskell** — Its elegant purity and laziness are powerful, but monads and unfamiliar functional concepts make it the least beginner-friendly.",
+  "reasoning": "We need answer ranking five languages by pleasant for beginner best to worst: Rust, Python, C, JavaScript, Haskell. One-sentence reason each in ranked order. Need decide ranking. Need be accurate and maybe subjective. Need rank best to worst. Likely Python best, JavaScript second? C maybe third? Rust fourth? Haskell worst? Need consider beginner pleasant. Python easiest syntax, immediate feedback. JavaScript approachable but quirks async, browser, ecosystem. C simple but manual memory, pointers. Rust strict compiler, ownership. Haskell functional purity, monads, unfamiliar. So ranking: Python, JavaScript, C, Rust, Haskell. Or maybe JavaScript vs C: easier to start JS? C has simple syntax but pointers/memory. JS has weird coercion and async but can run in browser. For pleasant, Python best.",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "beginners",
+        "token_index": 12,
+        "head": "begin",
+        "tail": "ners",
+        "context": "beginners"
+      },
+      {
+        "type": "same_script_glue",
+        "confidence": "advisory",
+        "token": "beginners",
+        "token_index": 58,
+        "head": "begin",
+        "tail": "ners",
+        "context": "beginners."
+      }
+    ],
+    "counts": {
+      "same_script_glue": 2
+    },
+    "n_high": 0,
+    "n_low": 0
+  }
+}

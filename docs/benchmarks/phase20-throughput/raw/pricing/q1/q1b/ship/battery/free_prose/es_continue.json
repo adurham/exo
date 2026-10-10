@@ -1,0 +1,33 @@
+{
+  "id": "es_continue",
+  "tag": "multilingual",
+  "prompt": "Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'",
+  "http_status": 200,
+  "elapsed_s": 25.24283790588379,
+  "error": null,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 30,
+    "completion_tokens": 745,
+    "total_tokens": 775,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 562,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "content": "El viento soplaba fuerte sobre las colinas, y las ramas de los robles se retorcían como dedos nerviosos. La hierba, ya crecida y plateada por la escarcha, corría en ondas hacia el sur, y un olor a tierra húmeda y a humo lejano subía desde el valle. En lo alto, los pájaros volaban bajo, en silencio, y las nubes se acumulaban tras la cresta como una marea oscura. Alguien, en alguna parte, cerró una puerta; el golpe llegó débil, casi tragado por el vendaval. La noche se anunciaba larga, y el camino, apenas visible entre los matorrales, parecía aguardar a que diera el primer paso.",
+  "reasoning": "We need answer in Spanish, continue same language and style. User asks: \"Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'\" Need continue sentence/story. We need produce continuation. Should match style: literary, descriptive, maybe ominous. We can write a paragraph. Need likely just continuation. We can start with \"y las ramas...\" etc. Keep same language Spanish. Style: narrative, atmospheric. Let's craft. Need maybe not too long. We can continue from given fragment. Ensure grammatical. \"El viento soplaba fuerte sobre las colinas, y las hierbas altas se inclinaban como si quisieran besar la tierra. En el horizonte, una sombra de nubes presagiaba tormenta...\" etc. Maybe include character? The prompt only gives setting. Continue naturally. We can make",
+  "detector": {
+    "verdict": "CLEAN",
+    "hits": [],
+    "counts": {},
+    "n_high": 0,
+    "n_low": 0
+  }
+}
