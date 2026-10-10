@@ -1,0 +1,6 @@
+# ru_winter [multilingual]
+PROMPT: Напиши короткий абзац на русском языке о зимнем утре, затем переведи его на английский.
+
+Зимнее утро встречает город мягкой пеленой снега. Морозный воздух щиплет щёки, а бледное солнце медленно поднимается над крышами, окрашивая иней на окнах в нежные розовые тона. На улицах тихо — лишь скрип шагов по свежему снегу нарушает безмолвие. Кажется, весь мир замер в ожидании чего-то светлого и чистого.
+
+A winter morning greets the city with a soft blanket of snow. The frosty air nips at your cheeks, and the pale sun slowly rises above the rooftops, tinting the frost on the windows in delicate shades of pink. The streets are quiet — only the crunch of footsteps on fresh snow breaks the silence. It seems the whole world has paused, waiting for something bright and pure.
