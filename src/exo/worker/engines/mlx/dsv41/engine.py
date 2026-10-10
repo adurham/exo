@@ -814,7 +814,19 @@ class Dsv41Engine(Engine):
         # The per-request draft-window slot is only for engines with no session
         # (``rounds._one_round``'s fallback); a conversation owns its own.
         self._draft_windows.clear()
-        session = self._sessions.get(tokens_list, self._conversation_key(params))
+        # An image-carrying request must NOT reuse a resident conversation.
+        # ``embeddings is not None`` is exactly the signal that this prompt's
+        # prefill carries image spans -- it is what logs "prompt expanded with
+        # N image(s)" just above. Reuse would delta-prefill from a nonzero cache
+        # offset, but the vision splice requires the whole image span inside the
+        # forward whose offset is 0, so it raises and (before this) killed the
+        # runner: the warm-session image crash. Force a cold one-off session;
+        # ``keep`` is already False for these requests, so it is dropped at end.
+        session = self._sessions.get(
+            tokens_list,
+            self._conversation_key(params),
+            reuse=embeddings is None,
+        )
         if self._active is not None:
             self._active.prefill_total = prompt_len
         try:
