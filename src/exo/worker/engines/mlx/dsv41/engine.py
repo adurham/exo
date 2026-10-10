@@ -195,13 +195,19 @@ DSV41_SPEC_GAMMA_ENV = "DSV41_SPEC_GAMMA"
 #: below 2 are the degenerate single-draft round and are not part of this round's
 #: study, so they are rejected rather than silently accepted.
 #:
-#: CAVEAT (why an arm is a warmup-gamma arm, not a whole-request width): the
-#: override only changes the engine's ``gamma`` field, which feeds
+#: CAVEAT (why an arm IS a whole-request width, not a warmup-only one): the
+#: override changes the engine's ``gamma`` field, which feeds
 #: ``rounds._spec_policy(self.gamma)`` == ``GammaPolicy(start=gamma)``. That
-#: policy uses ``start`` verbatim for its first ``warmup`` (4) rounds, then
-#: adapts over its fixed search set ``gammas=(1, 2, 3, 4)`` (so it can never
-#: settle on 5). The loop handles any of these widths cleanly; the arm simply
-#: differs in the warmup rounds' draft depth.
+#: policy's ``next()`` returns ``start`` verbatim while its internal counter is
+#: below ``warmup`` (4), and that counter only advances in
+#: ``GammaPolicy.update()``. The engine serving path (``engine._rounds`` +
+#: ``rounds._one_round``) NEVER calls ``update()``, so the counter stays 0 and
+#: ``next()`` returns ``start`` for EVERY round: the effective per-round gamma
+#: is CONSTANT == the override for the whole request. (GammaPolicy's own
+#: adaptation over its search set ``gammas=(1, 2, 3, 4)`` only engages when a
+#: caller calls ``update()`` after each round -- the deployed engine does not.)
+#: The loop handles any of these widths cleanly, so the arm is the draft depth
+#: for the whole request, not merely the warmup rounds'.
 _SPEC_GAMMA_SUPPORTED: tuple[int, ...] = (2, 3, 4, 5)
 
 

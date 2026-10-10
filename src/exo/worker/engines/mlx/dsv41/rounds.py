@@ -295,7 +295,13 @@ def _rows_logprobs(lp: dict[str, mx.array], n: int, lp_out: list[Any]) -> None:
 
 
 def _spec_policy(gamma: int) -> Any:
-    """Adaptive gamma policy for the speculative round (see ``spec.GammaPolicy``)."""
+    """Gamma policy for the speculative round (see ``spec.GammaPolicy``).
+
+    Built with ``start=gamma``. NB: the engine never calls
+    ``GammaPolicy.update()``, so ``next()`` returns ``start`` for every round
+    (the effective gamma is CONSTANT for the whole request); the policy's
+    adaptive behaviour is inert on this serving path.
+    """
     from mlx_lm.models.deepseek_v41.spec import GammaPolicy
 
     return GammaPolicy(start=gamma)
