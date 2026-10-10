@@ -190,7 +190,13 @@ def test_dsv41_builder_builds_the_engine_for_its_loaded_checkpoint(monkeypatch):
     )
     monkeypatch.setattr(builder_module, "speculation_enabled", lambda: False)
     warmed: list[object] = []
-    monkeypatch.setattr(builder_module, "load_warmup", warmed.append)
+    beats: list[object] = []
+
+    def fake_load_warmup(loaded_: object, heartbeat: object = None) -> None:
+        warmed.append(loaded_)
+        beats.append(heartbeat)
+
+    monkeypatch.setattr(builder_module, "load_warmup", fake_load_warmup)
     monkeypatch.setattr(builder_module, "_load_vision", lambda _loaded: None)
 
     builder = Dsv41Builder(
@@ -203,6 +209,8 @@ def test_dsv41_builder_builds_the_engine_for_its_loaded_checkpoint(monkeypatch):
     assert builder.loaded_dsv41 is loaded
     # the compile-storm warmup runs at load, before any request (p114/p115)
     assert warmed == [loaded]
+    # ...with a liveness beat wired in (ROUND-Q1B: the silent warmup was killed)
+    assert len(beats) == 1 and callable(beats[0])
 
     engine = builder.build()
     assert isinstance(engine, Dsv41Engine)

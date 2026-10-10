@@ -47,6 +47,20 @@
 # block size; 64 measured best. To disable: set EXO_DSV4_QUERY_TILED_SDPA=0.
 : "${EXO_DSV4_QUERY_TILED_SDPA:=1}"
 : "${EXO_DSV4_QUERY_TILED_B:=64}"
+# ── ROUND-Q1B-FIX: eval-branch dense default ──────────────────────────────
+# DSv4.1 dense re-quant (native affine q6g64 on the dense slice) with the
+# SHARED-EXPERT linears at q8g64. Pure q6 g64 (affine6) regressed the t2
+# tool-format battery (the model leaked the tool call as XML inside
+# reasoning_content; ROUND-Q1B-STALL §9). shared-experts@q8g64 restores the
+# full R8a battery to CLEAN at ~zero perf cost vs pure q6 (ROUND-Q1B-FIX).
+# This is the EVAL-BRANCH deploy default (deploy/q1-dense-qn), NOT a
+# production ship -- the owner decides the ship. Override by exporting
+# DSV41_DENSE / DSV41_DENSE_POLICY; DSV41_DENSE=exl3 (production) leaves the
+# policy unset. The policy is read at mlx-lm import (exl3_build.py).
+: "${DSV41_DENSE:=affine6}"
+if [ "${DSV41_DENSE}" != "exl3" ]; then
+  : "${DSV41_DENSE_POLICY:=layers.*.ffn.shared_experts.*=q8g64}"
+fi
 # 2026-06-04: libp2p -> zenoh migration (exo #2132) renamed this env var.
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
@@ -2743,6 +2757,20 @@ for NODE in "${NODES[@]}"; do
   # (read at import; default 1). Forwarded for the prefill-bubble A/B.
   # Audited: no stale value.
   [ -n "${DSV41_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV DSV41_ASYNC_EVAL=$DSV41_ASYNC_EVAL"
+  # DSV41_DENSE: DSv4.1 dense re-quant format toggle exl3 | affine6 | affine5 |
+  # affine8 (mlx_lm .../exl3_build.py, read at import); unset = exl3 default.
+  # affineN re-encodes the dense groups (attn wq_b/wo_b, shared experts) as MLX
+  # affine and TP-shards them exactly like exl3. DSV41_DENSE_TP=0 forces the
+  # affine modes back to the replicated (unsharded) path so the A/B can measure
+  # sharded vs replicated vs exl3.
+  [ -n "${DSV41_DENSE:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE=$DSV41_DENSE"
+  [ -n "${DSV41_DENSE_TP:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_TP=$DSV41_DENSE_TP"
+  # DSV41_DENSE_POLICY: per-tensor dense-quant override on top of DSV41_DENSE
+  # (mlx_lm .../exl3_build.py, read at import). Either an inline
+  # "selector=mode,..." spec or a path to a JSON file; selectors are globs on the
+  # full tensor name, last match wins, unset = the DSV41_DENSE behavior. Only the
+  # quant FORMAT changes, never the sharding (needs DSV41_DENSE_TP=1, the default).
+  [ -n "${DSV41_DENSE_POLICY:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_POLICY=$DSV41_DENSE_POLICY"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget

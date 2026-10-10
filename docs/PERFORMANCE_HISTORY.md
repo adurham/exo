@@ -11157,3 +11157,566 @@ PLAN (Fable, hardened):
 - Sizing (n=2048, C=16384, 4 consumers): waste 84-98% of consumer coarse FLOPs; **% of wall pessimistic->optimistic: 100K 3.9-13.7%, 350K 12.2-25.2%, 750K 14.8-38.6%** (pessimistic = low span share + extra 50% haircut on the consumer-coarse fraction). Clears the 2% gate at every offset; deep-weighted 14.8%.
 - **Correctness audit: provably EXACT.** Block-constant candidate mask; non-candidate block -> -inf either way; candidate block max = over exactly its candidate+visible columns with the identical `_score_shared_columns` expression; top_blocks picks the same 528 blocks; exact_rescore returns identical (top_v, top_i). One required condition: `HIER_BLOCK == candidate_block_size` (holds today; asserted on the source layer, NOT on consumers — **implementation must add a consumer-side assert**).
 - Impl sketch: seed the coarse pass from candidate block ids via `_gather_rows` + `_score_gathered_columns`; scatter candidate block maxima, rest -inf. ~50-100 LOC behind the existing HIER path, low risk, pure work reduction.
+
+## 2026-10-07 — consumer coarse-pass restriction IMPLEMENTED (bit-exact, RED-proven) -> deploy/next13, arm in flight
+
+Branch `perf/dsv41-consumer-skip` @ `5a986da`, merged to mlx-lm main `6cc9c1e`; exo main
+`55298d66b`; deploy/next13 `f0840af1c` (228 tests + alignment green).
+
+Implementation (mlx-lm, child-verified + re-verified by me):
+- `indexer_hierarchical.py`: new `_block_any` / `coarse_gather_strip` /
+  `coarse_block_scores_candidates` — computes which blocks hold a candidate per row,
+  scores only those blocks' columns via the existing `_gather_rows` +
+  `_score_gathered_columns`, scatters per-block maxima (non-candidate blocks stay -inf).
+  `hierarchical_topk_prod` gains `consumer_skip=True`; `exact_rescore_streaming` unchanged.
+- `indexer.py`: `DSV41_INDEXER_CONSUMER_SKIP` default ON (inside the existing HIER gate);
+  **consumer-side assert** `candidate_block_size == HIER_BLOCK` (raises on mismatch —
+  the audit's required condition); passes the switch through.
+- `tests/test_dsv41_consumer_skip.py` (11 tests): the mandated probe, zero-candidate rows,
+  partial-window blocks, partial tail block, unaligned mask, b=2, production shape,
+  the real `Indexer.__call__` on-vs-off, and the mismatch assert. **RED**: sabotaging the
+  mask-ignore made 9 fail (maxima differed in 1,024-92,672 cells); **GREEN**: 11/11.
+  Scoped suites: 49 passed. ruff clean.
+- Local function-level timing (laptop, whole hierarchical_topk_prod): 0.99x @32K,
+  **2.3x @131K, 3.7x @262K**, bit-exact at all three.
+- Two safety refinements beyond the brief: candidate ids computed in row chunks (a
+  one-go sort would build a ~0.75 GiB temp at deep offsets); gather strip sized to keep
+  peak memory ~equal to the old pass (4096 coarse cols -> 1360 gathered cols at h=32,d=128).
+- NOT verified (child's own list, correct): no live cluster measurement; nothing above
+  262K locally; peak memory on paper only; one extra blocking `.item()` per consumer
+  layer per chunk (unmeasured on cluster); break-even at nb <= 32K.
+
+## 2026-10-07 — CONSUMER-SKIP ARM: +30.1% r500 delta (186.2 vs 143.1 rows/s), +8.6% r160, +2.6% fresh — the win scales with depth exactly as sized (and then some)
+
+next13 (consumer skip ON, everything else = next12) vs the next12 comparators, IDENTICAL
+shapes (r500 delta refed 340,248 rows vs next12's 340,237; `turn reuse: prompt=499992
+prefill=340248 reuse=159744` = true delta):
+
+| feed | next13 | next12 | delta |
+|---|---|---|---|
+| fresh 100K | 281.0 tok/s (356.0 s) | 274.0 | **+2.6%** |
+| r160 cold | 268.9 tok/s (595.1 s) | 247.7 | **+8.6%** |
+| r500 delta (160K->500K) | **186.2 rows/s** (1,827.3 s) | 143.1 (2,378.0 s) | **+30.1%** |
+
+Scaling vs the sizing report's predicted wall shares (pessimistic->optimistic):
+100K 3.9-13.7% predicted vs 2.6% measured (at/below the pessimistic bound — matches: the
+fresh arc's consumer-index share is smallest); ~350K 12.2-25.2% predicted vs **+30.1%
+measured** — ABOVE the optimistic bound. The old path materialized a full-width masked
+score strip ([b,n,4096] fp32 = 33.5 MB/strip x 4 consumers) plus the where/max passes;
+the restricted path avoids the alloc+write, so the saving exceeds the raw FLOP ratio.
+
+Cumulative shipped-state numbers on next13: fresh **281.0** (session start 222 = +26.6%),
+r160 268.9, r500 delta 186.2 rows/s. Quality battery fired on next13 (CONSUMERSKIP label)
+as the selection-stage ship gate.
+
+## 2026-10-07 — CONSUMERSKIP battery CLEAN => consumer-skip is fully shipped (the deepest win of the campaign)
+
+Battery on next13 (consumer-skip ON), CONSUMERSKIP @350K: **CLEAN** — needles 6/6,
+tools 10/10, prose 0 DIRTY / 0 REVIEW, park recall True. Build prefill: 1,617.6 s vs the
+prior build's 1,892.8 s = **+17.0% at 350K** (consistent with the depth-scaling win).
+
+Full evidence chain for the consumer-skip lever:
+- Sizing (read-only report): 3.9/12.2/14.8% of wall pessimistic at 100K/350K/750K; exactness
+  provably held (block-constant mask -> identical block maxima -> identical top-k).
+- Implementation: bit-exact, RED-proven (11-test suite), consumer-side block-size assert.
+- Wire A/B (identical shapes): fresh 281.0 (+2.6%), r160 268.9 (+8.6%), r500 delta
+  186.2 rows/s (+30.1%).
+- Quality gate: CLEAN (above).
+- 350K build: +17.0%.
+
+Cumulative session arc: **222 -> 281.0 tok/s fresh = +26.6%**; r500 delta 143.1 -> 186.2
+rows/s = +30.1% vs the prior build. Deep soak (r160->r1m ladder on next13) firing as the
+final validation.
+
+## 2026-10-07 — next13 deep soak (in progress): r160 +6.3%, r500 delta +29.0% (soak-confirmed)
+
+Soak13 on the shipped next13 (consumer-skip ON), one salted conversation, ladder deltas:
+
+| rung | wall | rows/tokens | rate | vs next12 |
+|---|---|---|---|---|
+| r160 cold | 608 s | 160,006 tok | 263.2 tok/s | +6.3% |
+| r500 delta | 1,843 s | 340,248 refed (reuse=159,744) | **184.6 rows/s** | **+29.0%** |
+
+`turn reuse: prompt=499992 prefill=340248 reuse=159744` = true delta. The soak numbers
+confirm the arm (186.2) within noise on this ladder. r750/r1m in flight.
+
+## 2026-10-07 — soak13 r750: 146.4 rows/s (+57.3% vs next12) — the consumer-skip win GROWS with depth
+
+r750 delta on next13: 1,710 s for 250,282 refed rows (`turn reuse: prompt=749994
+prefill=250282 reuse=499712`) = **146.4 rows/s** vs next12's 93.1 = **+57.3%**.
+
+Depth-scaling of the consumer-skip win across the ladder (all same-shape, true deltas):
+
+| rung | next12 rows/s | next13 rows/s | delta |
+|---|---|---|---|
+| r160 (cold tok/s) | 247.7 | 263.2 | +6.3% |
+| r500 delta | 143.1 | 184.6 | +29.0% |
+| r750 delta | 93.1 | 146.4 | **+57.3%** |
+
+Exact match to the mechanism: the consumer layers' coarse pass is O(offset), so the
+saved work grows linearly with depth while the rest of the chunk shrinks. This is the
+strongest depth-scaling lever the campaign has measured (vs M2's +15/+25/+46%).
+
+r1m in flight.
+
+## 2026-10-07 — SOAK13 COMPLETE: consumer-skip depth ladder +6.3% / +29.0% / +57.3% / +65.5% — the campaign's strongest depth-scaling lever, fully shipped
+
+Full ladder on the shipped next13 (`f0840af1c` / mlx-lm `6cc9c1e`), one salted conversation,
+every rung a TRUE delta (verified via `turn reuse:` lines):
+
+| rung | refed | wall | rate | next12 | delta |
+|---|---|---|---|---|---|
+| r160 cold | 160,006 tok | 608 s | 263.2 tok/s | 247.7 | **+6.3%** |
+| r500 delta | 340,248 rows | 1,843 s | 184.6 rows/s | 143.1 | **+29.0%** |
+| r750 delta | 250,282 rows | 1,710 s | 146.4 rows/s | 93.1 | **+57.3%** |
+| r1m delta | 290,406 rows | 2,400 s | **121.0 rows/s** | 73.1 | **+65.5%** |
+
+1,039,974 tokens served end-to-end (up from 1,039,963 on the prior build); r1m `turn reuse:
+prompt=1039974 prefill=290406 reuse=749568`. Memory stayed 113 GB both nodes through the
+deep delta (well under the wired limit). Zero kills, zero refusals.
+
+The win GROWS with depth monotonically (6.3 -> 29.0 -> 57.3 -> 65.5%) — exact match to the
+mechanism: the consumer layers' coarse pass is O(offset), so the eliminated work grows
+linearly with depth while every other per-chunk term shrinks. This is the strongest
+depth-scaling lever measured in the campaign (vs M2's +15/+25/+46%) and the first shipped
+this session on top of it.
+
+CUMULATIVE SESSION ARC: fresh 222 -> 281.0 tok/s (+26.6%); r500 delta 103.6 (pre-framefix
+era, different shape) era aside, the same-shape comparators run +29% to +65% faster at
+depth. All battery-gated (CONSUMERSKIP CLEAN: needles 6/6, tools 10/10, prose 0 DIRTY /
+0 REVIEW) and soak-validated to 1M.
+
+## 2026-10-07 — chunk-4096 arm on the FINAL stack (post-consumer-skip): a wash => 2048 stays
+
+next13 with EXO_PREFILL_STEP_SIZE=4096 vs the 2048 shipped config (identical shapes,
+true deltas):
+
+| feed | 4096 | 2048 | delta |
+|---|---|---|---|
+| fresh 100K | 283.0 tok/s | 281.0 | +0.7% |
+| r160 cold | 266.4 tok/s | 268.9 | -0.9% |
+| r500 delta | 186.3 rows/s | 184.6 | +0.9% |
+
+All inside the ±3% single-arm resolution band; no resolvable gain. The next8 deep-rung
+regression evidence (-0.9% @750K, -0.3% @1M, measured pre-consumer-skip) still stands:
+the bigger-chunk transient mechanics at depth are unaffected by the indexer change.
+VERDICT: keep 2048 as the default; 4096 remains a documented shallow-workload override.
+This closes Fable's item 3 for the final stack — no relaunch needed.
+
+## 2026-10-07 — Exact-pass "sibling" question CLOSED by code read: no sibling waste exists (the cascade is structural)
+
+Fable's probe-gated question — does the exact-rescore side have equivalent waste to the
+consumer coarse-pass win? — is settled by the code without a probe:
+
+1. `hierarchical_topk_prod` calls `blocks = top_blocks(bm, kk + overfetch)` and feeds THAT
+   to `exact_rescore_streaming` (indexer_hierarchical.py ~:614-621). The exact pass consumes
+   the coarse pass's OWN top-(k+overfetch) output — it never enumerates candidates
+   independently. For a consumer layer `bm` was already restricted to candidate blocks, so
+   the exact pass inherited the restriction FOR FREE; its share of the win sits inside the
+   measured +30.1% r500 delta. Fable's condition 1 => sibling = empty set.
+2. Independently, the exact pass's work is bounded by `kb = k+overfetch = 528` blocks
+   (strips = ceil(528 / (estrip/block)) ~= 44-53 per layer, depth-INDEPENDENT) — there is no
+   O(offset) term on the exact side for ANY layer, consumer or not.
+3. The remaining O(offset) indexer term is the NON-consumer layers' full-width coarse sweep
+   (L2/8/14/20). Those layers either predate candidate publication (2/8/14: no candidates
+   exist to restrict to) or define them (L20: candidate source) — that sweep is semantic
+   hot-set computation, not waste. Restricting it would change outputs.
+
+Conclusion: item (b) closed with data — no implementation, no probe. The consumer-skip win
+is a strict superset of everything available on the exact side.
+
+## 2026-10-07 — LOOP-2 NIGHT MEMO: consumer-skip shipped (+65.5% at depth); MoE kernel priced; exact-pass sibling closed
+
+### The night's arc (all battery-gated, soak-validated, recorded)
+
+**Shipped**: deploy/next13 (`f0840af1c` / mlx-lm `6cc9c1e`; exo main `c673336c4`) — adds the
+consumer coarse-pass restriction to the prior shipped stack (framefix, M2, re-bill, ladder,
+fences, spans, bf16 score row, eval-merge, geometry log, MOE_ALLSUM_BF16, PV32=0, chunk 2048).
+
+**Numbers (fresh 100K / same-shape deep deltas):**
+- fresh: 222 (session start) -> 263.3 -> 265.8 -> 274.0 -> **281.0** = **+26.6%**
+- r500 delta: 143.1 -> **184.6 rows/s** (+29.0%)
+- r750 delta: 93.1 -> **146.4 rows/s** (+57.3%)
+- r1m delta: 73.1 -> **121.0 rows/s** (+65.5%); 1,039,974 tokens served, 113 GB peaks, zero kills
+- 350K build: 1,892.8 -> 1,617.6 s (+17.0%)
+
+**The mechanism**: consumer index layers (24/28/32/36) were scoring ALL nb coarse columns
+then masking 84-98% away. Now they score only candidate blocks. Provably bit-exact
+(block-constant mask -> identical block maxima -> identical top-k). The win grows with
+depth O(offset): +6.3% @160K -> +29% @500K -> +65.5% @1M.
+
+### Bench verdicts (Fable's three-way rule)
+
+- **MoE expert GEMM: INCONCLUSIVE** — 51-60% of a calibrated 15.14 TF ceiling (uniform 8.88
+  TF / skewed 7.55 TF at block level). NOT roofline, NOT cheaply harvestable: dequant->fp16
+  is 2x slower (killed); already single-launch segmented; the July "82 TF" artifact retired
+  (5.4x above silicon). The calibration table is the deliverable; the harvest would be a
+  Metal-kernel project (shape-aware partitioning), parked.
+- **Exact-pass sibling: CLOSED (no waste exists)** — the exact pass consumes the coarse
+  pass's own top-(k+overfetch) output; consumers inherited the restriction for free inside
+  the +30.1%, and it is bounded by 528 blocks (O(1) in offset) for every layer. The
+  remaining O(offset) term is the non-consumer layers' semantic hot-set sweep — restricting
+  it would change outputs.
+- **chunk-4096 on the final stack: WASH** (fresh +0.7%, r160 -0.9%, r500 +0.9%, all within
+  ±3%). 2048 stays.
+
+### Discipline notes for the next session
+- A/B arms MUST salt every feed (park/restore survives relaunches — a reused filler faked
+  1914 tok/s once). Fresh deltas <3% need >=2-3 feed means.
+- The `turn reuse:` line is the only proof of a true delta; every rung above was verified.
+- Payload-to-file for any long prompt (E2BIG killed a curl at 500K tokens).
+- Knob forwarding must be audited per-knob before any A/B (two knobs were silently absent).
+- The wall decomposition is now post-next13: the MoE block is a third of the chunk with
+  40-50% unharvested kernel headroom, indexer's consumer waste eliminated, collectives
+  halved (bf16). The sub-400 gap is now: MoE kernel efficiency (parked, Metal-project),
+  sdpa 21% (micro-levers exhausted), and the diffuse residue.
+
+## 2026-10-07 — Loop-3 consult (Fable): the MoE "kernel headroom" premise is UNVERIFIED — audit gates the project
+
+Fable's review of the campaign state found two soft spots in the MoE-kernel pricing and
+prescribed a gate-first evening before committing to the Metal project:
+
+1. **15.14 TF is a LARGE-shape ceiling; segments have their own roofline.** For a small-M
+   GEMM, ceiling ~= min(dense, BW * FLOPs/byte) where FLOPs/byte = 16M/bits for b-bit
+   weights. bf16 weights at ~550 GB/s, M=16 => ~8.8 TF — SUSPICIOUSLY equal to the measured
+   uniform 8.88 TF. If the uniform test ran mean M~16 on bf16 weights, the "gap" is the
+   shape roofline, not kernel loss, and the Metal project harvests ~nothing. (If experts are
+   4-bit — likely, a dequant step exists — the crossover M drops to ~7 and most segments are
+   compute-bound; then the gap is likely real and in-loop dequant ALU is the prime suspect,
+   NOT partitioning.) ONE division per segment settles which world we're in.
+2. **The +8-12% e2e estimate assumes GEMM is 60-80% of the MoE block — never measured.**
+   The GEMM-vs-drain split inside the block is unmeasured; spans are shipped, this is minutes.
+3. **chunk-4096 being a wash is mild evidence AGAINST bandwidth-bound** (doubling
+   tokens/chunk halves weight re-reads; if the GEMM were BW-bound, fresh should have beaten
+   noise). Leans compute/launch-bound, i.e. the gap IS harvestable. The two diagnostics point
+   opposite directions — hence the audit.
+
+PRESCRIBED FIRST STEP (offline autopsy, no serving, no deploy, one evening):
+- One log line in the segmented GEMM: per-segment M/N/K + cycles for a production chunk.
+- Per-segment roofline + achieved effective bandwidth -> the TRUE ceiling for the mix.
+  Compare 8.88/7.55 against it.
+- Re-run the killed dequant arm with conversion cost EXCLUDED from timing (convert once
+  offline, GEMM from pre-converted weights). If the pre-converted kernel hits ~ceiling,
+  in-loop dequant is the bottleneck and the fix is a persistent hot-expert weight cache
+  (one conversion amortized over ~50 chunks, bounded by a cumulative-M threshold) — a
+  different animal from the per-call conversion already killed — not partitioning.
+- Uniform vs skewed (8.88 -> 7.55, -15%) is the one clearly kernel-attributable signal
+  (load imbalance / tail waves). An hour of synthetic balanced-assignment testing isolates
+  it; if recoverable, an M-major/work-stealing partition patch is the block's shippable,
+  battery-gated outcome (~1.5-2% e2e) while the big decision stays gated.
+
+GATE (written down in advance): aggregate >=85% of mix-roofline -> KILL the Metal project,
+pivot; segments >=15% below shape-roofline (esp. top-decile-time) -> GO, and the histogram
+ranks the lever.
+
+ALSO FLAGGED FOR RE-EXAMINATION:
+- The wall model does not close (~60% accounted; the indexer has no fresh number at all).
+  Close it to ~100% with the shipped spans; if indexer >=15%, note its O(offset) semantic
+  sweep grows per rung — that's the deep-side wall where the ladder metrics live.
+- Unpriced structural angle: expert placement across the two Studios (TP-split vs
+  expert-locality sharding). If TP-split, placement changes both the M-mix and the drain —
+  possibly worth more than kernel polish. Worth a code-read.
+- Unpriced: the drain itself — dual-microbatch comm-hiding (overlap the drain with the other
+  micro-batch's compute) is a standard TP lever absent from the priced list.
+- Reprice the ceiling calibration: what dtype/shape/dequant did 15.14 include? (The 82 TF
+  lesson: verify the calibration's own premises.)
+
+## 2026-10-08 — Phase-3B ship-validation COMPLETE + next17 SHIPPED (−27 ms/round both arms); lever-2 split says the indexer hierarchy is −29 ms (52% of the win)
+
+Validated `deploy/next17-levers @ 576e9d279` (exo; mlx-lm `3bf8316`) vs production `deploy/next13 @ f4bb14746`.
+The change: `sparse_attention.py`'s C1 column-boundary derivation did two host round-trips (`.item()`) per
+compressing layer per forward at decode (m=1) and in the 4-row verify, for nothing — `attention.py`'s twin
+gate defaults OFF while `sparse_attention.py`'s own gate defaults ON, so the default call site arrived with
+`colsplit=None` and `_column_boundary(-1)` re-derived the boundary every time. Fix: gate the derivation on
+`m > _FENCE_MIN_ROWS` (16); small m takes the value-identical `_gather_split` fallback. +315 test lines, 17 tests green.
+
+Same-session, same-harness, symmetric arms (benign = 20K g3 8 reps; agentic = 91K real-session replay 6 reps; no PROF on either arm):
+
+| arm (agentic 91K g3, 800 tok) | benign ms/round (t/s) | agentic ms/round (t/s) | mean_accepted (agentic) |
+|---|---|---|---|
+| production f4bb14746 | 145.75 (25.5) | 157.10 (19.5) | 2.050 |
+| next17 defaults (lever-1 code) | 118.56 (31.5) | 130.07 (23.7) | 2.077 |
+| next17 + `DSV41_INDEXER_HIER=0` | — | **101.06 (30.2)** | 2.027 |
+
+Split (same-build, additive): total 56.04 ms/round = lever-1 code **27.03** + lever-2 HIER **29.01**; sum == total, no
+interaction. The HIER=0 point reproduces M3's cross-build both-off value (101.3) to 0.24 ms. **Lever-2 is the larger
+lever — 52% of the win, 5–8× M3's assumed "small, context-flat" value; that assumption is corrected.**
+`mean_accepted` flat across arms → latency effect, not an acceptance artefact.
+
+Battery R8a on next17: CLEAN (needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW; park PASS; advisory
+`same_script_glue`=4 identical to frozen g3).
+
+**Shipped:** deploy/next13 fast-forwarded f4bb14746 → 576e9d279, pushed, deployed 2026-10-08 16:02–16:07 CDT
+(`/tmp/p3b/ship_next17.sh`, idle-guarded; pre-ship expected-state check both nodes). Launcher: "Nodes
+synchronized on commit 576e9d279" → READY (2/2) 16:07:46 exit=0; post-boot canary healthy both nodes
+(14.85/14.86). Guard present in the INSTALLED venv module on BOTH nodes; gates unset (defaults). Post-ship
+parity smoke **PASS**: benign 3×20K g3 = **118.60 ms/round median, 31.4 t/s** (vs 118.56 pre-ship — reproduced
+to 0.04 ms on the live boot; mean_accepted 2.71; log `/tmp/p3b/ship_smoke.json`).
+
+**Lever-2 code fix — specced, not yet implemented** (measured share 29.0 ms/round ≫ 3 ms bar): `indexer.py:531`
+`if _HIER:` → `if _HIER and n > _FENCE_MIN_ROWS:`, shared threshold via `deepseek_v41/_gates.py`; env overrides
+keep working. Value-identity proof REQUIRED before shipping (bf16 coarse maxima + top-(k+16-overfetch) exact pass
+vs the full-width fallback — the overfetch margin is a heuristic, not a proof): elementwise `[b,n,k]` int32 index
+diff over synthetic grids incl. boundary n∈{16,17}, near-tie bf16 mis-ranks, fully-masked blocks, k±1; PLUS
+real-tensor captures from a 91K replay (tie-rich traffic); PLUS per-forward producer/consumer path-agreement
+assertion (source layers 2/8/14/20 vs consumers 24–36 — same n, one shared predicate); PLUS greedy token-identity
+diff vs next17 on real prompts; ties count as DIVERGENCE; abort on any divergence.
+
+Round close: relaunch budget 3/3 used (#1 next17 defaults / #2 HIER=0 split / #3 restore); RESTORED line:
+`f4bb14746 READY 2/2 canary 14.85/14.73 parity decode=25.70 (benign 144.82 ms/round) prefill=282.4 rows/s`;
+env parity 103/103, gates absent. Docs: `PHASE3B-SHIP-VALIDATION.md` @ deploy/phase20-campaign `0b10977ab`.
+Process note: the first PM died mid-round right after the deploy; doc-commit-after-each-step made the round
+cleanly resumable by a fresh PM — keep this pattern.
+
+Known-good tag: `known-good-decode-next17-20261008-160746` (exo 576e9d279 + mlx-lm 3bf8316, both forks).
+Baseline doc: `docs/known-good-decode-baseline-20261008.md`.
+
+NEXT (authorized): P1 lever-2 impl + identity proof + A/B + ship (target ≈101 ms ≈30 t/s agentic) → P2
+MoE_ALLSUM_BF16 decode A/B (≥3 ms bar) → P3 loop-2 consumer-skip (prefill, ≥8% wall) → P5 roofline close-out
+(reconcile the round-budget residual — verify ≈92.4 ms is 91.5% of 101.06, not 98.5% of a 93.8 ms round; then
+bytes-roofline one verify round vs measured bandwidth → near-floor verdict or headroom). Adaptive gamma parked
+(feature-blocked; γ5 benign-only).
+
+
+## 2026-10-08 — Phase-4 continuation: lever-2 code guard ABORTS (not identity-preserving); MoE_ALLSUM_BF16 decode A/B PASSES (3.32 ms); prefill consumer-skip already shipped; roofline = 6.9× headroom at MEASURED 497 GB/s
+
+Phase-4 campaign (PM, `deploy/phase20-campaign`; entry: `PHASE4-CAMPAIGN.md`, `PHASE4-P5-ROOFLINE.md`).
+Entry state: production `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset, canary healthy.
+
+**P1 — lever-2 code guard (`indexer.py` `if _HIER and n > _FENCE_MIN_ROWS`): ABORTED, not shipped.**
+Spec (`PHASE3B-SHIP-VALIDATION.md` §7) predicted ~29 ms/round. Implemented with a shared
+`deepseek_v41/_gates.py` threshold (retires the twin-default foot-gun). The required value-identity
+proof **DIVERGED**: `tests/test_dsv41_indexer_smallm_hier.py` = **2045 cells, 939 divergent**, all at
+`n<=16` (decode m=1 / verify m=4); `n=17` identically 0-diff; path-boundary + RED/GREEN controls PASS.
+Root cause (PM-reproduced): the hierarchical path exact-rescores in **fp32**, the fallback stores the
+row in `_ROW_DTYPE=bf16` — at the k-th boundary bf16 creates ties fp32 lacks, broken differently:
+`fallback(fp32 row) vs hier = 0 diffs / 165,924 slots`; `fallback(bf16 row) vs hier = 264 diffs`.
+Even with `DSV41_INDEXER_ROW_BF16=0` the engineered near-tie cells still diverge → `overfetch=16` is a
+heuristic, not a proof. So the guard would change decode/verify output vs shipped next17 → **not
+shippable** (ties = divergence). Lever-2's 29 ms is real but only reachable via the `DSV41_INDEXER_HIER=0`
+env flip — a genuine speed-vs-output tradeoff, not a code win. Future path (documented, not attempted):
+make the small-n fallback rank on an fp32 row so both branches share one precision, bound the overfetch
+residual / emit a runtime certificate, then re-run the suite to green incl. the tie cells.
+Branch `deploy/next18-lever2 @ 938b811` (proof `d4531e2` + capture harness `bench/next18_capture.py`).
+**Budget: 0 relaunches** (proof was offline).
+
+**P2 — `DSV41_MOE_ALLSUM_BF16` decode A/B: PASS on agentic; no new build needed.**
+`=0` (fp32 exact) vs default `=1` (bf16 halved tail collective), cross-boot (env is launch-time), same
+harness, same workload shapes:
+
+| arm | bf16 (=1, shipped) | fp32 (=0, this round) | Δ (bf16 wins) |
+|---|---|---|---|
+| benign 20K g3 | 118.53 ms / 32.36 t/s | 121.21 ms / 31.06 t/s | **2.68 ms** |
+| agentic 91K g3 | **129.90 ms / 23.62 t/s** | **133.22 ms / 23.63 t/s** | **3.32 ms** (≥3 ms bar; ranges disjoint) |
+| mean_accepted (agentic) | 2.0611 | 2.1575 | −0.096 (still >2.0) |
+
+The ON boot reproduced the §P3B next17-defaults point to 0.03–0.17 ms. **Verdict: the already-shipped
+bf16 default clears the Phase-4 ≥3 ms bar** (bf16 is marginally *lower* acceptance than fp32 — the
+known, already-accepted tradeoff). No `next19`; production stays as-is. **Budget: 1 relaunch.**
+
+**P3 — loop-2 consumer-index-skip PREFILL: ALREADY SHIPPED.** The audit the brief references
+(`bench/dsv41_loop2/consumer_index_sizing.md`, "up to ~15% of wall, provably exact") is exactly
+`coarse_block_scores_candidates` + `DSV41_INDEXER_CONSUMER_SKIP`, implemented + shipped in **`5a986da`**
+(loop-2, 2026-10-07) — `git merge-base --is-ancestor 5a986da 3bf8316` = TRUE; installed prod module has
+`_HIER_CONSUMER_SKIP` default 1 wired at `indexer.py:574`. It is the consumer coarse pass at prefill
+m=2048, already default. Recorded prefill wins (soak13 r500 +29.0%, r750 +57.3%, r1m +65.5%; 350K build
++17.0%) all exceed the 8% bar. **No new work, no budget.**
+
+**P5 — roofline close-out (bench-only).**
+(A) Round accounting: `verify_block 92.4 / round_total 93.8 = 98.5%` (server-internal) vs
+`92.4 / 101.06 = 91.4%` (client). The 8.66 ms split MECE = **1.40 ms in-round server residual**
+(measured: draft 0.55 + tail 0.09 + 0.76 host/serialisation) + **7.26 ms client↔server per-round
+boundary** (bounded, not measured — no PROF-capable build deployed). New finding: the raw OFF PROF is
+**bimodal** (benign verify 92.25 / agentic 97.81) — the brief's "8.7 ms" is dominated by a
+benign-vs-agentic mismatch, not in-round overhead; the 98.5% ratio is arm-robust (0.9845/0.9853).
+(B) Bytes-roofline, one verify round at 91K m=4 (per rank): routed-expert 4.46 GB + dense/shared/attn
+EXL3 2.04 GB + KV 0.15 GB + collectives 0.003 GB = **6.65 GB**; FLOPs floor 3.8 ms << bytes floor →
+memory-bound. **Read bandwidth MEASURED at 497 GB/s** (pure-read/GEMV canary, both nodes; the old 450
+was a *triad* number, read+write ≈304 here) → floor **13.4 ms**; measured verify **92.4 ms = 6.9× the
+floor (14.5% of achieved BW).** **VERDICT: NOT near-floor — ~79 ms headroom.** Largest single slice =
+**dense/shared EXL3 (≈34 ms, 8.5× its floor, ~53-55 GB/s = decode-ALU/issue-bound at the small-M
+plateau) → the lever**; routed experts second (~1.5-3× floor, closer to honest BW). Localizing
+differential (design, not run): force top-k routing down via debug hook — if halving activated experts
+barely moves ms/round, the gap is dense/other. A read-bw canary (`read_bw_canary.py`) is retained.
+
+**Adaptive gamma — PARKED.** Feature-blocked: `GammaPolicy.update()` is never called; the candidate γ
+set is hardcoded {1,2,3,4}, so γ5 (benign-only) can't be selected. Zero relaunches.
+
+**Session budget:** Phase-4 spent **2 relaunches** (P2 OFF arm + final restore), well under the cap of
+3 promotions + 1 reserve. P1/P3 needed none (offline proof / already-shipped).
+
+**End state:** production restored to `deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, **gates unset**,
+canary 14.86/14.85, 2 runners Ready; parity smoke below.
+
+## 2026-10-08 — Phase-5 continuation: P0 unit-reconcile (1 pass/round, NOT 4; KV 2.23%); lever-2 L2-full built + **SHIP CANDIDATE** (owner ruling: quality-battery gate SUPERSEDES the strict token-identity gate; leg-A token diff at 63/300 documented as an accepted output change); dense EXL3 measured 69.3/53.4 GB/s -> route Reading-2 (GEMV tuning), GO; ship round = battery-governed
+
+Phase-5 campaign (PM, `deploy/phase20-campaign`; entry `PHASE5-CAMPAIGN.md` + `PHASE5-P0-UNITS.md` +
+`PHASE5-P1-LEVER2.md` + `PHASE5-P1-AMENDMENT.md` + `PHASE5-P2-DENSE.md` + `PHASE5-R1-KIT.md` +
+`PHASE5-REQ3-DEVIATION.md` + `PHASE5-R1-RESULTS.md` + `PHASE5-R1B-RESULTS.md`). Entry state: production
+`deploy/next13 @ 576e9d279` + mlx-lm `3bf8316`, gates unset.
+
+**P0 — unit reconciliation (CORRECTS the P5 roofline).** The brief's per-round dense model was wrong.
+(1) **1 indexer/score pass per round, not 4**: the MTP draft is a separate 3-stage `DSparkHead`
+(`mtp.py:18-19,295,313`) with NO `Indexer` object; the body runs ONE m=4 verify forward
+(`attention.py:119,197`). So `2.04 GB`/pass = per-round (P5's 8.5x stands; the "~240 GB/s / 4-pass"
+reading is refuted — P2's real-weight census agrees: 2.734 GB/rank/pass at the real 5.0 bpw).
+(2) **KV share = 2.23 %**, not 0.2 % (decimal-place error at `PHASE4-P5-ROOFLINE.md:190`).
+(3) 27.0+29.0=56.0 ms; 29.0/56.0=51.8 %≈52 % — self-consistent.
+
+**P1 — lever-2 as CODE (L2-full): built, PROVEN, but NO-SHIP.** Design: at n≤16 the indexer fallback
+stores its score row in **fp32** (matching the hierarchical exact re-score) → both rank a
+bitwise-identical row. Frozen suite 2045 cells: **1794 equal / 251 divergent** (shipped: 939); both
+ablations (`L2_FULL=0`, `SMALLN_ROW_BF16=1`) reproduce 939 exactly. Residual 251 = H=2 fixture exact-tie
+class (census matches 2^-H; **0 diffs at H∈{8,32,64}**, 258,048 slots; production **H=32**, not 64).
+Adversarial suite at production H: 45/45 identity, 0 row-bitwise mismatch, 0 ulp flips. Per-diff-slot
+attribution: 22,740 slots = 10,406 exact-zero-column + 12,288 masked padding + 46 non-zero-column 1-ulp
+(all in one cell; L2-full loses 0 vs shipped's 48 value slots there); superset TRUE. **R1b (relaunch
+#3) measured a clean perf win — agentic 91K 130.38→99.30 ms (−31.08, disjoint), benign 118.86→94.93 — but
+LEG A FAILED: greedy token-identity vs production diverges at token 63/300** (prod-vs-prod control
+deterministic; deterministic across lever runs). Root cause: production runs `HIER` at all n
+(`indexer.py:531`), which ranks by a **bf16 coarse pass + top-k+overfetch blocks**; the lever's
+fp32-full-row ranks every column exactly — they differ on real tie-dense activations → committed-token
+change at production H.
+**OWNER RULING (2026-10-08, verbatim): "as long as we pass our quality tests then I'm fine with it."**
+The quality battery (R8a) is the **governing gate for lever-2**; the strict token-identity gate is
+superseded by explicit owner decision (the change is an accepted, deterministic output change).
+Lever-2's 29 ms win (agentic 130.38→99.30 ms) is therefore a **ship candidate** pending the battery;
+the harness fix (`bench/next18_capture.py` flush off the request thread; mlx-lm `16830e1`) is included
+and inert when capture is off.
+
+**P2 — dense EXL3 on REAL weights: route Reading-2, GO.** Isolated production-shape rate on the real
+checkpoint: **m=1 GEMV 69.3 GB/s, m=4 GEMM 53.4 GB/s** (9.3x the 497 GB/s read floor; flat across
+layers). Kernel-parity audit PASS (production ≡ fused-inner variant; full-W 2.8-3.6x / striped 4.1-5.3x
+slower — the prior ~58 GB/s sweep reproduces, NOT suspect). bf16 dequant-cache measured **dead**
+(3.2-4.0x the bytes → 10-21% slower wall). Route: GEMV bandwidth/latency tuning + collectives-at-m=1;
+**go/no-go = GO** (projected ≥5 ms/round). Real trellis is **5.0 bpw**, dense slice ≈51 ms/round.
+
+**Budget:** 3/3 relaunches through R1/R1b; **new ship-round budget: ≤2 relaunches** (ship deploy +
+contingency restore). **End state (this entry):** ship round is battery-governed; outcome appended on
+completion. Next round's levers = dense GEMV tuning (GO) + hardening the capture harness so it models
+the live path (the token-63 divergence root cause is NOT fully explained: capture replay showed 64/128
+records replayable with 0 diffs on those, yet the live greedy trajectory diverges — the offline harness
+does not fully model the live path; open item).
+
+**OUTCOME (R1c ship round, 2026-10-09) — SHIPPED-IN-PLACE.** Production artifact =
+exo `deploy/next18-identity @ fb4f9290b` (mlx-lm gitlink bumped `3bf8316`→`16830e1`; pushed to
+origin/adurham/exo). Deployed with ALL lever/capture env unset; READY 2/2; canary 14.84/14.84;
+installed-module verify on BOTH nodes (lever-2 guard + `_L2_FULL` in the installed indexer.py;
+lever-1 guard in installed sparse_attention.py; runner env has zero `DSV41_*` keys). The governing
+R8a quality battery came back **CLEAN** — needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park
+`recall_teal=True`; `compare.py` vs frozen `g3` → no fails. Parity smoke on the live build: benign
+20K **94.94 ms / 39.13 t/s**, agentic 91K **99.46 ms / 31.03 t/s** (reproduces R1b). **Build left
+LIVE as production, gates unset; tag `known-good-decode-next18-20261009-001052` on BOTH forks
+(adurham/exo `fb4f9290b`, adurham/mlx-lm `16830e1`).** Ship-round budget: **1/2 spent** (ship deploy;
+contingency restore not needed). Open item unchanged: the token-63 divergence root cause is not
+fully explained (harness replay replayed only 64/128 records) — harden the capture/replay harness so
+it models the live path next round.
+
+## 2026-10-09 — DENSE/EXL3 track CLOSED: structurally bound (decode-ALU + small-M floor); falsifier fired, 0 promotions spent
+
+Four offline experiments (real weights, production kernel, layer-20 dense roster, TP=2 per-rank shapes,
+studio2; 0 relaunches, servers untouched) settle the 9.3x gap to the 497 GB/s read roof. Verdict doc:
+`MECHANISM.md` on `deploy/phase20-campaign` (commits `cf4c09313` pre-reg, `f4e6ebae2` close, `f0c59e16c`
+2nd-opinion fold-in).
+
+**THE FORK (decode-free isolation):** the decode-free native bf16 `x@W` arm is **1.19x SLOWER** than the
+fused production kernel (m=4: 1.225 vs 1.048 ms/call). Native streams 5.1x the bytes at only 1.19x wall ->
+279 GB/s in its own bytes = 59% of the read roof, and it still loses. The bulk decode-only arm (1.45 ms)
+already >= the whole fused cost. **The pre-registered "<100 GB/s -> PROCEED" trigger was a normalization
+artifact** (native 54.5 was trellis-equivalent; even a perfect 477 GB/s stream maps to 93.5 trellis-equiv
+GB/s, so that branch fires for a perfect stream — units flaw, PROCEED carried no signal; 2nd-opinion
+correction). Real evidence = native arm is slower than fused.
+
+**Exp 2 (m-sweep/occupancy):** m=4 is NOT specifically degraded — flat in the m=2-8 band (54-67 GB/s);
+the only special point is m=1 (79). No m=4 occupancy anomaly exists. **Exp 3 (split-K n_splits override
+on the existing kernel):** monotonically WORSE with more splits (m4: +0.03/+0.08/+0.21/+0.53 ms at
+4/8/16/32), cosine 1.0 — the launch parallel tune is already optimal; decisive refutation of the
+latency/occupancy hypothesis. **Exp 4 (decode-mechanism env arms):** no arm beats stock beyond noise
+(SWAR=0 slower; LUT/FUSE <= +1.7% = within run noise; SIMD=0 1.48x slower = harness-sensitivity sanity).
+
+**Gate G1 (offline p95 m=4 >= 5 ms/round):** best arm ~ -1.1 ms/round, inside noise. FAILS.
+**Falsifier fired -> CLOSE.** No tune-existing mechanism remains; a real gain needs a NEW custom Metal
+kernel (fused decode+MMA / different small-M dataflow) — scope-closed (NOT-FUNDED). Honest boundary
+recorded: the P2 "collectives at m=1" angle is a separate slice (m=1 GEMV advantage 79 vs 66 GB/s) and
+was NOT measured here; and this is an isolated layer-20 microbench — the verdict is "no shippable
+change", not "round is at 100% of theoretical floor".
+
+Cluster: production `fb4f9290b` + mlx-lm `16830e1` still live on both nodes, gates unset, canary
+healthy (14.86/14.84) before+after, nothing deployed, nothing to restore. Budget: 0/3 promotions
+(+1 reserve) spent. Next levers live elsewhere: capture-harness hardening (token-63 root cause) and
+the m=1 collective/comm slice.
+
+## 2026-10-09 — Token-63 (Lead B): the L2-full lever's indexer effect is a PURE bf16 tie-break; propagation to token 63 NOT pinned (B0.4 correction + B1 boot; no output-affecting change)
+
+**B0.4 — the R1b "no offline lever effect" reading used the WRONG comparator (correction).** The R1b post-mortem compared `fp32-row vs HIER` (`L2full_vs_hier=0`) and closed with "no offline lever effect". Production does NOT run HIER at small n; its pre-ship fallback stores a **bf16** row, so the correct single-variable comparator is **bf16-row vs fp32-row**. Re-derived from the EXISTING R1b capture (`next18_91k.m4-{1,2}.npz`): 39,917 / 42,802 positional slot diffs; ranked-order difference in **64/64 replayable records (100%)**; committed column-**SET** symmetric difference only **822 / 844 of 131,072 slots (~0.63%, ≈830 cols/node)**; difference type = **pure tie-break** (max bf16 gap among swapped columns 0.0; 0 genuine re-rank). 50% of records/node were consumer layers, un-replayable offline (no `shared.candidates`) — B0.4 established presence+type, not the token-63 mechanism.
+
+**B1 — single-boot runtime-toggle capture (2 boots + 1 restore of 4-budget; one capture attempt was voided by a launcher gate-removal glob bug, then recaptured).** A DSv4.1 indexer probe recorded the direct lever A/B on **identical inputs** in gen-window tokens 55:63 (24 calls/node: layers 2/8/14/20/24/28/32/36, n=4 untiled, k=512). Both pre-registered gates PASSED: **fidelity gate = `harness valid`** (24/24 records self-reproduce bit-exactly, both nodes; consumer layers included) and **determinism** = within-boot (two identical requests → identical output) AND cross-boot (the deployed build produced byte-identical output sha `574b67a031c10f4b` on two separate boots).
+
+- **First divergence: window_rel=53 (gen token 53), layer 2, op = indexer top-k column selection; mechanism = dtype-dependent tie-break; MARGIN = 0.0 (exact bf16 tie at the k=512 boundary).**
+- **24/24 records diverge; 24/24 pure tie-break; 0/24 genuine re-rank.** Committed column-set change only 4–50 cols/record. Proof: bf16-rounding the fp32 arm's stored row reproduces the bf16 arm's row **bit-exactly (96/96 query-rows, worst diff 0.0)** — the arms carry the SAME bf16-rounded row.
+- **Consumer layers resolved:** all **12/12** `uses_candidates` (consumer-layer 24/28/32/36) records diverge identically (pure tie-break) — the half the offline capture could not replay.
+- **NOT shown:** propagation to token 63. The single captured logits step (wrel=60) shows LARGE margins (margin12 9.23/9.20/1.875/4.72) — no near-tie there; no logits at the first divergent token; the sequential path 53→63 is unobserved. nrounds=0. The lever is mechanistically sufficient to drive a greedy divergence via a DOWNSTREAM near-tie flip, but token-63 propagation is NOT pinned.
+- **Takeaway:** the shipped lever's indexer effect is a pure bf16-boundary coin-flip (margin 0.0, zero genuine re-rank). Identity/quality claims must rest on the R8a battery — not on a "diff is null" claim, nor on a claim it is proven to have caused token 63. **No output-affecting change ships from this round.**
+
+## 2026-10-09 — PRICING round (Fable-contested levers): Q1 quant-format = OWNER DECISION (native q4/q5 g64 2.47x at m=4, ~18.5 ms/round, quality-gated); Q3 7.26 ms boundary = ARTIFACT (~0 ms addressable); Q4 re-attributes the ~37 ms verify_block residual to MoE COMPUTE (43.08/37=1.16x); Q5 GPU-time instrument GO (per-op-class); Q2 gamma = no production surface
+
+Round doc: `ROUND-PRICING.md` on `deploy/phase20-campaign` (commits `b3e7a741c` budget, `13d9a67f3`
+Q1/Q3/Q4/Q5, `9b0309f65` Q2+synthesis). **Budget: 0 boots of ≤2 spent** (Q2 pivoted to a source finding
+before its boot; Q1/Q3/Q4/Q5 all offline). **No ship.** Cluster stayed production `fb4f9290b`/`16830e1`,
+gates unset, canary healthy; 2nd-opinion (auxiliary.consult) folded in before dispatch.
+
+**Q1 — EXL3-fused vs native `mx.quantized_matmul` (g64) at real dense shapes. OWNER DECISION TRIGGERED.**
+Offline microbench on studio2, real layer-20 dense roster, TP=2 rank-0 sharded, real EXL3 weights decoded then
+re-quantized in-memory (whole-18-linear chain, one eval; also K-batched). EXL3 prod m=4 = **0.945 ms/layer**
+(0.774 K/call) → **37.8 ms/round**; native **q4 +Hadamard (fair drop-in) = 0.483 ms (2.47×)** → **19.3 ms/round**;
+q5/q6 +Had = 2.29–2.30×; raw-q4 3.38× (drops EXL3's input Hadamard → not bit-fair). **A quant-format change
+(EXL3 2.9bpw trellis → native q4/q5 g64) prices ~18.5 ms/round off the dense slice — QUALITY-GATED, owner
+ruling required, NOT acted on.** Quality is UNMEASURED: cosine to the **bf16 EXL3-decoded W** is q4 0.9959 /
+q5 0.9990 / q6 0.9998 (fidelity to EXL3, not to the original model). The win is **ALU/issue, not bandwidth**
+(q4 streams 62 MB vs EXL3's 66.7 MB trellis) — the fused trellis decode (k=7 SWAR) is the cost; a *different
+kernel* escapes the decode-ALU wall that tune-existing levers could not. Experts arm PARKED (384 experts ×
+~71 MB = ~27 GB to re-quantize). Caveat: sharded per-rank dense slice = 37.8 ms/round, not the older "~51 ms".
+
+**Q2 — gamma re-pricing: NO PRODUCTION SURFACE (0 boots).** The deployed instance is served by **`Dsv41Engine`**;
+γ is a plain dataclass field `gamma: int = 3` (`dsv41/engine.py:333`) with **no** env (no `environ` in `dsv41/`),
+**no** per-request field, and **no** instance-level field (`_engine_kwargs_from_instance` injects only
+max_kv_tokens/prefill_step/transient_budget). `EXO_SPECULATIVE_GAMMA` is read **only** by the dormant
+batched/PP path (`batch_generate.py:845`, `dsv4_mtp.py:3969`) → **a boot setting it is a no-op.** Live log:
+`engine built: 40/40 layers, speculative=True (gamma=3)`. The prior γ3/4/5 matrix (+13.4 % γ5-benign) ran on the
+divergent `deploy/next14-gamma` branch (per-request `spec_gamma`), NOT this engine. The adaptive `GammaPolicy` is
+dead (`policy.update()` never called). → Re-pricing γ (incl. never-tested agentic γ2) needs a **CODE round first.**
+
+**Q3 — the 7.26 ms client↔server boundary = ARTIFACT, ~0 ms addressable.** `101.06 − 93.8` subtracts a
+**next17-HIER0 client, agentic-shaped** number minus a **next16-instr server, benign** number. Same-boot,
+same-request (raw/p3): client ms/round sits only **+0.23…+0.51 ms** above the server loop's own per-round wall
+(both shapes); the dominant term of the doc's 7.26 is **agentic-vs-benign shape** (~5.5 ms). Loop mechanism
+(PM-verified): `engine.py:_rounds` is a **yield-based streaming generator**; round N+1 is gated only on the
+in-process consumer drain + the cross-rank cancel collective, **never on the client** (one request → one long SSE
+stream). The doc's 1.40 ms in-round residual is real (inside-round bracket); the corrected split is ~1.5 ms
+in-round + ~0.65 ms inter-round in-engine gap + ~0.3–0.5 ms client-statistic delivery offset.
+
+**Q4 — MoE-expert drain differential: re-attributes the ~37 ms unattributed to MoE COMPUTE.** Bench-only offline
+microbench on studio2, real layer-20 `EXL3SwitchGLU` (E=384, rank0/world2), **0 boots**. Halving experts at the
+**verify shape (R=4)**: 1.077 → 0.615 ms/layer = **−0.462 ms (−43 %), 1.75×**; at the draft shape (R=1) it barely
+moves. **Totals: 1.077 ms × 40 MoE layers = 43.08 ms vs the ~37 ms unattributed → ratio 1.16×** — the MoE expert
+GEMM **alone** is the right order of magnitude to be the *entire* unattributed slice. So the residual is **MoE
+compute, not comm/drain**; Lead-A's ≤5.25 ms exposed-non-compute is not contradicted (compute ≠ non-compute) but
+its comm premise is **weakened**, and the **MoE path re-opens with numbers** (~18 ms/round standalone from
+halving at R=4). Honest boundary: a 1-node bench cannot show cross-rank overlap/exposure; cost is **slot-bound,
+routing-distribution-independent** (14 vs 24 unique experts → identical ms).
+
+**Q5 — GPU-time instrument: GO (per-op-class), not a flag-flip to per-kernel.** MLX already measures
+**per-command-buffer** GPU-busy time — `MLX_GPU_TIME=1` → `mx.metal.gpu_time_ns()` = Σ(GPUEndTime−GPUStartTime)
+per completed `MTL::CommandBuffer` (`mlx/backend/metal/eval.cpp:94-109`, `device.cpp:896-916`, `metal.h:32-43`;
+Python `python/src/metal.cpp:118-139`). **PM verified the env var + `gpu_time_ns`/`accumulate_gpu_time_ns`
+symbols exist in the node's `libmlx.dylib`.** Prototype RAN on studio2 (offline): nonzero per-op GPU ms
+(matmul 1024³ gpu 0.447/wall 0.611; 4096³ 13.285/13.482 GPU-bound); `MLX_MAX_OPS_PER_BUFFER=1` gives ≈per-kernel;
+compiled + custom kernels are counted (closes the compiled-prefill "not in spans" gap). Effort: Path 1
+(per-op-class, no rebuild) **~2-4 h**; Path 2 (per-buffer label→time ring buffer + `mx.metal.gpu_time_records()`,
+~1 round incl. node wheel rebuild); Path 3 (true per-dispatch `MTLCounterSampleBuffer`) 2-4 rounds. Caveat: the
+filter drops RDMA/CPU-only buffers → JACCL collective transport GPU cost is NOT attributed.
+
+**Ranked next-round menu:** (1) Q1 quant-format evaluation — **OWNER DECISION**, quality-gated, ≈18.5 ms/round
+dense; (2) Q4 MoE-expert reduction — quality-gated, −18 ms/round standalone at the verify shape; (3) Q5
+instrument Path 2 — cheap, unblocks attribution; (4) Q2 γ surface (code) + re-price; (5) Q1 experts arm (parked).
+Closed by pricing: the client↔server boundary (artifact) — do not spend on it.
