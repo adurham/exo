@@ -82,6 +82,50 @@ for attribution only (dispatch/launch overhead is excluded from `gpu_time_ns()`)
 
 ---
 
+## 2b. PRE-REGISTERED REFINEMENTS (A1–A6, added BEFORE any arm result is seen)
+
+Added after a design review, still ahead of the bench, so the bar cannot be retro-fitted.
+
+- **A1 — Dense-precedent sign (resolved, pro-native).** From the raw ROUND-PRICING Q1 artifact
+  (`raw/pricing/q1/p20_pricing_q1_dense_layer20.json`): native q4 g64 is **2.47× the EXL3 rate**
+  (fair drop-in, Hadamards kept) / **3.38×** raw at m=4 (`rate_ratio_kmean` 2.467 / 3.381;
+  `prod_m4_whole 0.945 ms` vs `nativehad_m4_B4 0.483 ms` / `native_m4_B4 0.374 ms`). I.e. on the
+  dense slice native g64 is **~2.5× FASTER** than EXL3 (the trellis decode is ALU/issue-bound), not
+  slower. ⇒ the experts premise is **plausible and pro-native**; a 30 % cut is not structurally
+  doomed. (Q1's experts arm was PARKED, not measured — this round measures it.)
+- **A2 — Cache-busting (a load-bearing fairness fix).** Single-layer repeated timing lets the
+  active expert set sit in SLC between reps, which flatters native (bandwidth-bound) and not EXL3
+  (ALU-bound) → false PASS risk. **Requirement:** each timed rep uses a *freshly drawn* hidden
+  state → fresh gate routing (record the union of experts touched across reps); run every arm in
+  BOTH a **warm** (back-to-back) and a **flushed** mode (evict SLC between reps by `mx.eval` of a
+  ≥1 GiB unrelated scratch read, outside the timed region). The gating number is the **flushed**
+  (cold) one.
+- **A3 — Achieved-GB/s readout per arm** (bytes streamed ÷ wall). An anomalously high GB/s flags a
+  warm cache or a construction bug. If a native arm lands under ~40 % of peak streaming GB/s,
+  suspect the construction before concluding "EXL3 is faster".
+- **A4 — Pre-registered unique-expert gating point = the CONSERVATIVE 24.** Native `gather_qmm`
+  batches rows sharing an expert ⇒ native (unlike EXL3, which Q4 showed is slot-bound) IS
+  unique-expert-sensitive, so the sweep is load-bearing. Report the full sweep {6,12,18,24}; the
+  **headline gate number is taken at 24 unique** (conservative), with the realistic-histogram value
+  (from D1) reported alongside. No re-picking after seeing results.
+- **A5 — Module-boundary comparison + fair native build.** Both sides measured from hidden x +
+  indices to the combined output y (gather, activation, down, weighted-sum included). The native
+  drop-in reconstructs the **true W** (undo Hadamard/suh/svh) and runs plain `gather_qmm` (matches
+  production `AffineProj`); Hadamards are a **Round-2 quality lever only**, not added to the speed
+  arm. Use the fused gate+up `gather_qmm` from `mlx_lm/models/switch_layers.py` and `mx.compile`
+  the activation so the native arm is not built unfairly slow.
+- **A6 — Two correctness checks, in order.** (a) reconstructed-fp16-W path vs the EXL3 fused-kernel
+  output — must be **near-exact** (validates reconstruction: missing svh/suh/transpose/sign bugs);
+  only then (b) each native arm's output vs EXL3 output (relative error / cosine), plus vs the
+  same-arm dequantized reference. A fast-but-wrong arm is disqualified, never a winner.
+
+**Memory-fit is a real limb, not a formality (both nodes have only 128 GiB RAM).** Per-rank resident
+(EXL3 ≈ 105.5 GB measured on-cluster, ROUND-Q1B) + KV at max agentic ctx + workspaces must fit;
+native qN (≈4.25/5.25/6.25 bpw vs EXL3 ~2.9) grows the expert bytes ~1.5×, so q4–q6 may **not** all
+fit. Computed exactly in D3.
+
+---
+
 ## 3. THE ROUND (deliverables — filled in below as results land)
 
 - **D0 — pre-registration** (this section + §0/§1/§2). ✅
