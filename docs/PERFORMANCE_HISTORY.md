@@ -11778,3 +11778,37 @@ materialize); Q4 MoE-expert reduction remains priced/untaken (~18 ms/round stand
 **Verdict: NO SHIP.** Eval branches preserved for a future variant (q5/affine5 or a format fix). Restore to `fb4f9290b`/`16830e1` attempted per protocol; command denied (no owner consent) - cluster left on eval build pending owner decision. Budget: 1/3 boots (+1 reserve).
 
 **Lessons:** (1) offline per-layer ratios overstate full-depth wins (~2.3x offline -> -13.7ms live vs ~19ms projected); price quant-format changes at full depth. (2) The battery's tool-format assertions catch formatting-level quant side-effects that per-layer cosine cannot.
+
+
+## 2026-10-09 — ROUND-Q1B-FIX: affine6 t2 tool-format regression FIXED (per-tensor DSV41_DENSE_POLICY; shared-experts@q8g64)
+
+STATE: the dense re-quant eval (native affine q6g64 dense slice, ~13.8 ms/round) was BLOCKED by the t2
+tool-format regression. This round root-causes + fixes it.
+
+DIAGNOSIS (cheapest falsifier first, zero new code): re-ran the exl3 arm ON THE SAME eval build — exl3 PASSES
+t2 2/2 + tools 10/10 => F1 does not fire; the build is fine, the regression is specific to the affine6 dense
+quantization. The live API already exposes per-token top-5 `logprobs`; the first divergent token between arms
+is a PROSE tie-break (token 36 `since` vs `as`, exl3 margin 0.219 < 0.3) — the q6 rounding (cos 0.99975)
+tips reasoning-logit near-ties and the affine6 trajectory lands on the leaked-XML format. Either class alone
+at q8 restores t2, so the sensitivity is distributed (not one culprit tensor).
+
+FIX: built a per-tensor `DSV41_DENSE_POLICY` env (mlx-lm `689e4ea`, exo `fbe74300d`; fnmatch glob selectors ->
+`exl3|q6g64|q6g32|q8g64`; last match wins; unset = byte-identical to `DSV41_DENSE`; 55 unit tests). Dense
+byte census: attention 74 % / shared-experts 18 % / engram 8 %. Winner = `layers.*.ffn.shared_experts.*=q8g64`
+(shared-expert dense linears at q8g64, attention dense stays q6g64) — cheapest passing config; q8-all and
+attn-q8 also pass but cost more.
+
+RESULT: FIXED. Build live exo `cfd74d49f` + mlx-lm `689e4ea`, winner BAKED as the eval-branch deploy default
+(`DSV41_DENSE=affine6` + the policy). READY, canary 14.84/14.87. Full R8a battery **CLEAN** (needles 6/6,
+tools 10/10, prose 0 DIRTY/0 REVIEW, park PASS). Expanded 36-prompt differential clean vs exl3 (35/36 vs
+33/36; the one shared failure is also an exl3 failure). F2 batch-invariance pass.
+
+PERF (same-boot A/B, salt q1b, vs frozen exl3 anchor): agentic **87.24 ms** vs 101.07 = **delta -13.83 ms**;
+decode 34.7 t/s. The pre-registered 15 ms floor is a **confirmed MISS** (reported as-is; owner decides
+promotion). The fix is ~speed-neutral vs the failed q6-all (-13.79).
+
+**Verdict: FIXED — eval-branch deploy default** (NOT a production ship). **Lessons:** (1) the q6 dense
+perturbation is enough to flip reasoning-logit near-ties -> tool-format fragility; raising ONE mechanism class
+(shared-experts, 18 % of dense bytes) to q8 fixes it at ~zero cost. (2) Run the exl3 control on the SAME
+build BEFORE building instrumentation — F1 + attribution answered in minutes via the live logprobs API.
+(3) Cheapest-passing-class (not top-K-tuned) is the principled fix.
