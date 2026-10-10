@@ -11812,3 +11812,28 @@ perturbation is enough to flip reasoning-logit near-ties -> tool-format fragilit
 (shared-experts, 18 % of dense bytes) to q8 fixes it at ~zero cost. (2) Run the exl3 control on the SAME
 build BEFORE building instrumentation — F1 + attribution answered in minutes via the live logprobs API.
 (3) Cheapest-passing-class (not top-K-tuned) is the principled fix.
+
+
+## 2026-10-09 — SHIPPED TO PRODUCTION: next19-dense — dense re-quant (affine6 q6g64 + shared-experts@q8g64) union-merged onto the production lineage
+
+**Owner directive (verbatim):** *"Promote to production — full ship ceremony (production branch, known-good tags, PH shipped line)."*
+
+**Production artifact:** exo `deploy/next19-dense` @ `99e2966eec26891b59e1af5467d8f0ddaad38577` (union merge `e82023e7bca2c7e1524dd9b6f4af8e114d68d90b` of production lineage `fb4f9290b` [deploy/next18-identity: IP pins + next18 capture bootstrap + L2_FULL forwarding] UNION dense eval lineage `cfd74d49f` [deploy/q1-dense-qn: dense work + load-warmup liveness + docs], then bump commit `99e2966ee...`), mlx-lm gitlink → `689e4eafd3cf2925a1cf78ba81375a3c098a0eef`; BOTH forks pushed. **uv.lock left unchanged** — matches the `fb4f9290b` gitlink-only bump precedent; the launcher force-reinstalls mlx-lm from the `./mlx-lm` submodule working tree, not uv.lock.
+
+**Merge resolution:** **CLEAN** (git `ort`, no conflicts). start_cluster.sh auto-merged to the **union**: dense bake + `DSV41_DENSE`/`DSV41_DENSE_TP`/`DSV41_DENSE_POLICY` forwardings AND the next18 `M4_1_IP=192.168.86.48` / `M4_2_IP=192.168.86.47` pins + `DSV41_NEXT18_CAPTURE*` + `DSV41_INDEXER_L2_FULL`/`SMALLN_ROW_BF16` forwardings. engine.py keeps `_maybe_install_next18_capture` (next18 side); builder.py keeps `_LOAD_HEARTBEAT_SECONDS` liveness (eval side); the new liveness test + dispatch tweak kept. Bake comment reworded from *"EVAL-BRANCH … NOT a production ship"* to *"NOW THE PRODUCTION DEFAULT on the next19-dense ship"*. Current LAN leases re-verified at ship time = .48/.47 (unchanged). _Deviation, noted:_ the bake-comment reword was folded into the bump commit (2 files) rather than as its own commit; tree content is identical.
+
+**Deploy (1 boot; 0 arm restarts; 1 reserve held):** shared checkout detached at `99e2966ee` + mlx-lm `689e4ea`; `EXO_TARGET_BRANCH=deploy/next19-dense ./start_cluster.sh` → `Nodes synchronized on commit 99e2966ee.`, HEALTHY, **READY (2/2)**. Post-boot canary **studio1 14.76/14.77/14.86 (med 14.77) / studio2 14.83/14.85/14.87 (med 14.85) healthy**. Installed `site-packages/mlx_lm/models/deepseek_v41/exl3_build.py` carries `_parse_dense_policy` (2) + `resolve_dense_mode` (3) on BOTH nodes; runner env exactly `DSV41_DENSE=affine6` + `DSV41_DENSE_POLICY=layers.*.ffn.shared_experts.*=q8g64`, **no stray `DSV41_*`**.
+
+**Gates (governing battery + parity + t2):**
+- **Battery CLEAN** (depth 40000, label `q1b_ship`): needles **6/6**, tools **10/10** (t2_forecast_tokyo PASS — the ROUND-Q1B regression confirmed fixed on the production build), prose **0 DIRTY / 0 REVIEW**, park **recall_teal=True**.
+- **Parity smoke** (salt `q1b`, fixed-replay): benign 20K **81.30 ms** median ([81.48, 81.12], 45.16 t/s) vs frozen exl3 control 94.56 → Δ **−13.26 ms** (expected 80.97); agentic 91K **86.03 ms** median ([85.96, 86.09], 34.30 t/s) vs control 101.07 → Δ **−15.04 ms** (expected 87.24). Both within ±2 ms of the fix-round numbers.
+- **t2 structured probe** (`--all-tools --logprobs`): **10/10** pass; t2 `finish=tool_calls` with structured `get_forecast`, **no leaked XML**, logprobs supported.
+- **Pre-registered falsifier did NOT fire** (battery DIRTY / smoke >±2 ms / t2 XML leak — all negative).
+
+**The 15 ms floor remains a confirmed MISS** (reported as-is; owner-accepted). Realized dense Δ at full depth ≈ −13.3 to −15.0 ms vs the frozen anchor — consistent with the fix round's −13.59/−13.83 ms; the fix is ~speed-neutral vs pure q6-all while restoring the battery.
+
+**Tags (both forks):** `known-good-dense-q68-20261009-231842` → exo `99e2966ee...` (`adurham/exo`), mlx-lm `689e4ea...` (`adurham/mlx-lm`).
+
+**Rollback (pre-authorized, unspent):** exo `deploy/q1-dense-qn` @ `cfd74d49f` + mlx-lm `689e4ea` via the same detach-checkout procedure; instant in-place fallback `DSV41_DENSE=exl3` (process restart, proven). Reserve boot held.
+
+**Open items:** (1) 15 ms floor miss (as-is, owner-accepted); (2) parser-robustness backlog (salvage leaked XML / malformed tags) — Fable-parked, not a fix; (3) §5 projection gap (realized ~71 % of the offline projection) recorded, not chased.
