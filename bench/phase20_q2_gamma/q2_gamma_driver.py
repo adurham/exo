@@ -8,9 +8,14 @@ production build by running a *bracketed* arm matrix in ONE boot:
 
 Arms are switched by the PM-VERIFIED recipe: edit ``~/relaunch_exo.sh`` on BOTH
 nodes (``sed`` the single ``DSV41_SPEC_GAMMA=N`` token), graceful node-process
-relaunch, wait READY 2/2, assert RANK CONSISTENCY of the logged effective gamma,
-idle-guard, then run the FIXED replays (benign 20K x3 + agentic 91K x2) with the
-FIXED salt base ``q2gamma`` so the content is byte-identical across arms.
+relaunch, TRIGGER THE JIT MODEL LOAD (a tiny warmup POST — the relaunch spawns NO
+runner, so ``GET /state`` alone never reaches READY; the POST returns 503 at the
+~120 s load timeout then 200; its epoch is registered as an own request), wait
+READY 2/2, assert RANK CONSISTENCY of the logged effective gamma, idle-guard, then
+run the FIXED replays (benign 20K x3 + agentic 91K x2) with the FIXED salt base
+``q2gamma`` so the content is byte-identical across arms.  If both nodes' latest
+logged effective gamma is ALREADY the target arm the relaunch+warmup is SKIPPED
+(REUSE) and control goes straight to the READY check.
 
 This module is DELIVERED NOT-RUN: no live arm switch is executed here.  Run it
 only after the eval boot (see ``README.md`` for preconditions).  ``--dry-run``
@@ -61,8 +66,22 @@ MATRIX = (("gamma3a", 3), ("gamma2", 2), ("gamma4", 4), ("gamma5", 5), ("gamma3b
 ANCHOR_BENIGN_WALL_S = 90.5
 ANCHOR_AGENTIC_WALL_S = 385.0
 LAUNCH_WALL_S = 300.0   # graceful relaunch both nodes, sequential (~2-3 min/node)
+WARMUP_WALL_S = 120.0   # tiny POST that triggers the JIT model load after relaunch (503 -> 200)
 IDLE_SETTLE_S = 90.0    # idle-guard settle + inter-chunk sleeps per arm
 ROUND_BUDGET_WALL_MIN = 135.0  # declared cap for the measurement wall-clock
+
+# --- warmup trigger (post-relaunch JIT-load kick) ---------------------------
+# ``~/relaunch_exo.sh`` restarts the exo *process* but spawns NO runner (no
+# LoadModel), so ``GET /state`` never reaches RunnerReady on its own.  A tiny
+# generation POST triggers the JIT model load; the first attempt blocks until the
+# ~120 s load timeout and returns 503, a repeat then succeeds 200 (live-measured
+# 2026-10-10: 200 in 119.6 s).  Mirrors the prior-round ``arm_switch2.py`` loop.
+WARMUP_SETTLE_S = 20.0        # short settle after the relaunch, before the POST
+WARMUP_TIMEOUT_S = 300.0      # total retry budget (503 -> 200)
+WARMUP_HTTP_TIMEOUT_S = 300.0  # per-attempt socket timeout (> the ~120 s load timeout)
+WARMUP_RETRY_SLEEP_S = 5.0    # pause between retries
+WARMUP_BODY = {"model": MODEL, "messages": [{"role": "user", "content": "Say OK."}],
+               "max_tokens": 8, "temperature": 0.0, "stream": False}
 
 SCRATCH = "/Users/adam.durham/.hermes/cache/scratch/phase20/q2gamma"
 DEFAULT_REGISTRY = os.path.join(SCRATCH, "own_requests.jsonl")
@@ -79,11 +98,12 @@ def budget_arithmetic(arms, benign_reps: int, agentic_reps: int) -> dict:
     n = len(arms)
     agentic_s = ANCHOR_AGENTIC_WALL_S * agentic_reps * n
     benign_s = ANCHOR_BENIGN_WALL_S * benign_reps * n
-    overhead_s = (LAUNCH_WALL_S + IDLE_SETTLE_S) * n
+    warmup_s = WARMUP_WALL_S * n  # post-relaunch JIT-load trigger, ~120 s per relaunched arm
+    overhead_s = (LAUNCH_WALL_S + IDLE_SETTLE_S) * n + warmup_s
     total_s = agentic_s + benign_s + overhead_s
     return {"n_arms": n, "benign_reps": benign_reps, "agentic_reps": agentic_reps,
-            "agentic_s": agentic_s, "benign_s": benign_s, "overhead_s": overhead_s,
-            "total_s": total_s, "total_min": total_s / 60.0}
+            "agentic_s": agentic_s, "benign_s": benign_s, "warmup_s": warmup_s,
+            "overhead_s": overhead_s, "total_s": total_s, "total_min": total_s / 60.0}
 
 
 def choose_agentic_reps(arms, benign_reps: int, budget_wall_min: float) -> int:
@@ -109,8 +129,10 @@ def declare_budget(arms, benign_reps: int = 3, budget_wall_min: float = ROUND_BU
         f"= {a['agentic_s']:.0f} s = {a['agentic_s']/60:.1f} min",
         f"  benign:  {ANCHOR_BENIGN_WALL_S:.1f} s/rep x {benign_reps} reps x {a['n_arms']} arms "
         f"= {a['benign_s']:.0f} s = {a['benign_s']/60:.1f} min",
-        f"  overhead: (relaunch {LAUNCH_WALL_S:.0f}s + idle {IDLE_SETTLE_S:.0f}s) x {a['n_arms']} "
-        f"= {a['overhead_s']:.0f} s = {a['overhead_s']/60:.1f} min",
+        f"  warmup:  {WARMUP_WALL_S:.0f} s/arm x {a['n_arms']} arms (JIT-load POST after each relaunch) "
+        f"= {a['warmup_s']:.0f} s = {a['warmup_s']/60:.1f} min",
+        f"  overhead: (relaunch {LAUNCH_WALL_S:.0f}s + idle {IDLE_SETTLE_S:.0f}s + warmup {WARMUP_WALL_S:.0f}s) "
+        f"x {a['n_arms']} = {a['overhead_s']:.0f} s = {a['overhead_s']/60:.1f} min",
         f"  TOTAL: {a['total_s']:.0f} s = {a['total_min']:.1f} min  vs cap {budget_wall_min:.0f} min "
         f"=> {'FITS' if a['total_min'] <= budget_wall_min else 'OVER'}",
         f"  DECISION: agentic_reps={agentic_reps}, iqr_enabled={iqr_enabled}"
@@ -191,16 +213,47 @@ def assert_precondition(dry: bool) -> None:
                 f"launched with `export {SPEC_GAMMA_ENV}=3` so the token exists.")
 
 
-def switch_arm(n: int, *, dry: bool = False) -> None:
-    """Set arm ``n`` on BOTH nodes via the verified recipe (sed -> confirm -> relaunch)."""
+def switch_arm(n: int, *, dry: bool = False, arm: str | None = None,
+               registry_path: str | None = None, settle_s: float = WARMUP_SETTLE_S,
+               allow_reuse: bool = True) -> dict:
+    """Set arm ``n`` on BOTH nodes via the verified recipe (sed -> confirm -> relaunch).
+
+    After the relaunch the driver TRIGGERS THE JIT MODEL LOAD with a tiny warmup
+    POST (the relaunch spawns NO runner), registers that POST in the own-request
+    registry so the next idle guard treats it as own traffic, and only then
+    returns for :func:`wait_ready`.
+
+    REUSE optimisation (safe): if BOTH nodes' latest logged effective gamma is
+    ALREADY ``n`` (e.g. the first arm right after a boot), the relaunch+warmup is
+    SKIPPED and control goes straight to the READY check + rank assert.  Returns
+    ``{"mode": "reuse"|"relaunch", ...}`` so the caller can log/record which.
+    """
     if n not in SUPPORTED_GAMMA:
         raise ValueError(f"gamma {n} not in supported set {SUPPORTED_GAMMA}")
-    for node in NODES:
-        if dry:
+    label = f"gamma{arm}" if arm and arm.startswith("gamma") else (arm or f"gamma{n}")
+
+    if dry:
+        print(f"[dry] ssh <node> \"{_LOG_TAIL_CMD}\"  # if latest effective gamma already == {n}: "
+              f"REUSE (skip relaunch+warmup)")
+        for node in NODES:
             print(f"[dry] ssh {node} \"{sed_cmd(n)}\"")
             print(f"[dry] ssh {node} \"{grep_cmd()}\"  # confirm one token == {n}")
             print(f"[dry] ssh {node} '{relaunch_cmd()}'  # graceful relaunch, ~2-3 min")
-            continue
+        print(f"[dry] sleep {settle_s:.0f}s settle, then warmup POST {API_BASE}/v1/chat/completions "
+              f"({json.dumps(WARMUP_BODY)})  # retry 503->200, <= {WARMUP_TIMEOUT_S:.0f}s")
+        print(f"[dry] register warmup epoch in own-request registry "
+              f"({registry_path or 'own_requests_<arm>.jsonl'})")
+        return {"mode": "relaunch", "dry": True}
+
+    if allow_reuse:
+        per = latest_effective_gamma()
+        reuse, msg = reuse_verdict(per, n)
+        if reuse:
+            print(f"[{time.strftime('%T')}] {label}: REUSE — {msg}; "
+                  f"skipping relaunch+warmup", flush=True)
+            return {"mode": "reuse", "per": per, "reason": msg}
+
+    for node in NODES:
         rc, out = _ssh(node, sed_cmd(n))
         if rc != 0:
             raise SystemExit(f"switch_arm({n}) sed failed on {node}: rc={rc} {out!r}")
@@ -210,6 +263,129 @@ def switch_arm(n: int, *, dry: bool = False) -> None:
             raise SystemExit(f"switch_arm({n}) confirm failed on {node}: tokens={toks!r}")
         print(f"[{time.strftime('%T')}] {node}: {SPEC_GAMMA_ENV} set to {n}; relaunching...", flush=True)
         _ssh(node, relaunch_cmd(), timeout=600)
+
+    if settle_s > 0:
+        print(f"[{time.strftime('%T')}] {label}: settle {settle_s:.0f}s before warmup POST", flush=True)
+        time.sleep(settle_s)
+    warm = warmup_post(registry_path=registry_path, label=label)
+    return {"mode": "relaunch", "warmup": warm}
+
+
+# ---------------------------------------------------------------------------
+# Warmup trigger (post-relaunch JIT model load) + own-request registration
+# ---------------------------------------------------------------------------
+def register_own_request(registry_path: str | None, t: float | None = None,
+                         label: str = "q2gamma_warmup") -> float:
+    """Append a ``{"label", "t"}`` own-request line to the registry (guard format).
+
+    Mirrors ``phase20_guard.ChunkGuard.register_own_request`` so the same file is
+    readable by ``_load_own`` / the idle guard.  Returns the registered epoch.
+    """
+    t = time.time() if t is None else t
+    if not registry_path:
+        return t
+    try:
+        d = os.path.dirname(registry_path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        with open(registry_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"label": label, "t": t}) + "\n")
+    except OSError:
+        pass
+    return t
+
+
+def _http_warmup_post(body: dict | None = None, *, timeout_s: float = WARMUP_HTTP_TIMEOUT_S) -> int | None:
+    """Send the warmup generation POST; return the HTTP status (None on transport error).
+
+    The first attempt blocks until the ~120 s JIT-load timeout and returns 503;
+    a repeat succeeds 200.  A connection error (API not yet up after the
+    relaunch) returns ``None`` so the retry loop keeps waiting.
+    """
+    import urllib.error
+    import urllib.request
+    body = WARMUP_BODY if body is None else body
+    req = urllib.request.Request(API_BASE + "/v1/chat/completions",
+                                 data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310 (fixed http LAN)
+            resp.read()
+            return resp.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:  # noqa: BLE001 (transport: API still coming up)
+        return None
+
+
+def warmup_post(*, registry_path: str | None = None, label: str = "warmup",
+                timeout_s: float = WARMUP_TIMEOUT_S, retry_sleep_s: float = WARMUP_RETRY_SLEEP_S,
+                post_fn=None, sleep_fn=time.sleep, now_fn=time.time, log_fn=print) -> dict:
+    """Trigger the JIT model load with a tiny POST; retry on 503 until 200.
+
+    The POST epoch is registered in ``registry_path`` BEFORE sending so the next
+    idle guard treats this driver traffic as own.  HTTP 200 => success.  HTTP
+    5xx / transport errors are retried until ``timeout_s``; other non-200 codes
+    are a hard failure (config error, not a slow load).
+    """
+    post_fn = _http_warmup_post if post_fn is None else post_fn
+    t_reg = register_own_request(registry_path, now_fn(), label)
+    t0 = now_fn()
+    deadline = t0 + timeout_s
+    attempt = 0
+    statuses: list = []
+    while True:
+        attempt += 1
+        a0 = now_fn()
+        status = post_fn()
+        elapsed = now_fn() - a0
+        statuses.append(status)
+        log_fn(f"[{time.strftime('%T')}] warmup {label}: attempt {attempt} -> HTTP {status} "
+               f"in {elapsed:.1f}s (total {now_fn() - t0:.1f}s)", flush=True)
+        if status == 200:
+            return {"ok": True, "attempts": attempt, "statuses": statuses,
+                    "elapsed_s": round(now_fn() - t0, 3), "registered": bool(registry_path),
+                    "t_reg": t_reg}
+        if status is not None and not (500 <= status < 600):
+            raise SystemExit(f"warmup {label}: hard HTTP failure {status} "
+                             f"(not a retryable JIT-load timeout)")
+        if now_fn() >= deadline:
+            raise SystemExit(f"warmup {label}: timed out after {timeout_s:.0f}s "
+                             f"({attempt} attempts, statuses={statuses}) — JIT load never succeeded")
+        sleep_fn(retry_sleep_s)
+
+
+def latest_effective_gamma(*, dry: bool = False) -> dict:
+    """Read each node's latest ``[DSV41] spec gamma override`` line -> {rank/env/eff} or None."""
+    per: dict = {}
+    for node in NODES:
+        if dry:
+            per[node] = None
+            continue
+        rc, out = _ssh(node, _LOG_TAIL_CMD)
+        lines = parse_override_lines(out)
+        per[node] = lines[-1] if lines else None
+    return per
+
+
+def reuse_verdict(per: dict, n: int) -> tuple[bool, str]:
+    """Pure decision: can the relaunch+warmup be SKIPPED (already at effective gamma ``n``)?
+
+    Reuse is safe (bracketed determinism semantics preserved) only when BOTH
+    nodes' latest logged effective gamma == ``n`` AND the ranks are {0,1}.
+    """
+    if not per:
+        return False, "no nodes probed"
+    missing = [k for k, v in per.items() if not v]
+    if missing:
+        return False, f"no 'spec gamma override' line on {', '.join(sorted(missing))}"
+    effs = {d.get("eff") for d in per.values()}
+    if effs != {n}:
+        return False, f"latest effective gammas {effs} != {{{n}}}"
+    ranks = [d.get("rank") for d in per.values() if d.get("rank") is not None]
+    if ranks and set(ranks) != {0, 1}:
+        return False, f"expected ranks {{0,1}}, got {ranks}"
+    return True, f"both ranks already log effective gamma={n}"
 
 
 # ---------------------------------------------------------------------------
@@ -473,12 +649,17 @@ def _load_own(registry_path: str) -> list[float]:
     return out
 
 
+def arm_registry_path(out_dir: str, arm: str) -> str:
+    """Canonical per-arm own-request registry (shared by switch_arm + run_arm)."""
+    return os.path.join(out_dir, f"own_requests_{arm}.jsonl")
+
+
 def run_arm(arm: str, gamma: int, budget: dict, *, out_dir: str) -> dict:
     """Run benign + agentic fixed replays for one arm; return the arm record."""
     RM, AM = _load_kit()
     G = _load_guard()
     os.makedirs(out_dir, exist_ok=True)
-    registry = os.path.join(out_dir, f"own_requests_{arm}.jsonl")
+    registry = arm_registry_path(out_dir, arm)
     log_dir = os.path.join(out_dir, "guard")
     own = _load_own(registry)
 
@@ -601,7 +782,7 @@ def main(argv=None) -> int:
         assert_precondition(dry=True)
         for arm, g in arms:
             print(f"\n# arm {arm} (gamma={g})")
-            switch_arm(g, dry=True)
+            switch_arm(g, dry=True, arm=arm, registry_path=arm_registry_path(a.outdir, arm))
             print(f"[dry] poll GET {API_BASE}/state until READY 2/2")
             confirm_rank_consistency(g, dry=True)
             print(f"[dry] idle-guard then: benign {DEPTH} x{budget['benign_reps']} + "
@@ -611,12 +792,18 @@ def main(argv=None) -> int:
 
     assert_precondition(dry=False)
     records = {}
+    switches = {}
     for arm, g in arms:
         print(f"\n[{time.strftime('%T')}] === arm {arm} (gamma={g}) ===", flush=True)
-        switch_arm(g)
+        outcome = switch_arm(g, arm=arm, registry_path=arm_registry_path(a.outdir, arm))
+        switches[arm] = outcome["mode"]
+        print(f"[{time.strftime('%T')}] arm {arm}: switch mode = {outcome['mode']}", flush=True)
         wait_ready()
         confirm_rank_consistency(g)
         records[arm] = run_arm(arm, g, budget, out_dir=a.outdir)
+        records[arm]["switch_mode"] = outcome["mode"]
+    with open(os.path.join(a.outdir, "arm_switches.json"), "w", encoding="utf-8") as fh:
+        json.dump(switches, fh, indent=1)
 
     ev = evaluate(records, budget)
     print("\n=== GATE RESULTS ===")

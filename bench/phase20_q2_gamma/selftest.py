@@ -25,6 +25,8 @@ import json
 import os
 import statistics
 import sys
+import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -372,6 +374,133 @@ def harness_checks():
     return out
 
 
+def warmup_checks():
+    """Post-relaunch JIT-load trigger: warmup retry loop, registration, skip-reuse."""
+    out = []
+    quiet = lambda *a, **k: None  # noqa: E731
+
+    # ---- warmup: 503 (JIT-load timeout) then 200 => proceed ----------------
+    seq = [503, 200]
+    calls = {"n": 0}
+
+    def fake_post():
+        s = seq[min(calls["n"], len(seq) - 1)]
+        calls["n"] += 1
+        return s
+
+    tmp = tempfile.mkdtemp(prefix="q2gamma_selftest_")
+    reg = os.path.join(tmp, "own_requests_gammaX.jsonl")
+    res = DRV.warmup_post(registry_path=reg, label="warmup_gammaX", post_fn=fake_post,
+                          sleep_fn=lambda _s: None, log_fn=quiet)
+    out.append(("warmup: HTTP 503 (JIT-load timeout) then 200 => proceeds after 2 attempts",
+                res["ok"] is True and res["attempts"] == 2 and res["statuses"] == [503, 200],
+                f"attempts={res['attempts']} statuses={res['statuses']}"))
+
+    # ---- warmup-registration assertion -------------------------------------
+    own = DRV._load_own(reg)
+    raw = [json.loads(x) for x in open(reg, encoding="utf-8").read().splitlines() if x.strip()]
+    out.append(("warmup: POST epoch registered (own-request registry, guard format + label)",
+                len(own) == 1 and abs(own[0] - res["t_reg"]) < 1e-6
+                and raw and raw[0]["label"] == "warmup_gammaX" and raw[0]["t"] == res["t_reg"],
+                f"own={own} raw_label={raw[0]['label'] if raw else None}"))
+
+    # ---- warmup: transport error (API still coming up) then 200 => proceed --
+    seq2 = [None, 200]
+    c2 = {"n": 0}
+
+    def fake_post2():
+        s = seq2[min(c2["n"], len(seq2) - 1)]
+        c2["n"] += 1
+        return s
+
+    res2 = DRV.warmup_post(registry_path=None, label="w2", post_fn=fake_post2,
+                           sleep_fn=lambda _s: None, log_fn=quiet)
+    out.append(("warmup: transport error (None) then 200 => retried and proceeds",
+                res2["ok"] and res2["statuses"] == [None, 200] and res2["registered"] is False,
+                f"statuses={res2['statuses']}"))
+
+    # ---- warmup: a definitive non-retryable HTTP code => hard SystemExit ----
+    hard = False
+    try:
+        DRV.warmup_post(registry_path=None, label="w400", post_fn=lambda: 400,
+                        sleep_fn=lambda _s: None, log_fn=quiet)
+    except SystemExit:
+        hard = True
+    out.append(("warmup: HTTP 400 => hard failure (not retried as a slow load)", hard, f"raised={hard}"))
+
+    # ---- warmup: persistent 503 past the retry budget => SystemExit --------
+    class _Clock:
+        def __init__(self, step):
+            self.t = 0.0
+            self.step = step
+
+        def __call__(self):
+            self.t += self.step
+            return self.t
+
+    clk = _Clock(100.0)  # every reading jumps 100 s => past the 300 s deadline fast
+    timed_out = False
+    try:
+        DRV.warmup_post(registry_path=None, label="w503", post_fn=lambda: 503,
+                        sleep_fn=lambda _s: None, now_fn=clk, log_fn=quiet, timeout_s=300.0)
+    except SystemExit:
+        timed_out = True
+    out.append(("warmup: persistent 503 past the ~300s budget => SystemExit (no silent proceed)",
+                timed_out, f"raised={timed_out}"))
+
+    # ---- skip-reuse verdict (pure) -----------------------------------------
+    per_hit = {"studio1": {"env": 3, "eff": 3, "rank": 1},
+               "studio2": {"env": 3, "eff": 3, "rank": 0}}
+    per_miss = {"studio1": {"env": 4, "eff": 4, "rank": 1},
+                "studio2": {"env": 4, "eff": 4, "rank": 0}}
+    per_partial = {"studio1": {"env": 3, "eff": 3, "rank": 1}, "studio2": None}
+    per_dup = {"studio1": {"env": 3, "eff": 3, "rank": 1}, "studio2": {"env": 3, "eff": 3, "rank": 1}}
+    out.append(("reuse: both ranks already log effective gamma==N => REUSE (skip relaunch)",
+                DRV.reuse_verdict(per_hit, 3)[0] is True, DRV.reuse_verdict(per_hit, 3)[1]))
+    out.append(("reuse: latest effective gamma != N => no reuse (relaunch)",
+                DRV.reuse_verdict(per_miss, 3)[0] is False, DRV.reuse_verdict(per_miss, 3)[1]))
+    out.append(("reuse: a node with no override line => no reuse",
+                DRV.reuse_verdict(per_partial, 3)[0] is False, DRV.reuse_verdict(per_partial, 3)[1]))
+    out.append(("reuse: duplicated rank => no reuse (mirrors rank-consistency abort)",
+                DRV.reuse_verdict(per_dup, 3)[0] is False, DRV.reuse_verdict(per_dup, 3)[1]))
+
+    # ---- skip-reuse path (integration: switch_arm) -------------------------
+    saved = (DRV.latest_effective_gamma, DRV.warmup_post, DRV._ssh)
+    ssh_calls = {"n": 0}
+
+    def fake_ssh(node, cmd, **kw):
+        ssh_calls["n"] += 1
+        return 0, "DSV41_SPEC_GAMMA=3"
+
+    warm_calls = {"n": 0}
+
+    def fake_warmup(**kw):
+        warm_calls["n"] += 1
+        return {"ok": True, "attempts": 1, "statuses": [200], "registered": True, "t_reg": 0.0}
+
+    try:
+        # reuse: latest logged effective gamma already == 3 => no ssh, no warmup
+        DRV.latest_effective_gamma = lambda **kw: per_hit
+        DRV.warmup_post = fake_warmup
+        DRV._ssh = fake_ssh
+        r_reuse = DRV.switch_arm(3, arm="gamma3a", registry_path=None, settle_s=0)
+        out.append(("reuse-path: switch_arm(3) with latest eff==3 => mode 'reuse', NO relaunch/warmup",
+                    r_reuse["mode"] == "reuse" and ssh_calls["n"] == 0 and warm_calls["n"] == 0,
+                    f"mode={r_reuse['mode']} ssh={ssh_calls['n']} warmup={warm_calls['n']}"))
+
+        # miss: latest eff==4 != 3 => full relaunch + warmup
+        ssh_calls["n"] = 0
+        DRV.latest_effective_gamma = lambda **kw: per_miss
+        r_relaunch = DRV.switch_arm(3, arm="gamma3a", registry_path=None, settle_s=0)
+        out.append(("reuse-path: switch_arm(3) with latest eff==4 => mode 'relaunch' + warmup fired",
+                    r_relaunch["mode"] == "relaunch" and ssh_calls["n"] >= 2 and warm_calls["n"] == 1,
+                    f"mode={r_relaunch['mode']} ssh={ssh_calls['n']} warmup={warm_calls['n']}"))
+    finally:
+        DRV.latest_effective_gamma, DRV.warmup_post, DRV._ssh = saved
+
+    return out
+
+
 def all_checks():
     out = []
     out.append(("imports: q2_gamma_eval + q2_gamma_driver resolve", True,
@@ -379,6 +508,7 @@ def all_checks():
     out += anchor_checks()
     out += evaluator_checks()
     out += harness_checks()
+    out += warmup_checks()
     return out
 
 

@@ -36,13 +36,14 @@ Arithmetic for the default 5-arm matrix, benign ×3 + agentic ×2, cap 135 min:
 ```
 agentic:  385 s/rep x 2 reps x 5 arms = 3850 s = 64.2 min
 benign:   90.5 s/rep x 3 reps x 5 arms = 1358 s = 22.6 min
-overhead: (relaunch 300s + idle 90s) x 5 = 1950 s = 32.5 min
-TOTAL:    7158 s = 119.3 min  vs cap 135 min => FITS
+warmup:   120 s/arm x 5 arms (JIT-load POST after each relaunch) = 600 s = 10.0 min
+overhead: (relaunch 300s + idle 90s + warmup 120s) x 5 = 2550 s = 42.5 min
+TOTAL:    7758 s = 129.3 min  vs cap 135 min => FITS
 DECISION: agentic_reps=2, iqr_enabled=False; DROP disjoint-IQR criterion (agentic reps < 3)
 ```
 
 **3 agentic reps do NOT fit** (agentic alone = 385×3×5 = 5775 s = 96.3 min;
-total 151.4 min > 135 min cap), so the driver **pre-declares 2 agentic reps and
+total 161.4 min > 135 min cap), so the driver **pre-declares 2 agentic reps and
 DROPS the disjoint-IQR criterion**. Raise `--budget-wall-min` (e.g. 200) and the
 driver re-selects 3 reps + IQR automatically — see the selftest budget cases.
 The selected decision is written to `<outdir>/round_budget.json`.
@@ -70,12 +71,26 @@ ssh studioN "grep -o 'DSV41_SPEC_GAMMA=[0-9]*' ~/relaunch_exo.sh"   # confirm ex
 ssh studioN '~/relaunch_exo.sh'                                      # graceful relaunch, ~2-3 min
 ```
 
-then polls `GET /state` until **READY 2/2** (`count_ready_runners` counts
-`RunnerReady`), asserts **RANK CONSISTENCY** by grepping both nodes' current-boot
-`~/.exo/exo_log/exo.log` for
+The relaunch restarts the exo **process** but spawns NO runner (no `LoadModel`),
+so `GET /state` alone never reaches `RunnerReady` — the driver therefore
+**triggers the JIT model load** after a short settle with a tiny warmup POST to
+`/v1/chat/completions` (`{"model": …, "messages":[{"role":"user","content":"Say OK."}],
+"max_tokens":8,"temperature":0.0,"stream":false}`), retrying on HTTP 503 (the
+~120 s load timeout returns 503 first, then 200) for up to ~300 s. The warmup
+POST epoch is **registered in the own-request registry** (`own_requests_<arm>.jsonl`)
+so the next idle guard treats this driver traffic as own. It then polls `GET
+/state` until **READY 2/2**, asserts **RANK CONSISTENCY** by grepping both nodes'
+current-boot `~/.exo/exo_log/exo.log` for
 `[DSV41] spec gamma override: DSV41_SPEC_GAMMA=N -> effective gamma=N ..., rank R`
 and aborting if the two ranks' effective gamma differ (or the ranks aren't {0,1}),
 idle-guards, then runs the fixed replays.
+
+**REUSE (safe optimisation):** if BOTH nodes' latest logged effective gamma is
+ALREADY the target arm N (e.g. the first arm `gamma3a` right after a boot/warm),
+the relaunch+warmup is **skipped** and control goes straight to the READY check +
+rank-consistency assert. This avoids a redundant ~5-min relaunch cycle while
+preserving the bracketed determinism semantics. Whether each arm was
+`relaunch`ed or `reuse`d is logged and written to `<outdir>/arm_switches.json`.
 
 ## Replays (FIXED content, byte-identical across arms)
 
@@ -146,6 +161,10 @@ Outputs (under `--outdir`): `round_budget.json`, `arm_<arm>.json` (records),
 * No arm switch / relaunch was executed; the recipe is implemented from the PM's
   verified description and exercised only via the `--dry-run` plan + `sed`
   simulation.
+* The warmup POST retry loop (503 -> 200, ~300 s budget) is built from the
+  live-measured behaviour (POST 200 in 119.6 s triggers the JIT load); the
+  selftest exercises the loop with an injected fake transport (503/200/None/4xx)
+  — the real endpoint was NOT exercised here (no live run).
 * `wait_ready` (`RunnerReady` 2/2) and the effective-gamma log-line regex are
   modelled on read-only `/state` and source probes, not a live eval boot.
 * `footprint -f bytes` first-line parsing is defensive (first numeric line, else
