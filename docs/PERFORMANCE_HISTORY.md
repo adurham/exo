@@ -11910,3 +11910,53 @@ kernel in **WALL** time enough to justify the quality work. Offline, single-node
   (reserve held unspent); bench ~33 s node GPU (after a memory-lean rebuild — a 27 GiB fp16 first attempt
   GPU-timed-out on the production-live node), fetch ~15 min throttled — well inside the 2–4 GPU-h cap;
   **no encode spend**.
+
+## 2026-10-10 — Q1e (experts requant, Round 2 — the q3-class arm): desk checks CLOSE the lead — a q3 arm is memory-blocked on the LIVE wired limit, not just 128 GiB; two budget-arithmetic corrections recorded (permissive; Round-1 verdict unchanged)
+
+Round 2 of the experts-requant campaign, run **conditional on three desk checks** (no GPU arm until they
+pass). Author: Phase-20 PM (delegation). Doc `ROUND-Q1E-Q3ARM.md` + raw `raw/pricing/q1/q1e/` on
+`deploy/phase20-campaign`. Budget: **0 boots, ~0 GPU-h (Phase B NOT run), 0 live/encode spend**.
+**Productive outcome: CLOSE.**
+
+- **Correction 1 (permissive → recorded).** The Round-1 doc computed its fit budget against the **full
+  128 GiB (137.44 GB)**, not the production wired limit (its `≤3.72 bpw` = (137.44−11.1−0.30)/33.95
+  exactly, and it cited a stale 115000 MB). The live value is **`iogpu.wired_limit_mb = 120000` MiB =
+  125.83 GB = 117.19 GiB on BOTH nodes** — a launcher default (`start_cluster.sh:1474`,
+  `DSV4_WIRED_LIMIT_MB`, read back at :1478). Because the doc's ceiling was too *generous*, the correct
+  computation is stricter and **every Round-1 measured arm fails harder — the Round-1 FAIL stands.**
+- **Correction 2 (compounding, permissive).** The doc's per-arm **bpw omitted the bias term**. MLX affine
+  `mx.quantize` emits BOTH fp16 scales AND fp16 biases (2×16 bits/group), so eff bpw = `bits + 2·16/gs`;
+  measured live (fp16 in): **q3g128 = 3.25, q3g64 = 3.50, q4g64 = 4.50** (doc said 4.25). The doc's own
+  q4g64 per-layer footprint (3.82 GB) already encoded 4.5 — its *stated* bpw was the error. Rival "3.125
+  dense scale-only" packing REFUTED. (Recompute of the doc's table at correct bpw: q4g64 163.9 GB,
+  q5g64 197.9, q6g64 231.9 — all further over the node.)
+- **A2 — incumbent non-weight peak.** EXL3 live per-rank weight total **104.7 GB** (`mx.get_active_memory`,
+  runner log, both ranks); non-expert rest = 6.51 GB. Peak at the 102K-token request: **114.0 GB resident**
+  (`footprint -p`; transient 9.3) or **124.833 GB allocator** (`exo_peak_memory_bytes`/`mx.get_peak_memory`;
+  non-weight 20.13). The incumbent already sits within ~12 GB (resident) / ~1 GB (allocator) of the wired
+  ceiling at depth.
+- **A3 — packing → B_arm.** q3g128 = 3.25 bpw ⇒ **B_arm = 110.42 GB/rank**; q3g64 = 3.50 ⇒ 118.91. Retained
+  original shards sha256 **re-verified intact** (manifest committed).
+- **RULE (pre-registered): run iff `B_arm + P ≤ W_live`; P = rest + transient + 2 GB.** q3g128 headroom =
+  125.83 − 110.42 = **15.41 GB**; measured demand = 6.51 + 9.3 = **15.81 GB** (no margin) ⇒ **over by
+  0.4 GB**; with margin 17.81 ⇒ over by 2.4 GB. Allocator reading ⇒ over by 11–13 GB. q3g64 fails by far.
+  Incremental form (weight-split-independent): 114.0 + 12.23 = **126.2 GB > 125.83**. **The rule fails
+  under both defensible readings**; only a dimensionally-wrong reading (drop the 6.5 GB rest weights) or
+  the doc's transient-free model passes. A second-opinion review confirmed the reasoning and the CLOSE.
+- **GATE 1 RE-DECISION = FAIL/CLOSE.** Phase B (the q3 arm) **did NOT run** — no speed/correctness spend on
+  an unshippable shape. Against the *physical* 137.44 GB the arm would fit; it is the **live wired limit**
+  that blocks it. Reopen only as a NEW pre-registered hypothesis: (a) a deliberate wired-limit raise with
+  risk analysis, (b) shrink the demand (smaller prefill chunks / quantized shared experts / a
+  measured-smaller arm transient), or (c) a format ≤ ~3.24 bpw judged quality-acceptable.
+- **Phase C — free trace mining (ran; 531×40 real clamp trace, PM re-derived, exact match).** Per-layer
+  unique-expert union **227/276/331** (min/median/max), **overall 384/384** (no dead experts). Routing is
+  **concentrated but CHURNY** (not flat, not stable): top-24 = **43.6 %** of picks, but top-24 Jaccard
+  across contiguous halves = **0.26** (thirds 0.19; parity control 0.68) ⇒ a *static* hot-q4/cold-EXL3
+  split is marginal; a *windowed/dynamic* re-selection is the viable form. Production TP is
+  intermediate-WIDTH sharding (not expert-EP) ⇒ real rank imbalance **≡ 1.0** (EP counterfactual ≥2× in
+  0.02 % of R=4 batches ⇒ no traffic-aware placement). Batch-to-batch (R=4) union mean **16.32** unique,
+  consecutive-batch Jaccard **0.24**, flat; R=1 always 6.
+- **End state:** production UNCHANGED & LIVE (`99e2966ee` + mlx-lm `689e4ea`, affine6 + shared-experts@q8g64;
+  1 runner/node, no strays, canary **14.85 / 14.85 healthy**). Budget: **0 boots** of the ≤2 reserve (held
+  unspent); Phase A ≈ 0 GPU; **Phase B unspent**; retained `studio1:/tmp/q1d_mem/orig` (22.18 GB, sha
+  re-verified).
