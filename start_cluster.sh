@@ -47,6 +47,20 @@
 # block size; 64 measured best. To disable: set EXO_DSV4_QUERY_TILED_SDPA=0.
 : "${EXO_DSV4_QUERY_TILED_SDPA:=1}"
 : "${EXO_DSV4_QUERY_TILED_B:=64}"
+# ── ROUND-Q1B-FIX: eval-branch dense default ──────────────────────────────
+# DSv4.1 dense re-quant (native affine q6g64 on the dense slice) with the
+# SHARED-EXPERT linears at q8g64. Pure q6 g64 (affine6) regressed the t2
+# tool-format battery (the model leaked the tool call as XML inside
+# reasoning_content; ROUND-Q1B-STALL §9). shared-experts@q8g64 restores the
+# full R8a battery to CLEAN at ~zero perf cost vs pure q6 (ROUND-Q1B-FIX).
+# This is the EVAL-BRANCH deploy default (deploy/q1-dense-qn), NOT a
+# production ship -- the owner decides the ship. Override by exporting
+# DSV41_DENSE / DSV41_DENSE_POLICY; DSV41_DENSE=exl3 (production) leaves the
+# policy unset. The policy is read at mlx-lm import (exl3_build.py).
+: "${DSV41_DENSE:=affine6}"
+if [ "${DSV41_DENSE}" != "exl3" ]; then
+  : "${DSV41_DENSE_POLICY:=layers.*.ffn.shared_experts.*=q8g64}"
+fi
 # 2026-06-04: libp2p -> zenoh migration (exo #2132) renamed this env var.
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
