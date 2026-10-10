@@ -2733,6 +2733,30 @@ for NODE in "${NODES[@]}"; do
   fi
   [ -n "${DSV41_NEXT18_CAPTURE_NS:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_NS=$DSV41_NEXT18_CAPTURE_NS"
   [ -n "${DSV41_NEXT18_CAPTURE_MAX:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_MAX=$DSV41_NEXT18_CAPTURE_MAX"
+  # DSV41_Q2FU1_CAPTURE (+_MS/_ROUNDS/_DMAX/_KSWEEP): the round-Q2-FU1
+  # verify-shape capture hook. bench/phase20_q2_fu1/q2fu1_capture.py installs
+  # its Model/Block/Gate/head wrappers (and the engine request-path patches)
+  # only when DSV41_Q2FU1_CAPTURE names an output DIRECTORY; the auto-install
+  # itself is wired by the env-gated import in the dsv41 engine module
+  # (exo.worker.engines.mlx.dsv41.engine), which imports the operator-staged
+  # 'q2fu1_capture' module IFF the env names a dir. With the env unset that
+  # import never runs, so the production path is byte-for-byte unchanged.
+  #
+  # ONE-VAR OPERATION. Stage the hook at /tmp/q2fu1/q2fu1_capture.py and use
+  # /tmp/q2fu1/out as the capture dir (its PARENT is derived into PYTHONPATH,
+  # matching the next18 convention). An explicit EXO_PYTHONPATH_DIAG is
+  # respected and used when already set.
+  if [ -n "${DSV41_Q2FU1_CAPTURE:-}" ]; then
+    EXO_ENV="$EXO_ENV DSV41_Q2FU1_CAPTURE=$DSV41_Q2FU1_CAPTURE"
+    if [ -z "${EXO_PYTHONPATH_DIAG:-}" ]; then
+      _q2fu1_hook_dir="$(dirname "$DSV41_Q2FU1_CAPTURE")"
+      EXO_ENV="$EXO_ENV PYTHONPATH=$_q2fu1_hook_dir"
+    fi
+  fi
+  [ -n "${DSV41_Q2FU1_MS:-}" ] && EXO_ENV="$EXO_ENV DSV41_Q2FU1_MS=$DSV41_Q2FU1_MS"
+  [ -n "${DSV41_Q2FU1_ROUNDS:-}" ] && EXO_ENV="$EXO_ENV DSV41_Q2FU1_ROUNDS=$DSV41_Q2FU1_ROUNDS"
+  [ -n "${DSV41_Q2FU1_DMAX:-}" ] && EXO_ENV="$EXO_ENV DSV41_Q2FU1_DMAX=$DSV41_Q2FU1_DMAX"
+  [ -n "${DSV41_Q2FU1_KSWEEP:-}" ] && EXO_ENV="$EXO_ENV DSV41_Q2FU1_KSWEEP=$DSV41_Q2FU1_KSWEEP"
   [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
   # DSV41_MOE_ALLSUM_BF16: MoE-tail collective payload dtype (mlx_lm
   # deepseek_v41/moe.py, read at import; default 0 = fp32 exact). Halves the

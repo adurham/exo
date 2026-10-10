@@ -168,6 +168,50 @@ def _maybe_install_next18_capture() -> None:
         logger.warning(f"[DSV41] next18 capture auto-install failed: {e!r}")
 
 
+def _maybe_install_q2fu1_capture() -> None:
+    """Install the Q2-FU1 verify-shape capture hook when the operator opted in.
+
+    Round Q2-FU1 needs the DSv4.1 per-shape tensors (MoE router top-k, residual
+    stream, final logits) recorded *inside the model-server process* across
+    verify row counts M=1/3/4/5/6 -- the offline synthetic suite cannot give
+    them.  ``bench/phase20_q2_fu1/q2fu1_capture.py`` provides the hook, but
+    nothing in the stock server imports it, so a capture dir exported in the
+    operator's shell is (correctly) inert.
+
+    Same contract as :func:`_maybe_install_next18_capture` (the ONE bootstrap
+    point): installed IFF ``DSV41_Q2FU1_CAPTURE`` names a non-empty output
+    directory AND the ``q2fu1_capture`` module is importable (operator-staged
+    on ``PYTHONPATH`` -- ``start_cluster.sh`` forwards the vars and derives
+    ``PYTHONPATH`` from the capture dir's parent, mirroring the next18 wiring).
+    With the env unset this function returns immediately -- no import, no
+    monkeypatch, no cost -- so the production path is byte-for-byte unchanged.
+
+    The hook's own request surface is the ``correlation_id`` prefix ``q2fu1``
+    (see its module docstring); no other request is affected.
+    """
+    import os
+
+    path = os.environ.get("DSV41_Q2FU1_CAPTURE")
+    if not path:
+        return                                    # production: inert, zero cost
+    try:
+        import q2fu1_capture as cap  # operator-staged on PYTHONPATH
+    except Exception as e:  # noqa: BLE001 - capture must never break serving
+        logger.warning(
+            f"[DSV41] DSV41_Q2FU1_CAPTURE={path} set but q2fu1_capture is not "
+            f"importable ({e!r}); capture DISABLED. Stage "
+            f"bench/phase20_q2_fu1/q2fu1_capture.py on PYTHONPATH (see "
+            f"start_cluster.sh DSV41_Q2FU1_CAPTURE* forwards)."
+        )
+        return
+    try:
+        if getattr(cap, "_CAP", None) is None:
+            cap.install(path)                     # idempotent; env default path
+        logger.info(f"[DSV41] q2fu1 capture hook ACTIVE -> {path}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[DSV41] q2fu1 capture auto-install failed: {e!r}")
+
+
 #: Env var for the branch-only speculative draft-depth override. Read ONCE, at
 #: engine construction (``Dsv41Engine.__post_init__``), so it is a launch-time
 #: constant per process -- there is deliberately NO request-level surface
@@ -468,6 +512,9 @@ class Dsv41Engine(Engine):
         # Real-tensor capture (R1 ship precondition A2): install the next18 hook
         # when the operator opted in. No-op with DSV41_NEXT18_CAPTURE unset.
         _maybe_install_next18_capture()
+        # Verify-shape capture (round Q2-FU1): install the q2fu1 hook when the
+        # operator opted in. No-op with DSV41_Q2FU1_CAPTURE unset.
+        _maybe_install_q2fu1_capture()
         # Branch-only draft-depth arm: read DSV41_SPEC_GAMMA ONCE and freeze the
         # effective gamma for this process. Unset/empty => the dataclass default
         # (3), byte-identical to production and NO log line emitted. Set =>
