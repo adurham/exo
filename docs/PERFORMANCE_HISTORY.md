@@ -12017,3 +12017,46 @@ affine6 + shared-experts@q8g64).
   treat the model load as an explicit, registered, retryable step (the relaunch does NOT reload
   the model; the 300 s JIT idle reaper races the idle guard; an unregistered warmup-retry POST
   makes the guard wait ~10 min and the reaper unload mid-wait).
+
+## 2026-10-10 — ROUND Q2-FU1 (offline phase): γ batch-shape divergence diagnostic — instrumentation built + a rollback ring-clobber H3 candidate
+
+Follow-up to Q2-GAMMA. Q2-GAMMA's identity gate found γ3a ≡ γ3b byte-identical but γ2/γ4/γ5
+diverging from γ3a at CONFIDENT positions (top1-top2 margins **0.28–1.03 nats**, 65–97% of
+positions) — a reference-model read judged this **too large for plain bf16 reduction-order
+noise**. Q2-FU1 diagnoses WHY: **H1** MoE router top-k amplification (benign: a small upstream
+delta flips a near-tie router choice ⇒ different expert ⇒ ~1 nat move) vs **H2** kernel-path/
+precision discontinuity across M (gemv↔gemm, accumulation order) vs **H3** semantic attention/KV/
+indexer non-equivalence (the class the sibling `deepseek_v4` engine documents: *"an L>1 batched
+verify forward is NOT equivalent to L sequential steps … cumulative drift ~1.7 logits @115K"*).
+
+- **Method (reference-model-designed).** Fixed prefix; single forwards at **M=1,3,4,5,6** verify
+  rows through the **REAL engine path**; dump final logits + per-layer MoE router top-k + the
+  residual stream; report **(a) the first layer where routing differs** and **(b) max |Δlogit|
+  under identical routing**; **M=1 target-only** = the offline γ3-vs-no-speculation baseline
+  (reference = M=1, not M=4). Mechanism (validated: no faithful 0-boot path — TP=2 ≈100 GB/rank
+  IS the object under test) ⇒ the pre-approved **≤1 eval boot + 1 restore**; now **FROZEN** pending
+  a new orchestrator GO (owner hold; production is LIVE and untouched).
+- **Instrumentation (branch `deploy/q2-fu1-capture` @ `898cf36a`, off `deploy/q2-gamma`).**
+  Env-gated `_maybe_install_q2fu1_capture()` in `engine.py` — an exact mirror of the existing
+  `next18` bootstrap (inert with `DSV41_Q2FU1_CAPTURE` unset ⇒ production byte-for-byte unchanged).
+  Operator-staged in-process hook `bench/phase20_q2_fu1/q2fu1_capture.py` (runtime monkeypatches of
+  Model/Block/Gate/ShardedHead + the engine request path; **mlx-lm source untouched**) driving an
+  M-sweep from **exact full-cache snapshots**, plus bf16-vs-fp32 all-reduce, fence, rollback-A/B and
+  multi-step arms; a driver with a **faithfulness gate** (γ3 must reproduce `arm_gamma3a.json`; γ4
+  must reproduce `arm_gamma4.json` div idx 14/12). Self-test **100 checks OK**; scoped regression
+  **202 passed** (5 pre-existing mlx-lm `test_dsv41_indexer_smallm_hier` failures, reproduced on the
+  pristine pinned checkout).
+- **Offline finding — candidate H3 (NOT yet confirmed on the real model; the live A/B arm
+  confirms it).** `spec.rollback` restores the compressor carry but **not the sliding-window ring**
+  (`win_kv`, slot = pos mod 128): a verify forward writes slots for ALL M rows, and rejected rows
+  leave KV in slots that **alias the live position q−128** read by the NEXT forward ⇒ contamination
+  whenever rejected ≥ 2. Accepted=1: γ2 (M=3) provably clean (the single rejected slot aliases a
+  dead position); γ3/4/5 (M=4/5/6) contaminated. Offline probes: production rollback ⇒ next-forward
+  max|Δlogit| **0 for M=2/3** but **0.7–2.1 for M=4/5/6**; an exact rejected-slot ring restore ⇒
+  **0.0** — matching the γ-round pattern (γ3 arms identical to each other yet each γ shifted by its
+  own M-dependent contamination). Candidate fix sketch (if confirmed): restore the rejected rows'
+  ring slots in `spec.rollback`. Could re-price the γ economics (per-round-time 81→111 ms tracks M).
+- **Status:** offline COMPLETE; LIVE CAPTURE FROZEN (owner hold) pending a new GO. Declared budget
+  **≤1 eval boot + 1 restore, ~1–2 GPU-h, 0 encode**. Artifacts: `ROUND-Q2-FU1.md` (deploy/phase20-
+  campaign @ `0808e3507`) + `bench/phase20_q2_fu1/` (capture + driver + analyzer + self-tests).
+  **No boot executed; production LIVE `99e2966ee`.**
