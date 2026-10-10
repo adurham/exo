@@ -18,6 +18,6 @@ Fallback (pre-authorized rollback): exo deploy/q1-dense-qn @ cfd74d49f + mlx-lm 
 | 1 | build union merge + bump (mid-coder) | DONE: tip 99e2966e (merge e82023e7b + bump 99e2966e); pushed both forks |
 | 2 | union verification (PM) | DONE: gitlink 689e4ea; engine bootstrap+builder liveness present; all 8 tokens present; 0 residual eval strings; uv.lock unchanged (245cef7b) |
 | 3 | deploy boot + canary + installed-module verify | DONE: synced 99e2966ee, READY 2/2, canary 14.77/14.85 healthy; installed exl3_build.py has _parse_dense_policy+resolve_dense_mode; runner env exactly DSV41_DENSE=affine6 + policy (no strays) |
-| 4 | battery depth 40000 + parity smoke + t2 probe | IN PROGRESS |
-| 5 | tags both forks + PH line (main) + ROUND-Q1B-FIX sectionPROMOTION | PENDING |
+| 4 | battery depth 40000 + parity smoke + t2 probe | battery CLEAN (needles 6/6, tools 10/10 incl t2, prose 0 DIRTY/0 REVIEW, park PASS); smoke benign 81.30 ms (ctl 94.56, exp 80.97) / agentic 86.03 ms (ctl 101.07, exp 87.24) — within +/-2ms; t2 probe RUNNING |
+| 5 | tags both forks + PH line (main) + ROUND-Q1B-FIX sec-PROMOTION | PENDING |
 | 6 | end-state + budget accounting | PENDING |
