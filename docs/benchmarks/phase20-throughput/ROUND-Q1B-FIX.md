@@ -146,6 +146,23 @@ tags in `reasoning_content` on any arm.
 (shared-expert linears at q8g64; attention dense stays q6g64). Chosen by §3's rule "cheapest option passing
 §4" (≈18 % of dense bytes → ≈⅓ the cost of attn-q8).
 
+**Margin distributions** (t2, top1−top2 over generated tokens, from the API logprobs):
+
+| arm | n | min | p5 | median | frac<0.3 |
+|---|--:|--:|--:|--:|--:|
+| affine6 (q6-all, FAIL) | 114 | 0.062 | 0.375 | 10.04 | 0.04 |
+| exl3 (reference) | 65 | 0.031 | 0.062 | 3.50 | 0.12 |
+| **shared-q8 (winner)** | 65 | 0.062 | 0.250 | 3.77 | 0.06 |
+| q8-all | 73 | 0.078 | 0.172 | 4.27 | 0.07 |
+| boot2 baked (winner) | 65 | 0.062 | 0.250 | 3.77 | 0.06 |
+
+Winner passes the §4 margin criterion (p5 0.250 ≥ 0.7× exl3's 0.062; min 0.062 > 0), and the baked build
+reproduces the winner exactly (identical n/p5/median). **Honest caveat:** the generated-token margin does NOT
+by itself discriminate pass/fail here — affine6's own margins look the *healthiest* (median 10.0) yet it
+FAILS — because the failure is a reasoning-trajectory/channel decision, not a single low-margin sampled token.
+The **suite** is the real discriminator; the margin is reported as the §4 metric requires, not leaned on.
+
+
 ---
 
 ## 6. §4 determinism + §6 PERF A/B
