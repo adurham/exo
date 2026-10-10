@@ -1,0 +1,44 @@
+[load] E=384 D=5120 H=1152 k=2 gu_tiles=72 dn_tiles=320 in 0.7s
+[A6a] reconstruct 24 experts + TRUE-fp16 vs EXL3 fused kernel
+[A6a] recon 24 experts in 0.3s
+[A6a] cosine_min=1.000000 rel_l2_max=9.50e-04 max_abs=5.859e-03 near_exact=True
+[exl3 R4_natural] warm wall=1.4752 gpu=0.8874 | flushed wall=1.3959 gpu=0.8867
+[exl3 R4_u24] warm wall=1.2240 gpu=0.9065 | flushed wall=1.2243 gpu=0.9063
+[exl3 R1] warm wall=0.5561 gpu=0.2818 | flushed wall=0.5468 gpu=0.2830
+[arm] building q4g64 (fused gu, streamed)
+[arm] q4g64 built in 4s total 3.82 GB (gu 2548 MB, dn 1274 MB)
+[A6b q4g64 sorted] cosine_mean=0.988061 rel_l2_mean=1.55e-01
+[q4g64 sorted R4] warm wall=0.7925 flushed wall=0.7792
+[A6b q4g64 unsorted] cosine_mean=0.988061 rel_l2_mean=1.55e-01
+[q4g64 unsorted R4] warm wall=0.9314 flushed wall=0.9181
+[variant] chosen = sorted
+[q4g64 R4 warm   ] wall=0.7856 gpu=0.3267 | u24 warm wall=0.8285 gbs=288.33
+[q4g64 R4 flushed] wall=0.7803 gpu=0.3274 | u24 flushed wall=0.8250 gbs=289.55
+[q4g64 A6b] cosine_mean=0.988061 rel_l2_mean=1.55e-01
+[GATE1] native(24u,fl)=0.8250 vs exl3(24u,fl)=1.2243 -> saved 32.6% pass=True | vs exl3 natural(fl)=1.3959 saved 40.9%
+[arm] building q4g64 unfused-gu (streamed)
+[q4g64_unfusedgu] warm wall=0.8134 flushed wall=0.8046
+[prefill] S=2048 (EXL3 _prefill vs native q4g64)
+[prefill exl3] warm wall=99.331 gpu=56.912 | flushed wall=97.314
+[prefill native_q4g64] warm wall=85.168 gpu=35.565 | flushed wall=85.245
+[arm] building q5g64 (streamed)
+[arm] q5g64 built in 4s total 4.67 GB
+[q5g64 R4 warm   ] wall=0.9479 gpu=0.4773 | u24 warm wall=0.9101 gbs=320.8
+[q5g64 R4 flushed] wall=0.9361 gpu=0.4782 | u24 flushed wall=0.9098 gbs=320.91
+[q5g64 A6b] cosine_mean=0.997223 rel_l2_mean=7.45e-02
+[arm] building q4gu_q6dn (streamed)
+[arm] q4gu_q6dn built in 4s total 4.39 GB
+[q4gu_q6dn R4 warm   ] wall=0.9332 gpu=0.3664 | u24 warm wall=0.9065 gbs=302.56
+[q4gu_q6dn R4 flushed] wall=0.9296 gpu=0.3671 | u24 flushed wall=0.8928 gbs=307.2
+[q4gu_q6dn A6b] cosine_mean=0.991857 rel_l2_mean=1.28e-01
+[arm] building q6g64 (streamed)
+[arm] q6g64 built in 4s total 5.52 GB
+[q6g64 R4 warm   ] wall=0.9861 gpu=0.4931 | u24 warm wall=0.9812 gbs=351.66
+[q6g64 R4 flushed] wall=1.0113 gpu=0.4917 | u24 flushed wall=0.9824 gbs=351.23
+[q6g64 A6b] cosine_mean=0.999315 rel_l2_mean=3.70e-02
+[arm] building q4g32 (streamed)
+[arm] q4g32 built in 4s total 4.25 GB
+[q4g32 R4 warm   ] wall=0.8302 gpu=0.3337 | u24 warm wall=0.8225 gbs=322.7
+[q4g32 R4 flushed] wall=0.8240 gpu=0.3341 | u24 flushed wall=0.8265 gbs=321.14
+[q4g32 A6b] cosine_mean=0.990454 rel_l2_mean=1.38e-01
+[done] wrote /tmp/q1d_bench/q1d_native_experts.json in 33.0s
