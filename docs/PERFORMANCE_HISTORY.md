@@ -11157,3 +11157,38 @@ PLAN (Fable, hardened):
 - Sizing (n=2048, C=16384, 4 consumers): waste 84-98% of consumer coarse FLOPs; **% of wall pessimistic->optimistic: 100K 3.9-13.7%, 350K 12.2-25.2%, 750K 14.8-38.6%** (pessimistic = low span share + extra 50% haircut on the consumer-coarse fraction). Clears the 2% gate at every offset; deep-weighted 14.8%.
 - **Correctness audit: provably EXACT.** Block-constant candidate mask; non-candidate block -> -inf either way; candidate block max = over exactly its candidate+visible columns with the identical `_score_shared_columns` expression; top_blocks picks the same 528 blocks; exact_rescore returns identical (top_v, top_i). One required condition: `HIER_BLOCK == candidate_block_size` (holds today; asserted on the source layer, NOT on consumers — **implementation must add a consumer-side assert**).
 - Impl sketch: seed the coarse pass from candidate block ids via `_gather_rows` + `_score_gathered_columns`; scatter candidate block maxima, rest -inf. ~50-100 LOC behind the existing HIER path, low risk, pure work reduction.
+
+### 2026-10-10 — ROUND Q2-GAMMA (γ draft-depth re-price on the post-dense build): Phase 0 findings
+
+Branch-only round (eval branch `deploy/q2-gamma`, off prod `99e2966ee`). Phase 0 complete; Phase 1
+(eval boot + arm matrix) HELD pending explicit launch approval. Artifacts:
+`docs/benchmarks/phase20-throughput/ROUND-Q2-GAMMA.md` + `raw/pricing/q2/`.
+
+**Code surface (deploy/q2-gamma @ 2cf078519).** `DSV41_SPEC_GAMMA` env override on the dsv41 engine,
+read ONCE at `Dsv41Engine.__post_init__`, validated to the supported set **{2,3,4,5}**, HARD ERROR
+(`Dsv41ConfigError`) otherwise, no request-level surface. Ported the acceptance histogram
+(`mtp_accepted_histogram_cumulative`, absent on prod). Scoped test 19 passed; sabotage RED; zero-new
+basedpyright/ruff. **Mechanism verified:** the engine never calls `GammaPolicy.update()`, so
+`next()` returns `start` every round ⇒ the override is the effective γ for the WHOLE request (a clean
+full-request lever, not warmup-only). **NOT live-verified.**
+
+**Memory headroom (0b, desk — PROMINENT).** The SHIPPED dsv41 serve can breach the wired limit
+W = 125.829 GB (120000 MiB) on a COLD single-request prefill: allocator-domain crossing ≈328K tokens
+(band 272–362K); resident-domain ≈266–286K (UNKNOWN-grade). Live cap `maxKvTokens` = 1,048,576 admits
+it. Warm turns not predicted to cross inside the cap (123.8 GB @1M, 2.0 GB under W); largest real
+traffic prompt seen = 126,527 tokens (below N*). Budget breach with observed pressure, not a crash.
+**PM-verified unit corrections to the Round-2 A2 inputs:** (i) `exo_peak_memory_bytes` over-reports
+bytes ×1.073741824 (`Memory.from_gb(get_peak_memory()/1e9)` at engine.py:284 / rounds.py:227) ⇒ the
+recorded 124.833 GB allocator peak is really ≈116.26 GB; (ii) `footprint`'s formatted "GB" is BINARY
+(measured `-f bytes`: "106 GB" = 114,345,083,928 B). Q1E's "footprint is decimal" was wrong; the Q1E
+CLOSE verdict is unchanged. Flagged-not-fixed: `Conversation.prefill` retains every chunk's DSpark
+taps (~30.7 KB/row) until prefill returns.
+
+**Hot-set Jaccard vs window (0c, desk).** From the real 531×40 EXL3 clamp trace (R=4 spec-verify
+batches): adjacent-window top-24 Jaccard median W1 0.371 → W32 0.171 (random floor 0.032); turnover
+0.453 → 0.711. Feeds the PARKED dynamic-hot-set path; does not reopen it.
+
+**Harness.** `bench/phase20_q2_gamma/` arm-matrix driver + pre-registered gate evaluators (identity
+ε=0.05, memory 0.5 GB of W, rank consistency, drift >1.5% re-run, acceptance histogram, bars).
+Self-test 42 checks PASS. Declared budget: ≤2 boots + 1 reserve + ~10–12 restarts; agentic reps=2
+(drop disjoint-IQR) at the 135-min wall cap. **No boot executed.**
