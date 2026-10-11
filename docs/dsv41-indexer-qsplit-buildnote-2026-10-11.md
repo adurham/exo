@@ -150,3 +150,54 @@ otherwise-new `Unknown`-propagation errors. The test file's errors are the
 - Per the chain-build convention (checked against `p20/dsv41-restart-g3`), a
   `PERFORMANCE_HISTORY.md` entry is **not** added for a gated, unmeasured build;
   the measured entry lands with the live A/B + battery.
+
+## N-node implications
+
+The band split is **parametric in rank count by construction** — it generalizes in
+shape to any N (verified against the shipped code at `f728bb681`):
+
+- `query_band` computes `world = group.size()` (`indexer.py:193`), `rows = n // world`
+  (`indexer.py:196`), `lo = group.rank() * rows` (`indexer.py:197`) → band
+  `(lo, lo + rows)` (`indexer.py:198`). Nothing is hard-coded to 2 ranks.
+- The reconstruction is an **N-way zero-padded `all_sum` on the full query axis**:
+  `full = mx.zeros((banded.shape[0], n_full, *banded.shape[2:]))`, then
+  `full[:, lo:hi, :] = banded`, then `_coll.all_sum(full, group=group)`
+  (`indexer.py:211-214`, `_reconstruct_rows`); driven from `_finish_rows`
+  (`indexer.py:217-223`) at each return site (`indexer.py:745,768,795`). The pad is
+  applied to axis 1 (query) only, so **batch (axis 0) is preserved** — the exchange
+  is batch-safe for any N.
+- The collect payload per layer is the full `[b, n, k]` int32 (`k = index_topk = 512`),
+  i.e. ~4.19 MB/layer at `n=2048`, **regardless of N**; the collective's own cost grows
+  with N, as any allreduce.
+
+**Caveat (honest).** The gate engages only when `n % world == 0` and
+`n > _FENCE_MIN_ROWS` (`_FENCE_MIN_ROWS = 16`, `_gates.py:43`); a non-zero remainder
+returns `None` → replicated fallback (`indexer.py:194`). At `w=2` both production chunk
+sizes (2048 low-ctx / 128 high-ctx — `start_cluster.sh:102,142`) divide evenly, so the
+split engages. At **`w=3`** `2048 % 3 = 2` and `128 % 3 = 2` → `query_band` returns
+`None` on every forward, so the P1 split **does not engage** and the indexer stays
+replicated. As-shipped, P1 is therefore w=2-only in practice; generalizing to w=3 needs
+a **query-axis pad to a multiple of `world`** (or a chunk size divisible by 3). The
+N-way collective machinery itself already supports any N.
+
+## TP3 relevance
+
+The TP3 study's flat-to-worse verdict at w=3
+(`docs/dsv41-tp3-scaling-readiness-2026-10-11.md`, branch `p20/tp3-scaling-readiness`
+@ `11fe07ff7`) was dominated by the **replicated indexer at depth** — the O(context)
+term a 3rd rank cannot split under the current design. `attn.indexer.score` rises from
+3.6% of a 16K chunk to **42.9 / 44.2%** at ~340K (that doc's M3/M4), and with the indexer
+replicated the shardable fraction `S ≈ 0.31` (experts only) models the band at
+**0.78×–0.86×** (a regression). P1 removes the 2-rank duplication of that dominant
+replicated term (`indexer.py:196-197`), and — per the section above — its `all_sum`
+reconstruction is already N-way by shape (`indexer.py:211-214`), so P1 is the
+**precondition that de-risks** a future 3-node case.
+
+**P1 is necessary, not sufficient.** 3-node *support* still requires the separate TP3
+readiness items from that doc: transport N>2 — the ARQ/reliable layer is hard-gated
+`size_==2` and *throws* for N>2 (`mesh_impl.h:706-709,1171-1175,1590`); the `w=3` raise
+tensors — `_block_bounds` `n % (8·world)` (`exl3_build.py:324`; `attn.wq_b` 2048t /
+`attn.wo_b` 512t / `head` 8080t all RAISE) and `n_heads % world or n_groups % world`
+(`exl3_build.py:703`; 64%3 and 8%3); and the launcher hardcodes (~15 two-node
+assumptions in `start_cluster.sh`). P1 clears the dominant *performance* blocker; the
+transport / geometry / launcher prerequisites remain open.
