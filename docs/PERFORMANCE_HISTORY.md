@@ -12124,3 +12124,39 @@ expert win (+22.1–23.0 % WALL block win, ≥20 % gate) can be made to FIT and 
 ## 2026-10-11 — Native-experts requant: owner decision recorded (NOT pursued); reopen condition = third node (TP3) + DSpark-taps reclaim + a fresh quality battery
 
 Owner declined the native-experts requant (memo `docs/dsv41-native-experts-fit-scope-2026-10-11.md`): the block win is real (+22 % WALL, pack Task A) but the e2e ceiling is only ~6–7 % (Amdahl) for ~10–16 engine-days plus a quality tradeoff (the only fitting arm, q3g128, is lossy — cos 0.9423; the quality arm q4g64 does not fit at 2 nodes). **Engine spend + requant CLOSED.** Sole reopen: a **third node (TP3)** spreads q4g64 experts to ~106.8 GB/node weights ⇒ ~127 GB/node vs the 125.829 GB wired limit (**≈1 GB over** — today's knife-edge class); the lossless DSpark-taps reclaim (~3 GB @102K) would flip it to fitting. Gated on 3-way jaccl/TB5 topology work, the engine's TP3 support (unproven), an unquantified 3-node sync scaling (estimate-grade: sub-linear, +20–40 % prefill rather than the naive +50 %), and a fresh quality battery.
+
+## 2026-10-11 — Attention-sharding scope (offline): the "replicated attention projections that refuse to split" premise is mis-attributed — big projections ALREADY split at w=2; the real replicated O(context) term is the INDEXER COMPUTE (~31% @100K), shardable NOW via a query-row band (modeled +15.4% @100K, gated on an unreconciled share)
+
+Offline scope memo (0 boots, read-only node access): `docs/dsv41-attention-sharding-scope-2026-10-11.md`
+(branch `p20/attention-sharding-scope` off `beda06114`). Answers the owner's "shard the replicated
+attention work across the existing 2 nodes — can it be done, and does it help now?"
+
+- **Premise corrected (source-verified).** At `world=2` the big attention projections are **already
+  head/group-split**: `attn.wq_b` (32/64 heads), `attn.wo_a` (4/8 groups), `attn.wo_b` (input-sliced)
+  — `exl3_build.py:702-718`; `head` is vocab-split (`ShardedHead`, `:808-812`). Nothing large
+  "refuses to split" at w=2 (the hard `raise`s are w=3 only: `:324-325`, `load.py:80-85`).
+- **The real replicated term is the INDEXER COMPUTE**, 100% duplicated (`indexer.py` has no
+  collective; weights built pre-head-slice, never sliced), runs on 8/40 layers
+  (`index_source_layer_ids=[2,8,14,20,24,28,32,36]`, config-verified), O(context). Measured class
+  share **31.1% @100K** (measure pack Task B, *unreconciled* — 3.7× vs phase-22 3.6%@16K) and
+  `attn.indexer.score` **~43% of deep prefill wall @~340K**.
+- **Shardable NOW.** The v4 `EXO_DSV4_SEQ_SPLIT` query-row band is **still in-tree**
+  (`deepseek_v4.py:5448-5462,5777-5796`; KV kept full; padded-`all_sum` reconstruct). Applying it
+  to the indexer halves its per-rank work; `cidx` exchange is tiny (**4.19 MB/layer × 8 = 34 MB/chunk**
+  `[DERIVED]`, vs 1.68 GB/chunk existing sync). **MODELED band (indexer band): +6.9% @25K → +10.9%
+  @50K → +15.4% @100K → +16.9% @130K (1.07–1.20×).** `sdpa` (13.6%) is NOT saved by a row band
+  (it is head-split; per-row KV-gather traffic is the only duplicated part — `[BOUND]`).
+- **Do NOT build the full attention row-split** — like-for-like on the already-split classes
+  (rows×heads work is identical) and needs a **~1.7 GB/rank** full-head weight reload. The correct
+  phase-2 is **Megatron sequence parallelism** (reduce-scatter the residual; run the row-local
+  replicated ops — indexer/HC/norms/`wq_a`/`wkv`/gate — on the band): captures the full replicated
+  set (~half of ~39% ⇒ **+19.5% @100K, 1.24×** `[MODELED]`) at **no extra weight memory**, but is a
+  residual-layout change across all 40 layers. Splitting the residual replicated **weights**
+  (`wq_a`/`wkv`) is small + structurally blocked → **not worth building**.
+- **Effort `[ESTIMATE]`:** reconcile the indexer share `0.5-1 d` (gate) → indexer band `3-6 d` →
+  SP-hybrid `12-25 d`. **Biggest risk:** the indexer share is unreconciled — the whole gain is gated
+  on it. **"Bit-exact" caveat:** M=1024 vs M=2048 can re-tile Metal matmuls → near-tied top-k can
+  flip; validate via top-k overlap + logit diffs, don't assert. Decode (M=1) unchanged (length-gated).
+- **Non-disturbance:** offline; 0 boots / 0 config changes / 0 generation requests; node contact was
+  one read-only `cat config.json`; own worktree; the shared checkout + two live sibling sessions
+  untouched.
