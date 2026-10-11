@@ -27,6 +27,7 @@ from typing import Any
 import mlx.core as mx
 import numpy as np
 
+from exo.worker.engines.mlx.dsv41 import fingerprint as fpmod
 from exo.worker.engines.mlx.dsv41 import park as pk
 from exo.worker.engines.mlx.dsv41 import session as s_
 
@@ -217,7 +218,15 @@ def test_eviction_parks_the_oldest_and_get_restores_it(tmp_path: Path) -> None:
     assert store.stats["restored"] == 1
     assert conv_a.offset == offsets["A"] > 0
     assert [int(t) for t in conv_a.tokens] == tokens["A"]
-    assert not any((x / pk.MANIFEST).is_file() for x in tmp_path.iterdir())
+    # Non-consuming restore (plan §G5): the generation STAYS on disk, marked
+    # active as the base the conversation is riding -- it survives the NEXT
+    # restart too, until the LRU / generation policy reclaims it.
+    live_dirs = [
+        x for x in tmp_path.iterdir()
+        if x.is_dir() and (x / pk.MANIFEST).is_file()
+    ]
+    assert len(live_dirs) == 1, list(tmp_path.iterdir())
+    assert (live_dirs[0] / pk.ACTIVE_MARKER).is_file()
 
 
 def test_below_min_tokens_is_closed_not_parked(tmp_path: Path) -> None:
@@ -261,7 +270,13 @@ def _park_one(tmp_path: Path, body: Any) -> tuple[Path, s_.Dsv41Sessions]:
     store = _new_store(body)
     conv, _f, _g = run_turn(store, np.arange(10, 82, dtype=np.int64), key="A")
     d = tmp_path / "s"
-    assert pk.park_conversation(conv, d, key="A") is True
+    # Park WITH the store fingerprint the restore path will check (§G2): the
+    # dir must be admissible so these tests reach the geometry/corruption guard
+    # (a fingerprintless park is a "legacy" dir the store would skip, not
+    # restore, so it would never be quarantined).
+    assert pk.park_conversation(
+        conv, d, key="A", fingerprint=fpmod.compute_fingerprint(model=body),
+    ) is True
     return d, store
 
 
@@ -326,7 +341,9 @@ def test_writer_failure_mid_park_leaves_no_tmp_dir(tmp_path: Path, monkeypatch) 
     d = tmp_path / "s"
     assert pk.park_conversation(conv, d) is False  # never raises
     assert not d.exists()
-    assert not any(x.name.startswith("s.tmp-") for x in tmp_path.iterdir())
+    # The whole generation is built under ``<name>.tmp/`` (§G5); a failed park
+    # removes it, so no ``.tmp`` artifact survives.
+    assert not any(x.name.endswith(".tmp") for x in tmp_path.iterdir())
 
 
 def test_restore_missing_draft_head_refuses(tmp_path: Path) -> None:

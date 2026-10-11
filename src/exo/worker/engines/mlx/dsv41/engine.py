@@ -85,6 +85,7 @@ from exo.worker.engines.mlx.dsv41.errors import (
     Dsv41UnsupportedFeature,
     reclassify_input_error,
 )
+from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.output import dsv41_output_parser
 from exo.worker.engines.mlx.dsv41.rounds import (
@@ -124,6 +125,34 @@ DEFAULT_PREFILL_CHUNK = 512
 #: kernels, not to measure anything (the first forward is the expensive one --
 #: exo phase 19 measured 206 s for a 2K first chunk).
 DEFAULT_WARMUP_TOKENS = 8
+
+
+def _dtype_of(loaded: Any, model: Any) -> str:
+    """Best-effort KV storage dtype for the park build fingerprint (plan §G2).
+
+    Source, in order: an explicit ``dtype`` on the loaded record, then on the
+    model args, then on the first built layer/cache the model exposes. When none
+    is reachable the stable string ``"unknown"`` is used -- deterministic across
+    restarts of the same build, so the layout fingerprint still gates a real
+    layout change; a change to the KV storage dtype is already caught by
+    ``kv_code_fp`` (the fork's ``cache`` module, which fixes the grid dtype, is
+    allowlisted).
+    """
+    for obj in (
+        loaded,
+        getattr(loaded, "args", None),
+        getattr(model, "args", None),
+    ):
+        dt = getattr(obj, "dtype", None)
+        if dt is not None:
+            return str(dt)
+    layers = getattr(model, "layers", None)
+    if isinstance(layers, (list, tuple)) and layers:
+        dt = getattr(layers[0], "dtype", None)
+        if dt is not None:
+            return str(dt)
+    return "unknown"
+
 
 #: Prompt used for warmup; deliberately a plain chat turn.
 _WARMUP_PROMPT = "Reply with the single word: ready"
@@ -314,6 +343,10 @@ class Dsv41Engine(Engine):
     #: draft windows) and serves the turns of one conversation, which is what
     #: makes turn N+1's prefill only the delta. Created in ``__post_init__``.
     _sessions: Dsv41Sessions = field(init=False)
+    #: Build fingerprint (plan §G2), computed ONCE in ``__post_init__`` from the
+    #: checkpoint identity (model path/tokenizer/tensor-parallel layout). Tags
+    #: every parked manifest this engine writes and gates every restore.
+    _fingerprint: Any = field(init=False)
     #: Cumulative speculative counters since process start (rounds started,
     #: draft tokens accepted, draft tokens attempted). Deltas across
     #: successive requests give the live acceptance rate -- the decode-depth
@@ -339,6 +372,22 @@ class Dsv41Engine(Engine):
         # chunk (see DEFAULT_PREFILL_CHUNK) unless the instance says otherwise.
         self._chunk = self.prefill_chunk_size or DEFAULT_PREFILL_CHUNK
         long_chunk = self.long_chunk or self._chunk
+        # Plan §G2: compute the build fingerprint ONCE here -- at startup, never
+        # lazily at shutdown and never per-park. It identifies the checkpoint
+        # (model/tokenizer), the KV/forward code and the MLX build, and the TP
+        # layout (world size, rank, built layer range, dtype), so a parked cache
+        # written by a different build is refused instead of silently served.
+        self._fingerprint = compute_fingerprint(
+            model_path=self.loaded.model_path,
+            tokenizer=self.loaded.tokenizer,
+            model=self.loaded.model,
+            layout={
+                "world_size": self.loaded.world,
+                "rank": self.loaded.rank,
+                "layers": self.loaded.built_layers,
+                "dtype": _dtype_of(self.loaded, self.loaded.model),
+            },
+        )
         self._sessions = Dsv41Sessions(
             self.loaded.model,
             self.loaded.head,
@@ -360,6 +409,8 @@ class Dsv41Engine(Engine):
             # is reached for minutes. Forwarded Dsv41Sessions -> Conversation ->
             # (the prefill_fn partial) -> engine_prefill; active on ALL ranks.
             fence_heartbeat=self._session_fence_heartbeat,
+            # The build fingerprint, forwarded to the lazily-built park store.
+            fingerprint=self._fingerprint,
         )
 
     def warmup(self) -> None:

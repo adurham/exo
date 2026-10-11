@@ -49,19 +49,39 @@ FAILURES NEVER RAISE. ``park_conversation`` returns ``False`` and removes its
 temporary directory on any error; ``restore_conversation`` returns ``None`` on
 any manifest/geometry/data mismatch, and the store moves the bad directory to
 ``<dir>.bad`` so the caller falls back to a cold prefill instead of mis-restoring.
+
+BUILD FINGERPRINT (plan §G2). Every manifest written by a store carries the
+store's build :class:`~exo.worker.engines.mlx.dsv41.fingerprint.BuildFingerprint`
+(model / tokenizer / KV-code / MLX / layout). ``find`` / ``try_restore`` refuse
+any candidate that does not match the current build (``park.skip reason=...``)
+WITHOUT quarantining it -- the dir is valid, just foreign or old, so the LRU
+reclaims it. Legacy manifests (no fingerprint, or a pre-v2 format) are refused
+the same way. The fingerprint is computed ONCE, at store construction.
+
+DURABILITY + GENERATIONS (plan §G5). Every file is fsynced; the manifest is
+committed as ``manifest.json.tmp`` -> fsync -> rename -> fsync dir; the whole
+generation is built under ``<name>.tmp/`` and renamed into place (fsync root),
+so a crash leaves only a ``.tmp`` that the next store construction sweeps.
+A generation dir is ``<prefix_hash>.gen<N>.<uuid8>`` with ``N`` starting at 1 and
+the newest TWO generations retained per conversation (older ones pruned only
+after the new generation commits). Restore is NON-CONSUMING: a restored
+generation stays on disk, marked the ACTIVE BASE with an empty ``.active`` file,
+so the conversation survives the NEXT restart too.
 """
 
 from __future__ import annotations
 
 import collections
+import contextlib
 import json
 import os
+import re
 import shutil
 import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import mlx.core as mx
 import numpy as np
@@ -77,11 +97,22 @@ from exo.worker.engines.mlx.disaggregated.adapter import (
     bytes_to_array,
     mx_dtype_to_str,
 )
+from exo.worker.engines.mlx.dsv41.fingerprint import (
+    FINGERPRINT_FIELD,
+    BuildFingerprint,
+    allow_mlx_drift,
+    allow_stale,
+    check_manifest,
+    compute_fingerprint,
+)
 from exo.worker.engines.mlx.dsv41.session import MIN_REUSE_TOKENS
 from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids the import cycle)
     from exo.worker.engines.mlx.dsv41.session import Conversation
+
+#: Refusal reason for a pre-v2 manifest or one without a usable fingerprint.
+_REASON_LEGACY = "legacy"
 
 __all__ = [
     "PARK_MAGIC",
@@ -94,8 +125,22 @@ __all__ = [
 
 #: Manifest magic + version. A mismatch refuses the restore (never guesses).
 PARK_MAGIC = "DSV41-PARK"
-PARK_VERSION = 1
+#: Format version. v2 adds the build-fingerprint manifest field (§G2); a v1
+#: manifest is refused as legacy (not restored, not quarantined).
+PARK_VERSION = 2
 MANIFEST = "manifest.json"
+#: Empty marker file written into a generation dir after a successful restore
+#: (the non-consuming ACTIVE BASE, §G5.5). Reclaimed later by LRU / generations.
+ACTIVE_MARKER = ".active"
+#: Suffix a corrupt generation is renamed to, so it is never retried.
+_QUARANTINE_SUFFIX = ".bad"
+#: Generations of one conversation retained on disk (the newest N, §G5.6).
+_KEEP_GENERATIONS = 2
+
+#: A generation directory: ``<prefix_hash>.gen<N>.<8 hex uuid>`` (§G5.6).
+_GEN_DIR_RE = re.compile(
+    r"^(?P<prefix>[0-9a-f]+)\.gen(?P<gen>\d+)\.(?P<uuid>[0-9a-f]{8})$"
+)
 
 ENV_ENABLE = "EXO_DSV41_PARK"
 ENV_DIR = "EXO_DSV41_PARK_DIR"
@@ -167,6 +212,52 @@ def park_dir_size(d: Path) -> int:
     return total
 
 
+def _is_tmp_name(name: str) -> bool:
+    """Whether ``name`` is a park temp artifact (``*.tmp`` / ``*.tmp.*``)."""
+    return name.endswith(".tmp") or ".tmp." in name
+
+
+def _write_bytes_synced(path: Path, data: bytes) -> None:
+    """Write ``data`` then fsync the fd: a crash must not leave a short file."""
+    with open(path, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _fsync_dir(d: Path) -> None:
+    """fsync a directory fd so a create/rename inside it is durable.
+
+    Best-effort: a platform or filesystem that refuses fsync on a directory must
+    not break a park, so failures are swallowed (the data fsync on each file is
+    the durability guarantee; this orders the directory entries).
+    """
+    try:
+        fd = os.open(d, os.O_RDONLY)
+    except OSError:  # pragma: no cover - dir vanished
+        return
+    with contextlib.suppress(OSError):  # pragma: no cover - fs may not fsync a dir
+        os.fsync(fd)
+    os.close(fd)
+
+
+def _gen_from_name(name: str) -> "tuple[str, int] | None":
+    """Parse ``<prefix_hash>.gen<N>.<uuid8>`` into ``(prefix_hash, N)``."""
+    m = _GEN_DIR_RE.match(name)
+    if m is None:
+        return None
+    return m.group("prefix"), int(m.group("gen"))
+
+
+def _generation_of(d: Path, man: "dict[str, Any]") -> int:
+    """The generation number of a parked dir: manifest field, else name, else 0."""
+    gen = man.get("generation")
+    if isinstance(gen, int):
+        return gen
+    parsed = _gen_from_name(d.name)
+    return parsed[1] if parsed is not None else 0
+
+
 # ---------------------------------------------------------------------------
 # byte plumbing (adapter codec + the CPU-copy idiom)
 # ---------------------------------------------------------------------------
@@ -180,9 +271,9 @@ def _to_cpu(a: mx.array) -> mx.array:
 
 
 def _write_blob(d: Path, name: str, arr: mx.array) -> dict[str, Any]:
-    """Write one array and return its manifest descriptor (file/dtype/shape)."""
+    """Write one array (fsynced) and return its manifest descriptor."""
     cpu = _to_cpu(arr)
-    (d / name).write_bytes(array_to_bytes(cpu))
+    _write_bytes_synced(d / name, array_to_bytes(cpu))
     return {
         "file": name,
         "dtype": mx_dtype_to_str(cpu.dtype),
@@ -204,9 +295,9 @@ def _read_blob(d: Path, desc: dict[str, Any]) -> mx.array:
 
 
 def _write_framed(d: Path, name: str, a: mx.array, b: mx.array) -> dict[str, Any]:
-    """Write two same-dtype arrays back-to-back; descriptors live in manifest."""
+    """Write two same-dtype arrays back-to-back (fsynced); descriptors in manifest."""
     a_cpu, b_cpu = _to_cpu(a), _to_cpu(b)
-    (d / name).write_bytes(array_to_bytes(a_cpu) + array_to_bytes(b_cpu))
+    _write_bytes_synced(d / name, array_to_bytes(a_cpu) + array_to_bytes(b_cpu))
     return {
         "file": name,
         "a": {"dtype": mx_dtype_to_str(a_cpu.dtype),
@@ -262,17 +353,25 @@ def park_safe(conv: "Conversation") -> bool:
 # ---------------------------------------------------------------------------
 
 def park_conversation(
-    conv: "Conversation", dir: "str | Path", *, key: str | None = None  # noqa: A002
+    conv: "Conversation",
+    dir: "str | Path",  # noqa: A002
+    *,
+    key: str | None = None,
+    fingerprint: "BuildFingerprint | None" = None,
 ) -> bool:
     """Serialize ``conv``'s full cache state into session directory ``dir``.
 
     Returns ``True`` on a committed park (manifest written, directory renamed
     into place) and ``False`` on any failure -- never raises. The directory is
-    built under a temporary name and atomically renamed, so a crash leaves no
-    half-valid session behind.
+    built under ``<name>.tmp/`` (each file fsynced) and atomically renamed, so a
+    crash leaves only a ``.tmp`` the next store construction sweeps.
+
+    ``fingerprint`` -- the store's build fingerprint (computed once at store
+    construction, never here) -- is written into the manifest under
+    :data:`FINGERPRINT_FIELD` so a later build can refuse a foreign park.
     """
     d = Path(dir)
-    tmp = d.with_name(f"{d.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
+    tmp = d.with_name(f"{d.name}.tmp")
     try:
         if not park_safe(conv):
             return False
@@ -286,13 +385,20 @@ def park_conversation(
 
         ids = np.ascontiguousarray(
             np.asarray(conv.cache.tokens, dtype=np.int64).astype("<i4"))
-        (tmp / "ids.bin").write_bytes(ids.tobytes())
+        _write_bytes_synced(tmp / "ids.bin", ids.tobytes())
 
+        gen_parsed = _gen_from_name(d.name)
         man: dict[str, Any] = {
             "magic": PARK_MAGIC,
             "version": PARK_VERSION,
             "created": time.time(),
             "key": key,
+            # The build fingerprint (plan §G2): computed once by the store and
+            # passed in; never computed here. None makes the dir "legacy".
+            FINGERPRINT_FIELD: (
+                fingerprint.as_dict() if fingerprint is not None else None
+            ),
+            "generation": gen_parsed[1] if gen_parsed is not None else 0,
             "offset": offset,
             "capacity": capacity,
             "max_seq_len": int(mc.max_seq_len),
@@ -350,7 +456,7 @@ def park_conversation(
         if mc.engram_ids is not None:
             used = min(offset, int(mc.engram_ids.shape[1]))
             arr = np.ascontiguousarray(mc.engram_ids[:, :used], dtype=np.int64)
-            (tmp / "engram_ids.bin").write_bytes(arr.tobytes())
+            _write_bytes_synced(tmp / "engram_ids.bin", arr.tobytes())
             man["engram"] = {
                 "file": "engram_ids.bin",
                 "dtype": "int64",
@@ -404,10 +510,18 @@ def park_conversation(
                 _write_blob(tmp, f"anchor.{pos}.bin", logits), pos=int(pos)))
         man["anchors"] = anchors
 
-        # The manifest is the commit record: written LAST, then the directory
-        # is renamed into place atomically.
-        (tmp / MANIFEST).write_text(json.dumps(man, indent=1))
+        # The manifest is the commit record: written LAST as
+        # ``manifest.json.tmp`` -> fsync -> rename -> fsync the dir, then the
+        # whole generation directory is renamed into place atomically and the
+        # containing (root) directory fsynced (plan §G5.2/§G5.3). A crash at any
+        # point leaves either a ``.tmp`` (swept at startup) or a fully committed
+        # generation -- never a half-valid one.
+        tmp_man = tmp / f"{MANIFEST}.tmp"
+        _write_bytes_synced(tmp_man, json.dumps(man, indent=1).encode("utf-8"))
+        os.replace(tmp_man, tmp / MANIFEST)
+        _fsync_dir(tmp)
         os.replace(tmp, d)
+        _fsync_dir(d.parent)
         return True
     except Exception as exc:  # noqa: BLE001 - a park must never break a turn
         logger.warning(f"[DSV41] park failed ({type(exc).__name__}: {exc}); discarding")
@@ -619,6 +733,15 @@ def _restore_engram(d: Path, mc: Any, desc: Any) -> bool:
 # the store: index, LCP match, LRU budget
 # ---------------------------------------------------------------------------
 
+class _Usage(NamedTuple):
+    """One parked generation's size + restore eligibility (for eviction order)."""
+
+    created: float
+    dir: Path
+    size: int
+    foreign: bool
+
+
 class ParkedStore:
     """The on-disk set of parked sessions + the policy around it.
 
@@ -628,6 +751,13 @@ class ParkedStore:
     (``EXO_DSV41_PARK_MAX_GB`` by summed file size + a count cap). Holds the
     model/head/construction kwargs so it can rebuild a ``Conversation`` on
     restore.
+
+    Also owns (plan §G2) the build fingerprint -- computed ONCE at construction
+    and stamped into every manifest this store writes, and used to refuse any
+    foreign/legacy candidate on restore -- and (plan §G5) the durability
+    protocol: startup ``.tmp`` sweep, per-generation atomic commit with fsync,
+    two-generation retention, and a non-consuming restore that leaves the
+    restored generation on disk as the ACTIVE BASE.
     """
 
     def __init__(
@@ -642,6 +772,7 @@ class ParkedStore:
         max_gb: float | None = None,
         min_tokens: int | None = None,
         max_count: int | None = None,
+        fingerprint: "BuildFingerprint | None" = None,
     ) -> None:
         self.model = model
         self.head = head
@@ -653,6 +784,18 @@ class ParkedStore:
         ).expanduser()
         self.enabled = (
             _env_flag(ENV_ENABLE, True) if enabled is None else bool(enabled)
+        )
+        # §G5.4: sweep stale temp artifacts BEFORE any scan, so a crash mid-park
+        # cannot leave a partial generation for this run to pick up.
+        self._sweep_tmp()
+        # §G2: the build fingerprint, computed ONCE here and reused for every
+        # manifest write and every refusal. Never recomputed per-park. When the
+        # caller provides none it degrades from whatever the store has (its
+        # model); ``compute_fingerprint`` never raises.
+        self._fingerprint: BuildFingerprint = (
+            fingerprint
+            if fingerprint is not None
+            else compute_fingerprint(model=model)
         )
         gb = max_gb if max_gb is not None else _env_float(ENV_MAX_GB, DEFAULT_MAX_GB)
         self.max_bytes = int(max(0.0, gb) * 1_000_000_000)
@@ -667,19 +810,55 @@ class ParkedStore:
 
     # -- internals --------------------------------------------------------
 
+    def _sweep_tmp(self) -> None:
+        """Delete stale ``*.tmp`` / ``*.tmp.*`` dirs and stray ``*.tmp`` files.
+
+        The crash-atomicity backstop (plan §G5.4): a SIGKILL mid-park leaves
+        ``<name>.tmp/`` (and possibly ``manifest.json.tmp`` inside a committed
+        dir); none of those is a valid generation, so they are removed before
+        the first scan.
+        """
+        if not self.root.is_dir():
+            return
+        for child in sorted(self.root.iterdir()):
+            if not _is_tmp_name(child.name):
+                continue
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                with contextlib.suppress(OSError):  # pragma: no cover - racing removal
+                    child.unlink()
+
     def _candidates(self) -> Iterator[tuple[Path, dict[str, Any]]]:
-        """Every directory under the root that holds a valid-magic manifest."""
+        """Every directory under the root that holds a valid-magic manifest.
+
+        A quarantined dir (``*.bad``) is never a candidate -- quarantine
+        renames, it does not delete, so without this it would be re-scanned and
+        re-quarantined forever. A directory whose manifest is unreadable or not
+        a JSON object is corrupt and quarantined here. A dir with no manifest at
+        all (or a non-park magic) is ignored.
+        """
         if not self.root.is_dir():
             return
         for child in sorted(self.root.iterdir()):
             if not child.is_dir():
                 continue
+            if child.name.endswith(_QUARANTINE_SUFFIX):
+                continue
             mpath = child / MANIFEST
             if not mpath.is_file():
                 continue
             try:
-                man = json.loads(mpath.read_text())
-            except (OSError, ValueError):
+                raw = mpath.read_text()
+            except OSError:  # pragma: no cover - racing removal
+                continue
+            try:
+                man = json.loads(raw)
+            except ValueError:
+                self._quarantine(child)  # garbage manifest: never retried
+                continue
+            if not isinstance(man, dict):
+                self._quarantine(child)
                 continue
             if man.get("magic") != PARK_MAGIC:
                 continue
@@ -713,17 +892,155 @@ class ParkedStore:
         except Exception:  # pragma: no cover - broken conversation
             return False
 
+    # -- fingerprint / version admission (plan §G2) -----------------------
+
+    def _admit(self, man: dict[str, Any]) -> tuple[bool, str | None]:
+        """Whether a manifest may be restored: version gate + fingerprint gate.
+
+        A pre-v2 (or unparseable-version) manifest is refused as ``legacy``
+        UNCONDITIONALLY -- it has no fingerprint the policy can trust, and
+        ``restore_conversation`` refuses it too, so admitting it would only
+        quarantine a valid-by-format-but-old dir (the audit's 44 ``key:null``
+        dirs). Otherwise the fingerprint policy applies via ``check_manifest``
+        (honouring the env escape hatches). Pure: it never logs or mutates, and
+        never raises.
+        """
+        try:
+            if int(man.get("version", -1)) != PARK_VERSION:
+                return False, _REASON_LEGACY
+            return check_manifest(
+                man,
+                self._fingerprint,
+                allow_stale=allow_stale(),
+                allow_mlx_drift=allow_mlx_drift(),
+            )
+        except Exception:  # noqa: BLE001 - a refusal must never raise
+            return False, _REASON_LEGACY
+
+    # -- generation bookkeeping (plan §G5.6) ------------------------------
+
+    def _generation_dirs(self, prefix_hash: str) -> list[tuple[int, Path]]:
+        """``(generation, dir)`` for every valid generation of one conversation."""
+        out: list[tuple[int, Path]] = []
+        for d, _man in self._candidates():
+            parsed = _gen_from_name(d.name)
+            if parsed is None or parsed[0] != prefix_hash:
+                continue
+            out.append((parsed[1], d))
+        return out
+
+    def _next_generation(self, key_hash: str) -> int:
+        """The next generation number: max existing for ``key_hash`` + 1 (or 1)."""
+        gens = [g for g, _d in self._generation_dirs(key_hash)]
+        return (max(gens) + 1) if gens else 1
+
+    def _prune_generations(
+        self, prefix_hash: str, *, keep: int, keep_dir: Path | None = None
+    ) -> None:
+        """Delete all but the newest ``keep`` generations of one conversation.
+
+        Called only AFTER a new generation has committed (plan §G5.6), so the
+        conversation is never left without a valid generation on disk.
+        ``keep_dir`` (the just-written generation) is never deleted.
+        """
+        gens = sorted(self._generation_dirs(prefix_hash), key=lambda t: t[0])
+        doomed = gens[:-keep] if keep > 0 else gens
+        for _gen, d in doomed:
+            if keep_dir is not None and d == keep_dir:
+                continue
+            self.remove(d)
+
+    # -- LRU / budget (plan §G5.7, §G5.8) ---------------------------------
+
+    def _usage_entries(self) -> list[_Usage]:
+        """Size + restore eligibility of every parked generation."""
+        out: list[_Usage] = []
+        for d, man in self._candidates():
+            ok, _reason = self._admit(man)
+            out.append(_Usage(
+                created=float(man.get("created", 0.0)),
+                dir=d,
+                size=park_dir_size(d),
+                foreign=not ok,
+            ))
+        return out
+
+    @staticmethod
+    def _evict_key(entry: _Usage) -> tuple[int, float]:
+        """Sort key: foreign/legacy dirs FIRST, then oldest-first (LRU)."""
+        return (0 if entry.foreign else 1, entry.created)
+
+    def _reserve_headroom(self, *, protect_prefix: str | None = None) -> None:
+        """Evict until free space can hold a new generation beside its old one.
+
+        Headroom = 2 x (largest parked generation), so the new generation can be
+        written BEFORE the one it supersedes is deleted (plan §G5.7). Eviction
+        order is foreign/legacy first, then oldest. A generation belonging to
+        ``protect_prefix`` (the conversation being re-parked) is never evicted
+        here -- its old generations are pruned only after the new one commits.
+        """
+        entries = self._usage_entries()
+        if not entries:
+            return
+        reserve = 2 * max(e.size for e in entries)
+        total = sum(e.size for e in entries)
+        for entry in sorted(entries, key=self._evict_key):
+            if total + reserve <= self.max_bytes:
+                break
+            if protect_prefix is not None:
+                parsed = _gen_from_name(entry.dir.name)
+                if parsed is not None and parsed[0] == protect_prefix:
+                    continue
+            self.remove(entry.dir)
+            total -= entry.size
+
+    def enforce_budget(self, *, keep: Path | None = None) -> None:
+        """Evict until under the byte and count caps (plan §G5.8).
+
+        Foreign-fingerprint and legacy dirs go FIRST (this build can never
+        restore them), then plain LRU (oldest first). ``keep`` -- the just
+        written generation -- is never evicted.
+        """
+        entries = self._usage_entries()
+        total = sum(e.size for e in entries)
+        count = len(entries)
+        for entry in sorted(entries, key=self._evict_key):
+            if total <= self.max_bytes and count <= self.max_count:
+                break
+            if keep is not None and entry.dir == keep:
+                continue
+            self.remove(entry.dir)
+            total -= entry.size
+            count -= 1
+
+    # -- park / find / restore --------------------------------------------
+
     def park(self, conv: "Conversation", *, key: str | None = None) -> bool:
-        """Serialize ``conv`` and enforce the disk budget; never raises."""
+        """Serialize ``conv`` as a new generation and enforce the disk budget.
+
+        Named ``<prefix_hash>.gen<N>.<uuid8>`` with ``N`` = max existing + 1
+        (plan §G5.6). Headroom is reserved before the write (§G5.7); older
+        generations are pruned, and the budget enforced, only after the new
+        generation has committed. Never raises.
+        """
         try:
             if not self.should_park(conv):
                 return False
             self.root.mkdir(parents=True, exist_ok=True)
             key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
-            d = self.root / f"{key_hash}__{uuid.uuid4().hex[:8]}"
-            if not park_conversation(conv, d, key=key):
+            gen = self._next_generation(key_hash)
+            d = self.root / f"{key_hash}.gen{gen}.{uuid.uuid4().hex[:8]}"
+            # Reserve room for the new generation BEFORE writing it, so the old
+            # one is never deleted to make space for a write that could fail.
+            self._reserve_headroom(protect_prefix=key_hash)
+            if not park_conversation(
+                conv, d, key=key, fingerprint=self._fingerprint
+            ):
                 return False
-            self.enforce_budget()
+            # New generation is on disk: now it is safe to prune the older ones.
+            self._prune_generations(
+                key_hash, keep=_KEEP_GENERATIONS, keep_dir=d)
+            self.enforce_budget(keep=d)
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[DSV41] park store error: {type(exc).__name__}: {exc}")
@@ -732,33 +1049,64 @@ class ParkedStore:
     def find(
         self, ids: Any, *, key: str | None = None
     ) -> tuple[Path, int] | None:
-        """Best parked session for ``ids``.
+        """Best RESTORABLE parked session for ``ids``.
 
         With ``key`` (a client conversation id), the manifest key must match
         exactly and no prefix threshold applies. Without it, the longest common
-        token prefix wins, and it must reach :data:`MIN_REUSE_TOKENS`.
+        token prefix wins, and it must reach :data:`MIN_REUSE_TOKENS`. Ties on
+        the same conversation are broken by the HIGHEST generation.
+
+        A candidate the current build may not restore (foreign fingerprint or a
+        legacy/pre-v2 manifest) is SKIPPED -- logged ``park.skip reason=<reason>``
+        and left on disk for the LRU to reclaim, never quarantined (the dir is
+        valid, just foreign/old).
         """
         ids_arr = np.asarray(ids, dtype=np.int64)
-        best_dir, best_lcp = None, 0
+        best_dir, best_lcp, best_gen = None, 0, -1
         for d, man in self._candidates():
+            ok, reason = self._admit(man)
+            if not ok:
+                logger.info(f"park.skip reason={reason}")
+                continue
+            gen = _generation_of(d, man)
             if key is not None:
-                if man.get("key") == key:
-                    return d, int(ids_arr.shape[0])
+                if man.get("key") == key and gen > best_gen:
+                    best_dir, best_lcp, best_gen = d, int(ids_arr.shape[0]), gen
                 continue
             try:
                 lcp = common_prefix_len(ids_arr, self._load_ids(d, man))
             except (OSError, KeyError, ValueError):
                 continue
-            if lcp > best_lcp:
-                best_dir, best_lcp = d, lcp
-        if best_dir is None or best_lcp < MIN_REUSE_TOKENS:
+            if lcp > best_lcp or (lcp == best_lcp and gen > best_gen):
+                best_dir, best_lcp, best_gen = d, lcp, gen
+        if best_dir is None or (key is None and best_lcp < MIN_REUSE_TOKENS):
             return None
         return best_dir, best_lcp
+
+    def _mark_active(self, d: Path) -> None:
+        """Mark a restored generation as the ACTIVE BASE (plan §G5.5).
+
+        The non-consuming restore leaves the generation on disk; this empty,
+        fsynced marker records that it is the live base so the LRU / generation
+        policy can reclaim it later and an observer can see which generation a
+        conversation is currently riding.
+        """
+        try:
+            _write_bytes_synced(d / ACTIVE_MARKER, b"")
+            _fsync_dir(d)
+        except OSError:  # pragma: no cover - best-effort marker
+            pass
 
     def try_restore(
         self, ids: Any, *, key: str | None = None
     ) -> "Conversation | None":
-        """Find, restore, and consume a parked session; ``None`` on any miss."""
+        """Find and restore a parked session; ``None`` on any miss.
+
+        NON-CONSUMING (plan §G5.5): a successful restore leaves the generation
+        on disk (marked active), so the conversation also survives the NEXT
+        restart; the LRU / generation policy reclaims it. Only a CORRUPT dir is
+        quarantined to ``<dir>.bad``.
+        """
         if not self.enabled:
             return None
         try:
@@ -773,19 +1121,5 @@ class ParkedStore:
         if conv is None:
             self._quarantine(d)
             return None
-        self.remove(d)
+        self._mark_active(d)
         return conv
-
-    def enforce_budget(self) -> None:
-        """Evict oldest parked sessions until under the byte and count caps."""
-        entries: list[tuple[float, Path, int]] = []
-        total = 0
-        for d, man in self._candidates():
-            size = park_dir_size(d)
-            entries.append((float(man.get("created", 0.0)), d, size))
-            total += size
-        entries.sort(key=lambda e: e[0])
-        while entries and (total > self.max_bytes or len(entries) > self.max_count):
-            _, d, size = entries.pop(0)
-            self.remove(d)
-            total -= size
