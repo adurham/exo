@@ -80,6 +80,7 @@ from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
+from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.errors import (
     Dsv41InvalidRequest,
     Dsv41UnsupportedFeature,
@@ -411,6 +412,12 @@ class Dsv41Engine(Engine):
             fence_heartbeat=self._session_fence_heartbeat,
             # The build fingerprint, forwarded to the lazily-built park store.
             fingerprint=self._fingerprint,
+            # Plan §G4: park/restore become CLUSTER decisions over the same
+            # QP-less TCP coord subgroup RankAgreement uses (never the model TP
+            # group). ``None`` (single rank / PP mode) keeps local-only parking.
+            coordinator=ParkCoordinator.from_group(
+                get_coord_group(self.group), rank=self.loaded.rank),
+            rank=self.loaded.rank,
         )
 
     def warmup(self) -> None:

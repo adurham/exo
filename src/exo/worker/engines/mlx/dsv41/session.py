@@ -933,6 +933,8 @@ class Dsv41Sessions:
         fence_heartbeat: Callable[[], None] | None = None,
         park_store: Any = None,
         fingerprint: Any = None,
+        coordinator: Any = None,
+        rank: int | None = None,
     ) -> None:
         self.model = model
         self.head = head if use_draft else None
@@ -972,6 +974,16 @@ class Dsv41Sessions:
         self._fingerprint = fingerprint
         #: Latched once a park-store build fails, so it is not retried per eviction.
         self._park_failed = False
+        #: Plan §G4: the cross-rank park/restore coordinator (a
+        #: ``coord.ParkCoordinator`` over the engine's coord subgroup), or
+        #: ``None`` for a single rank / PP mode (local-only, pre-G4 behaviour).
+        #: When set, EVERY park and restore call site takes part in the
+        #: cross-rank exchange unconditionally -- even when parking is disabled
+        #: or the store failed to build on this rank -- so a peer can never
+        #: block on a missing counterpart.
+        self._coordinator = coordinator
+        #: This rank (tags park dir names + manifests); ``None`` = unknown.
+        self._rank = rank
 
     # -- key resolution ---------------------------------------------------
     @staticmethod
@@ -1048,6 +1060,9 @@ class Dsv41Sessions:
                 # The engine's build fingerprint (plan §G2): forwarded so the
                 # store stamps it into every manifest and gates every restore.
                 fingerprint=self._fingerprint,
+                # Plan §G4: cross-rank coordination + the rank tag.
+                coordinator=self._coordinator,
+                rank=self._rank,
             )
             return self._park
         except Exception as exc:  # noqa: BLE001 - parking is best-effort
@@ -1059,20 +1074,35 @@ class Dsv41Sessions:
             return None
 
     def _restore_parked(self, ids: Any, *, key: str | None) -> Conversation | None:
-        """Try to restore a parked session for ``ids``; ``None`` on any miss."""
-        if not _park_enabled():
-            return None
-        store = self._park_store()
-        if store is None:
-            return None
-        try:
-            conv = store.try_restore(ids, key=key)
-        except Exception as exc:  # noqa: BLE001 - restore never breaks a request
-            logger.warning(
-                f"[DSV41] parked restore failed ({type(exc).__name__}: {exc}); "
-                "falling back to a cold open")
-            self.stats["park_failed"] += 1
-            return None
+        """Try to restore a parked session for ``ids``; ``None`` on any miss.
+
+        With a §G4 coordinator the restore is a cluster decision: every rank
+        restores the same generation or every rank goes cold. This rank takes
+        part even when parking is disabled or its store is unavailable (it
+        then contributes "no candidates", forcing COLD everywhere) -- skipping
+        the exchange would leave the peer blocked in it. Local errors degrade
+        inside the driver; only a transport failure of the collective itself
+        propagates (a real fault, as for ``RankAgreement``).
+        """
+        if self._coordinator is not None:
+            from exo.worker.engines.mlx.dsv41.park import coordinated_restore
+
+            store = self._park_store() if _park_enabled() else None
+            conv = coordinated_restore(self._coordinator, store, ids, key=key)
+        else:
+            if not _park_enabled():
+                return None
+            store = self._park_store()
+            if store is None:
+                return None
+            try:
+                conv = store.try_restore(ids, key=key)
+            except Exception as exc:  # noqa: BLE001 - restore never breaks a request
+                logger.warning(
+                    f"[DSV41] parked restore failed ({type(exc).__name__}: {exc}); "
+                    "falling back to a cold open")
+                self.stats["park_failed"] += 1
+                return None
         if conv is None:
             return None
         store_key = self.key_for(ids, key)
@@ -1112,7 +1142,27 @@ class Dsv41Sessions:
         discards stay hard.
         """
         parked = False
-        if _park_enabled():
+        if self._coordinator is not None:
+            # §G4: always take part in the cross-rank park exchange (agree N,
+            # ack, ack-gated prune), even when this rank cannot park.
+            from exo.worker.engines.mlx.dsv41.park import coordinated_park
+
+            store = self._park_store() if _park_enabled() else None
+            try:
+                parked = coordinated_park(self._coordinator, store, session, key=key)
+            except Exception as exc:  # noqa: BLE001 - session.close() must run
+                # Defense-in-depth: ``coordinated_park`` is documented never to
+                # raise, but if it somehow does, a propagating exception here
+                # would skip ``session.close()`` below (leaking this evicted
+                # session's KV) and, under TP, strand the peer mid-forward.
+                # Degrade to a plain discard instead.
+                logger.warning(
+                    f"[DSV41] coordinated park failed "
+                    f"({type(exc).__name__}: {exc}); discarding"
+                )
+                self.stats["park_failed"] += 1
+                parked = False
+        elif _park_enabled():
             store = self._park_store()
             if store is not None:
                 try:
