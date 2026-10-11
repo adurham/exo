@@ -129,6 +129,7 @@ KV_ALLOWLIST: frozenset[str] = frozenset(
         # --- mlx-lm DSv4.1 model stack (the KV math itself) ---------------------
         "mlx_lm.models.deepseek_v41.attention",  # MLA attention; produces the KV rows
         "mlx_lm.models.deepseek_v41.sparse_attention",  # CSA/HCA sparse kernel selection
+        "mlx_lm.models.deepseek_v41._gates",  # fence row-count gates (_FENCE_MIN_ROWS) read by indexer/sparse_attention (present in the next20-vision mlx-lm pin)
         "mlx_lm.models.deepseek_v41.compressor",  # compressed-KV latents + carry state
         "mlx_lm.models.deepseek_v41.indexer",  # index top-k keys
         "mlx_lm.models.deepseek_v41.indexer_hierarchical",  # hierarchical index path
