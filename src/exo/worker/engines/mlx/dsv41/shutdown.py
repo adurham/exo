@@ -275,10 +275,27 @@ def run_shutdown_park(
     ``precheck`` (the engine supplies one) mirrors the §G1 idle tick: it pairs an
     ``agree_on_tasks`` with a peer that may be inside ``step()`` and returns
     False to stand down (COLD-safe) rather than mispair a checkpoint collective.
+
+    ``request_pending`` (audit MED-A). At shutdown no NEW request can arrive, so
+    the only "pending" that matters is the park deadline itself. Unless the
+    caller supplies its own gate, this builds ``now() >= deadline`` and threads
+    it down the force path (``force_checkpoint_all`` -> ``maybe_checkpoint`` ->
+    ``checkpoint_conversation`` -> ``run_checkpoint``). The EXISTING §G1
+    per-unit ``CKPT_POLL`` then aborts the in-progress checkpoint (temp dir
+    removed, previous generation kept) within ONE unit of the deadline, on every
+    rank, instead of letting one conversation's checkpoint run to completion past
+    it. Without this the wall-clock cap was only checked BETWEEN attempts, so a
+    large dirty conversation could overshoot the deadline (and GRACE) by the
+    whole conversation's write.
     """
     b = budget if budget is not None else shutdown_budget()
     park_start = now()
     deadline = b.park_deadline(signal_time=signal_time, park_start=park_start)
+    pending_gate = (
+        request_pending
+        if request_pending is not None
+        else (lambda: now() >= deadline)
+    )
     if now() >= deadline:
         # No time left for a coordinated checkpoint; skip straight to exit.
         aborted = sessions.abort_inflight()
@@ -289,7 +306,7 @@ def run_shutdown_park(
     aborted = sessions.abort_inflight()
     parked, deadline_hit = sessions.force_checkpoint_all(
         deadline=deadline, now=now, precheck=precheck,
-        request_pending=request_pending,
+        request_pending=pending_gate,
     )
     return ShutdownOutcome(
         requested=True,

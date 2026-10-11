@@ -19,14 +19,14 @@ tests stay green (see evidence).
 
 | File | What |
 |---|---|
-| `src/exo/worker/engines/mlx/dsv41/shutdown.py` (NEW) | Env + budget + signal + orchestrator. `SHUTDOWN_PARK_ENV` :72, the four knobs :74-82, defaults :84-92 (`DRAIN` 10, `PARK` 4, `MARGIN` 1, `GRACE` 15, poll 0.25). **`shutdown_park_enabled` :95**, **`ShutdownBudget` :115** (`fits` :122, **`park_deadline` :131**), **`shutdown_budget` :144**, **`ShutdownSignal` :165** (**`on_signal` :197** idempotent, raises the pre-G3 `SystemExit` when park-off or before the loop exists; **`install` :226**), **`ShutdownOutcome` :244**, **`run_shutdown_park` :258** (steps 3+4). |
+| `src/exo/worker/engines/mlx/dsv41/shutdown.py` (NEW) | Env + budget + signal + orchestrator. `SHUTDOWN_PARK_ENV` :72, the four knobs :74-82, defaults :84-92 (`DRAIN` 10, `PARK` 4, `MARGIN` 1, `GRACE` 15, poll 0.25). **`shutdown_park_enabled` :95**, **`ShutdownBudget` :115** (`fits` :122, **`park_deadline` :131**), **`shutdown_budget` :144**, **`ShutdownSignal` :165** (**`on_signal` :197** idempotent, raises the pre-G3 `SystemExit` when park-off or before the loop exists; **`install` :226**), **`ShutdownOutcome` :244**, **`run_shutdown_park` :258** (steps 3+4; builds a deadline-aware `request_pending` gate `now() >= deadline` unless the caller supplies one, so the EXISTING §G1 per-unit `CKPT_POLL` bounds a checkpoint's overshoot to ONE unit — audit MED-A). |
 | `src/exo/worker/engines/mlx/dsv41/session.py` | **`checkpoint_candidate` :1335** gains keyword `force=False` / `exclude=None` (force relaxes ONLY the time gates — idle-since-turn, global cooldown, per-conv back-off; the between-turns + `min_tokens` + dirty gates are NOT relaxed). **`abort_inflight` :1504** (§G3 step 3: drop every `_inflight` conversation from residency, never park it). **`force_checkpoint_all` :1536** (§G3 step 4: most-recent-first, one attempt each, `maybe_checkpoint` per unit, wall-clock deadline, stops on the first non-committed attempt / a `precheck` stand-down). |
 | `src/exo/worker/engines/mlx/dsv41/engine.py` | `_shutting_down` field :374; **`_activate_next` guard :630** (refuses to start a queued turn while shutting down). **`begin_shutdown` :680** (step 1). **`shutdown_park` :689** (steps 3+4: release `_active` + `_draft_windows`, then `run_shutdown_park` with an `agree_on_tasks` `precheck`). |
 | `src/exo/worker/engines/base.py` | `Engine.begin_shutdown` :59 and `Engine.shutdown_park` :68 — no-op defaults (the runner reaches them generically; a non-DSv4.1 engine opts out). |
 | `src/exo/worker/runner/runner.py` | `_shutdown_state` / `_shutdown_budget` :164 (None unless bootstrap arms it). **`main` :339**: flips `runner_active`, checks `_shutdown_pending` at the top of the loop, runs `_run_shutdown_park` in the finally. **Helpers :382-453**: `_shutdown_pending` :384, `_shutdown_budget_or_default` :393, `_arm_shutdown_engine` :402, `_shutdown_drain_expired` :411, `_abort_inflight_for_shutdown` :418, `_run_shutdown_park` :431. **`_next_work_item` :455** uses a bounded wait (`poll_s`) ONLY while armed. **`handle_generation_tasks` drain check :785** (keep stepping the in-flight turn; abort at the drain deadline). |
 | `src/exo/worker/runner/bootstrap.py` | Park-aware SIGTERM install :225-249 (default-off keeps `_graceful_sigterm` byte-for-byte); attaches `runner._shutdown_state = shutdown_signal` :362-365. |
 | `src/exo/worker/engines/mlx/dsv41/fingerprint.py` | `dsv41.shutdown` added to `KV_NEUTRAL` :167 (control-plane; required by the existing `allowlist_problems()` guard). |
-| `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g3.py` (NEW) | T5 (23 test functions, 23 cases). |
+| `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g3.py` (NEW) | T5 (24 test functions, 24 cases). |
 
 ## Shutdown sequence (plan §G3 steps 1-5, all on the runner/engine main thread)
 
@@ -45,15 +45,22 @@ thread*, between bytecodes — no cross-thread marshalling is required.
    collective.
 3. **Abort.** If the drain window expires, the runner fails the in-flight streams
    and the engine-thread `shutdown_park` → `abort_inflight` DROPS the in-flight
-   conversation from residency. Nothing is parked mid-turn (absolute invariant:
-   `checkpoint_candidate` skips `_inflight`); the last §G1 generation stays the
-   on-disk restore point and only the aborted turn's delta is lost.
+   conversation from residency. Nothing is parked mid-turn (the between-turns
+   invariant is enforced by `checkpoint_candidate` skipping `_inflight`; see
+   *Failure modes → Half-written turn* for its one inherited caveat); the last §G1
+   generation stays the on-disk restore point and only the aborted turn's delta is
+   lost.
 4. **Force checkpoint.** Remaining dirty *between-turns* conversations,
    most-recent-first, each attempted once, via the EXISTING §G1/§G4 path
    (`Dsv41Sessions.maybe_checkpoint` → `park.checkpoint_conversation` →
    `coord.run_checkpoint`). A `precheck` mirrors the §G1 idle tick's
    `agree_on_tasks` pairing so a rank does not enter a checkpoint collective while
    a peer is inside `step()`; the loop stops on the first non-committed attempt.
+   The park **deadline** is threaded into the checkpoint as its
+   `request_pending` gate (`now() >= deadline`; at shutdown there are no new
+   requests), so the EXISTING §G1 per-unit `CKPT_POLL` aborts an *in-progress*
+   checkpoint within ONE unit of the deadline (audit MED-A) — the deadline is no
+   longer only checked *between* attempts.
 5. **Exit.** `main()` returns; `bootstrap.entrypoint`'s finally releases the MLX
    pool and the interpreter exits normally (JACCL/RDMA static destructors run).
    Unchanged from before — G3 does not regress this.
@@ -80,12 +87,20 @@ DRAIN_S + PARK_S + EXIT_MARGIN_S <= GRACE
 park_deadline = min(park_start + PARK_S, signal_time + GRACE - EXIT_MARGIN_S)
 ```
 
-The **hard wall-clock cap** (`signal_time + GRACE - EXIT_MARGIN_S`) is what
-actually protects the SIGKILL boundary: even if the drain overran its own
-nominal budget, the park phase can never push the process past `GRACE - MARGIN`,
-so it always exits (and tears down RDMA) before the script escalates to `kill
--9`. `shutdown_budget()` logs a loud warning if the three nominal phases do not
-fit GRACE, but still hard-caps. Env: `EXO_DSV41_SHUTDOWN_DRAIN_S`,
+The **hard wall-clock cap** (`signal_time + GRACE - EXIT_MARGIN_S`) protects the
+SIGKILL boundary, and it is now enforced at per-unit granularity: the deadline is
+the checkpoint's `request_pending` gate, so the §G1 `CKPT_POLL` aborts the
+in-progress write within **one unit** of the deadline on every rank (audit
+MED-A). **Residual:** the deadline is still a *soft* Python-level gate, not a
+preemptive timer. The overshoot is bounded to **one unit's write** (one layer's
+blobs + fsync), not zero: a single unit slower than `EXIT_MARGIN_S` could still
+push past `GRACE - MARGIN`, and only at that point does the launcher's SIGKILL
+land. With the default 1 s margin and a unit that is a fraction of a second this
+holds with a wide gap, but it is not a hard interrupt — the process does NOT
+"always exit before `kill -9`". A unit larger than the margin is a *design*
+limit; a launcher `GRACE` raise was NOT made here (`OPEN-QUESTION 2`).
+`shutdown_budget()` logs a loud warning if the three nominal phases do not fit
+GRACE, but still hard-caps. Env: `EXO_DSV41_SHUTDOWN_DRAIN_S`,
 `EXO_DSV41_SHUTDOWN_PARK_S`, `EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S`, and the budget
 it is checked against `EXO_SHUTDOWN_GRACE_SECONDS`.
 
@@ -93,20 +108,45 @@ it is checked against `EXO_SHUTDOWN_GRACE_SECONDS`.
 
 - **SIGKILL before completion** → the in-flight generation's `*.tmp` dir is left
   and the previous generation is intact; §G5 sweeps `*.tmp` at the next startup.
-- **Half-written turn** → IMPOSSIBLE: step 3 never serializes in-flight state,
-  and the writer's `_check_unchanged` refuses to write if a conversation moved.
+- **Deadline overshoot** → the park deadline is a per-unit `request_pending` gate,
+  so a checkpoint is aborted within ONE unit of it (temp dir removed, previous
+  generation kept). It is a soft gate, not a preemptive timer: the residual is one
+  unit's write, not zero (see *Budget math*).
+- **Half-written turn** → not serialized: step 3 never parks in-flight state,
+  `checkpoint_candidate` skips `conv._inflight`, and the writer's
+  `_check_unchanged` refuses to write if a conversation moved. **The
+  between-turns-only invariant is enforced SOLELY by `conv._inflight`** (set only
+  at the very end of `Conversation.prefill`, `session.py:780`). A *failed* prefill
+  (an error raised from a mid-stream `append_turn`) re-raises without rewinding
+  (`session_cache.py:619-633`; `_generate` only cancels on `PrefillCancelled`), so
+  it can leave a partial cache with `_inflight == False` that a later park WOULD
+  serialize. This is **inherited from G1, not introduced by G3**, is benign in
+  *bytes* (the parked `n_ctx == offset` is a valid prefix of the same stream, so a
+  restore reproduces exactly the live bytes — no torn/mixed state), and is **not
+  reachable from the runner**: prefill is one synchronous call inside `step()`, so
+  no park (idle or shutdown) can observe a conversation between the start of
+  prefill and its final `_inflight = True`.
 - **Repeat / duplicate signals** → idempotent (one sequence).
 - **Coord deadline exceeding GRACE** (peer slow / desynced) → SIGKILL → temp
   swept, previous generation kept (COLD-safe). No new collective was invented.
 
-## Multi-rank (TP2)
+## Multi-rank (TP2) — BEST-EFFORT / COLD, needs live validation
 
 Both ranks receive SIGTERM from the same deploy script and run the same
-sequence. The final force checkpoint reuses the G4 ALL-OR-NOTHING coordinated
-path VERBATIM, so it is rank-invariant and degrades to COLD on ANY disagreement
-(candidate mismatch → the IDLE exchange is a no-go on both ranks; the loop then
-stops). A rank whose `precheck` sees a peer task stands down. Nothing new is
-coordinated. See OPEN-QUESTION 1.
+sequence, and the final force checkpoint is **BEST-EFFORT / COLD-safe, NOT
+rank-invariant**: it MUST be validated on a live TP2 pair. The G4 protocol
+*inside* one checkpoint (IDLE agreement, agreed N, per-unit `CKPT_POLL`,
+ack-gated prune) is rank-invariant — a candidate disagreement is a no-go on both
+ranks. But the force LOOP around it is not: every per-iteration break
+(`now() >= deadline`, `precheck()` False, candidate None, attempt
+non-committed) is a RANK-LOCAL decision taken with no agreeing exchange, so the
+two ranks can issue a different NUMBER of collectives. Compounding this, G3's
+own step-1 `begin_shutdown` flips `_shutting_down` at a slightly different time
+on each rank, so `_activate_next` can pop a queued task on one rank and leave it
+in `_agreement.queue` on the other — which makes even `precheck()`
+(`not agree_on_tasks() and not self._agreement.queue`) asymmetric. On a real
+coord group that is a deterministic unmatched-collective hang, not merely a
+timing race. See OPEN-QUESTION 1.
 
 ## Test evidence (real runs, this worktree)
 
@@ -114,13 +154,13 @@ coordinated. See OPEN-QUESTION 1.
 $ EXO_DASHBOARD_DIR=…/dashboard PYTHONPATH=…/src:…/mlx-lm …/python \
       -m pytest src/exo/worker/engines/mlx/dsv41/tests/ -q
 322 passed in 31.27s     (baseline, before any change — given)
-345 passed in 32.75s     (after: 322 + 23 new)
+346 passed in 26.19s     (after: 322 + 24 new)
 
 $ … -m pytest src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g3.py -q
-23 passed in 1.13s       (T5 file; 23 test functions, 23 cases)
+24 passed in 0.96s       (T5 file; 24 test functions, 24 cases)
 
 $ … -m pytest src/exo/worker/tests/unittests/test_runner -q   (runner.py/bootstrap.py touched)
-174 passed in 16.71s
+174 passed in 16.26s
 
 $ ruff check src/exo/worker/engines/mlx/dsv41/shutdown.py …/session.py …/engine.py \
              …/fingerprint.py src/exo/worker/engines/base.py \
@@ -129,7 +169,7 @@ $ ruff check src/exo/worker/engines/mlx/dsv41/shutdown.py …/session.py …/eng
 All checks passed!
 ```
 
-**T5** (23 cases):
+**T5** (24 cases):
 
 - **Budget / gate.** Default-off; the four value spellings; defaults 10/4/1/15
   and `fits`; an overrun `not fits`; `park_deadline` = nominal when the drain
@@ -151,7 +191,11 @@ All checks passed!
   checkpoint and restores byte-identically.
 - **Deadline.** `deadline` in the past → no attempt, `deadline_hit`; `PARK_S`
   allows exactly one attempt then stops; most-recent-first ordering; one attempt
-  per conversation; an in-flight conversation is skipped by `force=True`.
+  per conversation; **the park deadline aborts an in-progress checkpoint after
+  exactly ONE unit** (per-unit `CKPT_POLL`, MED-A regression — a whole-conversation
+  write does not overshoot); an in-flight conversation is skipped by `force=True`
+  (now exercised with a COMMITTED prior turn present, so the `_inflight` gate
+  alone rejects it — LOW-D regression).
 - **Flag-off.** Gate false; runner hooks false; `_run_shutdown_park` does not call
   the engine.
 - **Two ranks (G4 lockstep).** Both ranks force-checkpoint the same conversation →
@@ -179,21 +223,37 @@ All checks passed!
 
 ## OPEN-QUESTIONs (cannot be settled offline)
 
-1. **Multi-rank shutdown simultaneity (the requested OQ).** Both ranks get
-   SIGTERM together, but their drains can finish at different times, so they may
-   reach the force-checkpoint `precheck`/IDLE exchange at different program
-   points. The loop is designed to stand down symmetrically (a `precheck`
-   `agree_on_tasks` pairs with a peer in `step()`; the IDLE exchange is a no-go on
-   any disagreement; the loop stops on the first non-committed attempt), and every
-   outcome is COLD-safe. **Residual risk:** if the two ranks hold a DIFFERENT
-   *number* of eligible dirty between-turns candidates, the loop could issue a
-   different number of exchanges and desync. Mitigation is the G4 all-or-nothing
-   decision plus the GRACE hard cap (a desync past GRACE is absorbed by SIGKILL →
-   temp swept). The exact simultaneity race needs live TP2 validation; it was NOT
-   attempted offline.
+1. **Multi-rank shutdown simultaneity (the requested OQ) — a DETERMINISTIC
+   rank-local-break risk, NOT merely a race.** Both ranks get SIGTERM together,
+   but the force-checkpoint LOOP is a sequence of RANK-LOCAL branches with no
+   agreeing exchange between them: `now() >= deadline` (a per-rank monotonic
+   clock), `precheck()` False, candidate None (each rank's own residency/LRU),
+   and "attempt not committed". Any one of these can be taken by one rank and not
+   its peer, so the two ranks can issue a different NUMBER of collectives and the
+   peer blocks in an unmatched `all_gather`. It is deterministic in the code
+   (probe I exercised candidate-count 50 vs 0, standdown 50 vs 0, deadline 50 vs 0
+   on the simulated pair), not a rare timing accident. It is compounded by G3's
+   own step-1 `begin_shutdown`: the `_shutting_down` flip lands at slightly
+   different times on the two ranks, so `_activate_next` can pop the queued task
+   on one rank and leave it in `_agreement.queue` on the other — making
+   `precheck()` itself asymmetric. **The final shutdown checkpoint is therefore
+   BEST-EFFORT / COLD and must be validated on a live TP2 pair; the loop does NOT
+   "stand down symmetrically" and is NOT rank-invariant** (the G4 protocol inside
+   a single checkpoint is; the loop around it is not). On a real coord group a
+   desync hangs until the launcher's SIGKILL, which also skips the clean RDMA
+   teardown (the QP-leak / "No device connected" wedge `bootstrap.py:208-217`
+   exists to prevent). **Robust fix (DESIGN-ONLY, deferred to deploy):** put a
+   *symmetric agreeing gate* before any shutdown collective — an exchange in
+   which both ranks commit to "we are at the shutdown point" and to the SAME next
+   action (proceed / stop), so a rank can never act on a local-only break. Per the
+   original brief this multi-rank simultaneity question is an explicit
+   OPEN-QUESTION and was NOT attempted offline; only the DOCUMENTATION is
+   corrected here.
 2. **Launcher / GRACE change is DESIGN-ONLY; deferred to deploy time.** G3 needs
-   NO launcher change to be correct (it never overruns GRACE). It is only worth
-   RAISING `GRACE` (so a large dirty set has more than ~4 s of park budget) or
+   no launcher change to be correct at the default budget: the park phase is
+   bounded to ONE unit past the deadline (audit MED-A), inside `GRACE - MARGIN`
+   with the default 1 s margin. It is only worth RAISING `GRACE` (so a large dirty
+   set has more than ~4 s of park budget) or
    wiring `EXO_SHUTDOWN_GRACE_SECONDS` into `start_cluster.sh`'s env allowlist so
    the runner and the script agree. Any such edit MUST land on the **production
    branch** at deploy time (per A8: `origin/main`'s `start_cluster.sh` lacks
