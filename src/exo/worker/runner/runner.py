@@ -7,7 +7,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 from anyio import ClosedResourceError, EndOfStream
 
@@ -156,6 +156,13 @@ class Runner:
         self._prefill_server_port: int | None = None
         self._work_queue: queue.Queue[WorkItem] = queue.Queue()
         self._task_reader_thread: threading.Thread | None = None
+
+        # §G3 park-on-shutdown. ``bootstrap.entrypoint`` sets ``_shutdown_state``
+        # (a ds v41 ``ShutdownSignal``) only when ``EXO_DSV41_SHUTDOWN_PARK=1``;
+        # left ``None`` the runner keeps its exact pre-G3 blocking idle wait and
+        # runs no shutdown-park code. ``_shutdown_budget`` is resolved lazily.
+        self._shutdown_state: Any = None
+        self._shutdown_budget: Any = None
 
         self._step_beat: float = time.monotonic()
         self._stall_sampler_thread: threading.Thread | None = None
@@ -331,8 +338,18 @@ class Runner:
 
     def main(self):
         self._start_task_reader()
+        # §G3: the polling loop is live now, so a shutdown signal arms the fast
+        # path instead of unwinding (see ShutdownSignal.on_signal). Set before the
+        # first blocking wait so no signal can land in the gap.
+        if getattr(self, "_shutdown_state", None) is not None:
+            self._shutdown_state.runner_active = True
         try:
             while True:
+                if self._shutdown_pending():
+                    # §G3 step 1: stop admitting new requests; fall to the finally
+                    # which runs the abort + force checkpoint + clean exit.
+                    self._arm_shutdown_engine()
+                    break
                 item = self._next_work_item()
                 if item is None:
                     continue  # an idle tick ran; go back to waiting
@@ -349,6 +366,11 @@ class Runner:
                 if isinstance(self.current_status, RunnerShutdown):
                     break
         finally:
+            # §G3 steps (3)+(4): if a shutdown is armed, abort any turn the drain
+            # could not finish and force-checkpoint the remaining dirty
+            # conversations HERE, before bootstrap's finally releases the MLX
+            # pool. Never raises.
+            self._run_shutdown_park()
             if self._prefill_server is not None:
                 self._prefill_server.stop()
                 self._prefill_server = None
@@ -356,6 +378,79 @@ class Runner:
             if self._task_reader_thread is not None:
                 self._task_reader_thread.join(timeout=5)
                 self._task_reader_thread = None
+
+    # ------------------------------------------------- §G3 park-on-shutdown
+
+    def _shutdown_pending(self) -> bool:
+        """§G3: True once a park-on-shutdown signal has been observed.
+
+        Always False with the fast path off (``_shutdown_state`` is None), so the
+        default runner touches none of the code below.
+        """
+        st = getattr(self, "_shutdown_state", None)
+        return st is not None and st.park and bool(st.requested)
+
+    def _shutdown_budget_or_default(self) -> Any:
+        b = getattr(self, "_shutdown_budget", None)
+        if b is None:
+            from exo.worker.engines.mlx.dsv41.shutdown import shutdown_budget
+
+            b = shutdown_budget()
+            self._shutdown_budget = b
+        return b
+
+    def _arm_shutdown_engine(self) -> None:
+        """§G3 step 1: tell the engine to stop admitting new turns (idempotent)."""
+        eng = self.generator
+        if isinstance(eng, Engine) and hasattr(eng, "begin_shutdown"):
+            try:
+                eng.begin_shutdown()
+            except Exception:  # noqa: BLE001 - never block the shutdown
+                logger.debug("[DSV41] §G3 begin_shutdown failed", exc_info=True)
+
+    def _shutdown_drain_expired(self) -> bool:
+        """§G3 step 2: True once the in-flight turn's drain window is over."""
+        st = getattr(self, "_shutdown_state", None)
+        if st is None or not st.park or not st.requested or st.signal_time is None:
+            return False
+        return time.monotonic() >= st.signal_time + self._shutdown_budget_or_default().drain_s
+
+    def _abort_inflight_for_shutdown(self) -> None:
+        """§G3 step 3 (runner side): the drain timed out — fail the in-flight
+        streams. The engine's conversations are aborted and dropped from
+        residency by ``_run_shutdown_park`` -> ``engine.shutdown_park`` (nothing
+        is ever parked mid-turn)."""
+        for task_id in list(self.active_tasks.keys()):
+            self.send_task_status(task_id, TaskStatus.Failed)
+            self.active_tasks.pop(task_id, None)
+        logger.warning(
+            "[DSV41] §G3 drain expired; aborting the in-flight turn "
+            "(nothing parked mid-turn; the last generation stays on disk)."
+        )
+
+    def _run_shutdown_park(self) -> None:
+        """§G3 steps (3)+(4) in the runner finally; never raises."""
+        st = getattr(self, "_shutdown_state", None)
+        if st is None or not st.park or not st.requested:
+            return
+        eng = self.generator
+        if not isinstance(eng, Engine) or not hasattr(eng, "shutdown_park"):
+            return
+        try:
+            out = eng.shutdown_park(
+                signal_time=st.signal_time,
+                budget=self._shutdown_budget_or_default(),
+            )
+            logger.info(
+                f"[DSV41] §G3 shutdown park complete: "
+                f"aborted={len(out.aborted)} attempted={out.parked_count} "
+                f"deadline_hit={out.deadline_hit}"
+            )
+        except Exception as exc:  # noqa: BLE001 - never break the clean exit
+            logger.warning(
+                f"[DSV41] §G3 shutdown park raised ({type(exc).__name__}: {exc}); "
+                "continuing with the clean exit (previous generation kept)."
+            )
 
     def _next_work_item(self) -> WorkItem | None:
         """Block for the next work item, or run ONE engine idle tick.
@@ -375,14 +470,23 @@ class Runner:
                 tick = gen.idle_tick_seconds()
             except Exception:  # noqa: BLE001 - a bad hook must not stop serving
                 tick = None
-        if tick is None:
+        # §G3: while a park-on-shutdown signal is armed the wait MUST be bounded
+        # even if the engine offers no idle ticks, so the flag is observed well
+        # within GRACE. ``_shutdown_state`` is None with the fast path off, so the
+        # default path below is byte-for-byte the pre-G3 blocking ``get()``.
+        st = getattr(self, "_shutdown_state", None)
+        if tick is None and st is None:
             return self._work_queue.get()
+        timeout = tick
+        if st is not None:
+            timeout = st.poll_s if timeout is None else min(timeout, st.poll_s)
         try:
-            return self._work_queue.get(timeout=tick)
+            return self._work_queue.get(timeout=timeout)
         except queue.Empty:
             pass
-        assert isinstance(gen, Engine)
-        gen.idle_tick(request_pending=lambda: not self._work_queue.empty())
+        if tick is not None:
+            assert isinstance(gen, Engine)
+            gen.idle_tick(request_pending=lambda: not self._work_queue.empty())
         return None
 
     def handle_first_task(self, task: Task):
@@ -677,6 +781,14 @@ class Runner:
 
         self._step_beat = time.monotonic()
         while self.active_tasks:
+            if self._shutdown_pending():
+                # §G3 step 2/3: a shutdown is armed. Keep draining the in-flight
+                # turn (its normal step below) until the drain window expires,
+                # then abort it — never park mid-turn.
+                self._arm_shutdown_engine()
+                if self._shutdown_drain_expired():
+                    self._abort_inflight_for_shutdown()
+                    break
             if _runner_probe:
                 _t_step_start = time.perf_counter()
             try:

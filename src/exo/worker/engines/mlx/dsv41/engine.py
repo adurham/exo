@@ -421,6 +421,10 @@ class Dsv41Engine(Engine):
     #: request (identical stream, deterministic finish) is long out of
     #: ``step()`` before this rank issues any idle-tick collective.
     _last_step_monotonic: float = field(default=0.0, init=False)
+    #: §G3: set once a shutdown is armed. ``_activate_next`` refuses to start a
+    #: queued request while this is True, so "stop admitting new requests" holds
+    #: even while the runner is still draining an in-flight turn.
+    _shutting_down: bool = field(default=False, init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -678,6 +682,9 @@ class Dsv41Engine(Engine):
         step must not raise on the first.
         """
         while self._agreement.queue:
+            if self._shutting_down:
+                # §G3 step 1: a shutdown is armed; do not start a new turn.
+                return
             task = self._agreement.queue.popleft()
             try:
                 self._active = self._start(task)
@@ -723,6 +730,62 @@ class Dsv41Engine(Engine):
         # next request sees the pre-turn state instead of a half-fed cache.
         self._sessions.cancel_all()
         return dropped
+
+    # ------------------------------------------------- §G3 park-on-shutdown
+
+    def begin_shutdown(self) -> None:
+        """§G3 step 1: stop admitting new requests.
+
+        After this, ``_activate_next`` will not start a queued request, so the
+        only turn that can still run is the one already in flight (drained by
+        the runner). Idempotent.
+        """
+        self._shutting_down = True
+
+    def shutdown_park(
+        self,
+        *,
+        signal_time: float,
+        budget: Any = None,
+        now: Any = time.monotonic,
+    ) -> Any:
+        """§G3 steps (3)+(4) on the engine/runner thread: abort, then park.
+
+        Called from the runner's ``main()`` finally while the model is still
+        resident. Uses the EXISTING §G1/§G4 coordinated checkpoint path
+        (``sessions.maybe_checkpoint`` -> ``coord.run_checkpoint``) so the final
+        force checkpoint stays rank-invariant and COLD-safe on any disagreement —
+        no new collective protocol.
+
+        Releases every in-flight reference BEFORE the checkpoints (drop the
+        ``_active`` request and its session from residency; clear the draft
+        windows) so no MLX array is held across the next forward — the §G1
+        donation trap does not apply to the coordination, but the abort itself
+        must not pin the graph either.
+        """
+        from exo.worker.engines.mlx.dsv41 import shutdown as _sh
+
+        self._shutting_down = True
+        b = budget if budget is not None else _sh.shutdown_budget()
+        # (3) release the active request; abort_inflight drops its conversation.
+        self._active = None
+        self._draft_windows.clear()
+
+        def precheck() -> bool:
+            # Mirror the §G1 idle tick: pair an agree_on_tasks with a peer that
+            # may be inside step(), and stand down if either side holds a task.
+            # (agree_on_tasks is ALWAYS issued — its collective must run.)
+            return not (
+                self._agreement.agree_on_tasks() or self._agreement.queue
+            )
+
+        return _sh.run_shutdown_park(
+            self._sessions,
+            signal_time=signal_time,
+            budget=b,
+            now=now,
+            precheck=precheck,
+        )
 
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
         raise Dsv41UnsupportedFeature(

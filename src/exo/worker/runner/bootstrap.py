@@ -6,7 +6,7 @@ import signal
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import loguru
 
@@ -220,12 +220,33 @@ def entrypoint(
         logger.info("Runner received SIGTERM — exiting cleanly to tear down RDMA.")
         raise SystemExit(0)
 
-    try:
-        signal.signal(signal.SIGTERM, _graceful_sigterm)
-    except (ValueError, OSError):
-        # Not on the main thread (shouldn't happen for the runner entrypoint),
-        # or signals unavailable — non-fatal; fall back to default disposition.
-        logger.warning("Could not install SIGTERM handler in runner entrypoint.")
+    # Plan §G3: park-on-shutdown is a DEFAULT-OFF fast path. With the gate unset
+    # the handler above is installed UNCHANGED (exact pre-G3 behaviour). With it
+    # armed, a ShutdownSignal is installed for SIGTERM (+SIGINT): it records the
+    # request and lets the runner's main loop drive the drain / abort /
+    # force-checkpoint sequence, unwinding directly (the SystemExit above) ONLY
+    # when the signal lands before that loop exists (during builder setup / load),
+    # so the RDMA-teardown guarantee is preserved in every case. Duplicate signals
+    # are idempotent no-ops.
+    from exo.worker.engines.mlx.dsv41.shutdown import (
+        ShutdownSignal,
+        shutdown_park_enabled,
+    )
+
+    shutdown_signal: Any = None
+    if shutdown_park_enabled():
+        shutdown_signal = ShutdownSignal(park=True)
+        shutdown_signal.install()
+        logger.info(
+            "[DSV41] §G3 park-on-shutdown armed (EXO_DSV41_SHUTDOWN_PARK=1)."
+        )
+    else:
+        try:
+            signal.signal(signal.SIGTERM, _graceful_sigterm)
+        except (ValueError, OSError):
+            # Not on the main thread (shouldn't happen for the runner entrypoint),
+            # or signals unavailable — non-fatal; fall back to default disposition.
+            logger.warning("Could not install SIGTERM handler in runner entrypoint.")
 
     # Live Python-stack dumper for the PP+DSpark decode-loop stall investigation
     # (2026-07-21). `sample <pid>` only shows the native C stack (mostly opaque
@@ -338,6 +359,10 @@ def entrypoint(
                 cancel_receiver=cancel_receiver,
             )
         runner = Runner(bound_instance, builder, event_sender_downcast, task_receiver)
+        if shutdown_signal is not None:
+            # §G3: hand the runner the signal state; with it set (park armed) the
+            # idle wait is bounded and main() runs the shutdown sequence.
+            runner._shutdown_state = shutdown_signal
         runner.main()
 
     except ClosedResourceError:
