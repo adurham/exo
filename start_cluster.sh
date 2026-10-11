@@ -2788,6 +2788,21 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_CHECKPOINT_SPACING_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_SPACING_ROWS=$EXO_DSV41_CHECKPOINT_SPACING_ROWS"
   [ -n "${EXO_DSV41_CHECKPOINT_MARGIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_MARGIN_ROWS=$EXO_DSV41_CHECKPOINT_MARGIN_ROWS"
   [ -n "${EXO_DSV41_CHECKPOINT_KEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_KEEP=$EXO_DSV41_CHECKPOINT_KEEP"
+  # Restart-survival next21 (G1 after-turn idle checkpoint / G3 park-on-shutdown).
+  # CKPT=1 arms the core treatment; SHUTDOWN_PARK=1 arms the graceful-shutdown
+  # fast path (both default OFF in code). The rest size their windows; unset =>
+  # code defaults (MIN_DELTA 2048 / IDLE_S 20 / DRAIN_S 10 / PARK_S ~ GRACE-drain).
+  # Forwarded here so a value set in the shell is not silently dropped by the
+  # allow-list (the read-at-code/dead-in-deployment bug class).
+  [ -n "${EXO_DSV41_CKPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT=$EXO_DSV41_CKPT"
+  [ -n "${EXO_DSV41_CKPT_MIN_DELTA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_MIN_DELTA=$EXO_DSV41_CKPT_MIN_DELTA"
+  [ -n "${EXO_DSV41_CKPT_IDLE_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_IDLE_S=$EXO_DSV41_CKPT_IDLE_S"
+  [ -n "${EXO_DSV41_CKPT_TICK_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_TICK_S=$EXO_DSV41_CKPT_TICK_S"
+  [ -n "${EXO_DSV41_CKPT_RETRY_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_RETRY_S=$EXO_DSV41_CKPT_RETRY_S"
+  [ -n "${EXO_DSV41_SHUTDOWN_PARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_PARK=$EXO_DSV41_SHUTDOWN_PARK"
+  [ -n "${EXO_DSV41_SHUTDOWN_DRAIN_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_DRAIN_S=$EXO_DSV41_SHUTDOWN_DRAIN_S"
+  [ -n "${EXO_DSV41_SHUTDOWN_PARK_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_PARK_S=$EXO_DSV41_SHUTDOWN_PARK_S"
+  [ -n "${EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S=$EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).
