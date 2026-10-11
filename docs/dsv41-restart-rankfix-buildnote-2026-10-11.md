@@ -101,12 +101,13 @@ NON-CONSUMING (dir kept, marked `.active`); fsync/tmp→rename/retention unchang
 - `src/exo/worker/engines/mlx/dsv41/engine.py` — park layout omits `rank`.
 - `src/exo/worker/engines/mlx/dsv41/fingerprint.py` — `_layout_fp_from` ignores
   rank when a layout mapping is given.
-- `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g4.py` — +11 CPU-only
+- `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g4.py` — +13 CPU-only
   tests (swap both directions bit-exact; site mismatch → cold both; no-swap
   unchanged & exchange counts symmetric; one rank missing → cold both; ambiguous
   same-gen different-digest → cold; `decide_identity` unit cases + rank-order
   invariance; `site_tag`; foreign-site refused locally; legacy no-site keeps the
-  rank rule; park layout rank-invariant; `site_identity` env→hostname).
+  rank rule; park layout rank-invariant; `site_identity` env→hostname; the
+  identity gate ISOLATED to cold; a negative verdict does not latch).
 
 ## Test evidence
 
@@ -118,14 +119,60 @@ PYTHONPATH=<wt>/src:<wt>/mlx-lm EXO_DASHBOARD_DIR=<live>/dashboard/build \
 ```
 
 - Baseline at construct tip (3afce11d7): **354 passed**.
-- With the fix: **365 passed** (354 + 11 new), locally reproduced by the PM on the
+- With the fix: **367 passed** (354 + 13 new), locally reproduced by the PM on the
   committed tree.
 
-## Adversarial audit
+Commits on the branch: `ea3175a6b` (the fix) and `30f32e448` (post-audit fixes).
 
-See the "Adversarial audit findings" section appended below (independent audit of
-wrong-identity mapping, startup-agreement race/order, partial restore, and the
-rank-independence claim).
+## Adversarial audit (independent) + post-audit fixes
+
+An independent adversarial audit (separate agent: mutation testing + reading the
+model source) attacked the fix. Verdict: **sound on content safety — no path to a
+mixed or wrong-content restore.** Findings and resolution:
+
+- **A. Rank-independence claim — CONFIRMED SOUND.** Independently re-derived from
+  the model source: no cached buffer is rank-split (`win_kv`/`comp_kv`/`index_k`
+  are `(bsz,·,head_dim)`; `wkv`/`kv_norm`/compressor/indexer weights load full on
+  both ranks; only the attention *output* projections + experts + head are
+  sharded; anchor logits come from the summed head, so they match). This is the
+  load-bearing assumption and it holds.
+- **B. Site admission fail-safe — no hole for site-tagged dirs.** Non-string /
+  empty / whitespace / wrong-case `site`, an unknown store site, and
+  `ALLOW_STALE` (the site check runs before `_admit`) are all refused.
+- **C. Startup-agreement latch — REAL BUG, FIXED (commit 30f32e448).** The
+  identity verdict was cached for the process lifetime, so a first restore landing
+  while a peer's store was unusable (site tag 0 → "unknown-identity") latched COLD
+  forever. Fixed: only a POSITIVE verdict latches; a negative one is re-attempted
+  on every restore (rank-invariant, since `decide_identity` is pure, so ranks
+  re-run/latch together). Regression test added.
+- **D. Partial restore — no finding.** The verdict is identical on every rank and
+  runs before `run_restore`; the existing all-ranks ack either discards the
+  restored copy on every rank or keeps it everywhere.
+- **E. Test quality — one surviving mutant, now caught.** Mutation testing showed
+  "ignore the identity verdict (always true)" was NOT caught by any test. Added an
+  ISOLATING test (both always-true variants now fail it; the swap tests do
+  genuinely exercise the site gate). The swap tests pass a SHARED fingerprint to
+  both ranks, so the fingerprint's rank-invariance is pinned separately by
+  `test_park_layout_is_rank_invariant`.
+- **F. Fingerprint scope — tightened (30f32e448).** The first pass also dropped
+  the model's `window`/`bsz` fallback from the park layout; fixed so the ONLY axis
+  removed from the park layout fingerprint is `rank` (window/bsz keep the model
+  fallback; geometry is still re-checked at restore). The cold log line no longer
+  prints an empty `reason=`.
+
+### Known limitations (documented, not defects for the production topology)
+
+- Same-host, SHARED park root: both ranks derive the same hostname `site` and
+  would cross-adopt each other's dirs. Production uses node-local stores on two
+  distinct hostnames, so this cannot occur there — and it is why the identity
+  exchange deliberately tolerates duplicate sites (a single machine hosts both
+  ranks in tests).
+- Every PRE-EXISTING dir is refused once after this build deploys (the
+  `layout_fp` value changes when `rank` is dropped) — the expected cold-accept;
+  dirs written by this build restore across a swap.
+- `EXO_DSV41_SITE_ID` is an optional override; the hostname default needs NO
+  launcher allow-list change (the value is read inside the process, not forwarded
+  through `start_cluster.sh`).
 
 ## Deferred / not done (out of scope here)
 
