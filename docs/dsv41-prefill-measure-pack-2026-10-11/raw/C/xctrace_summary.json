@@ -1,0 +1,467 @@
+{
+ "metal-gpu-intervals": {
+  "schema_cols": [
+   "start",
+   "duration",
+   "channel-name",
+   "frame-number",
+   "start-latency",
+   "event-depth",
+   "event-label",
+   "state",
+   "connection-UUID",
+   "color",
+   "process",
+   "gpu",
+   "channel-subtitle",
+   "iosurface-accesses",
+   "bytes",
+   "cmdbuffer-id",
+   "encoder-id",
+   "gpu-submission-id"
+  ],
+  "n_rows": 9400,
+  "numeric": {
+   "start": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "duration": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "event-label": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "state": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "gpu": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   }
+  },
+  "distinct_names": 8984,
+  "top_names": [
+   [
+    "None",
+    9817
+   ],
+   [
+    "GPU Execution  (n/a) 0xa1adc6c",
+    1
+   ],
+   [
+    "Active",
+    1
+   ],
+   [
+    "GPU Execution  (python (23410)) 0xa1adc71",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc76",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc75",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc79",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc78",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc7c",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc7f",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc7b",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc7e",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc84",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc81",
+    1
+   ],
+   [
+    "  (WindowServer (176)) 0xa1adc87",
+    1
+   ]
+  ]
+ },
+ "metal-command-buffer-completed": {
+  "schema_cols": [
+   "timestamp",
+   "cmdbuffer-id",
+   "commit-id"
+  ],
+  "n_rows": 2377,
+  "numeric": {
+   "timestamp": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "cmdbuffer-id": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "commit-id": {
+    "min": 0.0,
+    "max": 0.0,
+    "sum": 0.0,
+    "nnum": 1
+   }
+  },
+  "distinct_names": 0,
+  "top_names": []
+ },
+ "metal-application-intervals": {
+  "schema_cols": [
+   "start",
+   "duration",
+   "process",
+   "gpu",
+   "event-depth",
+   "event-label",
+   "event-priority",
+   "connection-UUID",
+   "color",
+   "thread",
+   "event-type",
+   "cmdbuffer-id",
+   "encoder-id"
+  ],
+  "n_rows": 2521,
+  "numeric": {
+   "start": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "duration": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "event-label": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "event-type": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "process": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   }
+  },
+  "distinct_names": 1685,
+  "top_names": [
+   [
+    "None",
+    5879
+   ],
+   [
+    "python (23410)",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 1) (python (23410))",
+    1
+   ],
+   [
+    "Encoding",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 2) (python (23410))",
+    1
+   ],
+   [
+    "Compute Command 0 (Main Thread (0x28b0e) (python, pid: 23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 3) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 4) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 5) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 6) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 7) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 8) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 9) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 10) (python (23410))",
+    1
+   ],
+   [
+    "Command Buffer 0 (Frame 11) (python (23410))",
+    1
+   ]
+  ]
+ },
+ "metal-application-command-buffer-submissions": {
+  "schema_cols": [
+   "start",
+   "duration",
+   "event-type",
+   "gpu",
+   "track-label",
+   "num-encoders",
+   "encoder-time",
+   "process",
+   "thread",
+   "event-icon",
+   "event-label",
+   "encoder-time-label",
+   "frame-number",
+   "color",
+   "cmdbuffer-id"
+  ],
+  "n_rows": 1681,
+  "numeric": {
+   "start": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "duration": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "cmdbuffer-id": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   }
+  },
+  "distinct_names": 0,
+  "top_names": []
+ },
+ "gpu-performance-device-state-intervals": {
+  "schema_cols": [
+   "start",
+   "duration",
+   "accelerator-id",
+   "state",
+   "desired-state"
+  ],
+  "n_rows": 0,
+  "numeric": {
+   "start": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "duration": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "state": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   }
+  },
+  "distinct_names": 0,
+  "top_names": []
+ },
+ "metal-driver-intervals": {
+  "schema_cols": [
+   "start",
+   "duration",
+   "gpu-driver-name",
+   "event-type",
+   "event-depth",
+   "event-label",
+   "event-priority",
+   "connection-UUID",
+   "color",
+   "process",
+   "thread",
+   "gpu",
+   "object-id",
+   "lane"
+  ],
+  "n_rows": 7804,
+  "numeric": {
+   "start": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "duration": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "event-label": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   }
+  },
+  "distinct_names": 69,
+  "top_names": [
+   [
+    "None",
+    7736
+   ],
+   [
+    "Command Buffer 0x91ad871 (python (0x28b0f) (python, pid: 23410))",
+    1
+   ],
+   [
+    "Segment 0xa1adc70",
+    1
+   ],
+   [
+    "Command Buffer 0 (python (0x28b0f) (python, pid: 23410))",
+    1
+   ],
+   [
+    "Compositor (Main Thread (0xc4a) (WindowServer, pid: 176))",
+    1
+   ],
+   [
+    "coreanimation.offscreen-encoder",
+    1
+   ],
+   [
+    "Compute Command 4",
+    1
+   ],
+   [
+    "coreanimation.assembly-encoder",
+    1
+   ],
+   [
+    "Compositor (com.apple.windowserver.root_queue (0x27c14) (WindowServer, pid: 176))",
+    1
+   ],
+   [
+    "Command Buffer 0 (python (0x28b10) (python, pid: 23410))",
+    1
+   ],
+   [
+    "Compute Command 0",
+    1
+   ],
+   [
+    "Compute Command 2",
+    1
+   ],
+   [
+    "Compositor (com.apple.windowserver.root_queue (0x28ae7) (WindowServer, pid: 176))",
+    1
+   ],
+   [
+    "Compositor (com.apple.windowserver.root_queue (0x23e86) (WindowServer, pid: 176))",
+    1
+   ],
+   [
+    "RBImageRenderer (SecurityAgent (0x28812) (SecurityAgent, pid: 381))",
+    1
+   ]
+  ]
+ },
+ "metal-gpu-execution-points": {
+  "schema_cols": [
+   "timestamp",
+   "channel-id",
+   "function",
+   "slot-id",
+   "gpu-submission-id",
+   "accelerator-id",
+   "note"
+  ],
+  "n_rows": 18800,
+  "numeric": {
+   "timestamp": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   },
+   "event-label": {
+    "min": null,
+    "max": null,
+    "sum": 0.0,
+    "nnum": 0
+   }
+  },
+  "distinct_names": 0,
+  "top_names": []
+ }
+}

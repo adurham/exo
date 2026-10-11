@@ -1,0 +1,3 @@
+<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[69]'><schema name="gpu-aps-stream" documentation="GPU APS Stream"><col><mnemonic>timestamp</mnemonic><name>Timestamp</name><engineering-type>event-time</engineering-type></col><col><mnemonic>buffer-index</mnemonic><name>Buffer Index</name><engineering-type>uint32</engineering-type></col><col><mnemonic>source-index</mnemonic><name>Source Index</name><engineering-type>uint32</engineering-type></col><col><mnemonic>source-type</mnemonic><name>Source Type</name><engineering-type>uint32</engineering-type></col><col><mnemonic>stream</mnemonic><name>Stream</name><engineering-type>data</engineering-type></col></schema></node></trace-query-result>

@@ -1,0 +1,37 @@
+{
+ "metal-gpu-intervals": {
+  "n_rows": 9400,
+  "gpu_exec_intervals_active": 1,
+  "gpu_busy_ms": 36.17,
+  "span_s": 30.614,
+  "by_category_ms": {
+   "Command Buffer 0:Compute": 19616.2,
+   "(noname)": 5291.0,
+   "  (WindowServer (176)) 0": 387.1,
+   "GPU Execution": 61.18,
+   "Write Surface: 7  (Windo": 19.13,
+   "Write Surface: 9  (Windo": 17.64,
+   "Write Surface: 8  (Windo": 16.47,
+   "Read Surface: 9  (Window": 13.68,
+   "Read Surface: 7  (Window": 8.78,
+   "Read Surface: 15  (Windo": 6.26
+  }
+ },
+ "metal-command-buffer-completed": {
+  "n_rows": 2377
+ },
+ "metal-application-command-buffer-submissions": {
+  "n_rows": 1681
+ },
+ "metal-application-intervals": {
+  "n_rows": 2521,
+  "label_prefix_counts": {
+   "Command Buffer": 1681,
+   "Compute Command": 1,
+   "other": 839
+  }
+ },
+ "metal-gpu-execution-points": {
+  "n_rows": 18800
+ }
+}

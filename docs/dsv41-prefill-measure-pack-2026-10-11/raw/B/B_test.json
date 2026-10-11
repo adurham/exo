@@ -1,0 +1,188 @@
+{
+ "env": {
+  "MLX_GPU_TIME": "1",
+  "MTL_DISABLE_TIMEOUT": "1",
+  "EXL3_MM_SEG": "v19d",
+  "DSV41_INDEXER_HIER": null,
+  "DSV41_DENSE": "affine6",
+  "DSV41_DENSE_POLICY": "layers.*.ffn.shared_experts.*=q8g64",
+  "MLX_MAX_OPS_PER_BUFFER": "200",
+  "MTL_COMMAND_BUFFER_TIMEOUT": "0"
+ },
+ "mode": "real",
+ "results": [
+  {
+   "layer": 3,
+   "ctx": 4096,
+   "chunk": 2048,
+   "start_pos": 2048,
+   "mode": "real",
+   "ratio": 2,
+   "is_kv_src": false,
+   "is_idx_src": false,
+   "build_report": {
+    "dense_groups": 15,
+    "plain": 14,
+    "fused": 0,
+    "optional_absent": [],
+    "bias_vl": "sidecar",
+    "trace_routing": true
+   },
+   "unbracketed": {
+    "label": "L3@4096",
+    "mode": "unbracketed",
+    "wall_ms": 128.88766650030448,
+    "wall_min": 128.7457499993252,
+    "gpu_ms": 148.884041,
+    "gpu_min": 148.793213,
+    "wall_all": [
+     129.44154200067715,
+     128.76737500027957,
+     128.7457499993252,
+     129.00795800032938
+    ],
+    "gpu_all": [
+     149.272078,
+     148.793213,
+     148.878208,
+     148.889874
+    ]
+   },
+   "bracketed_agg": {
+    "total_ms": 127.7213085,
+    "rows": [
+     {
+      "cls": "MoE expert (down)",
+      "ms": 37.8260585,
+      "pct": 29.616090646299636
+     },
+     {
+      "cls": "sdpa (sparse/compressed)",
+      "ms": 24.416772,
+      "pct": 19.117226629415562
+     },
+     {
+      "cls": "dense proj (attn o)",
+      "ms": 12.8670595,
+      "pct": 10.07432483358875
+     },
+     {
+      "cls": "MoE expert (gate)",
+      "ms": 12.3950385,
+      "pct": 9.704753768632115
+     },
+     {
+      "cls": "MoE expert (up)",
+      "ms": 11.40481,
+      "pct": 8.929449701026199
+     },
+     {
+      "cls": "hyper-connections (HC)",
+      "ms": 9.096493,
+      "pct": 7.122142034741212
+     },
+     {
+      "cls": "dense proj (attn qkv+rope)",
+      "ms": 7.7129365,
+      "pct": 6.038879957137301
+     },
+     {
+      "cls": "dense proj (shared expert)",
+      "ms": 6.110249,
+      "pct": 4.784048231074927
+     },
+     {
+      "cls": "norms (RMSNorm)",
+      "ms": 2.971164,
+      "pct": 2.3262868466462665
+     },
+     {
+      "cls": "MoE experts total",
+      "ms": 2.502978,
+      "pct": 1.9597184130007563
+     },
+     {
+      "cls": "MoE routing gate (score+topk)",
+      "ms": 0.4177495,
+      "pct": 0.32707893843727726
+     }
+    ]
+   },
+   "bracketed_total_ms": 127.7213085,
+   "sigma_bracketed_vs_whole_gap_pct": -14.214238381667776,
+   "gpu_vs_wall": {
+    "gpu_ms": 148.884041,
+    "wall_ms": 128.88766650030448,
+    "dispatch_gpu_idle_ms": -19.99637449969552,
+    "gpu_frac": 1.155145756321442
+   },
+   "allsum_calls": 18,
+   "allsum_bytes": 377487360,
+   "allsum_shapes": [
+    [
+     1,
+     2048,
+     5120
+    ],
+    [
+     2048,
+     5120
+    ],
+    [
+     1,
+     2048,
+     5120
+    ],
+    [
+     2048,
+     5120
+    ],
+    [
+     1,
+     2048,
+     5120
+    ],
+    [
+     2048,
+     5120
+    ],
+    [
+     1,
+     2048,
+     5120
+    ],
+    [
+     2048,
+     5120
+    ]
+   ],
+   "allsum_bound": {
+    "per_chunk_MB": 1677.7216,
+    "calls_per_chunk": 80,
+    "lower_ms_raw": 169.37216,
+    "lower_ms_eff": 337.14432000000005,
+    "raw_gbs": 10.0,
+    "eff_gbs": 5.0,
+    "lat_us": 20.0
+   },
+   "live_unfenced_ms_per_chunk": 8380.0,
+   "env": {
+    "MLX_GPU_TIME": "1",
+    "MTL_DISABLE_TIMEOUT": "1",
+    "EXL3_MM_SEG": "v19d",
+    "DSV41_INDEXER_HIER": null,
+    "DSV41_DENSE": "affine6",
+    "DSV41_DENSE_POLICY": "layers.*.ffn.shared_experts.*=q8g64",
+    "MLX_MAX_OPS_PER_BUFFER": "200",
+    "MTL_COMMAND_BUFFER_TIMEOUT": "0"
+   },
+   "have_gpu_time": true,
+   "mlx": "0.32.3.dev20260918+603f16eb7",
+   "host": "Adams-Mac-Studio-M4-2"
+  }
+ ],
+ "mlx": "0.32.3.dev20260918+603f16eb7",
+ "host": "Adams-Mac-Studio-M4-2",
+ "task": "B: per-op-class GPU-time attribution",
+ "note": "all_sum stubbed (no RDMA on live link); gpu_time DROPS JACCL RDMA/CPU-only buffers; bounded analytically + by difference"
+}

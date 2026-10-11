@@ -1,0 +1,2 @@
+[load] start 45s T=4096 M=8192 N=8192
+[load] done 1240 matmuls in 45.0s -> 15.14 TF sustained

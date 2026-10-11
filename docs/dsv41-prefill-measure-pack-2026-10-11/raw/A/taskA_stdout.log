@@ -1,0 +1,43 @@
+[A] cache limit set to 5.0 GB
+[A] trace /tmp/p20_pmp_A/raw/trace/p30_exl3_trace_clamp.json sha256=b4f1b142a5c5ef77... n_steps=531 layers=40
+[A] loaded checkpoint index
+[A] dense bf16 roofline 4096x8192x8192: 15.216 TF (gpu) 15.136 TF (wall)  gpu_ms=36.1302
+[A] building native q4g64 (streamed)
+[A] q4g64 built 5s total 3.82 GB
+[A] building native q3g128 (streamed)
+[A] q3g128 built 5s total 2.76 GB
+[A] loading EXL3 layer 20 (k=2)
+[A] L20 S=2048 real idx {'pairs': 12288, 'experts_hit': 237, 'M_mean_all': 32.0, 'M_mean_hit': 51.848, 'M_median_hit': 24.0, 'M_max': 781, 'M_p95': 152.5499999999999}
+[A] L20 S=2048 exl3_L20_real            wall=  59.555 gpu=  80.021 tf_gpu=  5.43 roof= 35.7%
+[A] L20 S=2048 native_q4g64_real        wall=  46.372 gpu=  46.090 tf_gpu=  9.44 roof= 62.0%
+[A] L20 S=2048 native_q3g128_real       wall=  46.457 gpu=  46.228 tf_gpu=  9.41 roof= 61.8%
+[A] L20 S=2048 exl3_L20_uniform         wall=  57.469 gpu=  77.142 tf_gpu=  5.64 roof= 37.0%
+[A] L20 S=2048 native_q4g64_uniform     wall=  36.077 gpu=  35.855 tf_gpu= 12.13 roof= 79.7%
+[A] L20 S=2048 native_q3g128_uniform    wall=  36.197 gpu=  35.960 tf_gpu= 12.09 roof= 79.5%
+[A] L20 S=4096 real idx {'pairs': 24576, 'experts_hit': 237, 'M_mean_all': 64.0, 'M_mean_hit': 103.696, 'M_median_hit': 47.0, 'M_max': 1573, 'M_p95': 299.5499999999999}
+[A] L20 S=4096 exl3_L20_real            wall= 104.043 gpu= 140.702 tf_gpu=  6.18 roof= 40.6%
+[A] L20 S=4096 native_q4g64_real        wall=  80.798 gpu=  80.566 tf_gpu= 10.80 roof= 71.0%
+[A] L20 S=4096 native_q3g128_real       wall=  81.456 gpu=  81.212 tf_gpu= 10.71 roof= 70.4%
+[A] L20 S=4096 exl3_L20_uniform         wall=  95.086 gpu= 128.387 tf_gpu=  6.77 roof= 44.5%
+[A] L20 S=4096 native_q4g64_uniform     wall=  71.509 gpu=  71.267 tf_gpu= 12.20 roof= 80.2%
+[A] L20 S=4096 native_q3g128_uniform    wall=  72.000 gpu=  71.695 tf_gpu= 12.13 roof= 79.7%
+[A] numerics q4g64 vs EXL3: cos=0.988061 rel_l2=1.547e-01
+[A] numerics q3g128 vs EXL3: cos=0.942326 rel_l2=3.468e-01
+[A] loading EXL3 layer 0 (k=3)
+[A] L0 S=2048 real idx {'pairs': 12288, 'experts_hit': 330, 'M_mean_all': 32.0, 'M_mean_hit': 37.236, 'M_median_hit': 25.0, 'M_max': 402, 'M_p95': 107.24999999999983}
+[A] L0 S=2048 exl3_L0_real             wall=  65.919 gpu=  71.130 tf_gpu=  6.11 roof= 40.2%
+[A] L0 S=2048 native_q4g64_real        wall=  50.735 gpu=  50.491 tf_gpu=  8.61 roof= 56.6%
+[A] L0 S=2048 native_q3g128_real       wall=  50.728 gpu=  50.440 tf_gpu=  8.62 roof= 56.7%
+[A] L0 S=2048 exl3_L0_uniform          wall=  58.909 gpu=  64.420 tf_gpu=  6.75 roof= 44.4%
+[A] L0 S=2048 native_q4g64_uniform     wall=  36.109 gpu=  35.873 tf_gpu= 12.12 roof= 79.7%
+[A] L0 S=2048 native_q3g128_uniform    wall=  36.241 gpu=  35.981 tf_gpu= 12.09 roof= 79.4%
+[A] L0 S=4096 real idx {'pairs': 24576, 'experts_hit': 331, 'M_mean_all': 64.0, 'M_mean_hit': 74.248, 'M_median_hit': 49.0, 'M_max': 752, 'M_p95': 210.84999999999997}
+[A] L0 S=4096 exl3_L0_real             wall= 109.437 gpu= 148.002 tf_gpu=  5.88 roof= 38.6%
+[A] L0 S=4096 native_q4g64_real        wall=  85.241 gpu=  84.993 tf_gpu= 10.23 roof= 67.2%
+[A] L0 S=4096 native_q3g128_real       wall=  85.875 gpu=  85.635 tf_gpu= 10.16 roof= 66.8%
+[A] L0 S=4096 exl3_L0_uniform          wall=  95.715 gpu= 129.484 tf_gpu=  6.72 roof= 44.1%
+[A] L0 S=4096 native_q4g64_uniform     wall=  71.447 gpu=  71.233 tf_gpu= 12.21 roof= 80.2%
+[A] L0 S=4096 native_q3g128_uniform    wall=  71.903 gpu=  71.702 tf_gpu= 12.13 roof= 79.7%
+[A] wrote /tmp/p20_pmp_A/taskA.json in 27.2s
+[A] HEADLINE {"L20_S2048": {"exl3_gpu_ms": 80.0214, "best_native": "native_q4g64_real", "best_native_gpu_ms": 46.0898, "delta_gpu_pct": 42.4, "exl3_wall_ms": 59.5549, "best_native_wall_ms": 46.3724, "delta_wall_pct": 22.14}, "L20_S4096": {"exl3_gpu_ms": 140.7021, "best_native": "native_q4g64_real", "best_native_gpu_ms": 80.5656, "delta_gpu_pct": 42.74, "exl3_wall_ms": 104.0432, "best_native_wall_ms": 80.7976, "delta_wall_pct": 22.34}, "L0_S2048": {"exl3_gpu_ms": 71.1302, "best_native": "native_q3g128_real", "best_native_gpu_ms": 50.4397, "delta_gpu_pct": 29.09, "exl3_wall_ms": 65.9195, "best_native_wall_ms": 50.7284, "delta_wall_pct": 23.04}, "L0_S4096": {"exl3_gpu_ms": 148.0022, "best_native": "native_q4g64_real", "best_native_gpu_ms": 84.9925, "delta_gpu_pct": 42.57, "exl3_wall_ms": 109.4367, "best_native_wall_ms": 85.2406, "delta_wall_pct": 22.11}}
+EXIT=0
