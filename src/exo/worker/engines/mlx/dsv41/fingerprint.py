@@ -163,6 +163,7 @@ KV_NEUTRAL: frozenset[str] = frozenset(
         "exo.worker.engines.mlx.dsv41.thinking",  # reasoning-marker resolution; no cache
         "exo.worker.engines.mlx.dsv41.errors",  # exception types only
         "exo.worker.engines.mlx.dsv41.agreement",  # rank task bookkeeping; "nothing touches model state"
+        "exo.worker.engines.mlx.dsv41.coord",  # §G4 cross-rank park/restore decisions; int control rows, no KV bytes
         "exo.worker.engines.mlx.dsv41.vision",  # engine-side ViT adapter; image convos forced cold, never parked
         "exo.worker.engines.mlx.dsv41.fingerprint",  # this module: hashes sources, touches no tensors/KV
         # --- exo disaggregated wire --------------------------------------------
