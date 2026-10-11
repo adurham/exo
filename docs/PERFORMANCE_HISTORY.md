@@ -12091,3 +12091,31 @@ Follow-up to the Q1c ladder: the apparent ~1.4x prefill delta vs the Aug-2026 kn
 ## 2026-10-11 — DSv4.1 restart-survival round 2 (next22-rankfix): WARN no-ABORT — rank-continuity fix FUNCTIONALLY PROVEN in graceful + kill-9 crash
 
 Closeout of the round-1 rank-swap failure (restore refused after a rank-swapping relaunch). Fix branch `p20/dsv41-restart-rankfix` @ **bebeb0066** (3 commits off base **3afce11d7** = `deploy/next21-restart`); construct/deploy `deploy/next22-rankfix` @ **ade481853**; suite 367 passed in 51.63 s pre-boot. Outcome: **WARN (no ABORT)**, bars applied per runbook `docs/dsv41-restart-live-ab-runbook-2026-10-11.md` §3.4 — the rank-continuity fix is **FUNCTIONALLY PROVEN**: restore fired after the graceful relaunch AND after the `kill -9` crash relaunch, the latter **across a live rank swap** (m4-1=rank1, m4-2=rank0, the exact round-1 permutation), admitted via SITE identity (manifest site == store hostname) replacing the `.r<rank>` gate, with ZERO foreign-site skips and no false fp_mismatch on fix dirs. Headline numbers: graceful post-restore delta TTFT **15.029 s** = 0.029 s over the 15 s bar (resident control floor **14.389 s** ⇒ restore overhead **0.64 s**, 17.7× vs the 265.7 s cold); crash TTFT **0.821 s** (exact-match restore, prefill=0); needles **5/5 both cases**; top-1 **1.000** over **46/46** tokens (256-token spec unevaluable — fixture stops at 46); DSpark **−4.91 %** (0.9231 vs 0.9722) on the first post-boot turn, returning to the **0.9722** baseline on a same-session resident turn ⇒ first-turn-after-load, not a KV effect. **WARN-CALIBRATION:** the ≤15 s bar had only ~0.6 s headroom over the 14.389 s resident floor — propose re-registering as floor+2 s (or median-of-N); DSpark needs a fresh-boot cold-first-turn control to discriminate warmup-vs-restore before ±2 % gating is trusted. **NOT promoted; `EXO_DSV41_CKPT=1` left live for observation** (rollback ref unspent). Full results: `docs/dsv41-restart-next22-results-2026-10-11.md`.
+
+## 2026-10-11 — Task G: indexer-share reconciliation (13.5/31.1 vs 3.6 is a FRAME+PATH mismatch, not a contradiction) + hyper-connections classified as REAL but low-leverage
+
+Offline (0 boots, 0 config changes, no cluster contact; the one sanctioned node microbench was NOT used).
+Doc `docs/dsv41-pmp-tasb-reconciliation-2026-10-11.md` (branch `p20/pmp-tasb-reconciliation`).
+
+- **Indexer — which number is right: BOTH, for different quantities.** The pack's 13.5 %@16K / 31.1 %@100K
+  (HIER-ON, LAST chunk, nb=16384) and phase-22's 3.6 %@16K decompose as **3.7× ≈ 2.0× (frame) × 1.85× (path)**:
+  - **~2.0× frame:** phase-22's `Indexer 2553.4 ms / 64 calls` (raw `phase22…/raw/run3/progress.jsonl:15`) is
+    summed over **all 8 chunks** of a 16 K prompt (64 = 8 index layers × 8 chunks; mean nb≈9216), while the pack
+    measures the **last chunk only** (start_pos 14336, nb=16384). The indexer score pass is ~linear in nb.
+  - **~1.85× path:** the pack ran `DSV41_INDEXER_HIER` at its default **ON** (`indexer.py:178`, ON since
+    2026-10-06); phase-22 (2026-10-01) was the pre-HIER **tiled** path. Offline microbench: HIER is **1.71–2.05×
+    slower at nb=16384**, neutral at 100 K, **2.6× faster for consumers at depth** — matching the in-repo A/B
+    (`PERFORMANCE_HISTORY.md:10476-10489`: fresh 100K −0.9 % neutral; delta 100K→200K +15.2 %; indexer attribution
+    14.6 %→42.9 % over 350K).
+  - **⇒ 31.1 %@100K is the representative deep-context production share; 13.5 %@16K is ~1.85× HIER-inflated at the
+    small nb; a whole-16 K average ≈ ~7 %** (reconciles with phase-22's last-chunk equivalent). Re-derived exactly
+    from `raw/B/B_16k.json`/`B_100k.json` (799.97 ms/13.48 %, 2241.41/31.10 %; note the shipped `analyze_B.py`
+    omits L14 → prints 713/12.48 % + 2044/29.79 %). **The indexer IS a real O(context) deep-context class
+    (single largest 100K bucket). Lever direction (STOP, no build): an nb-based HIER floor (the gate
+    `_FENCE_MIN_ROWS=16` is row-count-gated, so 16 K pays HIER overhead for no memory win) + the deep-context
+    indexer top-k/scan (the score GEMM is already ~99 % of ceiling).**
+- **Hyper-connections (HC) — REAL, low-leverage.** `hyper_connections.py`/`hc_fused.py`: the residual stream is
+  `hc_mult=4` parallel full-width copies; per sub-layer a real fp32 GEMM `_mix_proj` (`hc_attn_fn`/`hc_ffn_fn`
+  `[24,20480]`, **3.93 MB/layer → 157.3 MB/rank**) + 20-iter Sinkhorn collapse/expand Metal kernels (4 calls/layer).
+  Share 6.23 %@16K / 5.16 %@100K. **Already fused (~140 ops → ~4 kernels); the remaining cost is nearly-irreducible
+  per-layer bandwidth** (skinny N=24 GEMM + `[b,s,4,d]` passes); not a high-value lever.
