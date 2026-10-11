@@ -489,6 +489,60 @@ def test_force_checkpoint_deadline_allows_exactly_one(tmp_path: Path) -> None:
     assert len(_gen_dirs(tmp_path)) == 1
 
 
+def test_force_checkpoint_deadline_aborts_within_one_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """MED-A: the park wall-clock cap must abort an IN-PROGRESS checkpoint within
+    ONE unit of the deadline -- via the EXISTING §G1 per-unit ``CKPT_POLL`` -- not
+    let a whole conversation's write run past it.
+
+    Pre-fix, ``run_shutdown_park`` threaded no ``request_pending`` into the force
+    path, so that per-unit abort was disarmed and ``force_checkpoint_all`` only
+    noticed the deadline BETWEEN attempts; one conversation (~46 units here)
+    overshot the deadline -- and GRACE -- by its whole write. The fix makes the
+    deadline itself the ``request_pending`` gate.
+    """
+    body = _body()
+    store = _store(tmp_path, body)
+    sess = _sessions(body, store)
+    _turn(sess, IDS, key="A")                       # committed, dirty, between turns
+
+    slow = 0.05                                   # real cost of each unit's write
+    unit_cost = 0.2                               # modelled park cost per unit
+    clock = {"t": 0.0}
+
+    def now() -> float:                           # controlled clock (as in the
+        return clock["t"]                         # deadline_allows_exactly_one test)
+
+    real_unit = pk._GenerationWriter._layer_unit
+    written = {"n": 0}
+
+    def slow_unit(self: Any, i: int) -> None:
+        time.sleep(slow)
+        real_unit(self, i)
+        written["n"] += 1
+        clock["t"] += unit_cost                   # this unit's write advanced the clock
+
+    monkeypatch.setattr(pk._GenerationWriter, "_layer_unit", slow_unit)
+    # GRACE cap == signal_time + GRACE - MARGIN == 0.1 modelled s: a TIGHT deadline
+    # well inside ONE unit (0.2), so the per-unit poll must trip on the first unit.
+    b = _budget()
+    signal_time = 0.1 - (b.grace_s - b.exit_margin_s)
+    t0 = time.monotonic()
+    out = sh_.run_shutdown_park(sess, signal_time=signal_time, budget=b, now=now)
+    elapsed = time.monotonic() - t0
+
+    assert out.parked, "the force loop attempted the checkpoint"
+    oc = out.parked[0][1]
+    # Aborted mid-write by the per-unit gate, after EXACTLY one unit.
+    assert oc.aborted and oc.pending_abort and not oc.all_committed
+    assert oc.units == 1 and written["n"] == 1
+    # ~one unit's real cost, NOT the whole conversation (~46 units -> ~2.3 s).
+    assert elapsed < slow * 10
+    # COLD-safe: temp dir removed, nothing committed.
+    assert not _gen_dirs(tmp_path) and not _tmp_dirs(tmp_path)
+
+
 def test_force_checkpoint_most_recent_first_and_one_attempt_each(tmp_path: Path) -> None:
     body = _body()
     store = _store(tmp_path, body)
@@ -505,16 +559,36 @@ def test_force_checkpoint_most_recent_first_and_one_attempt_each(tmp_path: Path)
 
 
 def test_force_checkpoint_skips_inflight(tmp_path: Path) -> None:
+    """The force gate must skip a conversation that is IN FLIGHT *and* already
+    has a committed turn (``last_turn_end_ts > 0``) -- so the ``_inflight`` gate
+    alone is what rejects it, not the ``last_turn_end_ts <= 0`` gate a fresh
+    conversation would trip. (Audit LOW-D: the previous body used a fresh
+    in-flight conversation that the ``last_turn_end_ts <= 0`` gate already
+    skipped, so a mutation that made ``force`` ignore ``_inflight`` stayed
+    green.)"""
     body = _body()
     store = _store(tmp_path, body)
     sess = _sessions(body, store)
-    a = _turn(sess, IDS, key="A")
+    a = _turn(sess, IDS, key="A")                  # committed, dirty, between turns
+    assert sess.maybe_checkpoint().all_committed   # §G1 gen 1 on disk
+    disk_hash = _hash(a)
+    prev_end = a.last_turn_end_ts
+    assert prev_end > 0.0
+
+    # Re-enter the SAME conversation with its committed prefix (offset >=
+    # PARK_MIN_TOKENS, last_turn_end_ts > 0) still present: now it is between-
+    # turns-committed AND in flight.
     run_turn(sess, np.concatenate([IDS, np.arange(800, 820)]),
-             checkpoint=False, key="B")  # B in flight
-    results, _hit = sess.force_checkpoint_all(deadline=time.monotonic() + 30.0)
-    assert [k for k, _ in results] == ["id:A"]
-    assert store.has_committed(_hash(a), 1)
-    assert len(_gen_dirs(tmp_path)) == 1
+             checkpoint=False, key="A")
+    assert a._inflight and a.last_turn_end_ts == prev_end
+
+    # In flight -> the force gate returns None, so the loop attempts nothing.
+    assert sess.checkpoint_candidate(force=True) is None
+    results, hit = sess.force_checkpoint_all(deadline=time.monotonic() + 30.0)
+    assert results == [] and hit is False
+    # Gen 1 is untouched and nothing new was written.
+    assert list(_gens(tmp_path)) == [1]
+    assert store.has_committed(disk_hash, 1)
 
 
 # ---------------------------------------------------------------------------
