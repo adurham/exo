@@ -88,6 +88,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -119,6 +120,7 @@ from exo.worker.engines.mlx.dsv41.coord import (
     run_checkpoint,
     run_park,
     run_restore,
+    site_tag,
 )
 from exo.worker.engines.mlx.dsv41.fingerprint import (
     FINGERPRINT_FIELD,
@@ -181,6 +183,10 @@ ENV_DIR = "EXO_DSV41_PARK_DIR"
 ENV_MAX_GB = "EXO_DSV41_PARK_MAX_GB"
 ENV_MIN_TOKENS = "EXO_DSV41_PARK_MIN_TOKENS"
 ENV_MAX_COUNT = "EXO_DSV41_PARK_MAX_COUNT"
+#: Stable SITE identity of this node (rank-continuity). A logical node label
+#: that survives a relaunch which PERMUTES the two nodes' TP device ranks;
+#: falls back to the hostname. See :func:`site_identity`.
+ENV_SITE = "EXO_DSV41_SITE_ID"
 
 DEFAULT_PARK_DIR = "~/.exo/dsv41_park"
 DEFAULT_MAX_GB = 12.0
@@ -225,6 +231,37 @@ def _env_flag(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def site_identity() -> "str | None":
+    """This node's stable SITE identity, or ``None`` when unknown.
+
+    The launch-order-INDEPENDENT name of a node, as opposed to its TP device
+    ``rank`` -- which the scheduler assigns by launch order and can PERMUTE
+    across a graceful relaunch (swapping the two nodes' ranks), which is what
+    made a swapped restore refuse every dir. Resolution order:
+
+    1. ``EXO_DSV41_SITE_ID`` (:data:`ENV_SITE`) -- the stripped value when it is
+       a non-empty string;
+    2. ``socket.gethostname()`` -- the stripped value when it is non-empty;
+    3. ``None``.
+
+    The RAW (stripped) string is stored -- case and internal spacing are NOT
+    rewritten -- and only hashed (``coord.site_tag``) for the wire. A ``None``
+    here is a hard fail-safe: a store with no identity refuses every dir that
+    carries a ``site`` (see :meth:`ParkedStore._identity_matches`), going COLD
+    rather than risk a rank-mismatched restore.
+    """
+    raw = os.environ.get(ENV_SITE)
+    if raw is not None:
+        value = raw.strip()
+        if value:
+            return value
+    try:
+        host = socket.gethostname().strip()
+    except Exception:  # noqa: BLE001 - a broken hostname lookup means "unknown"
+        return None
+    return host or None
 
 
 def _numel(shape: "list[int] | tuple[int, ...]") -> int:
@@ -441,6 +478,7 @@ class _GenerationWriter:
         key: str | None,
         fingerprint: "BuildFingerprint | None",
         rank: int | None,
+        site: str | None = None,
     ) -> None:
         self.conv = conv
         self.dir = d
@@ -448,6 +486,10 @@ class _GenerationWriter:
         self.key = key
         self.fingerprint = fingerprint
         self.rank = rank
+        #: Stable SITE identity written into the manifest (rank-continuity); the
+        #: store's ``site``, or ``None`` for a store that knows none / a direct
+        #: :func:`park_conversation` call (legacy rank-rule dirs).
+        self.site = site
         self.man: dict[str, Any] = {}
         self.offset = -1
         self._units: list[Any] = []
@@ -519,6 +561,13 @@ class _GenerationWriter:
             "draft_snaps": [],
             "anchors": [],
         }
+        # Stable SITE identity (rank-continuity): written ONLY when this store
+        # knows one. A dir that CARRIES a ``site`` is admitted by SITE (rank-
+        # independent), so a graceful relaunch that permutes the two nodes' TP
+        # device ranks still restores it; a dir WITHOUT one keeps the legacy
+        # rank rule (documented cold-accept, see ``_identity_matches``).
+        if isinstance(self.site, str) and self.site:
+            self.man["site"] = self.site
         # Plan the units over INDICES / POSITIONS only (no array references).
         units: list[Any] = [
             (lambda i=i: self._layer_unit(i)) for i in range(n_layers)
@@ -696,6 +745,7 @@ def park_conversation(
     key: str | None = None,
     fingerprint: "BuildFingerprint | None" = None,
     rank: int | None = None,
+    site: str | None = None,
 ) -> bool:
     """Serialize ``conv``'s full cache state into session directory ``dir``.
 
@@ -711,7 +761,8 @@ def park_conversation(
     One-shot driver over :class:`_GenerationWriter` (the same unit sequence the
     §G1 checkpoint writes with polls in between).
     """
-    w = _GenerationWriter(conv, Path(dir), key=key, fingerprint=fingerprint, rank=rank)
+    w = _GenerationWriter(
+        conv, Path(dir), key=key, fingerprint=fingerprint, rank=rank, site=site)
     try:
         if not w.begin():
             return False
@@ -973,6 +1024,7 @@ class ParkedStore:
         fingerprint: "BuildFingerprint | None" = None,
         coordinator: "ParkCoordinator | None" = None,
         rank: int | None = None,
+        site: str | None = None,
     ) -> None:
         self.model = model
         #: §G4 cross-rank coordinator (``None`` = single rank / local-only).
@@ -982,6 +1034,10 @@ class ParkedStore:
             int(rank) if rank is not None
             else (coordinator.rank if coordinator is not None else None)
         )
+        #: Stable SITE identity (rank-continuity): the store's logical node
+        #: label, used to ADMIT dirs independently of the (permutable) TP rank.
+        #: ``None`` when this store was given none and the host is unknown.
+        self.site: str | None = site if site is not None else site_identity()
         self.head = head
         self.conv_kw = dict(conv_kw or {})
         self.progress = progress
@@ -1348,7 +1404,8 @@ class ParkedStore:
             self._reserve_headroom(
                 protect_prefix=key_hash, protect=self._protect_own(conv, key))
             if not park_conversation(
-                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank,
+                site=self.site,
             ):
                 return False
             # New generation is on disk: now it is safe to prune the older ones.
@@ -1485,6 +1542,35 @@ class ParkedStore:
             found = recorded
         return int(found) == int(self.rank)
 
+    def _identity_matches(self, d: Path, man: dict[str, Any]) -> bool:
+        """Whether a parked dir belongs to THIS store's SITE / rank (§G4 fix).
+
+        Admission is by SITE first: a manifest that CARRIES a non-empty ``site``
+        is admitted IFF this store also knows a site and they are EQUAL. The
+        site is a logical node label (see :func:`site_identity`) that survives a
+        graceful relaunch which PERMUTES the two nodes' TP device ranks --
+        exactly the case the old rank gate refused, turning every dir foreign.
+        The parked KV content is rank-INDEPENDENT (DeepSeek MLA keeps a single
+        shared latent per token), so a swapped-rank restore is content-safe.
+
+        FAIL-SAFE is ABSOLUTE: a dir with a ``site`` is refused COLD when this
+        store's site is unknown (``None``) or different -- never admitted by
+        guessing.
+
+        LEGACY: a dir with NO ``site`` field (written before this build, or by a
+        bare :func:`park_conversation` with no site) falls back to the
+        pre-existing :meth:`_rank_matches` rule. Such dirs are deliberately NOT
+        migrated (a cold-accept: they may be refused after a rank swap, exactly
+        as today) -- rewriting them in place would be a destructive migration on
+        a path that must never corrupt a parked shard.
+        """
+        msite = man.get("site")
+        if isinstance(msite, str) and msite:
+            return (
+                isinstance(self.site, str) and bool(self.site) and msite == self.site
+            )
+        return self._rank_matches(d, man)
+
     def local_restore_candidates(
         self, ids: Any, *, key: str | None = None
     ) -> list[Candidate]:
@@ -1504,8 +1590,14 @@ class ParkedStore:
         ids_arr = np.asarray(ids, dtype=np.int64)
         out: list[Candidate] = []
         for d, man in self._candidates():
-            if not self._rank_matches(d, man):
-                logger.info("park.skip reason=foreign-rank")
+            if not self._identity_matches(d, man):
+                # A dir that carries a site but is not THIS site is foreign-site;
+                # a dir with no site falls back to the legacy rank rule.
+                msite = man.get("site")
+                if isinstance(msite, str) and msite:
+                    logger.info("park.skip reason=foreign-site")
+                else:
+                    logger.info("park.skip reason=foreign-rank")
                 continue
             ok, reason = self._admit(man)
             if not ok:
@@ -1550,7 +1642,7 @@ class ParkedStore:
     def find_generation(self, wire_key: int, gen: int) -> Path | None:
         """The admissible local dir holding EXACTLY ``(wire_key, gen)``."""
         for d, man in self._candidates():
-            if not self._rank_matches(d, man):
+            if not self._identity_matches(d, man):
                 continue
             if _generation_of(d, man) != int(gen):
                 continue
@@ -1592,7 +1684,7 @@ class ParkedStore:
         record (manifest) actually landed, not just that the writer said so.
         """
         for d, man in self._candidates():
-            if not self._rank_matches(d, man):
+            if not self._identity_matches(d, man):
                 continue
             parsed = _gen_from_name(d.name)
             if parsed is None or parsed != (key_hash, int(gen)):
@@ -1619,7 +1711,8 @@ class ParkedStore:
             self._reserve_headroom(
                 protect_prefix=key_hash, protect=self._protect_own(conv, key))
             if not park_conversation(
-                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank,
+                site=self.site,
             ):
                 return None
             return d
@@ -1628,7 +1721,8 @@ class ParkedStore:
             return None
 
     def open_generation(
-        self, conv: "Conversation", gen: int, *, key: str | None = None
+        self, conv: "Conversation", gen: int, *, key: str | None = None,
+        site: str | None = None,
     ) -> "_GenerationWriter | None":
         """Start writing ``conv`` as generation ``gen`` WITHOUT closing it (§G1).
 
@@ -1638,6 +1732,10 @@ class ParkedStore:
         at a time (``write_next``) and finally ``commit``/``abort``. ``None`` when
         the policy refuses (disabled, too short, not park-safe) or the dir could
         not be opened. Never raises; never touches an existing generation.
+
+        ``site`` overrides the store's own :attr:`site` for this write (the
+        default, ``None``, uses it); the §G1 driver threads the store's site
+        explicitly so the manifest always carries the same identity a park does.
         """
         w: _GenerationWriter | None = None
         try:
@@ -1649,7 +1747,9 @@ class ParkedStore:
             self._reserve_headroom(
                 protect_prefix=key_hash, protect=self._protect_own(conv, key))
             w = _GenerationWriter(
-                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank)
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank,
+                site=(self.site if site is None else site),
+            )
             if not w.begin():
                 w.abort()
                 return None
@@ -1692,11 +1792,24 @@ def coordinated_restore(
 ) -> "Conversation | None":
     """All-or-nothing restore across ranks; ``None`` = COLD on EVERY rank.
 
-    Exactly two exchanges when the cluster decides RESTORE, one when it decides
-    COLD (a rank-invariant function of the gathered rows). A rank with no store
-    or a disabled store contributes "no candidates", which forces COLD.
+    Runs ONE identity-agreement exchange FIRST (``coord.MAGIC_IDENTITY``): every
+    rank must share a KNOWN, matching SITE before the RESTORE exchange is even
+    attempted, so a relaunch that permutes the nodes' TP device ranks (but keeps
+    their sites) proceeds, while a genuinely foreign/unknown identity goes COLD
+    on every rank identically (``decide_identity`` is pure/rank-invariant, so the
+    exchange count stays rank-invariant too). Then exactly two exchanges when the
+    cluster decides RESTORE, one when it decides COLD (a rank-invariant function
+    of the gathered rows). A rank with no store or a disabled store contributes
+    ``site_tag=None -> 0``, forcing COLD, and reports "no candidates" too.
     """
     usable = store if (store is not None and store.enabled) else None
+    # Startup identity agreement: ONE exchange, cached on the coordinator, at a
+    # program point EVERY rank reaches (both call sites tolerate store=None).
+    tag = site_tag(store.site if (store is not None and store.enabled) else None)
+    if not coord.identity_confirmed(tag, coord.rank, coord.world):
+        logger.info(
+            f"park.restore cold reason=identity-unconfirmed rank={coord.rank}")
+        return None
 
     def local() -> list[Candidate]:
         return [] if usable is None else usable.local_restore_candidates(ids, key=key)
@@ -1709,8 +1822,7 @@ def coordinated_restore(
 
     out = run_restore(coord, local, restore, discard)
     if out.decision.cold:
-        if out.decision.reason:
-            logger.info(f"park.restore cold reason={out.decision.reason} rank={coord.rank}")
+        logger.info(f"park.restore cold reason={out.decision.reason} rank={coord.rank}")
         return None
     assert usable is not None and out.value is not None
     with contextlib.suppress(Exception):  # the marker is best-effort bookkeeping
@@ -1813,6 +1925,7 @@ def checkpoint_conversation(
     key: str | None = None,
     request_pending: Any = None,
     on_unit: Any = None,
+    site: str | None = None,
 ) -> CheckpointOutcome:
     """Write ``conv`` as a NEW generation while it STAYS RESIDENT (plan §G1).
 
@@ -1863,7 +1976,7 @@ def checkpoint_conversation(
     def begin(gen: int) -> bool:
         if usable is None or conv is None or not key_hash:
             return False
-        w = usable.open_generation(conv, gen, key=key)
+        w = usable.open_generation(conv, gen, key=key, site=site)
         if w is None:
             return False
         state["w"] = w

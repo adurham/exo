@@ -36,6 +36,7 @@ from exo.worker.engines.mlx.dsv41 import park as pk
 from exo.worker.engines.mlx.dsv41 import session as s_
 
 from ._stub_harness import StubBody, run_turn
+from .test_dsv41_park import _cmp_conv
 
 CONV_KW: dict[str, Any] = dict(chunk=4, long_chunk=4, long_threshold=10**9)
 IDS = np.arange(10, 82, dtype=np.int64)
@@ -262,9 +263,15 @@ def _both(fns: list[Callable[[], Any]]) -> list[Any]:
 
 class _Rank:
     def __init__(self, root: Path, rank: int, ls: _Lockstep | None,
-                 fingerprint: fp.BuildFingerprint | None = None) -> None:
+                 fingerprint: fp.BuildFingerprint | None = None,
+                 site: str | None = None) -> None:
         self.root = root
         self.rank = rank
+        #: The SITE identity this rank's store carries. Defaults to one per rank
+        #: (``S<rank>``) so the existing tests keep the rank<->site
+        #: correspondence; a swap test passes an explicit site to DECOUPLE the
+        #: (permutable) device rank from the (stable) node/site label.
+        self.site = site if site is not None else f"S{rank}"
         self.coord = ls.coordinator(rank) if ls is not None else None
         _on(rank, lambda: self._build(fingerprint))
 
@@ -273,7 +280,7 @@ class _Rank:
         self.store = pk.ParkedStore(
             self.body, None, root=self.root, conv_kw=CONV_KW, min_tokens=8,
             fingerprint=fingerprint or _fp(layout=f"rank{self.rank}"),
-            coordinator=self.coord, rank=self.rank,
+            coordinator=self.coord, rank=self.rank, site=self.site,
         )
         self.conv = self._conv()
 
@@ -553,6 +560,7 @@ def test_t8_prefix_mode_two_ranks(tmp_path: Path) -> None:
 def _fake_dir(
     root: Path, name: str, *, prefix_key: str, rank: int | None,
     key: str | None = "A", gen: int = 1, created: Any = 1.0,
+    site: str | None = None,
 ) -> Path:
     """A minimal but ADMISSIBLE generation dir (manifest only; key mode)."""
     d = root / name
@@ -567,6 +575,8 @@ def _fake_dir(
         "rank": rank,
         fp.FINGERPRINT_FIELD: _fp().as_dict(),
     }
+    if site is not None:  # a SITE-tagged dir (rank-continuity); None = legacy
+        man["site"] = site
     (d / pk.MANIFEST).write_text(json.dumps(man))
     return d
 
@@ -742,3 +752,241 @@ def test_foreign_rank_dir_ignored_rankless_considered(tmp_path: Path) -> None:
                            min_tokens=8, fingerprint=_fp(), rank=None)
     assert {c.gen for c in blind.local_restore_candidates(IDS, key="A")} == {
         1, 2, 3}
+
+
+# ---------------------------------------------------------------------------
+# rank-continuity: a graceful relaunch that PERMUTES the two nodes' TP device
+# ranks must still restore the parked cache. Admission is by a stable SITE
+# identity, the park layout is rank-INVARIANT (the MLA cache is a single shared
+# latent per token), and a startup IDENTITY exchange gates the restore.
+# ---------------------------------------------------------------------------
+
+def _cmp_on(rank: int, restored: Any, fresh: Any) -> None:
+    """``_cmp_conv`` on ``rank``'s own thread (MLX streams are thread-local)."""
+    _on(rank, lambda: _cmp_conv(restored, fresh))
+
+
+def _restore_ranked(a: _Rank, b: _Rank) -> list[Any]:
+    """Restore on each store's OWN rank thread.
+
+    The existing ``_restore_both`` pairs ``list position -> pool(i)``, which is
+    only correct when node A is rank 0 and node B is rank 1. After a rank SWAP
+    the position no longer equals the device rank, so driving a rank-1 store on
+    the rank-0 thread aborts (MLX streams are thread-local).
+    """
+    fut_a = _pool(a.rank).submit(lambda: a.store.try_restore(IDS, key="A"))
+    fut_b = _pool(b.rank).submit(lambda: b.store.try_restore(IDS, key="A"))
+    return [fut_a.result(timeout=60), fut_b.result(timeout=60)]
+
+
+def _park_swapped_pair(
+    tmp_path: Path, a_site: str, b_site: str, shared_fp: fp.BuildFingerprint,
+) -> tuple[_Rank, _Rank]:
+    """Park gen 1 on node A (rank 0) and node B (rank 1), with distinct sites."""
+    ls = _Lockstep(2)
+    a = _Rank(tmp_path / "A", 0, ls, fingerprint=shared_fp, site=a_site)
+    b = _Rank(tmp_path / "B", 1, ls, fingerprint=shared_fp, site=b_site)
+    assert _park_both(a, b) == [True, True]
+    return a, b
+
+
+def test_site_swap_both_directions_restores_bit_exact(tmp_path: Path) -> None:
+    shared = _fp(layout="shared")  # the post-fix rank-INVARIANT park layout
+    a, b = _park_swapped_pair(tmp_path, "SA", "SB", shared)
+    assert a.gens() == b.gens() == {1}
+
+    # Graceful relaunch: the device ranks SWAP, the nodes (sites) do not.
+    ls2 = _Lockstep(2)
+    a2 = _Rank(tmp_path / "A", 1, ls2, fingerprint=shared, site="SA")
+    b2 = _Rank(tmp_path / "B", 0, ls2, fingerprint=shared, site="SB")
+    ra, rb = _restore_ranked(a2, b2)
+    assert ra is not None and rb is not None
+    # Bit-exact: a swapped-rank restore is content-safe (rank-independent MLA).
+    _cmp_on(1, ra, a2.conv)
+    _cmp_on(0, rb, b2.conv)
+    # The SAME generation was restored on both nodes and both dirs are ACTIVE.
+    for root in (tmp_path / "A", tmp_path / "B"):
+        act = []
+        for d in root.iterdir():
+            if not (d / pk.ACTIVE_MARKER).is_file():
+                continue
+            parsed = pk._gen_from_name(d.name)
+            if parsed is not None:
+                act.append(parsed[1])
+        assert act == [1]
+
+
+def test_site_mismatch_after_swap_is_cold_both(tmp_path: Path) -> None:
+    shared = _fp(layout="shared")
+    _park_swapped_pair(tmp_path, "SA", "SB", shared)
+    # Relaunch: the ranks swap AND each node now claims the OTHER's site, so the
+    # dirs on disk (site SA on A, site SB on B) match NEITHER store's site.
+    ls2 = _Lockstep(2)
+    a2 = _Rank(tmp_path / "A", 1, ls2, fingerprint=shared, site="SB")
+    b2 = _Rank(tmp_path / "B", 0, ls2, fingerprint=shared, site="SA")
+    assert _restore_ranked(a2, b2) == [None, None]
+    # NEVER a wrong restore: no ACTIVE marker anywhere.
+    for root in (tmp_path / "A", tmp_path / "B"):
+        assert not any((d / pk.ACTIVE_MARKER).exists() for d in root.iterdir())
+
+
+def test_no_swap_restore_unchanged_and_exchange_counts_symmetric(
+    tmp_path: Path,
+) -> None:
+    shared = _fp(layout="shared")
+    _park_swapped_pair(tmp_path, "SA", "SB", shared)
+    ls2 = _Lockstep(2)
+    a2 = _Rank(tmp_path / "A", 0, ls2, fingerprint=shared, site="SA")
+    b2 = _Rank(tmp_path / "B", 1, ls2, fingerprint=shared, site="SB")
+    ra, rb = _restore_ranked(a2, b2)
+    assert ra is not None and rb is not None
+    _cmp_on(0, ra, a2.conv)
+    _cmp_on(1, rb, b2.conv)
+    # identity(1) + RESTORE(1) + RESTORE_ACK(1) = 3 exchanges, SYMMETRIC.
+    assert ls2.calls == [3, 3]
+
+
+def test_one_rank_missing_generation_is_cold_both(tmp_path: Path) -> None:
+    shared = _fp(layout="shared")
+    a, b = _park_swapped_pair(tmp_path, "SA", "SB", shared)
+    b.drop_gen(1)  # rank 1 lost the only generation (e.g. crash before commit)
+    assert _restore_ranked(a, b) == [None, None]
+    assert not any((d / pk.ACTIVE_MARKER).exists() for d in a.root.iterdir())
+
+
+def test_decide_restore_ambiguous_same_gen_different_digest_is_cold() -> None:
+    """One rank reports the SAME (key, gen) twice with DIFFERENT digests: the
+    ambiguity makes it ineligible -> COLD (never a coin-flip restore)."""
+    rank0 = co.RankParkState((co.Candidate(KEY, 1, 5, D),
+                              co.Candidate(KEY, 1, 5, D + 1)))
+    rank1 = co.RankParkState((co.Candidate(KEY, 1, 5, D),))
+    assert co.decide_restore([rank0, rank1]).cold
+    assert co.decide_restore([rank1, rank0]).cold  # rank-order invariant
+
+
+def test_decide_identity_unit_cases_and_rank_order_invariance() -> None:
+    sa, sb = co.site_tag("SA"), co.site_tag("SB")
+    assert sa != 0 and sb != 0 and sa != sb
+
+    def row(tag: int, rank: int, world: int) -> list[int]:
+        return co.encode_identity_row(tag, rank, world)
+
+    assert co.decode_identity_row(row(sa, 3, 7)) == (sa, 3, 7)
+    # distinct sites, same world -> OK (two nodes)
+    assert co.decide_identity([row(sa, 0, 2), row(sb, 1, 2)]).ok
+    # duplicate sites still OK (one host / single-machine tests)
+    assert co.decide_identity([row(sa, 0, 2), row(sa, 1, 2)]).ok
+    # a 0 (unknown) tag -> not ok
+    bad = co.decide_identity([row(sa, 0, 2), row(0, 1, 2)])
+    assert not bad.ok and bad.reason == "unknown-identity"
+    # world mismatch -> not ok
+    wm = co.decide_identity([row(sa, 0, 2), row(sb, 1, 4)])
+    assert not wm.ok and wm.reason == "world-mismatch"
+    # malformed / short / missing row -> not ok
+    assert co.decide_identity(
+        [row(sa, 0, 2), [co.MAGIC_IDENTITY, 1, 2]]).reason == "malformed"
+    assert co.decide_identity([row(sa, 0, 2), []]).reason == "malformed"
+    assert co.decide_identity(
+        [row(sa, 0, 2), [0] * co.IDENTITY_WIDTH]).reason == "malformed"
+    # empty -> not ok
+    assert co.decide_identity([]).reason == "no-ranks"
+    # rank-order invariant (pure)
+    r = [row(sa, 0, 2), row(sb, 1, 2)]
+    assert co.decide_identity(r) == co.decide_identity(list(reversed(r)))
+
+
+def test_site_tag_nonzero_distinct_and_sized() -> None:
+    assert co.site_tag(None) == 0
+    assert co.site_tag("") == 0
+    assert co.site_tag("SA") != 0
+    assert co.site_tag("SA") == co.site_tag("SA")
+    assert co.site_tag("SA") != co.site_tag("SB")
+    assert 0 <= co.site_tag("SA") < (1 << 60)
+
+
+def test_foreign_site_dir_refused_locally(tmp_path: Path) -> None:
+    body = StubBody(initial_capacity=4, engram_layer_ids=(0,))
+    store = pk.ParkedStore(body, None, root=tmp_path, conv_kw=CONV_KW,
+                           min_tokens=8, fingerprint=_fp(), rank=0, site="SA")
+    key_hash = pk.prefix_hash(np.asarray(IDS, dtype=np.int64))
+    # site SB != store site SA -> refused (regardless of the rank tag).
+    _fake_dir(tmp_path, f"{key_hash}.gen1.r0.0000abcd", prefix_key=key_hash,
+              rank=0, gen=1, site="SB")
+    # site SA matches -> admitted.
+    _fake_dir(tmp_path, f"{key_hash}.gen2.r0.0000beef", prefix_key=key_hash,
+              rank=0, gen=2, site="SA")
+
+    assert [c.gen for c in store.local_restore_candidates(IDS, key="A")] == [2]
+    wk = pk.key_int(key_hash)
+    assert store.find_generation(wk, 1) is None
+    assert store.find_generation(wk, 2) is not None
+    assert store.has_committed(key_hash, 1) is False
+    assert store.has_committed(key_hash, 2) is True
+
+    # Fail-safe: an UNKNOWN store site refuses every site-tagged dir (never
+    # admits by guessing).
+    blind = pk.ParkedStore(body, None, root=tmp_path, conv_kw=CONV_KW,
+                           min_tokens=8, fingerprint=_fp(), rank=0)
+    blind.site = None
+    assert blind.local_restore_candidates(IDS, key="A") == []
+    assert blind.find_generation(wk, 2) is None
+    assert blind.has_committed(key_hash, 2) is False
+
+
+def test_legacy_no_site_dir_keeps_the_rank_rule(tmp_path: Path) -> None:
+    """A dir with NO ``site`` field is legacy: the pre-existing rank rule applies
+    (documented cold-accept -- such dirs are NOT migrated)."""
+    body = StubBody(initial_capacity=4, engram_layer_ids=(0,))
+    store = pk.ParkedStore(body, None, root=tmp_path, conv_kw=CONV_KW,
+                           min_tokens=8, fingerprint=_fp(), rank=0, site="SA")
+    key_hash = pk.prefix_hash(np.asarray(IDS, dtype=np.int64))
+    _fake_dir(tmp_path, f"{key_hash}.gen1.r0.0000abcd", prefix_key=key_hash,
+              rank=0, gen=1)                       # matches this store's rank
+    _fake_dir(tmp_path, f"{key_hash}.gen2.r1.0000beef", prefix_key=key_hash,
+              rank=1, gen=2)                       # foreign rank -> refused
+
+    assert [c.gen for c in store.local_restore_candidates(IDS, key="A")] == [1]
+    wk = pk.key_int(key_hash)
+    assert store.find_generation(wk, 1) is not None
+    assert store.find_generation(wk, 2) is None
+    assert store.has_committed(key_hash, 1) is True
+    assert store.has_committed(key_hash, 2) is False
+
+
+def test_park_layout_is_rank_invariant() -> None:
+    from types import SimpleNamespace
+
+    def model(rank: int) -> Any:
+        return SimpleNamespace(
+            rank=rank, world=2,
+            args=SimpleNamespace(window_size=128, bsz=1))
+
+    engine_layout = {"world_size": 2, "layers": [0, 1, 2], "dtype": "bfloat16"}
+    # The engine passes a layout with NO rank; the model's rank is not consulted
+    # when a layout mapping is supplied -> the park layout_fp is rank-invariant.
+    f0 = fp.compute_fingerprint(model=model(0), layout=engine_layout)
+    f1 = fp.compute_fingerprint(model=model(1), layout=engine_layout)
+    assert f0.layout_fp == f1.layout_fp
+    assert f0 == f1
+    # Even a layout that (mistakenly) carries a rank is normalized to rank 0.
+    g0 = fp.compute_fingerprint(layout={**engine_layout, "rank": 0})
+    g1 = fp.compute_fingerprint(layout={**engine_layout, "rank": 1})
+    assert g0.layout_fp == g1.layout_fp == f0.layout_fp
+
+    # The standalone ``layout_fingerprint`` itself STAYS rank-sensitive.
+    assert (fp.layout_fingerprint(world_size=2, rank=0, layers=[0, 1, 2],
+                                  dtype="bfloat16")
+            != fp.layout_fingerprint(world_size=2, rank=1, layers=[0, 1, 2],
+                                     dtype="bfloat16"))
+
+
+def test_site_identity_env_then_hostname(monkeypatch: Any) -> None:
+    monkeypatch.setenv(pk.ENV_SITE, "  site-west-2  ")
+    assert pk.site_identity() == "site-west-2"      # stripped; case preserved
+    monkeypatch.setenv(pk.ENV_SITE, "   ")          # whitespace-only -> fall through
+    host = pk.site_identity()
+    assert isinstance(host, str) and host == pk.socket.gethostname().strip()
+    monkeypatch.setenv(pk.ENV_SITE, "")
+    assert pk.site_identity() == pk.socket.gethostname().strip()
+    monkeypatch.delenv(pk.ENV_SITE, raising=False)
+    assert pk.site_identity() == pk.socket.gethostname().strip()

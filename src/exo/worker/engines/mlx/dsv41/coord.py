@@ -79,6 +79,13 @@ __all__ = [
     "decide_idle",
     "decide_poll",
     "run_checkpoint",
+    "IDENTITY_WIDTH",
+    "IdentityDecision",
+    "MAGIC_IDENTITY",
+    "decide_identity",
+    "decode_identity_row",
+    "encode_identity_row",
+    "site_tag",
 ]
 
 #: Candidates each rank reports per restore exchange (fixed payload width).
@@ -101,6 +108,10 @@ MAGIC_PARK_ACK = 0x4734_5204
 #: §G1 idle checkpoint: the "may we checkpoint now" row and the per-unit poll.
 MAGIC_IDLE = 0x4734_5205
 MAGIC_CKPT_POLL = 0x4734_5206
+#: Rank-continuity: the startup SITE-identity agreement row (site tag, rank,
+#: world). Exchanged ONCE, FIRST, before any restore exchange, so ranks that
+#: survived a rank-PERMUTING relaunch still agree on their logical sites.
+MAGIC_IDENTITY = 0x4734_5207
 
 _ENTRY_WIDTH = 6  # key_lo, key_hi, gen, pref, digest_lo, digest_hi
 RESTORE_WIDTH = 2 + MAX_CANDIDATES * _ENTRY_WIDTH
@@ -108,6 +119,7 @@ RESTORE_ACK_WIDTH = 5  # magic, ok, key_lo, key_hi, gen
 PARK_WIDTH = 4  # magic, key_lo, key_hi, value
 IDLE_WIDTH = 5  # magic, ok, key_lo, key_hi, offset
 POLL_WIDTH = 4  # magic, pending, ok, more
+IDENTITY_WIDTH = 5  # magic, site_lo, site_hi, rank, world
 
 #: ``PARK_ACK`` value meaning "this rank did NOT commit gen N" (write refused,
 #: write failed, store unreadable): blocks pruning on every rank this turn.
@@ -152,6 +164,20 @@ def key_int(prefix_hash: str) -> int:
         return int(prefix_hash[:15], 16) & _WIDE_MASK
     except ValueError:
         return _wide(prefix_hash)
+
+
+def site_tag(site: str | None) -> int:
+    """The 60-bit NON-ZERO wire tag of a site identity, or 0 when unknown.
+
+    ``None`` / empty -> ``0``: an unknown identity, which can never agree (see
+    :func:`decide_identity`). Otherwise the RAW string is hashed (blake2b, via
+    :func:`_wide`); if that digest lands on 0 (vanishingly unlikely) it is
+    coerced to 1, so a KNOWN site is always distinguishable from an unknown one.
+    """
+    if not site:
+        return 0
+    tag = _wide(site)
+    return tag if tag != 0 else 1
 
 
 def build_identity_digest(fingerprint: Any) -> int:
@@ -378,6 +404,66 @@ def _park_row(magic: int, key: int, value: int) -> list[int]:
     return [magic, lo, hi, int(value)]
 
 
+def encode_identity_row(site: int, rank: int, world: int) -> list[int]:
+    """Fixed-width IDENTITY row: ``magic, site_lo, site_hi, rank, world``.
+
+    ``site`` is a :func:`site_tag` (0 = unknown). Never raises (a bad value is
+    masked into a non-negative int32 by :func:`_split`).
+    """
+    lo, hi = _split(int(site))
+    return [MAGIC_IDENTITY, lo, hi, int(rank), int(world)]
+
+
+def decode_identity_row(row: Sequence[int]) -> tuple[int, int, int] | None:
+    """``(site_tag, rank, world)`` of an IDENTITY row; ``None`` if malformed."""
+    try:
+        if len(row) != IDENTITY_WIDTH or int(row[0]) != MAGIC_IDENTITY:
+            return None
+        return _join(row[1], row[2]), int(row[3]), int(row[4])
+    except Exception:  # noqa: BLE001 - a malformed row is never trusted
+        return None
+
+
+@dataclass(frozen=True)
+class IdentityDecision:
+    """The cluster's startup SITE-identity agreement (rank-invariant)."""
+
+    ok: bool
+    reason: str = ""
+    world: int = 0
+
+
+def decide_identity(rows: Sequence[Sequence[int]]) -> IdentityDecision:
+    """Whether every rank shares a well-formed, KNOWN, same-world identity. PURE.
+
+    ``ok`` iff ``rows`` is non-empty, EVERY row is well-formed (exact
+    :data:`IDENTITY_WIDTH` + :data:`MAGIC_IDENTITY`), every row's ``world`` is
+    EQUAL, and every ``site_tag`` is non-zero. Reasons, in check order:
+    ``"no-ranks"`` / ``"malformed"`` / ``"world-mismatch"`` /
+    ``"unknown-identity"``.
+
+    Rank-order invariant and rank-agnostic: the row's ``rank`` field is
+    informational (diagnostics) and never affects the verdict, so TWO ranks may
+    legitimately share one site (a single-machine test, or two ranks on one
+    host) and still agree -- only a KNOWN, matching site is required. Being
+    pure, every rank computes the same verdict from the same gathered rows.
+    """
+    if not rows:
+        return IdentityDecision(False, reason="no-ranks")
+    decoded: list[tuple[int, int, int]] = []
+    for row in rows:
+        parsed = decode_identity_row(row)
+        if parsed is None:
+            return IdentityDecision(False, reason="malformed")
+        decoded.append(parsed)
+    worlds = {world for _tag, _rank, world in decoded}
+    if len(worlds) != 1:
+        return IdentityDecision(False, reason="world-mismatch")
+    if any(tag == 0 for tag, _rank, _world in decoded):
+        return IdentityDecision(False, reason="unknown-identity")
+    return IdentityDecision(True, world=decoded[0][2])
+
+
 # ---------------------------------------------------------------------------
 # the coordinator + drivers
 # ---------------------------------------------------------------------------
@@ -395,6 +481,8 @@ class ParkCoordinator:
         self._gather = gather
         self.rank = int(rank)
         self.world = int(world)
+        #: Cached single-shot identity-agreement verdict (``None`` = not yet run).
+        self._identity_ok: bool | None = None
 
     @classmethod
     def from_group(cls, group: Any, *, rank: int | None = None) -> "ParkCoordinator | None":
@@ -428,6 +516,23 @@ class ParkCoordinator:
         if len(out) != self.world:
             return [[] for _ in range(self.world)]
         return out
+
+    def identity_confirmed(self, site_tag: int, rank: int, world: int) -> bool:
+        """Whether the cluster agrees on a KNOWN, matching SITE (ONE exchange).
+
+        Runs a single ``MAGIC_IDENTITY`` exchange the FIRST time it is called and
+        caches the boolean on the coordinator (``_identity_ok``), so every later
+        call is free and the cluster performs exactly ONE identity exchange per
+        process. Every rank must call it at the same program point --
+        ``coordinated_restore`` does, before its RESTORE exchange -- so the
+        exchange counts stay rank-invariant. ``decide_identity`` is pure and
+        rank-invariant, so every rank reaches the same verdict (and a rank that
+        cannot confirm skips the RESTORE exchange identically).
+        """
+        if self._identity_ok is None:
+            rows = self.exchange(encode_identity_row(site_tag, rank, world))
+            self._identity_ok = decide_identity(rows).ok
+        return self._identity_ok
 
     def __repr__(self) -> str:
         return f"ParkCoordinator(rank={self.rank}, world={self.world})"

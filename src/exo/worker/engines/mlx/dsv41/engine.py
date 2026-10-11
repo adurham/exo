@@ -445,15 +445,25 @@ class Dsv41Engine(Engine):
         # Plan §G2: compute the build fingerprint ONCE here -- at startup, never
         # lazily at shutdown and never per-park. It identifies the checkpoint
         # (model/tokenizer), the KV/forward code and the MLX build, and the TP
-        # layout (world size, rank, built layer range, dtype), so a parked cache
+        # layout (world size, built layer range, dtype), so a parked cache
         # written by a different build is refused instead of silently served.
+        #
+        # The park layout DELIBERATELY OMITS ``rank``. The DeepSeek MLA cache
+        # stores a SINGLE shared latent per token (``win_kv``/``comp_kv`` are
+        # ``(bsz, ..., head_dim)``, NOT ``n_heads*head_dim``; ``attn.wkv`` is
+        # built full on both ranks), so rank is NOT a cache-CONTENT axis. The two
+        # nodes' TP device ranks are assigned by launch order and SWAP across a
+        # graceful relaunch, so gating a park on rank made every parked dir
+        # foreign after a swap (``park.skip reason=foreign-rank`` -> cold on both
+        # nodes). Excluding rank makes the park fingerprint rank-INVARIANT and a
+        # swapped-rank restore content-safe. (``fingerprint.layout_fingerprint``
+        # itself stays rank-sensitive; only this park layout drops the axis.)
         self._fingerprint = compute_fingerprint(
             model_path=self.loaded.model_path,
             tokenizer=self.loaded.tokenizer,
             model=self.loaded.model,
             layout={
                 "world_size": self.loaded.world,
-                "rank": self.loaded.rank,
                 "layers": self.loaded.built_layers,
                 "dtype": _dtype_of(self.loaded, self.loaded.model),
             },

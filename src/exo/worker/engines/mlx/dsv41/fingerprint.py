@@ -508,23 +508,27 @@ def _layout_fp_from(layout: Any, model: Any) -> str:
     """Build ``layout_fp`` from a layout mapping, falling back to ``model``.
 
     ``layout`` is the plan's "layout mapping" (world_size/rank/layers/dtype/
-    window/bsz); when a field is absent and a ``model`` object is supplied, the
-    model's own attributes are tried. With neither, the defaults (world 1,
-    rank 0, full stack, empty dtype) are used and the degradation is implicit in
-    the result.
+    window/bsz); the model's own attributes are consulted ONLY when ``layout``
+    itself is ``None``. With neither, the defaults (world 1, rank 0, full stack,
+    empty dtype) are used and the degradation is implicit in the result.
+
+    ``rank`` is DELIBERATELY excluded from the park layout fingerprint: the
+    DeepSeek MLA cache is a single shared latent per token (rank-independent), so
+    rank is not a cache-content axis, and the two nodes' TP device ranks are
+    assigned by launch order and SWAP across a graceful relaunch -- gating a park
+    on rank made every dir foreign after a swap. Neither ``layout`` nor ``model``
+    is consulted for rank here; :func:`layout_fingerprint` (which stays
+    rank-sensitive) is simply called with rank 0.
     """
     ws = _field(layout, "world_size", None)
-    rk = _field(layout, "rank", None)
     layers = _field(layout, "layers", None)
     dtype = _field(layout, "dtype", None)
     window = _field(layout, "window", None)
     bsz = _field(layout, "bsz", None)
-    if model is not None:
+    if layout is None and model is not None:
         args = getattr(model, "args", None)
         if ws is None:
             ws = _field(args, "world_size", None) or getattr(model, "world", None)
-        if rk is None:
-            rk = _field(args, "rank", None) or getattr(model, "rank", None)
         if window is None:
             window = _field(args, "window_size", None)
         if bsz is None:
@@ -533,7 +537,7 @@ def _layout_fp_from(layout: Any, model: Any) -> str:
             dtype = _field(args, "dtype", None)
     return layout_fingerprint(
         world_size=_coerce_int(ws, 1),
-        rank=_coerce_int(rk, 0),
+        rank=0,  # rank-invariant park layout (see the docstring above)
         layers=layers,
         dtype="" if dtype is None else str(dtype),
         window=_coerce_int(window, 0),
