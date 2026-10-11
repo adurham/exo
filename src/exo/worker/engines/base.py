@@ -56,6 +56,25 @@ class Engine(ABC):
         del request_pending
         return None
 
+    def begin_shutdown(self) -> None:
+        """Plan §G3 step 1: stop admitting new requests. Default: no-op.
+
+        The DSv4.1 engine sets a flag so ``step()`` will not start a queued turn
+        while the runner drains the in-flight one. Called only when §G3
+        park-on-shutdown is armed (``EXO_DSV41_SHUTDOWN_PARK=1``).
+        """
+        return None
+
+    def shutdown_park(self, **kwargs: object) -> object:
+        """Plan §G3 steps (3)+(4): abort the in-flight turn, force-checkpoint the
+        remaining dirty conversations. Default: no-op (returns ``None``).
+
+        Only reached when the fast path is armed; the DSv4.1 engine implements the
+        real sequence on the runner/engine thread.
+        """
+        del kwargs
+        return None
+
     @abstractmethod
     def warmup(self) -> None: ...
 

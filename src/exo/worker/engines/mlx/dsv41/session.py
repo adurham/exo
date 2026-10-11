@@ -1332,7 +1332,13 @@ class Dsv41Sessions:
 
         return _read_int_env(ENV_MIN_TOKENS, DEFAULT_MIN_TOKENS)
 
-    def checkpoint_candidate(self, now: float | None = None) -> tuple[str, Any] | None:
+    def checkpoint_candidate(
+        self,
+        now: float | None = None,
+        *,
+        force: bool = False,
+        exclude: set[str] | None = None,
+    ) -> tuple[str, Any] | None:
         """The ONE conversation an idle tick should checkpoint, or ``None``.
 
         PURE LOCAL gate (no collectives, no disk): a resident conversation
@@ -1342,15 +1348,25 @@ class Dsv41Sessions:
         turn committed, and it is not in an agreed retry back-off. Most recently
         used first. Inputs are conversation state (identical on every rank: same
         request stream, same deterministic LRU) + env + the monotonic clock.
+
+        ``force`` (§G3 step 4) relaxes only the TIME gates — the idle-since-turn
+        wait, the global no-go cooldown and the per-conversation back-off — so a
+        shutdown can park the remaining dirty conversations now. The
+        between-turns invariant is NOT relaxed: an in-flight conversation is
+        still skipped, and so is one below ``PARK_MIN_TOKENS`` or with no
+        committed turn. ``exclude`` skips entry keys already attempted this
+        shutdown (so the force loop tries each conversation at most once).
         """
         if not ckpt_enabled() or not _park_enabled():
             return None
         now = time.monotonic() if now is None else float(now)
-        if now < self._ckpt_cooldown_until:
+        if not force and now < self._ckpt_cooldown_until:
             return None
         min_tokens = self._ckpt_min_tokens()
         best: tuple[float, str, Any] | None = None
         for k, entry in self._entries.items():
+            if exclude and k in exclude:
+                continue
             conv = entry.session
             try:
                 if conv._inflight or conv.cache is None or conv.cache.cache is None:
@@ -1365,9 +1381,9 @@ class Dsv41Sessions:
                     # AND the token stream. A same-offset branch change bypasses
                     # this (MED-1).
                     continue
-                if now - conv.last_turn_end_ts < self.ckpt_idle_s:
+                if not force and now - conv.last_turn_end_ts < self.ckpt_idle_s:
                     continue
-                if now < self._ckpt_backoff.get(self._ckpt_hash(conv), 0.0):
+                if not force and now < self._ckpt_backoff.get(self._ckpt_hash(conv), 0.0):
                     continue
             except Exception:  # noqa: BLE001 - a broken conversation is skipped
                 continue
@@ -1482,6 +1498,99 @@ class Dsv41Sessions:
         for entry in self._entries.values():
             dropped += int(entry.session.cancel())
         return dropped
+
+    # -- §G3: park-on-shutdown -------------------------------------------
+
+    def abort_inflight(self) -> list[str]:
+        """ABORT every in-flight turn and DROP it from residency (§G3 step 3).
+
+        Called only after the shutdown drain timed out. The turn is NOT parked —
+        the between-turns-only parking invariant is absolute, so a conversation
+        whose cache holds a partial turn is discarded, not serialized. Its last
+        committed §G1 generation stays on disk untouched and remains the restore
+        point; only the aborted turn's delta is lost. Returns the dropped entry
+        keys.
+        """
+        dropped: list[str] = []
+        for k, entry in list(self._entries.items()):
+            conv = entry.session
+            if not getattr(conv, "_inflight", False):
+                continue
+            dropped.append(k)
+            del self._entries[k]
+            try:
+                conv.close()
+            except Exception as exc:  # noqa: BLE001 - a leak must not stop exit
+                logger.warning(
+                    f"[DSV41] §G3 abort: closing in-flight session {k} failed "
+                    f"({type(exc).__name__}: {exc}); dropping anyway."
+                )
+            self.stats["shutdown_aborted"] += 1
+        if dropped:
+            logger.info(
+                f"[DSV41] §G3 abort: dropped {len(dropped)} in-flight "
+                "conversation(s) from residency (last generation kept on disk)."
+            )
+        return dropped
+
+    def force_checkpoint_all(
+        self,
+        *,
+        deadline: float,
+        now: Callable[[], float] = time.monotonic,
+        exclude: set[str] | None = None,
+        precheck: Callable[[], bool] | None = None,
+        request_pending: Callable[[], bool] | None = None,
+    ) -> tuple[list[tuple[str, Any]], bool]:
+        """Force-checkpoint remaining dirty BETWEEN-TURNS conversations (§G3 (4)).
+
+        Most-recently-used first, at most one attempt per conversation, through
+        the existing §G1/§G4 ``maybe_checkpoint`` path (G4 agreed N + per-unit
+        CKPT_POLL + ack-gated prune) so it stays rank-invariant and COLD-safe.
+        Stops at ``deadline`` (or sooner): ``precheck()`` (the engine's
+        agree_on_tasks pairing) is consulted before EVERY attempt and a False
+        stands the whole loop down — a peer mid-``step()`` must not have this
+        rank's checkpoint collective mispair. Returns ``(results, deadline_hit)``
+        where each result is ``(key, CheckpointOutcome)``.
+        """
+        attempted = set() if exclude is None else set(exclude)
+        results: list[tuple[str, Any]] = []
+        deadline_hit = False
+        while True:
+            if now() >= deadline:
+                deadline_hit = True
+                logger.info(
+                    "[DSV41] §G3 force-checkpoint: shutdown park deadline reached; "
+                    f"stopping after {len(results)} attempt(s)."
+                )
+                break
+            if precheck is not None and not precheck():
+                logger.info(
+                    "[DSV41] §G3 force-checkpoint: peer is not at the shutdown "
+                    "point; standing down (previous generation kept)."
+                )
+                break
+            cand = self.checkpoint_candidate(force=True, now=now(), exclude=attempted)
+            if cand is None:
+                break
+            key, _conv = cand
+            attempted.add(key)
+            out = self.maybe_checkpoint(
+                candidate=cand, now=now(), request_pending=request_pending
+            )
+            results.append((key, out))
+            if out is None or not out.all_committed:
+                # A no-go / failure means the ranks are not in lockstep this
+                # shutdown (candidate mismatch, a peer mid-request, a write
+                # failure): STOP rather than issue another collective at a
+                # possibly divergent program point. COLD-safe — every prior
+                # generation stays on disk.
+                logger.info(
+                    "[DSV41] §G3 force-checkpoint: attempt not committed "
+                    f"({getattr(out, 'reason', 'none')}); stopping the loop."
+                )
+                break
+        return results, deadline_hit
 
     def close(self) -> None:
         for entry in self._entries.values():
