@@ -481,7 +481,10 @@ class ParkCoordinator:
         self._gather = gather
         self.rank = int(rank)
         self.world = int(world)
-        #: Cached single-shot identity-agreement verdict (``None`` = not yet run).
+        #: Latched POSITIVE identity-agreement verdict. ``None``/``False`` means
+        #: "not yet confirmed" -- a NEGATIVE verdict is not cached, so the
+        #: one-exchange check is RE-ATTEMPTED on every call until it is positive
+        #: (a first restore while a peer's store is unusable must not latch cold).
         self._identity_ok: bool | None = None
 
     @classmethod
@@ -520,18 +523,24 @@ class ParkCoordinator:
     def identity_confirmed(self, site_tag: int, rank: int, world: int) -> bool:
         """Whether the cluster agrees on a KNOWN, matching SITE (ONE exchange).
 
-        Runs a single ``MAGIC_IDENTITY`` exchange the FIRST time it is called and
-        caches the boolean on the coordinator (``_identity_ok``), so every later
-        call is free and the cluster performs exactly ONE identity exchange per
-        process. Every rank must call it at the same program point --
+        Runs a ``MAGIC_IDENTITY`` exchange and latches the verdict on the
+        coordinator (``_identity_ok``) ONLY when it is POSITIVE, so every later
+        call is free once the cluster has confirmed. A NEGATIVE verdict is NOT
+        cached: the check is RE-ATTEMPTED on every call until it is confirmed, so
+        a rank whose first restore lands while a peer's store is still unusable
+        (or parking is disabled, site tag 0 -> "unknown-identity") recovers as
+        soon as both identities are known, instead of latching cold for the life
+        of the process. Every rank must call it at the same program point --
         ``coordinated_restore`` does, before its RESTORE exchange -- so the
-        exchange counts stay rank-invariant. ``decide_identity`` is pure and
-        rank-invariant, so every rank reaches the same verdict (and a rank that
-        cannot confirm skips the RESTORE exchange identically).
+        exchange counts stay rank-invariant. The retry is itself rank-invariant:
+        ``decide_identity`` is pure, so every rank re-runs (or latches) together
+        and reaches the same verdict (and a rank that cannot confirm skips the
+        RESTORE exchange identically).
         """
-        if self._identity_ok is None:
-            rows = self.exchange(encode_identity_row(site_tag, rank, world))
-            self._identity_ok = decide_identity(rows).ok
+        if self._identity_ok:
+            return True
+        rows = self.exchange(encode_identity_row(site_tag, rank, world))
+        self._identity_ok = decide_identity(rows).ok
         return self._identity_ok
 
     def __repr__(self) -> str:

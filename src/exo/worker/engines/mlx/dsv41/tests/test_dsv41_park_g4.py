@@ -969,8 +969,10 @@ def test_park_layout_is_rank_invariant() -> None:
     assert f0.layout_fp == f1.layout_fp
     assert f0 == f1
     # Even a layout that (mistakenly) carries a rank is normalized to rank 0.
-    g0 = fp.compute_fingerprint(layout={**engine_layout, "rank": 0})
-    g1 = fp.compute_fingerprint(layout={**engine_layout, "rank": 1})
+    # (The model is supplied so the layout's window/bsz keep the same model
+    # fallback as f0 -- rank is the ONLY axis that differs, and it is dropped.)
+    g0 = fp.compute_fingerprint(model=model(0), layout={**engine_layout, "rank": 0})
+    g1 = fp.compute_fingerprint(model=model(1), layout={**engine_layout, "rank": 1})
     assert g0.layout_fp == g1.layout_fp == f0.layout_fp
 
     # The standalone ``layout_fingerprint`` itself STAYS rank-sensitive.
@@ -990,3 +992,71 @@ def test_site_identity_env_then_hostname(monkeypatch: Any) -> None:
     assert pk.site_identity() == pk.socket.gethostname().strip()
     monkeypatch.delenv(pk.ENV_SITE, raising=False)
     assert pk.site_identity() == pk.socket.gethostname().strip()
+
+
+# ---------------------------------------------------------------------------
+# rank-continuity audit fixes: the identity gate must be ISOLATED (a peer with
+# an UNKNOWN identity -> COLD even though the restore would succeed) and must
+# NOT latch a NEGATIVE verdict (a later attempt with known identities recovers).
+# ---------------------------------------------------------------------------
+
+def _solo_store(root: Path, *, site: str = "SA") -> pk.ParkedStore:
+    """A real rank-0 ``ParkedStore`` (no coordinator) with a parked gen 1."""
+    body = StubBody(initial_capacity=4, engram_layer_ids=(0,))
+    store = pk.ParkedStore(body, None, root=root, conv_kw=CONV_KW, min_tokens=8,
+                           fingerprint=_fp(), rank=0, site=site)
+    sess = s_.Dsv41Sessions(body, None, max_seq_len=256, **CONV_KW)
+    conv, _fed, _gen = run_turn(sess, IDS, key="A")
+    assert store.park(conv, key="A") is True
+    return store
+
+
+def test_identity_gate_cold_when_peer_identity_unknown(tmp_path: Path) -> None:
+    """ISOLATE the identity gate: this rank's on-disk generation IS admissible
+    (so the RESTORE exchange would succeed), but the peer reports an UNKNOWN
+    identity (site tag 0) -> the cluster must go COLD, never touching the
+    restore path. The peer is pop-based and EXHAUSTED by the identity row, so a
+    gate that wrongly proceeds runs the restore exchange out of rows (errors);
+    and the FIRST (and only) exchange must be the IDENTITY gate -- so an
+    'always-true identity' mutant that skips OR ignores it FAILS this test."""
+    body = StubBody(initial_capacity=4, engram_layer_ids=(0,))
+    local_rows: list[list[int]] = []
+    peer = [co.encode_identity_row(0, 1, 2)]            # peer: UNKNOWN site (tag 0)
+
+    def gather(row: list[int]) -> list[list[int]]:
+        local_rows.append(list(row))
+        return [row, peer.pop(0)]      # pop-based: exhausted after the identity row
+
+    store = pk.ParkedStore(body, None, root=tmp_path, conv_kw=CONV_KW,
+                           min_tokens=8, fingerprint=_fp(), rank=0, site="SA",
+                           coordinator=co.ParkCoordinator(gather, rank=0, world=2))
+    key_hash = pk.prefix_hash(np.asarray(IDS, dtype=np.int64))
+    _fake_dir(tmp_path, f"{key_hash}.gen1.r0.0000abcd", prefix_key=key_hash,
+              rank=0, gen=1, site="SA")
+    # The restore WOULD have succeeded: this rank admits its own generation.
+    assert [c.gen for c in store.local_restore_candidates(IDS, key="A")] == [1]
+
+    assert store.try_restore(IDS, key="A") is None          # identity gate -> COLD
+    assert not any((d / pk.ACTIVE_MARKER).exists() for d in tmp_path.iterdir())
+    # The gate ran FIRST and short-circuited: exactly ONE exchange, and it was
+    # the IDENTITY gate (a skipped/ignored gate would issue the RESTORE row).
+    assert [r[0] for r in local_rows] == [co.MAGIC_IDENTITY]
+
+
+def test_identity_negative_verdict_does_not_latch(tmp_path: Path) -> None:
+    """A NEGATIVE identity verdict must NOT latch for the process: the first
+    restore (peer identity UNKNOWN) goes COLD, but a subsequent attempt with
+    both identities known must RE-ATTEMPT the identity exchange and restore."""
+    store = _solo_store(tmp_path)
+    cand = store.local_restore_candidates(IDS, key="A")[0]
+    k_lo, k_hi = co._split(cand.key)
+    store.coordinator = _scripted([
+        co.encode_identity_row(0, 1, 2),                    # attempt 1: UNKNOWN
+        co.encode_identity_row(co.site_tag("SB"), 1, 2),    # attempt 2: known
+        co.encode_restore_payload([cand]),                  # peer candidate
+        [co.MAGIC_RESTORE_ACK, 1, k_lo, k_hi, cand.gen],    # peer ack
+    ])
+
+    assert store.try_restore(IDS, key="A") is None          # first: COLD (unknown)
+    second = store.try_restore(IDS, key="A")                # re-attempted: known
+    assert second is not None

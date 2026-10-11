@@ -508,8 +508,8 @@ def _layout_fp_from(layout: Any, model: Any) -> str:
     """Build ``layout_fp`` from a layout mapping, falling back to ``model``.
 
     ``layout`` is the plan's "layout mapping" (world_size/rank/layers/dtype/
-    window/bsz); the model's own attributes are consulted ONLY when ``layout``
-    itself is ``None``. With neither, the defaults (world 1, rank 0, full stack,
+    window/bsz); any field MISSING from it falls back to ``model``'s own
+    attributes. With neither, the defaults (world 1, rank 0, full stack,
     empty dtype) are used and the degradation is implicit in the result.
 
     ``rank`` is DELIBERATELY excluded from the park layout fingerprint: the
@@ -525,7 +525,7 @@ def _layout_fp_from(layout: Any, model: Any) -> str:
     dtype = _field(layout, "dtype", None)
     window = _field(layout, "window", None)
     bsz = _field(layout, "bsz", None)
-    if layout is None and model is not None:
+    if model is not None:
         args = getattr(model, "args", None)
         if ws is None:
             ws = _field(args, "world_size", None) or getattr(model, "world", None)

@@ -1822,7 +1822,8 @@ def coordinated_restore(
 
     out = run_restore(coord, local, restore, discard)
     if out.decision.cold:
-        logger.info(f"park.restore cold reason={out.decision.reason} rank={coord.rank}")
+        if out.decision.reason:
+            logger.info(f"park.restore cold reason={out.decision.reason} rank={coord.rank}")
         return None
     assert usable is not None and out.value is not None
     with contextlib.suppress(Exception):  # the marker is best-effort bookkeeping
