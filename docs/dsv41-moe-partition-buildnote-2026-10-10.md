@@ -39,7 +39,8 @@ differences).
 - A host-side schedule checker confirms, for every mix: each live row is covered exactly once,
   by its own expert, at the v19d 32-row-window origin; no half exceeds 32 rows; dead schedule
   columns are zero.
-- The laptop run (M4 Max, mlx 0.32.0.dev) also gave 65/65 with 0 diffs.
+- The laptop run (M4 Max, mlx 0.32.0.dev20260804) also gave **75/75 with 0 diffs** on the final
+  harness (cb=2 on all 13 mixes, plus cb=0/cb=1 on the real trace).
 - Also verified: the v19c/v19d/v19e kernel **sources** are byte-identical to `6cc9c1e` for
   k=2..4 and cb=0..2.
 - Raw: `docs/benchmarks/phase20-throughput/raw/p20-moe-partition/p20_moe_partition_bitexact_studio2.json`
