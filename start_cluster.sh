@@ -2710,6 +2710,17 @@ for NODE in "${NODES[@]}"; do
   # Audited: no stale values.
   [ -n "${DSV41_INDEXER_L2_FULL:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_L2_FULL=$DSV41_INDEXER_L2_FULL"
   [ -n "${DSV41_INDEXER_SMALLN_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_ROW_BF16=$DSV41_INDEXER_SMALLN_ROW_BF16"
+  # DSV41_INDEXER_QSPLIT: split the indexer's QUERY side across the 2 TP ranks
+  # (mlx_lm deepseek_v41/indexer.py + attention.py, default OFF in the engine).
+  # Each rank scores / top-ks / emits half the chunk's query rows; the KEY side
+  # (index_k + compressor/wkv/wq_a) stays FULL on every rank and a small
+  # cidx [b,n,index_topk] int32 all_sum reconstructs the full selection, so
+  # sparse_attn and the candidate-mask consumer are unchanged. Prefill-only
+  # (decode/verify, n <= FENCE_MIN_ROWS, stay replicated). Forwarded because the
+  # runner env is an ALLOW-LIST: an unlisted knob is silently dropped, which
+  # would make both A/B arms run the default. Audited: no stale value in
+  # repo/shell.
+  [ -n "${DSV41_INDEXER_QSPLIT:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_QSPLIT=$DSV41_INDEXER_QSPLIT"
   # DSV41_NEXT18_CAPTURE*: the next18 real-tensor capture hook (R1 ship precondition
   # A2 / R2 hard gate). bench/next18_capture.py auto-installs its Indexer.__call__
   # wrapper only when DSV41_NEXT18_CAPTURE names an output path; the three vars are
