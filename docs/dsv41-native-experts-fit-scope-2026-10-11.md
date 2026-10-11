@@ -340,3 +340,37 @@ coupling is the fingerprint gate (R3).
   (`_BUILD_IDENTITY_FIELDS` excludes `layout_fp`).
 - Companion: `docs/dsv41-pmp-tasb-reconciliation-2026-10-11.md` (Task G, branch
   `p20/pmp-tasb-reconciliation`) reconciles the indexer share used in the pack's block-share input.
+
+---
+
+## OWNER DECISION — 2026-10-11
+
+**The native-experts build is NOT authorized.** The lever is real at the expert block (+22.1–23.0 % WALL, pack Task A, ≥20 % gate) but the *e2e* ceiling is only **≈6–7 %** (Amdahl: ~33 % expert-block share × 22 % block win), the engine cost is **≈10–16 eng-days** (§3), and the arm that would fit is the materially **lossy** one (q3g128, cos 0.9423) while the quality-acceptable arm (q4g64, cos 0.9881) does not fit at 2 nodes. **Owner ruling: the projected ~6–7 % prefill gain for 10–16 engine-days plus a quality tradeoff is judged not worth it.** **Engine spend and the requant remain CLOSED.** The quality-battery question (§2) is **moot unless the reopen condition below is met.**
+
+---
+
+## REOPEN CONDITION — third node (owner-raised)
+
+The one configuration that changes the calculus is a **third node (TP3)**, spreading the routed experts across 3 Macs instead of 2. Verified 3-node fit math on the repo's own byte facts (Q1d `docs/benchmarks/phase20-throughput/raw/pricing/q1/q1d/q1d-memfit-and-fetch.md`; Q1e `…/q1/q1e/{a3_packing,a2_nwpeak}.json`; `PERFORMANCE_HISTORY.md` Q1d/Q1e):
+
+| quantity | value | basis |
+|---|---:|---|
+| EXL3 experts (both nodes) | **196.0 GB** = 98.253 GB/rank @TP2 | Q1d header |
+| q4g64 experts (both nodes) | **305.8 GB** = 152.883 GB/rank @TP2 (= EXL3 **+54.6/rank**) | Q1e, 4.5 bpw |
+| non-expert REST (both nodes) | **14.55 GB** = 10.71 GB/rank @TP2 | Q1d |
+| q4 model total | ≈ **320.3 GB** | 305.8 + 14.55 |
+| **TP3 per-node weights** | ≈ **106.8 GB** | 320.3 ÷ 3 |
+| non-weight peak (allocator) | ≈ **20.1 GB** | Q1e a2 |
+| **TP3 per-node peak** | ≈ **127 GB** | 106.8 + 20.1 |
+| W_live (wired limit) | **125.829 GB** (iogpu.wired_limit_mb 120000) | q1e a2; `start_cluster.sh:1474` |
+| **verdict** | **≈1 GB OVER** | same knife-edge class as today (incumbent 124.833 GB allocator peak, ≈1 GB *under*) |
+
+The **lossless DSpark-taps reclaim (≈3 GB @102K)** — `Conversation.prefill` retains every chunk's taps until prefill returns (flagged-not-fixed; `PERFORMANCE_HISTORY.md` Q2-gamma) — would tip the arm to fitting (**≈1.9 GB margin**). *(Reconciliation: the brief's aggregate form — (98.09+54.6)×2 + 14.5, ÷3, +20.1 ⇒ ≈126.8 GB — and the repo-fact form (≈126.9 GB) agree to ≈0.13 GB; both land ≈1 GB over. The repo's exact figures are EXL3 **98.253** GB/rank [not 98.09], q4g64 **152.883** GB/rank = **+54.63**/rank [Q1e 4.5-bpw correction; the pack's +46 used the wrong 4.25 bpw], and REST **14.547** GB both-nodes.)*
+
+**3-node sync scaling is UNQUANTIFIED (estimate-grade).** The current 2-node sync cost is itself only loosely bounded (1–24 % of prefill chunk wall, unmeasured in the last attribution; ~2–4 % as an overlapable-class estimate; decode collective-removal bound ≤8.4 %). A 3-node ring adds collective steps/messages per layer while per-rank compute shrinks, so the added-compute-to-throughput conversion is expected **sub-linear — plausibly +20–40 % prefill rather than the naive +50 %, decode flat-to-slightly-worse.** Quantifying it needs a TB5 all-sum microbench at real per-layer shapes on the current pair **plus** the 3-way link work.
+
+**Caveats — TP3 is NOT a drop-in:**
+1. The current **jaccl/TB5 transport is a two-node build**; a third node needs **3-way topology work**.
+2. **Divisibility:** the experts are width-sharded on the **intermediate width H = 2304** (→1152 at TP2; a 3-way split is **768 — clean**; `loader.py::_slice_intermediate`, phase-12 geometry). The **hidden width 5120 is NOT divisible by 3** (1706.67), but it is *not* the sliced axis today; any policy that did slice it would need padding / uneven-split handling. *(The brief labelled 5120 the "intermediate dim"; per the Q1d config the intermediate is 2304 and 5120 is `hidden_size`.)*
+3. The **engine's TP3 support is unproven** — the §3 work list assumed TP2.
+4. A **fresh quality battery** (§2) is required regardless: the fit math is orthogonal to the q3g128/q4g64 quality question, and any fit arm must still clear the ship gate.

@@ -12120,3 +12120,7 @@ expert win (+22.1–23.0 % WALL block win, ≥20 % gate) can be made to FIT and 
 - **RECOMMENDED:** owner fit-route decision (wired-limit raise / demand hygiene / ≤3.24 bpw) → measure the
   hygiene reclaims → quality gate → only then engine work; if no fit route survives, **close as does-not-fit**.
   Companion indexer reconciliation: `docs/dsv41-pmp-tasb-reconciliation-2026-10-11.md` (branch `p20/pmp-tasb-reconciliation`).
+
+## 2026-10-11 — Native-experts requant: owner decision recorded (NOT pursued); reopen condition = third node (TP3) + DSpark-taps reclaim + a fresh quality battery
+
+Owner declined the native-experts requant (memo `docs/dsv41-native-experts-fit-scope-2026-10-11.md`): the block win is real (+22 % WALL, pack Task A) but the e2e ceiling is only ~6–7 % (Amdahl) for ~10–16 engine-days plus a quality tradeoff (the only fitting arm, q3g128, is lossy — cos 0.9423; the quality arm q4g64 does not fit at 2 nodes). **Engine spend + requant CLOSED.** Sole reopen: a **third node (TP3)** spreads q4g64 experts to ~106.8 GB/node weights ⇒ ~127 GB/node vs the 125.829 GB wired limit (**≈1 GB over** — today's knife-edge class); the lossless DSpark-taps reclaim (~3 GB @102K) would flip it to fitting. Gated on 3-way jaccl/TB5 topology work, the engine's TP3 support (unproven), an unquantified 3-node sync scaling (estimate-grade: sub-linear, +20–40 % prefill rather than the naive +50 %), and a fresh quality battery.
