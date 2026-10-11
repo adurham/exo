@@ -12091,3 +12091,32 @@ Follow-up to the Q1c ladder: the apparent ~1.4x prefill delta vs the Aug-2026 kn
 ## 2026-10-11 — DSv4.1 restart-survival round 2 (next22-rankfix): WARN no-ABORT — rank-continuity fix FUNCTIONALLY PROVEN in graceful + kill-9 crash
 
 Closeout of the round-1 rank-swap failure (restore refused after a rank-swapping relaunch). Fix branch `p20/dsv41-restart-rankfix` @ **bebeb0066** (3 commits off base **3afce11d7** = `deploy/next21-restart`); construct/deploy `deploy/next22-rankfix` @ **ade481853**; suite 367 passed in 51.63 s pre-boot. Outcome: **WARN (no ABORT)**, bars applied per runbook `docs/dsv41-restart-live-ab-runbook-2026-10-11.md` §3.4 — the rank-continuity fix is **FUNCTIONALLY PROVEN**: restore fired after the graceful relaunch AND after the `kill -9` crash relaunch, the latter **across a live rank swap** (m4-1=rank1, m4-2=rank0, the exact round-1 permutation), admitted via SITE identity (manifest site == store hostname) replacing the `.r<rank>` gate, with ZERO foreign-site skips and no false fp_mismatch on fix dirs. Headline numbers: graceful post-restore delta TTFT **15.029 s** = 0.029 s over the 15 s bar (resident control floor **14.389 s** ⇒ restore overhead **0.64 s**, 17.7× vs the 265.7 s cold); crash TTFT **0.821 s** (exact-match restore, prefill=0); needles **5/5 both cases**; top-1 **1.000** over **46/46** tokens (256-token spec unevaluable — fixture stops at 46); DSpark **−4.91 %** (0.9231 vs 0.9722) on the first post-boot turn, returning to the **0.9722** baseline on a same-session resident turn ⇒ first-turn-after-load, not a KV effect. **WARN-CALIBRATION:** the ≤15 s bar had only ~0.6 s headroom over the 14.389 s resident floor — propose re-registering as floor+2 s (or median-of-N); DSpark needs a fresh-boot cold-first-turn control to discriminate warmup-vs-restore before ±2 % gating is trusted. **NOT promoted; `EXO_DSV41_CKPT=1` left live for observation** (rollback ref unspent). Full results: `docs/dsv41-restart-next22-results-2026-10-11.md`.
+
+## 2026-10-11 — Native-experts FIT & QUALITY scoping (Task F, offline design only): the lever is real at the block (+22% WALL) but **~7% e2e** and **NO arm fits** — recommend an owner fit-route decision BEFORE any engine spend
+
+Offline design memo (no build, no cluster contact): `docs/dsv41-native-experts-fit-scope-2026-10-11.md`
+(branch `p20/native-experts-fit-scope` off this commit). Answers whether the pack's native-vs-EXL3
+expert win (+22.1–23.0 % WALL block win, ≥20 % gate) can be made to FIT and whether it is worth engine days.
+
+- **Amdahl ceiling small.** Expert block ≈ 33 % of the chunk (pack Task B) × 22 % block win ⇒ **≈7.3 % e2e
+  if EVERY MoE layer goes native.** Nothing goes native today. (Standalone single-node bound; realized e2e ≤ this.)
+- **Fit ⟂ quality (the crux).** Re-derived byte math (per rank, TP2): EXL3 experts **98.253 GB** (k=2 on
+  layers 18–22 = 8.566; k=3 on the other 35 = 89.687); q4g64 **152.883 GB** (4.5 bpw — **CORRECTION: the
+  pack's "+46 GB/rank" used the wrong 4.25 bpw; correct is +54.6**); q3g128 **110.416** (3.25 bpw);
+  W_live 125.829 GB; rest 10.710; resident demand 15.81. The **quality-acceptable** arm (q4g64, cos 0.9881)
+  cannot fit >~7 of 40 layers (≈1.3 % e2e); the arm that fits by a knife-edge (q3g128, over by 0.4 GB) is the
+  **lossy** one (cos 0.9423). Converting only the 35 k=3 layers to q3g128 fits with ~4.8 GB margin (≈6.35 % e2e);
+  all-40 q3g128 is over by 0.4 GB (demand hygiene — DSpark-taps retention ≈3 GB @102K — would flip it).
+- **Quality gate.** In-repo battery `bench/dsv41_quality_battery/` is the ship gate (needles 6/6, tools 10/10,
+  prose 0 DIRTY, park recall_teal; `compare.py` vs a frozen reference — it FAILED the q1b affine6 round → NO SHIP).
+  **The "ORIGINAL bf16 source" likely does not exist** (the pre-EXL3 original is FP8+FP4, 510.3 GB; bf16 name 404s)
+  → owner must pick the reference source. q3g128 cos 0.9423 = ~34.7 % rel-L2 on the expert block vs the EXL3
+  reconstruction (not bf16 truth) — an owner judgment, not agent-decided. **Seven owner decision points listed.**
+- **Engine work ≈10–16 eng-days** (read-only pass; the native module already exists — `BatchedSwitchGLU`/
+  `QuantizedSwitchLinear`); dominated by the **fingerprint/park coupling**: the format is NOT hashed by any
+  fingerprint field (`model_fp` = config/index/**sizes**; `coord._BUILD_IDENTITY_FIELDS` excludes `layout_fp`), so
+  an env-only format toggle could silently restore uniformly-EXL3 parks — a format digest must join the fingerprint
+  + the G4 identity fields. Load transient: streamed reconstruct→fp16 is mandatory (+13.6 GB/layer if not streamed).
+- **RECOMMENDED:** owner fit-route decision (wired-limit raise / demand hygiene / ≤3.24 bpw) → measure the
+  hygiene reclaims → quality gate → only then engine work; if no fit route survives, **close as does-not-fit**.
+  Companion indexer reconciliation: `docs/dsv41-pmp-tasb-reconciliation-2026-10-11.md` (branch `p20/pmp-tasb-reconciliation`).
