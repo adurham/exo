@@ -201,3 +201,80 @@ tensors — `_block_bounds` `n % (8·world)` (`exl3_build.py:324`; `attn.wq_b` 2
 (`exl3_build.py:703`; 64%3 and 8%3); and the launcher hardcodes (~15 two-node
 assumptions in `start_cluster.sh`). P1 clears the dominant *performance* blocker; the
 transport / geometry / launcher prerequisites remain open.
+
+## Post-audit fixes (2026-10-11)
+
+Adversarial audit (STEP-3) of mlx-lm `perf/dsv41-indexer-qsplit` @ `f728bb6` /
+exo `p20/dsv41-indexer-qsplit` @ `01ddc7bf3` — report
+`~/.hermes/cache/scratch/p20-idxsplit-audit-report.md`. The band math itself was
+confirmed exact (reconstruction byte-exact, batch-safe, source↔consumer on one
+band, flag-off value-identical); the audit found **two defects** and three
+mutation-coverage gaps. All are fixed here.
+
+**mlx-lm** `perf/dsv41-indexer-qsplit`: `f728bb681` → `e03406282` (new tip).
+
+### D1 (HIGH) — attention.py call signature
+
+The new `band=`/`group=` keywords were passed **unconditionally**, so with
+`DSV41_INDEXER_QSPLIT` OFF the call still bound the keyword and raised
+`TypeError` against a **fixed positional-signature** monkeypatch of
+`Indexer.__call__` — the supported `DSV41_NEXT18_CAPTURE` capture hook
+(`bench/next18_capture.py:222`), installed on every rank when that env is set
+(`dsv41/engine.py`, forwarded by `start_cluster.sh`). The flag-off call now passes
+**no band keyword at all** (the literal base call); the kwargs are passed only
+when `band is not None` (`attention.py:196-218`).
+
+### D2 (MEDIUM) — `query_band` fences on the BAND row count
+
+`query_band` gated on the FULL `n` (`n <= _FENCE_MIN_ROWS`) while the indexer
+routes on the BAND's row count (`indexer.py` `n = qpos.shape[0]`, driving both
+`_HIER and n > _FENCE_MIN_ROWS` and `_row_dtype(n)`). At world=2 with
+`_FENCE_MIN_ROWS < n_full <= _FENCE_MIN_ROWS * world` (17..32) each rank's band
+(9..16 rows) took the small-n fp32 fallback while the replicated run took the
+hier/bf16 path, so the "band == full slice, byte-exact" invariant broke (not
+corruption: both ranks share the regime, and the fp32 row is the more precise
+one). The fence now applies to the band's own rows
+(`n % world or n // world <= _FENCE_MIN_ROWS`, `indexer.py:190-198`), so a band
+engages only where the replicated run would have taken the same path.
+
+### Coverage fills (the audit's mutation escapes)
+
+- **M5** (`lens` band-relative while the rope stays absolute) — every case used
+  `sp = 2*nb` (all columns visible), so `lens` was inert. Added a causal-frame
+  case (`sp=0`, `nb=n/2`).
+- **M10** (untiled return site not wrapped) — the suite only forced tiling or
+  the hierarchy. Added a banded **untiled** case (which fails with `KeyError
+  'padded'` if the wrap is dropped).
+- **M12** (attention call site never bands) — only `Indexer`/`query_band` were
+  called directly. Added an **Attention-forward** test asserting the band
+  (`(0, 20)` at n=40, world=2) is actually passed, plus the D1 fixed-arity
+  wrapper test driven through a real Attention forward.
+
+`tests/test_dsv41_indexer_qsplit.py` 15 → **21**; `ruff` clean. All five
+sabotages (D1, D2, M5, M10, M12) are **CAUGHT (RED)** when re-applied.
+
+> Note (out of lane, flagged): `tests/test_dsv41_indexer_bf16_row.py` ends with
+> an `importlib.reload(indexer)`, leaving a *second* `Indexer` class bound while
+> `attention` still holds the first. The new Attention-level tests therefore
+> patch `type(att.indexer)`, not `IX.Indexer`. Not fixed here — a future cleanup
+> could make that test restore the module.
+
+### exo pins + alignment
+
+The `mlx-lm` gitlink and the `uv.lock` pin (`uv.lock:1501`) both advance to the
+same sha; the alignment guard
+(`src/exo/shared/tests/test_submodule_lock_pin_alignment.py`) is **green**
+(2 passed).
+
+> **Advisory (audit I1, unresolved — offline):** the `uv.lock` pin reads
+> `?branch=main#<sha>` while `<sha>` lives only on the feature branch
+> `perf/dsv41-indexer-qsplit` (precedent: next11's pin `d740764`). uv resolves a
+> locked git source by the **exact rev**, and the commit is pushed/reachable, so
+> it is fetchable; only CI/uv2nix fetchers that verify `rev ∈ ref` are at risk
+> (deploy force-reinstalls from the submodule, so the lock does not drive the
+> cluster). Re-pin to the **merge sha** when this lands on `main`.
+
+### Bench impact
+
+None. Bench shapes are n=2048 (far above the fence) so neither fix changes the
+band geometry there — **no re-bench**.
