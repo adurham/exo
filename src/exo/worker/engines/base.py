@@ -39,6 +39,23 @@ class Engine(ABC):
             or CANCEL_ALL_TASKS in self._cancelled_tasks
         )
 
+    def idle_tick_seconds(self) -> float | None:
+        """Interval at which the runner should call :meth:`idle_tick` while it
+        has no generation task, or ``None`` (the default) to keep the runner's
+        blocking idle wait exactly as before."""
+        return None
+
+    def idle_tick(self, request_pending: Callable[[], bool] | None = None) -> object:
+        """Opportunistic between-requests work on the RUNNER (engine) thread.
+
+        Called only when the runner is Ready and its work queue stayed empty for
+        :meth:`idle_tick_seconds`. ``request_pending()`` turns True as soon as a
+        new work item arrives; an implementation must poll it and yield quickly.
+        Default: no-op.
+        """
+        del request_pending
+        return None
+
     @abstractmethod
     def warmup(self) -> None: ...
 

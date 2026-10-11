@@ -74,6 +74,11 @@ __all__ = [
     "prune_floor",
     "run_park",
     "run_restore",
+    "CheckpointOutcome",
+    "IdleDecision",
+    "decide_idle",
+    "decide_poll",
+    "run_checkpoint",
 ]
 
 #: Candidates each rank reports per restore exchange (fixed payload width).
@@ -93,11 +98,16 @@ MAGIC_RESTORE = 0x4734_5201
 MAGIC_RESTORE_ACK = 0x4734_5202
 MAGIC_PARK_GEN = 0x4734_5203
 MAGIC_PARK_ACK = 0x4734_5204
+#: §G1 idle checkpoint: the "may we checkpoint now" row and the per-unit poll.
+MAGIC_IDLE = 0x4734_5205
+MAGIC_CKPT_POLL = 0x4734_5206
 
 _ENTRY_WIDTH = 6  # key_lo, key_hi, gen, pref, digest_lo, digest_hi
 RESTORE_WIDTH = 2 + MAX_CANDIDATES * _ENTRY_WIDTH
 RESTORE_ACK_WIDTH = 5  # magic, ok, key_lo, key_hi, gen
 PARK_WIDTH = 4  # magic, key_lo, key_hi, value
+IDLE_WIDTH = 5  # magic, ok, key_lo, key_hi, offset
+POLL_WIDTH = 4  # magic, pending, ok, more
 
 #: ``PARK_ACK`` value meaning "this rank did NOT commit gen N" (write refused,
 #: write failed, store unreadable): blocks pruning on every rank this turn.
@@ -530,3 +540,199 @@ def run_park(
         with contextlib.suppress(Exception):  # pruning is best-effort
             prune(floor)
     return ParkOutcome(gen, written, floor)
+
+
+# ---------------------------------------------------------------------------
+# §G1: the coordinated, cancellable after-turn idle checkpoint
+# ---------------------------------------------------------------------------
+#
+# A checkpoint is a park that KEEPS the conversation resident, written one
+# unit (~one layer) at a time while the engine thread is idle. It reuses the
+# G4 generation protocol verbatim (PARK_GEN -> write -> PARK_ACK -> ack-gated
+# prune) and adds two exchanges:
+#
+# * ``IDLE`` (once, first): every rank reports whether it may checkpoint NOW
+#   (no request pending, a usable store, a park-safe conversation) and WHICH
+#   conversation (key + offset). Go only when every rank says ok for the SAME
+#   (key, offset); anything else is a rank-invariant no-go.
+# * ``CKPT_POLL`` (before every unit and once after the last): every rank
+#   reports ``pending`` (a request arrived), ``ok`` (its local writes are
+#   healthy) and ``more`` (it still has units to write). Any pending / not-ok
+#   / malformed row -> EVERY rank aborts (removes its temp dir, keeps the
+#   previous generation) -- so a request waits for at most the one unit that
+#   was in flight. No rank has more -> commit + PARK_ACK. Otherwise each rank
+#   with more writes exactly one unit and polls again.
+#
+# The number of exchanges is a pure function of the gathered rows, so it is
+# identical on every rank; a local failure is reported as ``ok=0`` in the NEXT
+# row, never as a skipped exchange.
+
+#: Hard cap on poll rounds (rank-invariant: every rank counts the same rounds).
+MAX_CKPT_POLLS = 1 << 20
+
+
+@dataclass(frozen=True)
+class IdleDecision:
+    """Whether every rank agreed to checkpoint exactly one ``(key, offset)``."""
+
+    go: bool
+    key: int = 0
+    offset: int = 0
+    reason: str = ""
+
+
+def _idle_row(ok: bool, key: int, offset: int) -> list[int]:
+    lo, hi = _split(key)
+    return [MAGIC_IDLE, 1 if ok else 0, lo, hi, int(offset)]
+
+
+def decide_idle(rows: Sequence[Sequence[int]]) -> IdleDecision:
+    """GO iff every row is a valid IDLE row with ok=1 and identical key/offset. PURE."""
+    if not rows:
+        return IdleDecision(False, reason="no-ranks")
+    first: tuple[int, int] | None = None
+    for row in rows:
+        if len(row) != IDLE_WIDTH or int(row[0]) != MAGIC_IDLE:
+            return IdleDecision(False, reason="malformed")
+        if int(row[1]) != 1:
+            return IdleDecision(False, reason="rank-not-ready")
+        kv = (_join(row[2], row[3]), int(row[4]))
+        if first is None:
+            first = kv
+        elif kv != first:
+            return IdleDecision(False, reason="candidate-mismatch")
+    assert first is not None
+    return IdleDecision(True, key=first[0], offset=first[1])
+
+
+PollVerdict = Literal["continue", "done", "abort-pending", "abort-failed"]
+
+
+def _poll_row(pending: bool, ok: bool, more: bool) -> list[int]:
+    return [MAGIC_CKPT_POLL, 1 if pending else 0, 1 if ok else 0, 1 if more else 0]
+
+
+def decide_poll(rows: Sequence[Sequence[int]]) -> PollVerdict:
+    """The per-unit verdict, identical on every rank. PURE.
+
+    Any malformed row or any ``ok=0`` -> ``abort-failed``; else any
+    ``pending=1`` -> ``abort-pending``; else nobody has more -> ``done``; else
+    ``continue``.
+    """
+    if not rows:
+        return "abort-failed"
+    pending = False
+    more = False
+    for row in rows:
+        if len(row) != POLL_WIDTH or int(row[0]) != MAGIC_CKPT_POLL:
+            return "abort-failed"
+        if int(row[2]) != 1:
+            return "abort-failed"
+        pending = pending or int(row[1]) == 1
+        more = more or int(row[3]) == 1
+    if pending:
+        return "abort-pending"
+    return "continue" if more else "done"
+
+
+@dataclass
+class CheckpointOutcome:
+    """What :func:`run_checkpoint` did. ``all_committed`` is the AGREED result
+    (every rank acked gen N) and is identical on every rank; ``written`` is
+    this rank's local commit only."""
+
+    go: bool
+    reason: str = ""
+    generation: int = 0
+    written: bool = False
+    floor: int | None = None
+    aborted: bool = False
+    pending_abort: bool = False
+    units: int = 0
+    polls: int = 0
+
+    @property
+    def all_committed(self) -> bool:
+        return self.floor is not None
+
+
+def _safe(fn: Callable[[], Any], default: Any) -> Any:
+    try:
+        return fn()
+    except Exception:  # noqa: BLE001 - local errors become row values
+        return default
+
+
+def run_checkpoint(
+    coord: ParkCoordinator,
+    key: int,
+    offset: int,
+    *,
+    ready: Callable[[], bool],
+    pending: Callable[[], bool],
+    local_max: Callable[[], int],
+    begin: Callable[[int], bool],
+    write_next: Callable[[], bool],
+    has_more: Callable[[], bool],
+    commit: Callable[[], bool],
+    committed: Callable[[int], bool],
+    prune: Callable[[int], None],
+    abort: Callable[[], None],
+) -> CheckpointOutcome:
+    """The coordinated, cancellable checkpoint. Never raises on LOCAL errors.
+
+    ``ready()`` -> the IDLE ``ok`` bit; ``begin(N)`` opens gen N's temp dir;
+    ``write_next()`` writes ONE unit and returns whether more remain;
+    ``has_more()`` is consulted after ``begin``; ``commit()`` writes the
+    manifest + renames; ``abort()`` removes the temp dir. See the section
+    comment above for the exchange sequence.
+    """
+    ok_now = bool(_safe(ready, False)) and not bool(_safe(pending, True))
+    rows = coord.exchange(_idle_row(ok_now, key, offset))
+    idle = decide_idle(rows)
+    if not idle.go:
+        return CheckpointOutcome(go=False, reason=idle.reason)
+
+    mine = max(0, int(_safe(local_max, 0)))
+    gen = agree_generation(coord.exchange(_park_row(MAGIC_PARK_GEN, key, mine)))
+    ok = bool(_safe(lambda: begin(gen), False))
+    more = bool(_safe(has_more, False)) if ok else False
+    units = 0
+    polls = 0
+    verdict: PollVerdict = "abort-failed"
+    while polls < MAX_CKPT_POLLS:
+        pend = bool(_safe(pending, True))
+        polls += 1
+        verdict = decide_poll(coord.exchange(_poll_row(pend, ok, more)))
+        if verdict != "continue":
+            break
+        if ok and more:
+            try:
+                more = bool(write_next())
+                units += 1
+            except Exception:  # noqa: BLE001 - reported as ok=0 next poll
+                ok = False
+                more = False
+    else:
+        verdict = "abort-failed"  # cap reached on EVERY rank (same count)
+    if verdict != "done":
+        with contextlib.suppress(Exception):
+            abort()
+        return CheckpointOutcome(
+            go=True, reason=verdict, generation=gen, aborted=True,
+            pending_abort=verdict == "abort-pending", units=units, polls=polls,
+        )
+    written = ok and bool(_safe(commit, False))
+    if not written:
+        with contextlib.suppress(Exception):
+            abort()
+    done = gen if (written and bool(_safe(lambda: committed(gen), False))) else NOT_COMMITTED
+    acks = coord.exchange(_park_row(MAGIC_PARK_ACK, key, done))
+    floor = prune_floor(acks, key, gen)
+    if floor is not None:
+        with contextlib.suppress(Exception):  # pruning is best-effort
+            prune(floor)
+    return CheckpointOutcome(
+        go=True, reason="committed" if floor is not None else "not-acked",
+        generation=gen, written=written, floor=floor, units=units, polls=polls,
+    )
