@@ -932,6 +932,7 @@ class Dsv41Sessions:
         progress: Callable[[int, int, float], None] | None = None,
         fence_heartbeat: Callable[[], None] | None = None,
         park_store: Any = None,
+        fingerprint: Any = None,
     ) -> None:
         self.model = model
         self.head = head if use_draft else None
@@ -964,6 +965,11 @@ class Dsv41Sessions:
         #: An injected park store (the tests pass one rooted at ``tmp_path``);
         #: ``None`` builds the default store lazily on the first eviction.
         self._park: "ParkedStore | None" = park_store
+        #: The engine's build fingerprint (plan §G2), computed once by the
+        #: engine and forwarded to the lazily-built park store so every manifest
+        #: it writes is tagged and every restore is gated. ``None`` (tests, a
+        #: fingerprintless engine) makes the store degrade gracefully.
+        self._fingerprint = fingerprint
         #: Latched once a park-store build fails, so it is not retried per eviction.
         self._park_failed = False
 
@@ -1059,6 +1065,9 @@ class Dsv41Sessions:
                 # (which is the bare construction-scalar dict).
                 conv_kw=dict(self.kw, fence_hook=self._fence_heartbeat),
                 progress=self._progress,
+                # The engine's build fingerprint (plan §G2): forwarded so the
+                # store stamps it into every manifest and gates every restore.
+                fingerprint=self._fingerprint,
             )
             return self._park
         except Exception as exc:  # noqa: BLE001 - parking is best-effort
