@@ -1,0 +1,167 @@
+sched ok real_trace_L0_E384             tgs={'v20': 280}
+sched ok uniform_E192_N12288            tgs={'v20': 192}
+sched ok skew_E192_N12288               tgs={'v20': 252}
+sched ok adv_tail_only_1to7             tgs={'v20': 96}
+sched ok adv_all_len1                   tgs={'v20': 192}
+sched ok adv_all_full_64                tgs={'v20': 96}
+sched ok adv_boundary_lens              tgs={'v20': 152}
+sched ok adv_max64_plus_tiny            tgs={'v20': 288}
+sched ok adv_long_runs_sparse           tgs={'v20': 61}
+sched ok adv_random_ragged_a            tgs={'v20': 239}
+sched ok adv_random_geometric_b         tgs={'v20': 273}
+sched ok adv_single_last_expert         tgs={'v20': 1}
+sched ok adv_single_row                 tgs={'v20': 1}
+real_trace_L0_E384/cb2/gu/gate v20==v19d       OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb2/gu/gate v20==v19c       OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb2/gu/up v20==v19d         OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb2/dn/down v20==v19d       OK   bitdiff=0 maxabs=0 elems=62914560
+real_trace_L0_E384/cb2/dn/down v20==v19c       OK   bitdiff=0 maxabs=0 elems=62914560
+uniform_E192_N12288/cb2/gu/gate v20==v19d      OK   bitdiff=0 maxabs=0 elems=14155776
+uniform_E192_N12288/cb2/gu/gate v20==v19c      OK   bitdiff=0 maxabs=0 elems=14155776
+uniform_E192_N12288/cb2/gu/up v20==v19d        OK   bitdiff=0 maxabs=0 elems=14155776
+uniform_E192_N12288/cb2/dn/down v20==v19d      OK   bitdiff=0 maxabs=0 elems=62914560
+uniform_E192_N12288/cb2/dn/down v20==v19c      OK   bitdiff=0 maxabs=0 elems=62914560
+skew_E192_N12288/cb2/gu/gate v20==v19d         OK   bitdiff=0 maxabs=0 elems=14155776
+skew_E192_N12288/cb2/gu/gate v20==v19c         OK   bitdiff=0 maxabs=0 elems=14155776
+skew_E192_N12288/cb2/gu/up v20==v19d           OK   bitdiff=0 maxabs=0 elems=14155776
+skew_E192_N12288/cb2/dn/down v20==v19d         OK   bitdiff=0 maxabs=0 elems=62914560
+skew_E192_N12288/cb2/dn/down v20==v19c         OK   bitdiff=0 maxabs=0 elems=62914560
+adv_tail_only_1to7/cb2/gu/gate v20==v19d       OK   bitdiff=0 maxabs=0 elems=907776
+adv_tail_only_1to7/cb2/gu/gate v20==v19c       OK   bitdiff=0 maxabs=0 elems=907776
+adv_tail_only_1to7/cb2/gu/up v20==v19d         OK   bitdiff=0 maxabs=0 elems=907776
+adv_tail_only_1to7/cb2/dn/down v20==v19d       OK   bitdiff=0 maxabs=0 elems=4034560
+adv_tail_only_1to7/cb2/dn/down v20==v19c       OK   bitdiff=0 maxabs=0 elems=4034560
+adv_all_len1/cb2/gu/gate v20==v19d             OK   bitdiff=0 maxabs=0 elems=442368
+adv_all_len1/cb2/gu/gate v20==v19c             OK   bitdiff=0 maxabs=0 elems=442368
+adv_all_len1/cb2/gu/up v20==v19d               OK   bitdiff=0 maxabs=0 elems=442368
+adv_all_len1/cb2/dn/down v20==v19d             OK   bitdiff=0 maxabs=0 elems=1966080
+adv_all_len1/cb2/dn/down v20==v19c             OK   bitdiff=0 maxabs=0 elems=1966080
+adv_all_full_64/cb2/gu/gate v20==v19d          OK   bitdiff=0 maxabs=0 elems=7077888
+adv_all_full_64/cb2/gu/gate v20==v19c          OK   bitdiff=0 maxabs=0 elems=7077888
+adv_all_full_64/cb2/gu/up v20==v19d            OK   bitdiff=0 maxabs=0 elems=7077888
+adv_all_full_64/cb2/dn/down v20==v19d          OK   bitdiff=0 maxabs=0 elems=31457280
+adv_all_full_64/cb2/dn/down v20==v19c          OK   bitdiff=0 maxabs=0 elems=31457280
+adv_boundary_lens/cb2/gu/gate v20==v19d        OK   bitdiff=0 maxabs=0 elems=9036288
+adv_boundary_lens/cb2/gu/gate v20==v19c        OK   bitdiff=0 maxabs=0 elems=9036288
+adv_boundary_lens/cb2/gu/up v20==v19d          OK   bitdiff=0 maxabs=0 elems=9036288
+adv_boundary_lens/cb2/dn/down v20==v19d        OK   bitdiff=0 maxabs=0 elems=40161280
+adv_boundary_lens/cb2/dn/down v20==v19c        OK   bitdiff=0 maxabs=0 elems=40161280
+adv_max64_plus_tiny/cb2/gu/gate v20==v19d      OK   bitdiff=0 maxabs=0 elems=14594688
+adv_max64_plus_tiny/cb2/gu/gate v20==v19c      OK   bitdiff=0 maxabs=0 elems=14594688
+adv_max64_plus_tiny/cb2/gu/up v20==v19d        OK   bitdiff=0 maxabs=0 elems=14594688
+adv_max64_plus_tiny/cb2/dn/down v20==v19d      OK   bitdiff=0 maxabs=0 elems=64865280
+adv_max64_plus_tiny/cb2/dn/down v20==v19c      OK   bitdiff=0 maxabs=0 elems=64865280
+adv_long_runs_sparse/cb2/gu/gate v20==v19d     OK   bitdiff=0 maxabs=0 elems=3512448
+adv_long_runs_sparse/cb2/gu/gate v20==v19c     OK   bitdiff=0 maxabs=0 elems=3512448
+adv_long_runs_sparse/cb2/gu/up v20==v19d       OK   bitdiff=0 maxabs=0 elems=3512448
+adv_long_runs_sparse/cb2/dn/down v20==v19d     OK   bitdiff=0 maxabs=0 elems=15610880
+adv_long_runs_sparse/cb2/dn/down v20==v19c     OK   bitdiff=0 maxabs=0 elems=15610880
+adv_random_ragged_a/cb2/gu/gate v20==v19d      OK   bitdiff=0 maxabs=0 elems=12398976
+adv_random_ragged_a/cb2/gu/gate v20==v19c      OK   bitdiff=0 maxabs=0 elems=12398976
+adv_random_ragged_a/cb2/gu/up v20==v19d        OK   bitdiff=0 maxabs=0 elems=12398976
+adv_random_ragged_a/cb2/dn/down v20==v19d      OK   bitdiff=0 maxabs=0 elems=55106560
+adv_random_ragged_a/cb2/dn/down v20==v19c      OK   bitdiff=0 maxabs=0 elems=55106560
+adv_random_geometric_b/cb2/gu/gate v20==v19d   OK   bitdiff=0 maxabs=0 elems=13083264
+adv_random_geometric_b/cb2/gu/gate v20==v19c   OK   bitdiff=0 maxabs=0 elems=13083264
+adv_random_geometric_b/cb2/gu/up v20==v19d     OK   bitdiff=0 maxabs=0 elems=13083264
+adv_random_geometric_b/cb2/dn/down v20==v19d   OK   bitdiff=0 maxabs=0 elems=58147840
+adv_random_geometric_b/cb2/dn/down v20==v19c   OK   bitdiff=0 maxabs=0 elems=58147840
+adv_single_last_expert/cb2/gu/gate v20==v19d   OK   bitdiff=0 maxabs=0 elems=5760
+adv_single_last_expert/cb2/gu/gate v20==v19c   OK   bitdiff=0 maxabs=0 elems=5760
+adv_single_last_expert/cb2/gu/up v20==v19d     OK   bitdiff=0 maxabs=0 elems=5760
+adv_single_last_expert/cb2/dn/down v20==v19d   OK   bitdiff=0 maxabs=0 elems=25600
+adv_single_last_expert/cb2/dn/down v20==v19c   OK   bitdiff=0 maxabs=0 elems=25600
+adv_single_row/cb2/gu/gate v20==v19d           OK   bitdiff=0 maxabs=0 elems=1152
+adv_single_row/cb2/gu/gate v20==v19c           OK   bitdiff=0 maxabs=0 elems=1152
+adv_single_row/cb2/gu/up v20==v19d             OK   bitdiff=0 maxabs=0 elems=1152
+adv_single_row/cb2/dn/down v20==v19d           OK   bitdiff=0 maxabs=0 elems=5120
+adv_single_row/cb2/dn/down v20==v19c           OK   bitdiff=0 maxabs=0 elems=5120
+real_trace_L0_E384/cb0/gu/gate v20==v19d       OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb0/gu/gate v20==v19c       OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb0/gu/up v20==v19d         OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb0/dn/down v20==v19d       OK   bitdiff=0 maxabs=0 elems=62914560
+real_trace_L0_E384/cb0/dn/down v20==v19c       OK   bitdiff=0 maxabs=0 elems=62914560
+real_trace_L0_E384/cb1/gu/gate v20==v19d       OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb1/gu/gate v20==v19c       OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb1/gu/up v20==v19d         OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/cb1/dn/down v20==v19d       OK   bitdiff=0 maxabs=0 elems=62914560
+real_trace_L0_E384/cb1/dn/down v20==v19c       OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/real_trace_L0_E384/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/real_trace_L0_E384/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/real_trace_L0_E384/cb2/gu/up v20==v19d  OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/real_trace_L0_E384/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/real_trace_L0_E384/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/real_trace_L0_E384/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/adv_tail_only_1to7/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=907776
+REAL_W/adv_tail_only_1to7/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=907776
+REAL_W/adv_tail_only_1to7/cb2/gu/up v20==v19d  OK   bitdiff=0 maxabs=0 elems=907776
+REAL_W/adv_tail_only_1to7/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=4034560
+REAL_W/adv_tail_only_1to7/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=4034560
+REAL_W/adv_tail_only_1to7/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=4055040
+REAL_W/adv_all_len1/cb2/gu/gate v20==v19d      OK   bitdiff=0 maxabs=0 elems=442368
+REAL_W/adv_all_len1/cb2/gu/gate v20==v19c      OK   bitdiff=0 maxabs=0 elems=442368
+REAL_W/adv_all_len1/cb2/gu/up v20==v19d        OK   bitdiff=0 maxabs=0 elems=442368
+REAL_W/adv_all_len1/cb2/dn/down v20==v19d      OK   bitdiff=0 maxabs=0 elems=1966080
+REAL_W/adv_all_len1/cb2/dn/down v20==v19c      OK   bitdiff=0 maxabs=0 elems=1966080
+REAL_W/adv_all_len1/_prefill e2e v20==v19d     OK   bitdiff=0 maxabs=0 elems=1966080
+REAL_W/adv_all_full_64/cb2/gu/gate v20==v19d   OK   bitdiff=0 maxabs=0 elems=7077888
+REAL_W/adv_all_full_64/cb2/gu/gate v20==v19c   OK   bitdiff=0 maxabs=0 elems=7077888
+REAL_W/adv_all_full_64/cb2/gu/up v20==v19d     OK   bitdiff=0 maxabs=0 elems=7077888
+REAL_W/adv_all_full_64/cb2/dn/down v20==v19d   OK   bitdiff=0 maxabs=0 elems=31457280
+REAL_W/adv_all_full_64/cb2/dn/down v20==v19c   OK   bitdiff=0 maxabs=0 elems=31457280
+REAL_W/adv_all_full_64/_prefill e2e v20==v19d  OK   bitdiff=0 maxabs=0 elems=31457280
+REAL_W/adv_boundary_lens/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=9036288
+REAL_W/adv_boundary_lens/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=9036288
+REAL_W/adv_boundary_lens/cb2/gu/up v20==v19d   OK   bitdiff=0 maxabs=0 elems=9036288
+REAL_W/adv_boundary_lens/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=40161280
+REAL_W/adv_boundary_lens/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=40161280
+REAL_W/adv_boundary_lens/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=40181760
+REAL_W/adv_max64_plus_tiny/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=14594688
+REAL_W/adv_max64_plus_tiny/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=14594688
+REAL_W/adv_max64_plus_tiny/cb2/gu/up v20==v19d OK   bitdiff=0 maxabs=0 elems=14594688
+REAL_W/adv_max64_plus_tiny/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=64865280
+REAL_W/adv_max64_plus_tiny/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=64865280
+REAL_W/adv_max64_plus_tiny/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=64880640
+REAL_W/adv_long_runs_sparse/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=3512448
+REAL_W/adv_long_runs_sparse/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=3512448
+REAL_W/adv_long_runs_sparse/cb2/gu/up v20==v19d OK   bitdiff=0 maxabs=0 elems=3512448
+REAL_W/adv_long_runs_sparse/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=15610880
+REAL_W/adv_long_runs_sparse/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=15610880
+REAL_W/adv_long_runs_sparse/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=15636480
+REAL_W/adv_random_ragged_a/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=12398976
+REAL_W/adv_random_ragged_a/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=12398976
+REAL_W/adv_random_ragged_a/cb2/gu/up v20==v19d OK   bitdiff=0 maxabs=0 elems=12398976
+REAL_W/adv_random_ragged_a/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=55106560
+REAL_W/adv_random_ragged_a/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=55106560
+REAL_W/adv_random_ragged_a/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=55111680
+REAL_W/adv_random_geometric_b/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=13083264
+REAL_W/adv_random_geometric_b/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=13083264
+REAL_W/adv_random_geometric_b/cb2/gu/up v20==v19d OK   bitdiff=0 maxabs=0 elems=13083264
+REAL_W/adv_random_geometric_b/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=58147840
+REAL_W/adv_random_geometric_b/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=58147840
+REAL_W/adv_random_geometric_b/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=58152960
+REAL_W/adv_single_last_expert/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=5760
+REAL_W/adv_single_last_expert/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=5760
+REAL_W/adv_single_last_expert/cb2/gu/up v20==v19d OK   bitdiff=0 maxabs=0 elems=5760
+REAL_W/adv_single_last_expert/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=25600
+REAL_W/adv_single_last_expert/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=25600
+REAL_W/adv_single_last_expert/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=30720
+REAL_W/adv_single_row/cb2/gu/gate v20==v19d    OK   bitdiff=0 maxabs=0 elems=1152
+REAL_W/adv_single_row/cb2/gu/gate v20==v19c    OK   bitdiff=0 maxabs=0 elems=1152
+REAL_W/adv_single_row/cb2/gu/up v20==v19d      OK   bitdiff=0 maxabs=0 elems=1152
+REAL_W/adv_single_row/cb2/dn/down v20==v19d    OK   bitdiff=0 maxabs=0 elems=5120
+REAL_W/adv_single_row/cb2/dn/down v20==v19c    OK   bitdiff=0 maxabs=0 elems=5120
+REAL_W/adv_single_row/_prefill e2e v20==v19d   OK   bitdiff=0 maxabs=0 elems=30720
+REAL_W/uniform_E192_N12288/cb2/gu/gate v20==v19d OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/uniform_E192_N12288/cb2/gu/gate v20==v19c OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/uniform_E192_N12288/cb2/gu/up v20==v19d OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/uniform_E192_N12288/cb2/dn/down v20==v19d OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/uniform_E192_N12288/cb2/dn/down v20==v19c OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/uniform_E192_N12288/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/skew_E192_N12288/cb2/gu/gate v20==v19d  OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/skew_E192_N12288/cb2/gu/gate v20==v19c  OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/skew_E192_N12288/cb2/gu/up v20==v19d    OK   bitdiff=0 maxabs=0 elems=14155776
+REAL_W/skew_E192_N12288/cb2/dn/down v20==v19d  OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/skew_E192_N12288/cb2/dn/down v20==v19c  OK   bitdiff=0 maxabs=0 elems=62914560
+REAL_W/skew_E192_N12288/_prefill e2e v20==v19d OK   bitdiff=0 maxabs=0 elems=62914560
+VERDICT 0-diff  cases=153 fail=0 -> /tmp/p20moe_partition/p20_moe_partition_bitexact_studio2.json

@@ -1,0 +1,200 @@
+# v21 (REJECTED, laptop: real gu 6.27->4.36 TF, uniform 8.91->6.75): 256-thread TGs, 128-row same-expert decode sharing.
+# Kept for the record only; NOT in the shipped patch.
+# --- v21: 128-row threadgroups, per-expert decode sharing -------------------
+# 256 threads = two 64-row "halves" (each the v19d 2x2 simdgroup layout). The
+# schedule pairs the v19d blocks of one expert two at a time (local block 2j
+# and 2j+1 -> one threadgroup, ONE weight-tile decode per k-stage shared by
+# 128 rows: the decode floor becomes ceil(rows_e/128) per expert instead of
+# ceil(rows_e/64)); each expert's odd leftover block is paired with another
+# expert's leftover (two decodes, one per half, each done by 128 threads).
+# Every simdgroup's 32-row window starts at exactly the v19d row (64-aligned
+# halves of the v19d blocks), uses only its own expert's tile and runs the
+# identical guarded mma body -> bit-identical to v19d.
+# sched (6, nb_max) u32 = [e0, row0_0, len0, e1, row0_1, len1] (len <= 64).
+_MM_SEG_V21 = ("v21",)
+_GEM_THREADS_V21 = 256
+
+
+@lru_cache(maxsize=None)
+def _seg_pair2_sched_fn(nb_max: int) -> Callable[[mx.array, mx.array], tuple[mx.array, mx.array]]:
+    @mx.compile
+    def _fn(blk_tab: mx.array, nb_real: mx.array):
+        e = blk_tab[0]
+        r0 = blk_tab[1]
+        ln = blk_tab[2]
+        bi = mx.arange(nb_max, dtype=mx.uint32)
+        valid = bi < nb_real[0]
+        ev = mx.where(valid, e, nb_max)  # invalid -> spare bucket
+        cntb = mx.zeros((nb_max + 1,), dtype=mx.uint32).at[ev].add(1)
+        first_b = mx.cumsum(cntb) - cntb  # blocks are expert-ordered
+        local = bi - first_b[ev]
+        nb_e = cntb[ev]
+        odd = (local % 2) == 1
+        is_first = valid & (~odd) & (local + 1 < nb_e)
+        is_second = valid & odd
+        is_lone = valid & (~odd) & (local + 1 >= nb_e)
+        fc = mx.cumsum(is_first.astype(mx.uint32))
+        lc = mx.cumsum(is_lone.astype(mx.uint32))
+        n_double = fc[-1:]
+        n_lone = lc[-1:]
+        frank = fc - is_first.astype(mx.uint32)  # rank among firsts
+        # a second block's pair index = rank of the first block before it
+        frank_prev = mx.concatenate([mx.zeros((1,), dtype=mx.uint32), frank[:-1]])
+        lrank = lc - is_lone.astype(mx.uint32)
+        tg = mx.where(is_first, frank, mx.where(is_second, frank_prev, n_double + lrank // 2))
+        tg = mx.where(valid, tg, nb_max)  # dummy column
+        h = mx.where(is_first, 0, mx.where(is_second, 1, lrank % 2))
+        cols = nb_max + 1
+        base = h * 3 * cols + tg
+        idx = mx.concatenate([base, base + cols, base + 2 * cols])
+        vals = mx.concatenate([e, r0, ln]).astype(mx.uint32)
+        flat = mx.zeros((6 * cols,), dtype=mx.uint32).at[idx].add(vals)
+        sched = flat.reshape(6, cols)[:, :nb_max]
+        nts = (n_double + (n_lone + 1) // 2).astype(mx.uint32)
+        return sched, nts
+
+    return _fn
+
+
+_seg_sched2_memo: list[Any] = [None, None, None, None]
+
+
+def _seg_pair2_sched(blk_tab: mx.array, nb_real: mx.array) -> tuple[mx.array, mx.array]:
+    m = _seg_sched2_memo
+    if m[0] is blk_tab and m[1] is nb_real:
+        return m[2], m[3]
+    sched, nts = _seg_pair2_sched_fn(int(blk_tab.shape[1]))(blk_tab, nb_real)
+    m[0], m[1], m[2], m[3] = blk_tab, nb_real, sched, nts
+    return sched, nts
+
+
+def _mm_seg_source_v21(k: int, cb: CodebookMode) -> str:
+    packed_u32 = k * 256 // 32
+    decode = _decode_expr(cb, cw_in="cw")
+    if os.environ.get("EXL3_MM_NODECODE", "0") == "1":
+        decode = "float dq_val = float(cw & 1u);"
+    decode_lines = decode_bs(decode)
+    mma = _MMA_GUARDED.replace("&wblk[", "&wbuf[")
+    if mma.count("&wbuf[") != 5:
+        raise ValueError("_mm_seg_source_v21: unexpected guarded mma body")
+    return f"""
+#define PACKED_U32 {packed_u32}
+#define K_BITS {k}
+
+    uint b = threadgroup_position_in_grid.y;
+    if (b >= nbr[0]) {{
+        return;
+    }}
+    uint colb = threadgroup_position_in_grid.x;
+    uint tid = thread_position_in_threadgroup.x;     // 256 threads
+    uint lane = tid & 31u;
+    uint sgid = tid >> 5u;                            // 0..7
+    uint hf = sgid >> 2u;                             // 64-row half
+    uint sgr = (sgid >> 1u) & 1u;                     // 2x2 grid per half
+    uint sgc = sgid & 1u;
+
+    uint in_tiles = dims[0];
+    uint tiles_per_e = dims[1];
+    uint src_tiles = dims[2];
+    uint tn_base = dims[3];
+    uint out_e = dims[4];
+    uint nb_max = dims[5];
+    uint in_features = in_tiles * 16u;
+
+    uint e_h0 = blk_tab[b];
+    uint e_h1 = blk_tab[3u * nb_max + b];
+    uint len_h1 = blk_tab[5u * nb_max + b];
+    uint row0 = blk_tab[(hf * 3u + 1u) * nb_max + b];
+    uint hlen = blk_tab[(hf * 3u + 2u) * nb_max + b];
+    uint ndec = (len_h1 == 0u || e_h1 == e_h0) ? 1u : 2u;
+    uint wsel = (ndec == 2u) ? hf : 0u;
+    // decode split: one tile -> each 128-thread group decodes 2 of the 4
+    // out-tiles; two tiles -> each group decodes its own half's tile.
+    uint grp = tid >> 7u;
+    uint q = (ndec == 2u) ? grp : 0u;
+    uint lt_lo = (ndec == 2u) ? 0u : grp * 2u;
+    uint lt_hi = (ndec == 2u) ? 4u : grp * 2u + 2u;
+    uint tn0 = tn_base + ((q == 0u) ? e_h0 : e_h1) * tiles_per_e + colb * 4u;
+
+    uint t2 = tid & 127u;
+    uint dcol = t2 >> 3u;        // out col 0..15 within tile
+    uint rp = t2 & 7u;           // in row-pair 0..7
+    uint i0_[2];
+    uint i1_[2];
+    uint sh_[2];
+    for (uint j = 0u; j < 2u; j++) {{
+        uint src = inv_perm[(2u * rp + j) * 16u + dcol];
+        uint t = src >> 1u;
+        int b0 = int(t) * 2 * K_BITS + K_BITS - 16 + 256 * K_BITS;
+        int b2 = b0 + K_BITS + 16;
+        i0_[j] = uint(b0 / 32) % PACKED_U32;
+        i1_[j] = uint((b2 - 1) / 32) % PACKED_U32;
+        sh_[j] = uint(((b2 - 1) / 32 + 1) * 32 - b2) + ((src & 1u) ? 0u : K_BITS);
+    }}
+
+    // this simdgroup's 32-row window inside its half (identical to v19d)
+    uint blk_len = hlen;
+    uint rlive = 0u;
+    if (blk_len > sgr * 32u) {{
+        uint rrem = blk_len - sgr * 32u;
+        rlive = (rrem > 32u) ? 4u : ((rrem + 7u) >> 3u);
+    }}
+    threadgroup half wblk[2u * 32u * {_MM_WS}u];
+    threadgroup float csc[8u * 64u];
+    const threadgroup half* wbase = &wblk[wsel * 32u * {_MM_WS}u];
+    threadgroup half* wdst = &wblk[q * 32u * {_MM_WS}u];
+
+    simdgroup_float8x8 C[4][4];
+    for (uint r = 0u; r < 4u; r++) {{
+        for (uint c = 0u; c < 4u; c++) {{
+            C[r][c] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        }}
+    }}
+
+    const device half* xrow = xh + (ulong)(row0 + sgr * 32u) * in_features;
+    uint stages = in_tiles >> 1u;             // in_tiles is even (>=32)
+    for (uint ks = 0u; ks < stages; ks++) {{
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        for (uint it2 = 0u; it2 < 2u; it2++) {{
+            uint tk = ks * 2u + it2;
+            for (uint lt = lt_lo; lt < lt_hi; lt++) {{
+                const device uint* words =
+                    trellis + ((ulong)tk * src_tiles + tn0 + lt) * PACKED_U32;
+                for (uint j = 0u; j < 2u; j++) {{
+                    ulong merged =
+                        ((ulong)words[i0_[j]] << 32) | (ulong)words[i1_[j]];
+                    uint cw = uint(merged >> sh_[j]) & 0xFFFFu;
+{decode_lines}
+                    wdst[(it2 * 16u + 2u * rp + j) * {_MM_WS}u + lt * 16u + dcol] =
+                        half(dq_val);
+                }}
+            }}
+        }}
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        const threadgroup half* wbuf = wbase;
+{mma}    }}
+
+    uint cb0 = colb * {_MM_BN}u + sgc * 32u;
+    uint rbase = sgr * 32u;
+    for (uint r = 0u; r < 4u; r++) {{
+        if (rbase + r * 8u >= blk_len) {{
+            break;
+        }}
+        for (uint cf = 0u; cf < 4u; cf++) {{
+            simdgroup_store(C[r][cf], &csc[sgid * 64u], 8u);
+            simdgroup_barrier(mem_flags::mem_threadgroup);
+            for (uint i = lane; i < 64u; i += 32u) {{
+                uint rr = i >> 3u;
+                uint cc = i & 7u;
+                uint gr = rbase + r * 8u + rr;
+                if (gr < blk_len) {{
+                    out[(ulong)(row0 + gr) * out_e + cb0 + cf * 8u + cc] =
+                        half(csc[sgid * 64u + i]);
+                }}
+            }}
+            simdgroup_barrier(mem_flags::mem_threadgroup);
+        }}
+    }}
+"""
+
+

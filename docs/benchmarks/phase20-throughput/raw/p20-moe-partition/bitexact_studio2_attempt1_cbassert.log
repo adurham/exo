@@ -1,0 +1,86 @@
+sched ok real_trace_L0_E384             tgs={'v20': 280}
+sched ok uniform_E192_N12288            tgs={'v20': 192}
+sched ok skew_E192_N12288               tgs={'v20': 252}
+sched ok adv_tail_only_1to7             tgs={'v20': 96}
+sched ok adv_all_len1                   tgs={'v20': 192}
+sched ok adv_all_full_64                tgs={'v20': 96}
+sched ok adv_boundary_lens              tgs={'v20': 152}
+sched ok adv_max64_plus_tiny            tgs={'v20': 288}
+sched ok adv_long_runs_sparse           tgs={'v20': 61}
+sched ok adv_random_ragged_a            tgs={'v20': 239}
+sched ok adv_random_geometric_b         tgs={'v20': 273}
+sched ok adv_single_last_expert         tgs={'v20': 1}
+sched ok adv_single_row                 tgs={'v20': 1}
+real_trace_L0_E384/gu/gate v20==v19d           OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/gu/gate v20==v19c           OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/gu/up v20==v19d             OK   bitdiff=0 maxabs=0 elems=14155776
+real_trace_L0_E384/dn/down v20==v19d           OK   bitdiff=0 maxabs=0 elems=62914560
+real_trace_L0_E384/dn/down v20==v19c           OK   bitdiff=0 maxabs=0 elems=62914560
+uniform_E192_N12288/gu/gate v20==v19d          OK   bitdiff=0 maxabs=0 elems=14155776
+uniform_E192_N12288/gu/gate v20==v19c          OK   bitdiff=0 maxabs=0 elems=14155776
+uniform_E192_N12288/gu/up v20==v19d            OK   bitdiff=0 maxabs=0 elems=14155776
+uniform_E192_N12288/dn/down v20==v19d          OK   bitdiff=0 maxabs=0 elems=62914560
+uniform_E192_N12288/dn/down v20==v19c          OK   bitdiff=0 maxabs=0 elems=62914560
+skew_E192_N12288/gu/gate v20==v19d             OK   bitdiff=0 maxabs=0 elems=14155776
+skew_E192_N12288/gu/gate v20==v19c             OK   bitdiff=0 maxabs=0 elems=14155776
+skew_E192_N12288/gu/up v20==v19d               OK   bitdiff=0 maxabs=0 elems=14155776
+skew_E192_N12288/dn/down v20==v19d             OK   bitdiff=0 maxabs=0 elems=62914560
+skew_E192_N12288/dn/down v20==v19c             OK   bitdiff=0 maxabs=0 elems=62914560
+adv_tail_only_1to7/gu/gate v20==v19d           OK   bitdiff=0 maxabs=0 elems=907776
+adv_tail_only_1to7/gu/gate v20==v19c           OK   bitdiff=0 maxabs=0 elems=907776
+adv_tail_only_1to7/gu/up v20==v19d             OK   bitdiff=0 maxabs=0 elems=907776
+adv_tail_only_1to7/dn/down v20==v19d           OK   bitdiff=0 maxabs=0 elems=4034560
+adv_tail_only_1to7/dn/down v20==v19c           OK   bitdiff=0 maxabs=0 elems=4034560
+adv_all_len1/gu/gate v20==v19d                 OK   bitdiff=0 maxabs=0 elems=442368
+adv_all_len1/gu/gate v20==v19c                 OK   bitdiff=0 maxabs=0 elems=442368
+adv_all_len1/gu/up v20==v19d                   OK   bitdiff=0 maxabs=0 elems=442368
+adv_all_len1/dn/down v20==v19d                 OK   bitdiff=0 maxabs=0 elems=1966080
+adv_all_len1/dn/down v20==v19c                 OK   bitdiff=0 maxabs=0 elems=1966080
+adv_all_full_64/gu/gate v20==v19d              OK   bitdiff=0 maxabs=0 elems=7077888
+adv_all_full_64/gu/gate v20==v19c              OK   bitdiff=0 maxabs=0 elems=7077888
+adv_all_full_64/gu/up v20==v19d                OK   bitdiff=0 maxabs=0 elems=7077888
+adv_all_full_64/dn/down v20==v19d              OK   bitdiff=0 maxabs=0 elems=31457280
+adv_all_full_64/dn/down v20==v19c              OK   bitdiff=0 maxabs=0 elems=31457280
+adv_boundary_lens/gu/gate v20==v19d            OK   bitdiff=0 maxabs=0 elems=9036288
+adv_boundary_lens/gu/gate v20==v19c            OK   bitdiff=0 maxabs=0 elems=9036288
+adv_boundary_lens/gu/up v20==v19d              OK   bitdiff=0 maxabs=0 elems=9036288
+adv_boundary_lens/dn/down v20==v19d            OK   bitdiff=0 maxabs=0 elems=40161280
+adv_boundary_lens/dn/down v20==v19c            OK   bitdiff=0 maxabs=0 elems=40161280
+adv_max64_plus_tiny/gu/gate v20==v19d          OK   bitdiff=0 maxabs=0 elems=14594688
+adv_max64_plus_tiny/gu/gate v20==v19c          OK   bitdiff=0 maxabs=0 elems=14594688
+adv_max64_plus_tiny/gu/up v20==v19d            OK   bitdiff=0 maxabs=0 elems=14594688
+adv_max64_plus_tiny/dn/down v20==v19d          OK   bitdiff=0 maxabs=0 elems=64865280
+adv_max64_plus_tiny/dn/down v20==v19c          OK   bitdiff=0 maxabs=0 elems=64865280
+adv_long_runs_sparse/gu/gate v20==v19d         OK   bitdiff=0 maxabs=0 elems=3512448
+adv_long_runs_sparse/gu/gate v20==v19c         OK   bitdiff=0 maxabs=0 elems=3512448
+adv_long_runs_sparse/gu/up v20==v19d           OK   bitdiff=0 maxabs=0 elems=3512448
+adv_long_runs_sparse/dn/down v20==v19d         OK   bitdiff=0 maxabs=0 elems=15610880
+adv_long_runs_sparse/dn/down v20==v19c         OK   bitdiff=0 maxabs=0 elems=15610880
+adv_random_ragged_a/gu/gate v20==v19d          OK   bitdiff=0 maxabs=0 elems=12398976
+adv_random_ragged_a/gu/gate v20==v19c          OK   bitdiff=0 maxabs=0 elems=12398976
+adv_random_ragged_a/gu/up v20==v19d            OK   bitdiff=0 maxabs=0 elems=12398976
+adv_random_ragged_a/dn/down v20==v19d          OK   bitdiff=0 maxabs=0 elems=55106560
+adv_random_ragged_a/dn/down v20==v19c          OK   bitdiff=0 maxabs=0 elems=55106560
+adv_random_geometric_b/gu/gate v20==v19d       OK   bitdiff=0 maxabs=0 elems=13083264
+adv_random_geometric_b/gu/gate v20==v19c       OK   bitdiff=0 maxabs=0 elems=13083264
+adv_random_geometric_b/gu/up v20==v19d         OK   bitdiff=0 maxabs=0 elems=13083264
+adv_random_geometric_b/dn/down v20==v19d       OK   bitdiff=0 maxabs=0 elems=58147840
+adv_random_geometric_b/dn/down v20==v19c       OK   bitdiff=0 maxabs=0 elems=58147840
+adv_single_last_expert/gu/gate v20==v19d       OK   bitdiff=0 maxabs=0 elems=5760
+adv_single_last_expert/gu/gate v20==v19c       OK   bitdiff=0 maxabs=0 elems=5760
+adv_single_last_expert/gu/up v20==v19d         OK   bitdiff=0 maxabs=0 elems=5760
+adv_single_last_expert/dn/down v20==v19d       OK   bitdiff=0 maxabs=0 elems=25600
+adv_single_last_expert/dn/down v20==v19c       OK   bitdiff=0 maxabs=0 elems=25600
+adv_single_row/gu/gate v20==v19d               OK   bitdiff=0 maxabs=0 elems=1152
+adv_single_row/gu/gate v20==v19c               OK   bitdiff=0 maxabs=0 elems=1152
+adv_single_row/gu/up v20==v19d                 OK   bitdiff=0 maxabs=0 elems=1152
+adv_single_row/dn/down v20==v19d               OK   bitdiff=0 maxabs=0 elems=5120
+adv_single_row/dn/down v20==v19c               OK   bitdiff=0 maxabs=0 elems=5120
+Traceback (most recent call last):
+  File "/tmp/p20moe_partition/p20_moe_partition_bitexact.py", line 170, in <module>
+    main()
+    ~~~~^^
+  File "/tmp/p20moe_partition/p20_moe_partition_bitexact.py", line 147, in main
+    assert sg._k == 3 and int(sg._cb) == 0, (sg._k, sg._cb)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: (3, <CodebookMode.MUL1: 2>)

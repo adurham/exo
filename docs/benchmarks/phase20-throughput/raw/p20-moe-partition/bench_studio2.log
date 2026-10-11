@@ -1,0 +1,23 @@
+[partition] start /tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py vers ['v19d', 'v20']
+[autopsy] === ceilings (in-session) ===
+[autopsy]   dense bf16 2048x4096x4096: 4.762 ms 14.43 TF
+[autopsy]   dense bf16 4096x4096x4096: 9.268 ms 14.83 TF
+[autopsy]   dense bf16 8192x4096x4096: 18.268 ms 15.05 TF
+[autopsy]   dense bf16 4096x8192x8192: 36.311 ms 15.14 TF
+[autopsy]   ceiling: 15.14 TF dense-bf16 / 438 GB/s BW
+[partition]   real r0 v19d  full 66.07 ms  gate 19.36 up 19.38 dn 18.76
+[partition]   real r0 v20   full 64.05 ms  gate 18.76 up 18.76 dn 18.05
+[partition]   real r1 v20   full 64.15 ms  gate 18.66 up 18.59 dn 18.03
+[partition]   real r1 v19d  full 65.90 ms  gate 19.24 up 19.30 dn 18.58
+[partition]   uniform r0 v19d  full 48.86 ms  gate 13.62 up 13.55 dn 13.23
+[partition]   uniform r0 v20   full 48.14 ms  gate 13.08 up 13.05 dn 13.13
+[partition]   uniform r1 v20   full 48.14 ms  gate 13.12 up 13.14 dn 13.16
+[partition]   uniform r1 v19d  full 48.87 ms  gate 13.60 up 13.62 dn 13.21
+[partition]   skew r0 v19d  full 57.59 ms  gate 16.47 up 16.51 dn 15.96
+[partition]   skew r0 v20   full 56.21 ms  gate 16.03 up 16.02 dn 15.48
+[partition]   skew r1 v20   full 56.21 ms  gate 16.02 up 16.04 dn 15.49
+[partition]   skew r1 v19d  full 57.49 ms  gate 16.50 up 16.50 dn 15.96
+[partition] [real] autopsy_baseline_TF=6.630 autopsy_mix_roofline_TF=14.960 in_session_mix_roofline_TF=14.954 v19d_TF=6.590 v19d_pct_mix=44.069 v20_TF=6.784 v20_pct_mix=45.366 v20_vs_v19d_pct=2.943 v20_vs_v19d_full_ms_saved=1.887
+[partition] [uniform] autopsy_baseline_TF=8.850 autopsy_mix_roofline_TF=15.150 in_session_mix_roofline_TF=15.144 v19d_TF=8.899 v19d_pct_mix=58.761 v20_TF=9.033 v20_pct_mix=59.647 v20_vs_v19d_pct=1.509 v20_vs_v19d_full_ms_saved=0.727
+[partition] [skew] autopsy_baseline_TF=7.550 autopsy_mix_roofline_TF=15.100 in_session_mix_roofline_TF=15.094 v19d_TF=7.558 v19d_pct_mix=50.070 v20_TF=7.736 v20_pct_mix=51.254 v20_vs_v19d_pct=2.364 v20_vs_v19d_full_ms_saved=1.329
+[partition] DONE -> /tmp/p20moe_partition/p20_moe_partition_bench.json

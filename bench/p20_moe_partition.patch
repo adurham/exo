@@ -1,0 +1,352 @@
+diff --git a/mlx_lm/models/exl3/gemv_metal.py b/mlx_lm/models/exl3/gemv_metal.py
+index 27ce684..710840e 100644
+--- a/mlx_lm/models/exl3/gemv_metal.py
++++ b/mlx_lm/models/exl3/gemv_metal.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ 
+ import os
+ from collections.abc import Callable
++from functools import lru_cache
+ from typing import Any
+ 
+ import numpy as np
+@@ -1577,6 +1578,14 @@ _MM_WS = 72  # wblk row stride in halfs (32 rows x 64 cols, padded)
+ # EXL3_MM_SEG=v19c restores the stock kernel.
+ _MM_SEG_VERSION = os.environ.get("EXL3_MM_SEG", "v19d")
+ 
++# EXL3_MM_SEG_LOG=1 (Phase-20 MoE autopsy Step 1): once per launch, record the
++# host-side per-segment decomposition of the single segmented-GEMM dispatch.
++# The whole launch is ONE Metal dispatch, so per-segment GPU cycles are not
++# separately exposed; this records the block (M) histogram + N + K per launch
++# (launch wall is measured host-side around the drained eval by the caller).
++_MM_SEG_LOG = os.environ.get("EXL3_MM_SEG_LOG", "0") == "1"
++_MM_SEG_LOG_ROWS: list[dict[str, Any]] = []
++
+ _mm_seg_kernels: dict[tuple[int, int, str], Callable[..., Any]] = {}
+ 
+ _WBLK_ANCHOR = "    threadgroup half wblk[32u * 72u];   // 2 in-tiles x 4 out-tiles"
+@@ -1878,6 +1887,214 @@ def _mm_seg_source(k: int, cb: CodebookMode) -> str:
+ """
+ 
+ 
++# --- v20: half-block pairing (Phase-20 MoE partition, lever #1) -------------
++# v19d runs one threadgroup per (64-row expert block, 64-col tile). At the
++# DSv4.1 production mix (E=384, 12288 pairs/rank) 235 of 397 blocks hold <=32
++# rows, so the sgr=1 simdgroup pair of those threadgroups idles for the whole
++# K loop while still paying the barriers. v20 keeps every block with >32 rows
++# exactly as v19d (same expert in both sgr halves, one weight tile) and packs
++# the <=32-row blocks two per threadgroup: sgr=0 takes one short block, sgr=1
++# the next, each against its OWN expert's weight tile (second wblk buffer).
++#
++# Bit-exactness: each 8-row A fragment still starts at the same sorted row
++# (row0 + r*8 of its own block, half-local), multiplies the same expert's
++# decoded B fragments, and accumulates k2-ascending through the same guarded
++# per-row mma blocks as v19d -> every live output element is produced by the
++# identical simdgroup_multiply_accumulate sequence. No fragment ever mixes two
++# experts (packing granularity is the 32-row sgr half, not the 8-row
++# fragment), so no x-row gather and no 8-row alignment is needed: x stays the
++# expert-sorted rows, addressed device-direct exactly as before.
++#
++# sched (6, nb_max) u32 = [e0, r0_0, len0, e1, r0_1, len1] per threadgroup,
++# built on device from blk_tab (no host sync); nts (1,) = live threadgroups.
++_MM_SEG_V20 = ("v20",)
++
++
++@lru_cache(maxsize=None)
++def _seg_pair_sched_fn(nb_max: int) -> Callable[[mx.array, mx.array], tuple[mx.array, mx.array]]:
++    half = _MM_BM // 2
++
++    @mx.compile
++    def _fn(blk_tab: mx.array, nb_real: mx.array):
++        e = blk_tab[0]
++        r0 = blk_tab[1]
++        ln = blk_tab[2]
++        valid = mx.arange(nb_max, dtype=mx.uint32) < nb_real[0]
++        is_long = valid & (ln > half)
++        is_short = valid & (ln <= half) & (ln > 0)
++        lc = mx.cumsum(is_long.astype(mx.uint32))
++        sc = mx.cumsum(is_short.astype(mx.uint32))
++        n_long = lc[-1:]
++        n_short = sc[-1:]
++        lrank = lc - is_long.astype(mx.uint32)
++        srank = sc - is_short.astype(mx.uint32)
++        tg = mx.where(is_long, lrank, n_long + srank // 2)
++        tg = mx.where(is_long | is_short, tg, nb_max)  # dummy column
++        h = mx.where(is_long, 0, srank % 2)
++        len_a = mx.where(is_long, half, ln)
++        # half 0 (or the short block's own half)
++        cols = nb_max + 1
++        base = h * 3
++        idx = mx.concatenate([
++            (base + 0) * cols + tg, (base + 1) * cols + tg, (base + 2) * cols + tg,
++            # long blocks' second half (sgr=1); others -> dummy column
++            mx.where(is_long, 3 * cols + tg, 3 * cols + nb_max),
++            mx.where(is_long, 4 * cols + tg, 4 * cols + nb_max),
++            mx.where(is_long, 5 * cols + tg, 5 * cols + nb_max),
++        ])
++        vals = mx.concatenate([e, r0, len_a, e, r0 + half, ln - mx.minimum(ln, half)])
++        flat = mx.zeros((6 * cols,), dtype=mx.uint32).at[idx].add(vals.astype(mx.uint32))
++        sched = flat.reshape(6, cols)[:, :nb_max]
++        nts = (n_long + (n_short + 1) // 2).astype(mx.uint32)
++        return sched, nts
++
++    return _fn
++
++
++_seg_sched_memo: list[Any] = [None, None, None, None]  # blk_tab, nb_real, sched, nts
++
++
++def _seg_pair_sched(blk_tab: mx.array, nb_real: mx.array) -> tuple[mx.array, mx.array]:
++    """One schedule per (blk_tab, nb_real) pair: the gate/up/down launches of
++    one _prefill share their table, so build it once (lazy, no sync)."""
++    m = _seg_sched_memo
++    if m[0] is blk_tab and m[1] is nb_real:
++        return m[2], m[3]
++    sched, nts = _seg_pair_sched_fn(int(blk_tab.shape[1]))(blk_tab, nb_real)
++    m[0], m[1], m[2], m[3] = blk_tab, nb_real, sched, nts
++    return sched, nts
++
++
++def _mm_seg_source_v20(k: int, cb: CodebookMode) -> str:
++    packed_u32 = k * 256 // 32
++    decode = _decode_expr(cb, cw_in="cw")
++    if os.environ.get("EXL3_MM_NODECODE", "0") == "1":
++        decode = "float dq_val = float(cw & 1u);"
++    decode_lines = decode_bs(decode)
++    # identical guarded mma body to v19d, reading this half's weight buffer
++    mma = _MMA_GUARDED.replace("&wblk[", "&wbuf[")
++    if mma.count("&wbuf[") != 5:
++        raise ValueError("_mm_seg_source_v20: unexpected guarded mma body")
++    return f"""
++#define PACKED_U32 {packed_u32}
++#define K_BITS {k}
++
++    uint b = threadgroup_position_in_grid.y;
++    if (b >= nbr[0]) {{
++        return;
++    }}
++    uint colb = threadgroup_position_in_grid.x;
++    uint tid = thread_position_in_threadgroup.x;     // 128 threads
++    uint lane = tid & 31u;
++    uint sgid = tid >> 5u;
++    uint sgr = sgid >> 1u;                            // 2x2 simdgroup grid
++    uint sgc = sgid & 1u;
++
++    uint in_tiles = dims[0];
++    uint tiles_per_e = dims[1];
++    uint src_tiles = dims[2];
++    uint tn_base = dims[3];
++    uint out_e = dims[4];
++    uint nb_max = dims[5];
++    uint in_features = in_tiles * 16u;
++
++    // per-half work item: sgr=0 -> half 0, sgr=1 -> half 1
++    uint e_h0 = blk_tab[b];
++    uint len_h0 = blk_tab[2u * nb_max + b];
++    uint e_h1 = blk_tab[3u * nb_max + b];
++    uint len_h1 = blk_tab[5u * nb_max + b];
++    uint row0 = blk_tab[(sgr * 3u + 1u) * nb_max + b];
++    uint blk_len = (sgr == 0u) ? len_h0 : len_h1;     // <= 32 (half-local)
++    // one decoded tile when both halves use the same expert (v19d long
++    // block) or half 1 is empty; else two tiles, one per half.
++    uint ndec = (len_h1 == 0u || e_h1 == e_h0) ? 1u : 2u;
++    uint wsel = (ndec == 2u) ? sgr : 0u;
++    uint tn0_[2];
++    tn0_[0] = tn_base + e_h0 * tiles_per_e + colb * 4u;
++    tn0_[1] = tn_base + e_h1 * tiles_per_e + colb * 4u;
++
++    // decode-position precompute (fixed per thread; decode_full_t mapping)
++    uint dcol = tid >> 3u;        // out col 0..15 within tile
++    uint rp = tid & 7u;           // in row-pair 0..7
++    uint i0_[2];
++    uint i1_[2];
++    uint sh_[2];
++    for (uint j = 0u; j < 2u; j++) {{
++        uint src = inv_perm[(2u * rp + j) * 16u + dcol];
++        uint t = src >> 1u;
++        int b0 = int(t) * 2 * K_BITS + K_BITS - 16 + 256 * K_BITS;
++        int b2 = b0 + K_BITS + 16;
++        i0_[j] = uint(b0 / 32) % PACKED_U32;
++        i1_[j] = uint((b2 - 1) / 32) % PACKED_U32;
++        sh_[j] = uint(((b2 - 1) / 32 + 1) * 32 - b2) + ((src & 1u) ? 0u : K_BITS);
++    }}
++
++    uint rlive = 0u;
++    if (blk_len > 0u) {{
++        rlive = (blk_len > 32u) ? 4u : ((blk_len + 7u) >> 3u);
++    }}
++    threadgroup half wblk[2u * 32u * {_MM_WS}u];   // 2 halves x (2 in x 4 out tiles)
++    threadgroup float csc[4u * 64u];
++    const threadgroup half* wbase = &wblk[wsel * 32u * {_MM_WS}u];
++
++    simdgroup_float8x8 C[4][4];
++    for (uint r = 0u; r < 4u; r++) {{
++        for (uint c = 0u; c < 4u; c++) {{
++            C[r][c] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
++        }}
++    }}
++
++    const device half* xrow = xh + (ulong)row0 * in_features;
++    uint stages = in_tiles >> 1u;             // in_tiles is even (>=32)
++    for (uint ks = 0u; ks < stages; ks++) {{
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        for (uint q = 0u; q < ndec; q++) {{
++            uint tn0 = tn0_[q];
++            threadgroup half* wdst = &wblk[q * 32u * {_MM_WS}u];
++            for (uint it2 = 0u; it2 < 2u; it2++) {{
++                uint tk = ks * 2u + it2;
++                for (uint lt = 0u; lt < 4u; lt++) {{
++                    const device uint* words =
++                        trellis + ((ulong)tk * src_tiles + tn0 + lt) * PACKED_U32;
++                    for (uint j = 0u; j < 2u; j++) {{
++                        ulong merged =
++                            ((ulong)words[i0_[j]] << 32) | (ulong)words[i1_[j]];
++                        uint cw = uint(merged >> sh_[j]) & 0xFFFFu;
++{decode_lines}
++                        wdst[(it2 * 16u + 2u * rp + j) * {_MM_WS}u + lt * 16u + dcol] =
++                            half(dq_val);
++                    }}
++                }}
++            }}
++        }}
++        threadgroup_barrier(mem_flags::mem_threadgroup);
++        const threadgroup half* wbuf = wbase;
++{mma}    }}
++
++    // store: fp32 frags -> tg scratch -> half device rows within the half
++    uint cb0 = colb * {_MM_BN}u + sgc * 32u;
++    for (uint r = 0u; r < 4u; r++) {{
++        if (r * 8u >= blk_len) {{
++            break;
++        }}
++        for (uint cf = 0u; cf < 4u; cf++) {{
++            simdgroup_store(C[r][cf], &csc[sgid * 64u], 8u);
++            simdgroup_barrier(mem_flags::mem_threadgroup);
++            for (uint i = lane; i < 64u; i += 32u) {{
++                uint rr = i >> 3u;
++                uint cc = i & 7u;
++                uint gr = r * 8u + rr;
++                if (gr < blk_len) {{
++                    out[(ulong)(row0 + gr) * out_e + cb0 + cf * 8u + cc] =
++                        half(csc[sgid * 64u + i]);
++                }}
++            }}
++            simdgroup_barrier(mem_flags::mem_threadgroup);
++        }}
++    }}
++"""
++
++
+ def decode_bs(decode: str) -> str:
+     """Strip ``//`` comments (line splicing runs BEFORE comment removal in
+     the preprocessor) and drop blank lines; used for code inlined into
+@@ -1890,6 +2107,68 @@ def decode_bs(decode: str) -> str:
+     return "\n".join(lines)
+ 
+ 
++def _mm_seg_log_capture(
++    blk_tab: mx.array,
++    nb_real: mx.array,
++    *,
++    k: int,
++    in_tiles: int,
++    out_e: int,
++    tn_base: int,
++    tiles_per_e: int,
++    n_rows: int,
++) -> dict[str, Any]:
++    """Phase-20 MoE autopsy Step 1 diagnostic (EXL3_MM_SEG_LOG=1).
++
++    Records the host-side per-segment M/N/K decomposition of one segmented-GEMM
++    launch. ``blk_tab`` is (3, nb_max) u32 = [expert, row0, len] per block and
++    ``nb_real`` is the live-block count, so the per-segment shapes are exactly
++    M=len, N=out_e, K=in_tiles*16. A single Metal dispatch covers every block;
++    per-segment GPU cycles are therefore NOT separately exposed -- the launch
++    wall is measured host-side around the drained eval by the bench caller.
++    """
++    mx.eval(blk_tab, nb_real)
++    tab = np.asarray(blk_tab).astype(np.int64)
++    nb_max = int(tab.shape[1])
++    nb = int(np.asarray(nb_real).reshape(-1)[0])
++    nb = max(0, min(nb, nb_max))
++    ln = tab[2, :nb] if nb else np.zeros((0,), np.int64)
++    ev = tab[0, :nb] if nb else np.zeros((0,), np.int64)
++    K = int(in_tiles) * 16
++    N = int(out_e)
++    hist: dict[int, int] = {}
++    for v in ln.tolist():
++        hist[int(v)] = hist.get(int(v), 0) + 1
++    M_sum = int(ln.sum()) if nb else 0
++    row = {
++        "tn_base": int(tn_base),
++        "tiles_per_e": int(tiles_per_e),
++        "k_bits": int(k),
++        "N": N,
++        "K": K,
++        "n_rows": int(n_rows),
++        "nb_max": nb_max,
++        "nb_real": nb,
++        "M_sum": M_sum,
++        "M_max": int(ln.max()) if nb else 0,
++        "M_hist": {int(a): int(b) for a, b in sorted(hist.items())},
++        "n_experts_touched": int(len(set(ev.tolist()))) if nb else 0,
++        "blocks_per_full_row": float(nb * 64) / float(M_sum) if M_sum else 0.0,
++    }
++    _MM_SEG_LOG_ROWS.append(row)
++    print(
++        "[mm_seg] k=%d N=%d K=%d nb_real=%d nb_max=%d M_sum=%d "
++        "M_max=%d M_hist=%s blocks_full/row=%.3f tn_base=%d tpe=%d n_rows=%d"
++        % (
++            k, N, K, nb, nb_max, M_sum, row["M_max"],
++            sorted(hist.items()), row["blocks_per_full_row"],
++            tn_base, tiles_per_e, n_rows,
++        ),
++        flush=True,
++    )
++    return row
++
++
+ def inner_mm_seg_mlx(
+     xh_sorted: mx.array,  # (>= n_rows + 64, in) fp16, rows sorted by expert
+     trellis_u16: mx.array,  # stacked (in_tiles, src_tiles, P)
+@@ -1922,11 +2201,13 @@ def inner_mm_seg_mlx(
+     kernel = _mm_seg_kernels.get(key)
+     if kernel is None:
+         src = _mm_seg_source(k, cb)
+-        if _MM_SEG_VERSION in ("v19d", "v19e"):
++        if _MM_SEG_VERSION in _MM_SEG_V20:
++            src = _mm_seg_source_v20(k, cb)
++        elif _MM_SEG_VERSION in ("v19d", "v19e"):
+             src = _mm_seg_hoisted(src) if _MM_SEG_VERSION == "v19e" else _mm_seg_guarded(src)
+         elif _MM_SEG_VERSION != "v19c":
+             raise ValueError(
+-                f"EXL3_MM_SEG={_MM_SEG_VERSION!r} is not one of v19c/v19d/v19e"
++                f"EXL3_MM_SEG={_MM_SEG_VERSION!r} is not one of v19c/v19d/v19e/v20"
+             )
+         kernel = _mm_seg_kernels[key] = mx.fast.metal_kernel(
+             name=f"exl3_mm_seg_k{k}_cb{int(cb)}_{_MM_SEG_VERSION}",
+@@ -1938,13 +2219,22 @@ def inner_mm_seg_mlx(
+     dims = mx.array(
+         [in_tiles, tiles_per_e, src_tiles, tn_base, out_e, nb_max], dtype=mx.uint32
+     )
++    if _MM_SEG_LOG:
++        _mm_seg_log_capture(
++            blk_tab, nb_real, k=k, in_tiles=in_tiles, out_e=out_e,
++            tn_base=tn_base, tiles_per_e=tiles_per_e, n_rows=n_rows,
++        )
++    tab_in, nbr_in = blk_tab, nb_real
++    if _MM_SEG_VERSION in _MM_SEG_V20:
++        # paired schedule: same (6, nb_max) column count, <= nb_real live TGs
++        tab_in, nbr_in = _seg_pair_sched(blk_tab, nb_real)
+     out = kernel(
+         inputs=[
+             xh_sorted.reshape(-1),
+             trellis_u16.reshape(-1).view(mx.uint32),
+             _inv_perm_u32(),
+-            blk_tab.reshape(-1),
+-            nb_real,
++            tab_in.reshape(-1),
++            nbr_in,
+             dims,
+         ],
+         template=[("T", mx.float16)],

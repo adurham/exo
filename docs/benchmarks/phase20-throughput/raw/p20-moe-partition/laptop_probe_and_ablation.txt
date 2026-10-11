@@ -1,0 +1,42 @@
+# Laptop (Apple M4 Max 36GB, mlx 0.32.0.dev20260804) exploratory output, synthetic trellis cb=0, verbatim.
+# Probe: bench/p20_moe_partition_probe.py VERS=v19d,v20,v20b ; v21 run separately
+real         gu  v19d     23.077 ms   6.28 TF
+real         gu  v20      22.343 ms   6.49 TF
+real         gu  v20b     22.692 ms   6.39 TF
+real         dn  v19d     22.496 ms   6.44 TF
+real         dn  v20      21.970 ms   6.60 TF
+real         dn  v20b     22.622 ms   6.41 TF
+uniform192   gu  v19d     16.271 ms   8.91 TF
+uniform192   gu  v20      16.005 ms   9.06 TF
+uniform192   gu  v20b     15.926 ms   9.10 TF
+uniform192   dn  v19d     16.185 ms   8.96 TF
+uniform192   dn  v20      16.119 ms   8.99 TF
+uniform192   dn  v20b     16.015 ms   9.05 TF
+skew192      gu  v19d     20.007 ms   7.25 TF
+skew192      gu  v20      19.226 ms   7.54 TF
+skew192      gu  v20b     19.517 ms   7.43 TF
+skew192      dn  v19d     19.519 ms   7.43 TF
+skew192      dn  v20      18.889 ms   7.67 TF
+skew192      dn  v20b     19.412 ms   7.47 TF
+# v21 (256-thread, REJECTED)
+real         gu  v19d     23.121 ms   6.27 TF
+real         gu  v21      33.243 ms   4.36 TF
+real         dn  v21      32.025 ms   4.53 TF
+uniform192   gu  v19d     16.260 ms   8.91 TF
+uniform192   gu  v21      21.465 ms   6.75 TF
+uniform192   dn  v21      20.448 ms   7.09 TF
+skew192      gu  v21      26.652 ms   5.44 TF
+skew192      dn  v21      25.226 ms   5.75 TF
+# Ablation: bench/p20_moe_partition_ablate.py (gu, NOT numerics-preserving)
+v19d  full      real         23.187 ms
+v19d  full      uniform192   16.308 ms
+v19d  no_mma    real          0.493 ms
+v19d  no_mma    uniform192    0.342 ms
+v19d  no_tload  real         17.817 ms
+v19d  no_tload  uniform192   14.578 ms
+v20   full      real         22.420 ms
+v20   full      uniform192   16.015 ms
+v20   no_mma    real          0.447 ms
+v20   no_mma    uniform192    0.345 ms
+v20   no_tload  real         17.363 ms
+v20   no_tload  uniform192   14.264 ms
