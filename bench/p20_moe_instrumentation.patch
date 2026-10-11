@@ -1,0 +1,100 @@
+diff --git a/mlx_lm/models/exl3/gemv_metal.py b/mlx_lm/models/exl3/gemv_metal.py
+index 27ce684..f30cac9 100644
+--- a/mlx_lm/models/exl3/gemv_metal.py
++++ b/mlx_lm/models/exl3/gemv_metal.py
+@@ -1577,6 +1577,14 @@ _MM_WS = 72  # wblk row stride in halfs (32 rows x 64 cols, padded)
+ # EXL3_MM_SEG=v19c restores the stock kernel.
+ _MM_SEG_VERSION = os.environ.get("EXL3_MM_SEG", "v19d")
+ 
++# EXL3_MM_SEG_LOG=1 (Phase-20 MoE autopsy Step 1): once per launch, record the
++# host-side per-segment decomposition of the single segmented-GEMM dispatch.
++# The whole launch is ONE Metal dispatch, so per-segment GPU cycles are not
++# separately exposed; this records the block (M) histogram + N + K per launch
++# (launch wall is measured host-side around the drained eval by the caller).
++_MM_SEG_LOG = os.environ.get("EXL3_MM_SEG_LOG", "0") == "1"
++_MM_SEG_LOG_ROWS: list[dict[str, Any]] = []
++
+ _mm_seg_kernels: dict[tuple[int, int, str], Callable[..., Any]] = {}
+ 
+ _WBLK_ANCHOR = "    threadgroup half wblk[32u * 72u];   // 2 in-tiles x 4 out-tiles"
+@@ -1890,6 +1898,68 @@ def decode_bs(decode: str) -> str:
+     return "\n".join(lines)
+ 
+ 
++def _mm_seg_log_capture(
++    blk_tab: mx.array,
++    nb_real: mx.array,
++    *,
++    k: int,
++    in_tiles: int,
++    out_e: int,
++    tn_base: int,
++    tiles_per_e: int,
++    n_rows: int,
++) -> dict[str, Any]:
++    """Phase-20 MoE autopsy Step 1 diagnostic (EXL3_MM_SEG_LOG=1).
++
++    Records the host-side per-segment M/N/K decomposition of one segmented-GEMM
++    launch. ``blk_tab`` is (3, nb_max) u32 = [expert, row0, len] per block and
++    ``nb_real`` is the live-block count, so the per-segment shapes are exactly
++    M=len, N=out_e, K=in_tiles*16. A single Metal dispatch covers every block;
++    per-segment GPU cycles are therefore NOT separately exposed -- the launch
++    wall is measured host-side around the drained eval by the bench caller.
++    """
++    mx.eval(blk_tab, nb_real)
++    tab = np.asarray(blk_tab).astype(np.int64)
++    nb_max = int(tab.shape[1])
++    nb = int(np.asarray(nb_real).reshape(-1)[0])
++    nb = max(0, min(nb, nb_max))
++    ln = tab[2, :nb] if nb else np.zeros((0,), np.int64)
++    ev = tab[0, :nb] if nb else np.zeros((0,), np.int64)
++    K = int(in_tiles) * 16
++    N = int(out_e)
++    hist: dict[int, int] = {}
++    for v in ln.tolist():
++        hist[int(v)] = hist.get(int(v), 0) + 1
++    M_sum = int(ln.sum()) if nb else 0
++    row = {
++        "tn_base": int(tn_base),
++        "tiles_per_e": int(tiles_per_e),
++        "k_bits": int(k),
++        "N": N,
++        "K": K,
++        "n_rows": int(n_rows),
++        "nb_max": nb_max,
++        "nb_real": nb,
++        "M_sum": M_sum,
++        "M_max": int(ln.max()) if nb else 0,
++        "M_hist": {int(a): int(b) for a, b in sorted(hist.items())},
++        "n_experts_touched": int(len(set(ev.tolist()))) if nb else 0,
++        "blocks_per_full_row": float(nb * 64) / float(M_sum) if M_sum else 0.0,
++    }
++    _MM_SEG_LOG_ROWS.append(row)
++    print(
++        "[mm_seg] k=%d N=%d K=%d nb_real=%d nb_max=%d M_sum=%d "
++        "M_max=%d M_hist=%s blocks_full/row=%.3f tn_base=%d tpe=%d n_rows=%d"
++        % (
++            k, N, K, nb, nb_max, M_sum, row["M_max"],
++            sorted(hist.items()), row["blocks_per_full_row"],
++            tn_base, tiles_per_e, n_rows,
++        ),
++        flush=True,
++    )
++    return row
++
++
+ def inner_mm_seg_mlx(
+     xh_sorted: mx.array,  # (>= n_rows + 64, in) fp16, rows sorted by expert
+     trellis_u16: mx.array,  # stacked (in_tiles, src_tiles, P)
+@@ -1938,6 +2008,11 @@ def inner_mm_seg_mlx(
+     dims = mx.array(
+         [in_tiles, tiles_per_e, src_tiles, tn_base, out_e, nb_max], dtype=mx.uint32
+     )
++    if _MM_SEG_LOG:
++        _mm_seg_log_capture(
++            blk_tab, nb_real, k=k, in_tiles=in_tiles, out_e=out_e,
++            tn_base=tn_base, tiles_per_e=tiles_per_e, n_rows=n_rows,
++        )
+     out = kernel(
+         inputs=[
+             xh_sorted.reshape(-1),

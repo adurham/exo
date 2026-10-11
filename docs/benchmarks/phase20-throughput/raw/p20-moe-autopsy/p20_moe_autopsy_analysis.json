@@ -1,0 +1,378 @@
+{
+ "dense_ceiling_TF": 15.145918162344115,
+ "BW_GBps": 430.81791084184187,
+ "bits": 3,
+ "crossover_M": 6.591786422923503,
+ "raw": "/private/tmp/p20-moe-autopsy/docs/benchmarks/phase20-throughput/raw/p20-moe-autopsy",
+ "real_production_chunk": {
+  "idx_stats": {
+   "pairs": 12288,
+   "tokens": 2048,
+   "experts_hit": 330,
+   "max_rows_per_expert": 341,
+   "avg_rows_per_expert": 37.236363636363635,
+   "blocks_bm64": 397,
+   "pad_waste": 2.0677083333333335
+  },
+  "full_prefill_ms": 65.58529194444418,
+  "full_prefill_TF": 6.630532941568129,
+  "pct_of_dense_ceiling": 43.8,
+  "mix_ceiling_TF_weighted": 14.958,
+  "launches": [
+   {
+    "launch": "gu_gate",
+    "tn_base": 0,
+    "N": 1152,
+    "K": 5120,
+    "nb_real": 397,
+    "M_sum": 12288,
+    "M_mean": 31.0,
+    "M_max": 64,
+    "wall_ms": 19.231,
+    "weight_bytes_MB": 878.1,
+    "achieved_TF": 7.538,
+    "achieved_GBps": 45.66,
+    "mix_ceiling_TF": 14.958,
+    "pct_of_mix_ceiling": 50.4
+   },
+   {
+    "launch": "gu_up",
+    "tn_base": 27648,
+    "N": 1152,
+    "K": 5120,
+    "nb_real": 397,
+    "M_sum": 12288,
+    "M_mean": 31.0,
+    "M_max": 64,
+    "wall_ms": 19.265,
+    "weight_bytes_MB": 878.1,
+    "achieved_TF": 7.524,
+    "achieved_GBps": 45.58,
+    "mix_ceiling_TF": 14.958,
+    "pct_of_mix_ceiling": 50.3
+   },
+   {
+    "launch": "dn",
+    "tn_base": 0,
+    "N": 5120,
+    "K": 1152,
+    "nb_real": 397,
+    "M_sum": 12288,
+    "M_mean": 31.0,
+    "M_max": 64,
+    "wall_ms": 18.563,
+    "weight_bytes_MB": 878.1,
+    "achieved_TF": 7.809,
+    "achieved_GBps": 47.3,
+    "mix_ceiling_TF": 14.958,
+    "pct_of_mix_ceiling": 52.2
+   }
+  ],
+  "achieved_effective_GBps_over_3_launches": 46.17,
+  "pct_of_BW_ceiling": 10.7,
+  "seg_table_bucketed": [
+   {
+    "M_range": "1-8",
+    "blocks": 69,
+    "rows": 314,
+    "M_mean": 4.6,
+    "fpb_at_Mmean": 24.3,
+    "bw_ceiling_tf": 10.46,
+    "shape_ceiling_tf": 10.456,
+    "bound": "bw"
+   },
+   {
+    "M_range": "9-16",
+    "blocks": 69,
+    "rows": 826,
+    "M_mean": 12.0,
+    "fpb_at_Mmean": 63.8,
+    "bw_ceiling_tf": 27.51,
+    "shape_ceiling_tf": 15.146,
+    "bound": "compute"
+   },
+   {
+    "M_range": "17-32",
+    "blocks": 97,
+    "rows": 2371,
+    "M_mean": 24.4,
+    "fpb_at_Mmean": 130.4,
+    "bw_ceiling_tf": 56.16,
+    "shape_ceiling_tf": 15.146,
+    "bound": "compute"
+   },
+   {
+    "M_range": "33-48",
+    "blocks": 52,
+    "rows": 2107,
+    "M_mean": 40.5,
+    "fpb_at_Mmean": 216.1,
+    "bw_ceiling_tf": 93.1,
+    "shape_ceiling_tf": 15.146,
+    "bound": "compute"
+   },
+   {
+    "M_range": "49-63",
+    "blocks": 40,
+    "rows": 2190,
+    "M_mean": 54.8,
+    "fpb_at_Mmean": 292.0,
+    "bw_ceiling_tf": 125.8,
+    "shape_ceiling_tf": 15.146,
+    "bound": "compute"
+   },
+   {
+    "M_range": "64-64",
+    "blocks": 70,
+    "rows": 4480,
+    "M_mean": 64.0,
+    "fpb_at_Mmean": 341.3,
+    "bw_ceiling_tf": 147.05,
+    "shape_ceiling_tf": 15.146,
+    "bound": "compute"
+   }
+  ]
+ },
+ "block_192_uniform_skew": {
+  "uniform": {
+   "seg_ms": 49.12012501154095,
+   "TFLOPS": 8.853101221094752,
+   "pct_dense_ceiling": 58.5,
+   "nb_real": 192,
+   "M_mean": 64.0,
+   "M_hist": {
+    "64": 192
+   },
+   "mix_ceiling_TF": 15.146,
+   "pct_of_mix_ceiling": 58.5,
+   "achieved_effective_GBps": 31.52,
+   "pct_BW_ceiling": 7.3,
+   "seg_table_bucketed": [
+    {
+     "M_range": "64-64",
+     "blocks": 192,
+     "rows": 12288,
+     "M_mean": 64.0,
+     "fpb_at_Mmean": 341.3,
+     "bw_ceiling_tf": 147.05,
+     "shape_ceiling_tf": 15.146,
+     "bound": "compute"
+    }
+   ]
+  },
+  "skew": {
+   "seg_ms": 57.567582989577204,
+   "TFLOPS": 7.553998555032853,
+   "pct_dense_ceiling": 49.9,
+   "nb_real": 326,
+   "M_mean": 37.7,
+   "M_hist": {
+    "2": 1,
+    "3": 1,
+    "4": 4,
+    "5": 9,
+    "6": 11,
+    "7": 5,
+    "8": 16,
+    "9": 13,
+    "10": 10,
+    "11": 16,
+    "12": 15,
+    "13": 11,
+    "14": 8,
+    "15": 12,
+    "16": 7,
+    "17": 1,
+    "18": 1,
+    "20": 2,
+    "23": 1,
+    "24": 3,
+    "27": 1,
+    "30": 1,
+    "33": 1,
+    "34": 2,
+    "35": 2,
+    "36": 1,
+    "37": 1,
+    "38": 1,
+    "39": 1,
+    "41": 1,
+    "42": 3,
+    "43": 1,
+    "44": 1,
+    "45": 2,
+    "46": 2,
+    "47": 1,
+    "48": 1,
+    "50": 1,
+    "51": 2,
+    "52": 1,
+    "53": 3,
+    "54": 5,
+    "56": 3,
+    "57": 2,
+    "58": 2,
+    "61": 1,
+    "63": 2,
+    "64": 134
+   },
+   "mix_ceiling_TF": 15.098,
+   "pct_of_mix_ceiling": 50.0,
+   "achieved_effective_GBps": 44.18,
+   "pct_BW_ceiling": 10.3,
+   "seg_table_bucketed": [
+    {
+     "M_range": "1-8",
+     "blocks": 47,
+     "rows": 295,
+     "M_mean": 6.3,
+     "fpb_at_Mmean": 33.5,
+     "bw_ceiling_tf": 14.42,
+     "shape_ceiling_tf": 14.422,
+     "bound": "bw"
+    },
+    {
+     "M_range": "9-16",
+     "blocks": 92,
+     "rows": 1120,
+     "M_mean": 12.2,
+     "fpb_at_Mmean": 64.9,
+     "bw_ceiling_tf": 27.97,
+     "shape_ceiling_tf": 15.146,
+     "bound": "compute"
+    },
+    {
+     "M_range": "17-32",
+     "blocks": 10,
+     "rows": 227,
+     "M_mean": 22.7,
+     "fpb_at_Mmean": 121.1,
+     "bw_ceiling_tf": 52.16,
+     "shape_ceiling_tf": 15.146,
+     "bound": "compute"
+    },
+    {
+     "M_range": "33-48",
+     "blocks": 21,
+     "rows": 852,
+     "M_mean": 40.6,
+     "fpb_at_Mmean": 216.4,
+     "bw_ceiling_tf": 93.22,
+     "shape_ceiling_tf": 15.146,
+     "bound": "compute"
+    },
+    {
+     "M_range": "49-63",
+     "blocks": 22,
+     "rows": 1218,
+     "M_mean": 55.4,
+     "fpb_at_Mmean": 295.3,
+     "bw_ceiling_tf": 127.21,
+     "shape_ceiling_tf": 15.146,
+     "bound": "compute"
+    },
+    {
+     "M_range": "64-64",
+     "blocks": 134,
+     "rows": 8576,
+     "M_mean": 64.0,
+     "fpb_at_Mmean": 341.3,
+     "bw_ceiling_tf": 147.05,
+     "shape_ceiling_tf": 15.146,
+     "bound": "compute"
+    }
+   ]
+  }
+ },
+ "step3_dequant_excluded": {
+  "M": 64,
+  "E_sub": 32,
+  "rel_max_err_pre_vs_inloop": 0.0,
+  "seg_TF": 7.953321559675243,
+  "seg_pct_ceiling": 52.52482212485793,
+  "pre_TF": 6.932862129333889,
+  "pre_pct_ceiling": 45.785568636595585,
+  "inloop_TF": 4.389830225173635,
+  "inloop_pct_ceiling": 28.99103852466205,
+  "pre_over_inloop": 1.579300741422105,
+  "pre_over_seg": 0.8716939303051363,
+  "wcache_MB": 1132.46208,
+  "shape_roofline_TF_at_M64": 15.142
+ },
+ "step4_balanced": {
+  "uniform": {
+   "idx_stats": {
+    "pairs": 12288,
+    "tokens": 2048,
+    "experts_hit": 192,
+    "max_rows_per_expert": 64,
+    "avg_rows_per_expert": 64.0,
+    "blocks_bm64": 192,
+    "pad_waste": 1.0
+   },
+   "ms": 49.08895801054314,
+   "ms_all": [
+    48.89808304142207,
+    49.08895801054314
+   ],
+   "TFLOPS": 8.858722131087022,
+   "pct_ceiling": 58.50165873658311,
+   "pad_waste": 1.0
+  },
+  "skew": {
+   "idx_stats": {
+    "pairs": 12288,
+    "tokens": 2048,
+    "experts_hit": 192,
+    "max_rows_per_expert": 1867,
+    "avg_rows_per_expert": 64.0,
+    "blocks_bm64": 326,
+    "pad_waste": 1.6979166666666667
+   },
+   "ms": 57.54279100801796,
+   "ms_all": [
+    57.54279100801796,
+    57.496875000651926
+   ],
+   "TFLOPS": 7.55725315199616,
+   "pct_ceiling": 49.90695478895175,
+   "pad_waste": 1.6979166666666667
+  },
+  "skew_balanced": {
+   "idx_stats": {
+    "pairs": 12288,
+    "tokens": 2048,
+    "experts_hit": 67,
+    "max_rows_per_expert": 1920,
+    "avg_rows_per_expert": 183.40298507462686,
+    "blocks_bm64": 192,
+    "pad_waste": 1.0
+   },
+   "ms": 48.105333000421524,
+   "ms_all": [
+    47.87754197604954,
+    48.105333000421524
+   ],
+   "TFLOPS": 9.039859233823192,
+   "pct_ceiling": 59.69786071831344,
+   "pad_waste": 1.0
+  },
+  "_derived": {
+   "uniform_to_skew_drop_pct": 14.691385053423767,
+   "skew_balanced_recovery_pct": 19.618319672610408,
+   "skew_balanced_pct_of_uniform": 102.04473173507185,
+   "skew_pad_waste": 1.6979166666666667,
+   "skew_balanced_pad_waste": 1.0
+  }
+ },
+ "gate": {
+  "rule": "aggregate>=85% mix-roofline -> KILL; segments>=15% below shape-roofline -> GO",
+  "mix_roofline_TF": 14.96,
+  "shortfall_pct": {
+   "real": 55.7,
+   "uniform": 40.8,
+   "skew": 49.5
+  },
+  "verdict": "GO (all >=15% below shape-roofline; achieved BW ~7-11% of peak, not BW-bound)"
+ }
+}

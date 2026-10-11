@@ -1,0 +1,25 @@
+[autopsy] stage 4 ck /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+[autopsy] === ceilings (in-session) ===
+[autopsy]   dense bf16 2048x4096x4096: 4.757 ms 14.45 TF
+[autopsy]   dense bf16 4096x4096x4096: 9.203 ms 14.93 TF
+[autopsy]   dense bf16 8192x4096x4096: 18.185 ms 15.12 TF
+[autopsy]   dense bf16 4096x8192x8192: 36.305 ms 15.14 TF
+[autopsy]   ceiling: 15.14 TF dense-bf16 / 438 GB/s BW
+[autopsy] === Step4: uniform vs skew vs skew-balanced E=192 N=12288 ===
+[autopsy]   [uniform] blocks=192 waste=1.000 maxM=64 | 49.09 ms 8.86 TF (59%)
+[autopsy]   [skew] blocks=326 waste=1.698 maxM=1867 | 57.54 ms 7.56 TF (50%)
+[autopsy]   [skew_balanced] blocks=192 waste=1.000 maxM=1920 | 48.11 ms 9.04 TF (60%)
+[autopsy] DONE -> /tmp/p20moe/p20_moe_autopsy_stage4.json
+EXIT=0
+[autopsy] stage 3 ck /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw
+[autopsy] === ceilings (in-session) ===
+[autopsy]   dense bf16 2048x4096x4096: 4.765 ms 14.42 TF
+[autopsy]   dense bf16 4096x4096x4096: 9.274 ms 14.82 TF
+[autopsy]   dense bf16 8192x4096x4096: 18.195 ms 15.11 TF
+[autopsy]   dense bf16 4096x8192x8192: 36.307 ms 15.14 TF
+[autopsy]   ceiling: 15.14 TF dense-bf16 / 437 GB/s BW
+[autopsy] === Step3: dequant-excluded arm E_sub=32 ===
+[autopsy]   building fp16 W cache for 32 experts ...
+[autopsy]   M=64 E=32: seg 7.95TF(53%) pre 6.93TF(46%) inloop 4.39TF(29%) | pre/inloop=1.58x | roofline(M=64)=15.14TF
+[autopsy] DONE -> /tmp/p20moe/p20_moe_autopsy_stage3.json
+EXIT=0

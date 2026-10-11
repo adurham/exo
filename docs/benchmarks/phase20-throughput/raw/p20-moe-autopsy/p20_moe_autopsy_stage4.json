@@ -1,0 +1,119 @@
+{
+ "stage": "4",
+ "host": "Adams-Mac-Studio-M4-2",
+ "started": "2026-10-10 20:20:46",
+ "env": {
+  "seg": "v19d",
+  "BM": 64,
+  "BN": 64,
+  "GEM_THREADS": 128,
+  "MM_MAX_ROWS": 9216,
+  "reps": 7,
+  "E_BLOCK": 192,
+  "NPROD": 12288
+ },
+ "ceil": {
+  "add_GBps": 437.99380920532064,
+  "copy_GBps": 418.5853681771035,
+  "matmul": [
+   {
+    "M": 2048,
+    "N": 4096,
+    "K": 4096,
+    "ms": 4.756834008730948,
+    "TFLOPS": 14.446473559907407
+   },
+   {
+    "M": 4096,
+    "N": 4096,
+    "K": 4096,
+    "ms": 9.20341705204919,
+    "TFLOPS": 14.933470111668848
+   },
+   {
+    "M": 8192,
+    "N": 4096,
+    "K": 4096,
+    "ms": 18.185207969509065,
+    "TFLOPS": 15.115466779642263
+   },
+   {
+    "M": 4096,
+    "N": 8192,
+    "K": 8192,
+    "ms": 36.305040994193405,
+    "TFLOPS": 15.142685391153462
+   }
+  ],
+  "dense_TFLOPS": 15.142685391153462,
+  "BW_GBps": 437.99380920532064
+ },
+ "notes": [],
+ "stage4": {
+  "uniform": {
+   "idx_stats": {
+    "pairs": 12288,
+    "tokens": 2048,
+    "experts_hit": 192,
+    "max_rows_per_expert": 64,
+    "avg_rows_per_expert": 64.0,
+    "blocks_bm64": 192,
+    "pad_waste": 1.0
+   },
+   "ms": 49.08895801054314,
+   "ms_all": [
+    48.89808304142207,
+    49.08895801054314
+   ],
+   "TFLOPS": 8.858722131087022,
+   "pct_ceiling": 58.50165873658311,
+   "pad_waste": 1.0
+  },
+  "skew": {
+   "idx_stats": {
+    "pairs": 12288,
+    "tokens": 2048,
+    "experts_hit": 192,
+    "max_rows_per_expert": 1867,
+    "avg_rows_per_expert": 64.0,
+    "blocks_bm64": 326,
+    "pad_waste": 1.6979166666666667
+   },
+   "ms": 57.54279100801796,
+   "ms_all": [
+    57.54279100801796,
+    57.496875000651926
+   ],
+   "TFLOPS": 7.55725315199616,
+   "pct_ceiling": 49.90695478895175,
+   "pad_waste": 1.6979166666666667
+  },
+  "skew_balanced": {
+   "idx_stats": {
+    "pairs": 12288,
+    "tokens": 2048,
+    "experts_hit": 67,
+    "max_rows_per_expert": 1920,
+    "avg_rows_per_expert": 183.40298507462686,
+    "blocks_bm64": 192,
+    "pad_waste": 1.0
+   },
+   "ms": 48.105333000421524,
+   "ms_all": [
+    47.87754197604954,
+    48.105333000421524
+   ],
+   "TFLOPS": 9.039859233823192,
+   "pct_ceiling": 59.69786071831344,
+   "pad_waste": 1.0
+  },
+  "_derived": {
+   "uniform_to_skew_drop_pct": 14.691385053423767,
+   "skew_balanced_recovery_pct": 19.618319672610408,
+   "skew_balanced_pct_of_uniform": 102.04473173507185,
+   "skew_pad_waste": 1.6979166666666667,
+   "skew_balanced_pad_waste": 1.0
+  }
+ },
+ "finished": "2026-10-10 20:20:50"
+}
