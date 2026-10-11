@@ -1,0 +1,458 @@
+{
+ "ok": true,
+ "reasons": [],
+ "detail": {
+  "now": 1791703204.142874,
+  "min_idle_s": 600,
+  "clock_offset_s": {
+   "studio1": 0.09702348709106445,
+   "studio2": 0.10006523132324219
+  },
+  "nodes": {
+   "studio1": {
+    "log_ok": true,
+    "events": [],
+    "state": "ready",
+    "running": false,
+    "post_routes": {
+     "/v1/chat/completions": 17,
+     "/place_instance": 1
+    },
+    "last_post": [
+     1791675397.3229766,
+     "/v1/chat/completions"
+    ],
+    "clock_offset_s": 0.09702348709106445,
+    "error": null,
+    "n_events": 71,
+    "events_tail": [
+     {
+      "ts": "2026-10-10 17:44:09.992",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.089",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.187",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 17:44:14.337",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.338",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.118",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.262",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 17:44:36.391",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.394",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.313",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.351",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 17:44:41.440",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.441",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:46.593",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:50:49.061",
+      "kind": "post",
+      "value": "/place_instance"
+     },
+     {
+      "ts": "2026-10-10 17:52:44.851",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:04.144",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 17:53:04.227",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:04.230",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:05.721",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:35:47.089",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 18:35:47.213",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:35:47.216",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.786",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.871",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 18:36:05.917",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.918",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:09.929",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:10.396",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 18:36:10.573",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:10.576",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.346",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.455",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 18:36:32.523",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.526",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.381",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.420",
+      "kind": "post",
+      "value": "/v1/chat/completions"
+     },
+     {
+      "ts": "2026-10-10 18:36:37.480",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.481",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:42.700",
+      "kind": "ready",
+      "value": ""
+     }
+    ],
+    "state_epoch": 1791675402.6029766
+   },
+   "studio2": {
+    "log_ok": true,
+    "events": [],
+    "state": "ready",
+    "running": false,
+    "post_routes": {},
+    "last_post": null,
+    "clock_offset_s": 0.10006523132324219,
+    "error": null,
+    "n_events": 70,
+    "events_tail": [
+     {
+      "ts": "2026-10-10 17:44:10.049",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.089",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.089",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.301",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:14.304",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.115",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.124",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.454",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:36.457",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.309",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.316",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.426",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:41.427",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:46.594",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:44:46.600",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:52:44.852",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:04.186",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:04.188",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:05.663",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 17:53:05.722",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:35:47.133",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:35:47.136",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.791",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.794",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.937",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:05.938",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:09.930",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:09.930",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:10.482",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:10.485",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.354",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.358",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.542",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:32.543",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.377",
+      "kind": "task_finished",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.382",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.497",
+      "kind": "start_task",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:37.498",
+      "kind": "running",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:42.701",
+      "kind": "ready",
+      "value": ""
+     },
+     {
+      "ts": "2026-10-10 18:36:42.706",
+      "kind": "task_finished",
+      "value": ""
+     }
+    ],
+    "state_epoch": 1791675402.6009347
+   }
+  },
+  "state_db": {
+   "ok": true,
+   "error": null,
+   "recent_completed": [],
+   "s4": {
+    "messages": [],
+    "sessions": []
+   }
+  },
+  "state_active_tasks": 0
+ }
+}

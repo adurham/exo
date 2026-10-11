@@ -1,0 +1,170 @@
+{
+ "kind": "p20_moe_spike_limiter",
+ "host": "Adams-Mac-Studio-M4-2",
+ "ts": "2026-10-11 02:22:09",
+ "json": "/tmp/p20moe_spike/p20_moe_spike_limiter.json",
+ "modes": [
+  "default"
+ ],
+ "criteria": {
+  "BUSY_SAT": 95.0,
+  "TL_SMALL": 10.0,
+  "TL_KNOWN_PCT": 23.2,
+  "MMA_KNOWN_PCT": 97.9
+ },
+ "per_mode": {
+  "default": {
+   "mode": "default",
+   "host": "Adams-Mac-Studio-M4-2",
+   "ts": "2026-10-11 02:22:03",
+   "mlx": "0.32.3.dev20260918+603f16eb7",
+   "gemv_metal": "/tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py",
+   "seg": "v19d",
+   "gpu_time_env": "1",
+   "max_ops_per_buffer": null,
+   "ck_present": true,
+   "ck": "/Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+   "trace": "/tmp/p20moe/p30_exl3_trace_clamp.json",
+   "mixes": {
+    "real": {
+     "synth": false,
+     "E": 384,
+     "D": 5120,
+     "H": 1152,
+     "N": 12288,
+     "idx_stats": {
+      "pairs": 12288,
+      "tokens": 2048,
+      "experts_hit": 330,
+      "max_rows_per_expert": 341,
+      "avg_rows_per_expert": 37.236363636363635,
+      "blocks_bm64": 397,
+      "pad_waste": 2.0677083333333335
+     },
+     "launches": {
+      "gu_gate": {
+       "gpu_time_ns": 19084125,
+       "wall_ns": 19336792,
+       "cycle_busy_pct": 98.69333548191447,
+       "gpu_time_ns_min": 19008166,
+       "gpu_time_ns_max": 19208208,
+       "wall_ns_min": 19203791,
+       "wall_ns_max": 19374875,
+       "dispatch_count": 0,
+       "reps": 5
+      },
+      "gu_up": {
+       "gpu_time_ns": 19076458,
+       "wall_ns": 19251916,
+       "cycle_busy_pct": 99.08862058197221,
+       "gpu_time_ns_min": 19026208,
+       "gpu_time_ns_max": 19178958,
+       "wall_ns_min": 19176875,
+       "wall_ns_max": 19365500,
+       "dispatch_count": 0,
+       "reps": 5
+      },
+      "dn": {
+       "gpu_time_ns": 18390333,
+       "wall_ns": 18554624,
+       "cycle_busy_pct": 99.1145549486748,
+       "gpu_time_ns_min": 18357958,
+       "gpu_time_ns_max": 18400791,
+       "wall_ns_min": 18503999,
+       "wall_ns_max": 18579832,
+       "dispatch_count": 0,
+       "reps": 5
+      }
+     },
+     "busy_weighted_pct": 98.96328061513809,
+     "gpu_ns_sum": 56550916,
+     "wall_ns_sum": 57143332,
+     "full_prefill_ms": 65.71254099253565
+    },
+    "uniform": {
+     "synth": false,
+     "E": 192,
+     "D": 5120,
+     "H": 1152,
+     "N": 12288,
+     "idx_stats": {
+      "pairs": 12288,
+      "tokens": 2048,
+      "experts_hit": 192,
+      "max_rows_per_expert": 64,
+      "avg_rows_per_expert": 64.0,
+      "blocks_bm64": 192,
+      "pad_waste": 1.0
+     },
+     "launches": {
+      "gu_gate": {
+       "gpu_time_ns": 13509416,
+       "wall_ns": 13702041,
+       "cycle_busy_pct": 98.59418753746249,
+       "gpu_time_ns_min": 13450416,
+       "gpu_time_ns_max": 13523124,
+       "wall_ns_min": 13631000,
+       "wall_ns_max": 13759249,
+       "dispatch_count": 0,
+       "reps": 5
+      },
+      "gu_up": {
+       "gpu_time_ns": 13495208,
+       "wall_ns": 13663332,
+       "cycle_busy_pct": 98.76952415413751,
+       "gpu_time_ns_min": 13390958,
+       "gpu_time_ns_max": 13533166,
+       "wall_ns_min": 13585249,
+       "wall_ns_max": 13731290,
+       "dispatch_count": 0,
+       "reps": 5
+      },
+      "dn": {
+       "gpu_time_ns": 13046166,
+       "wall_ns": 13205875,
+       "cycle_busy_pct": 98.79062159834164,
+       "gpu_time_ns_min": 13037291,
+       "gpu_time_ns_max": 13053708,
+       "wall_ns_min": 13190291,
+       "wall_ns_max": 13257417,
+       "dispatch_count": 0,
+       "reps": 5
+      }
+     },
+     "busy_weighted_pct": 98.71717527644208,
+     "gpu_ns_sum": 40050790,
+     "wall_ns_sum": 40571248,
+     "full_prefill_ms": 49.340416968334466
+    }
+   },
+   "capture": {
+    "status": "unavailable (RuntimeError: [metal::start_capture] Failed to start: Capture layer is not inserted.)",
+    "path": "/tmp/p20moe_spike/gputrace.gputrace",
+    "needs_live": true
+   },
+   "ablation": {
+    "full_ms": 19.281540997326374,
+    "no_tload_ms": 14.970958000048995,
+    "tl_saving_pct": 22.356008774791885,
+    "source": "measured (gu shape, real mix, v19d)"
+   },
+   "notes": [],
+   "gpu_time_live_ns": 64250,
+   "gpu_time_live": true
+  }
+ },
+ "primary": {
+  "gate": "CLEARED",
+  "limiter": "operand-stall/occupancy",
+  "mix_used": "real",
+  "B_cycle_busy_pct": 98.96328061513809,
+  "TL_no_tload_saving_pct": 22.356008774791885,
+  "tl_source": "measured (gu shape, real mix, v19d)",
+  "criteria": {
+   "BUSY_SAT": 95.0,
+   "TL_SMALL": 10.0,
+   "fires_iff": "B >= BUSY_SAT AND TL <= TL_SMALL"
+  },
+  "gpu_time_live": true
+ }
+}

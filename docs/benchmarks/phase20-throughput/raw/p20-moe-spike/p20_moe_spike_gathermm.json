@@ -1,0 +1,432 @@
+{
+ "script": "bench/p20_moe_spike_gathermm.py",
+ "host": "Adams-Mac-Studio-M4-2",
+ "mlx": "0.32.3.dev20260918+603f16eb7",
+ "gemv_metal": "/tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py",
+ "seg_version": "v19d",
+ "tf_convention": "TF = 6*D*H*pairs / wall (pairs = token,slot pairs = 12288); walls: seg3/seg_pipe (prod seg launches, launch-only/pipe), steel3/steel_pipe (gather_mm launches/pipe+glue), +decode_incl",
+ "started": "2026-10-11 02:22:15",
+ "env": {
+  "GM_MIXES": [
+   "real",
+   "uniform192"
+  ],
+  "GM_MTS": [
+   64,
+   32,
+   16,
+   128
+  ],
+  "GM_EBATCH": -1,
+  "GM_REPS": 5,
+  "GM_REPS_DECODE": 3,
+  "REAL_CK": "auto",
+  "GM_CK": "/Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw"
+ },
+ "primitive": {
+  "gather_mm": "out[i] = a[lhs[i]] @ b[rhs[i]] (batch-level gather)",
+  "signature": "mx.gather_mm(a, b, lhs_indices=None, rhs_indices=None, *, sorted_indices=False) -> array",
+  "py_stub": "mlx/python/mlx/core/__init__.pyi:3458",
+  "binding": "mlx/python/src/ops.cpp:5146 (array gather_mm ... :6147)",
+  "metal": "mlx/backend/metal/matmul.cpp:2835 steel_gather_mm_* (generic batched gather, bm=64 bn=64 bk=16); sorted M==1 rhs-only path :2308 (gather_mm_rhs) / :2441 (_nax)",
+  "also_present": "mx.gather_qmm (ops.cpp:4837, affine modes only), mx.segmented_mm (ops.cpp:6280, splits K not rows)",
+  "gather_mm_doc": "gather_mm(a: array, b: array, /, lhs_indices: array, rhs_indices: array, *, sorted_indices: bool = False, stream: StreamOrDevice = None) -> array"
+ },
+ "mixes": {
+  "real": {
+   "E": 384,
+   "D": 5120,
+   "H": 1152,
+   "k": 3,
+   "cb": 2,
+   "weights": "real",
+   "idx_stats": {
+    "pairs": 12288,
+    "experts_hit": 330,
+    "max_rows": 341,
+    "avg_rows": 37.236363636363635
+   },
+   "seg": {
+    "launch_gate_ms": 19.376749987713993,
+    "launch_up_ms": 19.34550004079938,
+    "launch_dn_ms": 18.581666983664036,
+    "seg3_ms": 57.30391701217741,
+    "act_ms": 0.6627920083701611,
+    "seg_pipe_ms": 57.96670902054757,
+    "seg3_TF": 7.588755906993035,
+    "seg_pipe_TF": 7.50198598588463,
+    "full_prefill_ms": 65.62087498605251,
+    "full_prefill_TF": 6.626937522738444
+   },
+   "decode": {
+    "chunked_at": 182,
+    "chunks": 3,
+    "GM_EBATCH": -1,
+    "whole_e_limit": 182,
+    "total_ms": 132.85304309101775,
+    "fp16_bytes": 13589544960,
+    "GBps": 102.29005406138712
+   },
+   "steel": {
+    "Mt64": {
+     "Mt": 64,
+     "n_chunks": 3,
+     "tiles": 397,
+     "rows_padded": 25408,
+     "pad_waste": 2.0677083333333335,
+     "machine_bm64_rows": 25408,
+     "ms": {
+      "g": 21.010291064158082,
+      "u": 20.885706995613873,
+      "y": 20.683624898083508,
+      "act": 1.5056249685585499,
+      "build": 2.4617909803055227,
+      "unpad": 0.9337080409750342
+     },
+     "steel3_ms": 62.57962295785546,
+     "steel_pipe_ms": 67.48074694769457,
+     "steel3_TF": 6.948994227927231,
+     "steel_pipe_TF": 6.444289051172942
+    },
+    "Mt32": {
+     "Mt": 32,
+     "n_chunks": 3,
+     "tiles": 559,
+     "rows_padded": 17888,
+     "pad_waste": 1.4557291666666667,
+     "machine_bm64_rows": 35776,
+     "ms": {
+      "g": 29.0388340363279,
+      "u": 29.01620900956914,
+      "y": 28.640499047469348,
+      "act": 1.1907080188393593,
+      "build": 1.828540989663452,
+      "unpad": 0.9304999839514494
+     },
+     "steel3_ms": 86.69554209336638,
+     "steel_pipe_ms": 90.64529108582065,
+     "steel3_TF": 5.016006915922777,
+     "steel_pipe_TF": 4.7974410309773345
+    },
+    "Mt16": {
+     "Mt": 16,
+     "n_chunks": 3,
+     "tiles": 928,
+     "rows_padded": 14848,
+     "pad_waste": 1.2083333333333333,
+     "machine_bm64_rows": 59392,
+     "ms": {
+      "g": 47.071624954696745,
+      "u": 47.11974895326421,
+      "y": 46.77391494624317,
+      "act": 1.0292080114595592,
+      "build": 2.0044580451212823,
+      "unpad": 0.9342489647679031
+     },
+     "steel3_ms": 140.96528885420412,
+     "steel_pipe_ms": 144.93320387555286,
+     "steel3_TF": 3.0849114860451032,
+     "steel_pipe_TF": 3.000454189182197
+    },
+    "Mt128": {
+     "Mt": 128,
+     "n_chunks": 3,
+     "tiles": 343,
+     "rows_padded": 43904,
+     "pad_waste": 3.5729166666666665,
+     "machine_bm64_rows": 43904,
+     "ms": {
+      "g": 35.09612492052838,
+      "u": 35.10500001721084,
+      "y": 34.965958970133215,
+      "act": 2.5521269417367876,
+      "build": 3.8083340041339397,
+      "unpad": 0.9333760244771838
+     },
+     "steel3_ms": 105.16708390787244,
+     "steel_pipe_ms": 112.46092087822035,
+     "steel3_TF": 4.134995690295521,
+     "steel_pipe_TF": 3.866813781392554
+    }
+   },
+   "m1_fallback": {
+    "launch_gate_ms": 24.616250942926854,
+    "launch_up_ms": 24.55870807170868,
+    "launch_dn_ms": 19.597999984398484,
+    "act_ms": 0.8671669638715684,
+    "m1_pipe_ms": 69.64012596290559,
+    "m1_TF": 6.244466573073616,
+    "n_chunks": 3
+   },
+   "confirm_interleaved": {
+    "Mt": 64,
+    "rounds": 5,
+    "seg_pipe_ms": 57.72983509814367,
+    "steel_pipe_ms": 67.31608411064371,
+    "seg_pipe_ms_all": [
+     57.667000975925475,
+     57.73837602464482,
+     57.62445798609406,
+     57.7397090382874,
+     57.72983509814367
+    ],
+    "steel_pipe_ms_all": [
+     67.30220792815089,
+     67.40258197532967,
+     67.31608411064371,
+     67.41479295305908,
+     67.28450203081593
+    ],
+    "ratio_per_round": [
+     1.167083544993919,
+     1.1673792478430605,
+     1.1681859832310864,
+     1.1675637802115715,
+     1.1655065689418451
+    ],
+    "ratio": 1.1673792478430605,
+    "seg_pipe_TF": 7.532767727132887,
+    "steel_pipe_TF": 6.460052518878486,
+    "note": "ratio = median of per-round steel/seg pipe ratios"
+   },
+   "price": {
+    "best_Mt": 64,
+    "weights": "real",
+    "headline": "interleaved_confirm",
+    "steel_pipe_TF": 6.460052518878486,
+    "seg_pipe_TF": 7.532767727132887,
+    "ratio_vs_seg_pipe": 1.1673792478430605,
+    "phase_separated": {
+     "steel_pipe_TF": 6.444289051172942,
+     "seg_pipe_TF": 7.50198598588463,
+     "ratio": 0.8590110756402639
+    },
+    "ratio_vs_seg3": 0.9156961052764572,
+    "steel_pipe_decode_incl_ms": 200.16912720166147,
+    "steel_pipe_decode_incl_TF": 2.1724900577794517,
+    "ratio_decode_incl_vs_seg_pipe": 0.2884052895928522,
+    "decode_share_of_pipe_pct": 197.35705789518977,
+    "decode_amortized_routed_frac": {
+     "frac": 0.859375,
+     "ms": 114.17058390634338,
+     "ratio_est": 0.31809408222062996
+    },
+    "published_ref": {
+     "seg_real_TF": 6.63,
+     "seg_uniform192_TF": 8.85,
+     "mix_roofline_TF": 14.96,
+     "host": "studio2",
+     "note": "cross-host reference; the same-host ratio is authoritative"
+    },
+    "marginal_within_noise": false,
+    "raw_ratio_win": true
+   },
+   "verdict_rule": "WIN iff interleaved steel/seg ratio > 1 and (|ratio-1| > 0.10 or decode-included ratio > 1); otherwise LOSS",
+   "verdict": "P3: steel-gather price 6.46 TF = 1.17x vs seg kernel 7.53 TF => WIN"
+  },
+  "uniform192": {
+   "E": 192,
+   "D": 5120,
+   "H": 1152,
+   "k": 3,
+   "cb": 2,
+   "weights": "real",
+   "idx_stats": {
+    "pairs": 12288,
+    "experts_hit": 192,
+    "max_rows": 64,
+    "avg_rows": 64.0
+   },
+   "seg": {
+    "launch_gate_ms": 13.549083028919995,
+    "launch_up_ms": 13.529916992411017,
+    "launch_dn_ms": 13.209291035309434,
+    "seg3_ms": 40.288291056640446,
+    "act_ms": 0.6639999919570982,
+    "seg_pipe_ms": 40.952291048597544,
+    "seg3_TF": 10.793841766796016,
+    "seg_pipe_TF": 10.61883053634169,
+    "full_prefill_ms": 48.756707983557135,
+    "full_prefill_TF": 8.919089427995331
+   },
+   "decode": {
+    "chunked_at": 182,
+    "chunks": 2,
+    "GM_EBATCH": -1,
+    "whole_e_limit": 182,
+    "total_ms": 66.14233291475102,
+    "fp16_bytes": 6794772480,
+    "GBps": 102.72955580138955
+   },
+   "steel": {
+    "Mt64": {
+     "Mt": 64,
+     "n_chunks": 2,
+     "tiles": 192,
+     "rows_padded": 12288,
+     "pad_waste": 1.0,
+     "machine_bm64_rows": 12288,
+     "ms": {
+      "g": 10.329291922971606,
+      "u": 10.323875059839338,
+      "y": 10.084791982080787,
+      "act": 0.7744170725345612,
+      "build": 1.3234170037321746,
+      "unpad": 0.8255829452537
+     },
+     "steel3_ms": 30.73795896489173,
+     "steel_pipe_ms": 33.66137598641217,
+     "steel3_TF": 14.147505344017617,
+     "steel_pipe_TF": 12.918825388942473
+    },
+    "Mt32": {
+     "Mt": 32,
+     "n_chunks": 2,
+     "tiles": 384,
+     "rows_padded": 12288,
+     "pad_waste": 1.0,
+     "machine_bm64_rows": 24576,
+     "ms": {
+      "g": 19.860583008266985,
+      "u": 19.832251011393964,
+      "y": 19.640374928712845,
+      "act": 0.7705000462010503,
+      "build": 1.3241659617051482,
+      "unpad": 0.7456659805029631
+     },
+     "steel3_ms": 59.333208948373795,
+     "steel_pipe_ms": 62.173540936782956,
+     "steel3_TF": 7.329208152189767,
+     "steel_pipe_TF": 6.994381085069034
+    },
+    "Mt16": {
+     "Mt": 16,
+     "n_chunks": 2,
+     "tiles": 768,
+     "rows_padded": 12288,
+     "pad_waste": 1.0,
+     "machine_bm64_rows": 49152,
+     "ms": {
+      "g": 38.67420903407037,
+      "u": 38.64675003569573,
+      "y": 38.53416698984802,
+      "act": 0.7777499849908054,
+      "build": 1.401167013682425,
+      "unpad": 0.8234180277213454
+     },
+     "steel3_ms": 115.85512605961412,
+     "steel_pipe_ms": 118.8574610860087,
+     "steel3_TF": 3.753527819703349,
+     "steel_pipe_TF": 3.658713847213334
+    },
+    "Mt128": {
+     "Mt": 128,
+     "n_chunks": 2,
+     "tiles": 192,
+     "rows_padded": 24576,
+     "pad_waste": 2.0,
+     "machine_bm64_rows": 24576,
+     "ms": {
+      "g": 19.790041958913207,
+      "u": 19.761458039283752,
+      "y": 19.70991602865979,
+      "act": 1.4910830068401992,
+      "build": 2.1950420341454446,
+      "unpad": 0.8297499734908342
+     },
+     "steel3_ms": 59.26141602685675,
+     "steel_pipe_ms": 63.77729104133323,
+     "steel3_TF": 7.338087205390482,
+     "steel_pipe_TF": 6.81849968256208
+    }
+   },
+   "m1_fallback": {
+    "launch_gate_ms": 10.796584014315158,
+    "launch_up_ms": 10.861248942092061,
+    "launch_dn_ms": 11.257458943873644,
+    "act_ms": 0.7739579887129366,
+    "m1_pipe_ms": 33.6892498889938,
+    "m1_TF": 12.908136576293128,
+    "n_chunks": 2
+   },
+   "confirm_interleaved": {
+    "Mt": 64,
+    "rounds": 5,
+    "seg_pipe_ms": 41.00979206850752,
+    "steel_pipe_ms": 33.68258394766599,
+    "seg_pipe_ms_all": [
+     41.04695800924674,
+     40.99945997586474,
+     41.00979206850752,
+     40.950958034954965,
+     41.021790937520564
+    ],
+    "steel_pipe_ms_all": [
+     33.77045801607892,
+     33.638042164966464,
+     33.676705963443965,
+     33.68258394766599,
+     33.704542031046
+    ],
+    "ratio_per_round": [
+     0.8227274237586955,
+     0.8204508592251766,
+     0.8211869474292013,
+     0.822510279708601,
+     0.8216253181724974
+    ],
+    "ratio": 0.8216253181724974,
+    "seg_pipe_TF": 10.603941565798486,
+    "steel_pipe_TF": 12.910691157058148,
+    "note": "ratio = median of per-round steel/seg pipe ratios"
+   },
+   "price": {
+    "best_Mt": 64,
+    "weights": "real",
+    "headline": "interleaved_confirm",
+    "steel_pipe_TF": 12.910691157058148,
+    "seg_pipe_TF": 10.603941565798486,
+    "ratio_vs_seg_pipe": 0.8216253181724974,
+    "phase_separated": {
+     "steel_pipe_TF": 12.918825388942473,
+     "seg_pipe_TF": 10.61883053634169,
+     "ratio": 1.21659587133718
+    },
+    "ratio_vs_seg3": 1.3107015694391715,
+    "steel_pipe_decode_incl_ms": 99.82491686241701,
+    "steel_pipe_decode_incl_TF": 4.356281501534834,
+    "ratio_decode_incl_vs_seg_pipe": 0.4108171923151108,
+    "decode_share_of_pipe_pct": 196.3695333396009,
+    "decode_amortized_routed_frac": {
+     "frac": 1.0,
+     "ms": 66.14233291475102,
+     "ratio_est": 0.4108171923151108
+    },
+    "published_ref": {
+     "seg_uniform192_TF": 8.85
+    },
+    "marginal_within_noise": false,
+    "raw_ratio_win": false
+   },
+   "verdict_rule": "WIN iff interleaved steel/seg ratio > 1 and (|ratio-1| > 0.10 or decode-included ratio > 1); otherwise LOSS",
+   "verdict": "P3: steel-gather price 12.91 TF = 0.82x vs seg kernel 10.60 TF => LOSS"
+  }
+ },
+ "selfcheck": {
+  "E": 8,
+  "N": 512,
+  "Mt": 32,
+  "tiles": 21,
+  "rows_padded": 672,
+  "gate_rel": 0.0,
+  "dn_rel": 0.0,
+  "chunk_slice_bitdiff_copy": 0,
+  "chunk_slice_bitdiff_raw": 0,
+  "pass": true
+ },
+ "notes": [],
+ "real_ck": true,
+ "checkpoint": "/Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+ "finished": "2026-10-11 02:22:45",
+ "verdict": "P3: steel-gather price 6.46 TF = 1.17x vs seg kernel 7.53 TF => WIN"
+}

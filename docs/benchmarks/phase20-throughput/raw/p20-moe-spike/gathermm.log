@@ -1,0 +1,27 @@
+[gathermm] start mlx=0.32.3.dev20260918+603f16eb7 gemv_metal=/tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py seg=v19d
+[gathermm] selfcheck: gate_rel=0.0000 dn_rel=0.0000 slice_copy_bitdiff=0 slice_raw_bitdiff=0 -> PASS
+[gathermm] weights=real (ckpt /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw present=True)
+[gathermm] real: E=384 pairs=12288 experts_hit=330 maxM=341 weights=real
+[gathermm]   seg3 57.30 ms (7.59 TF)  seg_pipe 57.97 ms (7.50 TF)
+[gathermm]   full _prefill 65.62 ms (6.63 TF)
+[gathermm]   decode once: 132.85 ms (13.59 GB fp16, 102 GB/s) [3 chunks of 182, int32 cap]
+[gathermm]   Mt=64  tiles=397  pad=2.07x steel3 6.95 TF pipe 6.44 TF (build 2.5 act 1.5 unpad 0.9 ms)
+[gathermm]   Mt=32  tiles=559  pad=1.46x steel3 5.02 TF pipe 4.80 TF (build 1.8 act 1.2 unpad 0.9 ms)
+[gathermm]   Mt=16  tiles=928  pad=1.21x steel3 3.08 TF pipe 3.00 TF (build 2.0 act 1.0 unpad 0.9 ms)
+[gathermm]   Mt=128 tiles=343  pad=3.57x steel3 4.13 TF pipe 3.87 TF (build 3.8 act 2.6 unpad 0.9 ms)
+[gathermm]   m1 fallback (fork's form): 6.24 TF
+[gathermm]   confirm (interleaved x5): steel 6.46 TF vs seg 7.53 TF -> 0.86x (medians) / 1.17x (median-of-rounds)
+[gathermm] uniform192: E=192 pairs=12288 experts_hit=192 maxM=64 weights=real
+[gathermm]   seg3 40.29 ms (10.79 TF)  seg_pipe 40.95 ms (10.62 TF)
+[gathermm]   full _prefill 48.76 ms (8.92 TF)
+[gathermm]   decode once: 66.14 ms (6.79 GB fp16, 103 GB/s) [2 chunks of 182, int32 cap]
+[gathermm]   Mt=64  tiles=192  pad=1.00x steel3 14.15 TF pipe 12.92 TF (build 1.3 act 0.8 unpad 0.8 ms)
+[gathermm]   Mt=32  tiles=384  pad=1.00x steel3 7.33 TF pipe 6.99 TF (build 1.3 act 0.8 unpad 0.7 ms)
+[gathermm]   Mt=16  tiles=768  pad=1.00x steel3 3.75 TF pipe 3.66 TF (build 1.4 act 0.8 unpad 0.8 ms)
+[gathermm]   Mt=128 tiles=192  pad=2.00x steel3 7.34 TF pipe 6.82 TF (build 2.2 act 1.5 unpad 0.8 ms)
+[gathermm]   m1 fallback (fork's form): 12.91 TF
+[gathermm]   confirm (interleaved x5): steel 12.91 TF vs seg 10.60 TF -> 1.22x (medians) / 0.82x (median-of-rounds)
+[gathermm] P3: steel-gather price 6.46 TF = 1.17x vs seg kernel 7.53 TF => WIN
+[gathermm]   (decode included once: 2.17 TF = 0.29x; decode 132.9 ms = 197% of pipe; amortized over routed 86%: 0.32x)
+P3: steel-gather price 6.46 TF = 1.17x vs seg kernel 7.53 TF => WIN
+[gathermm] DONE -> /tmp/p20moe_spike/p20_moe_spike_gathermm.json

@@ -1,0 +1,63 @@
+[spike] start /tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py vers ['v19d', 'v19e', 'v20'] rounds 5 mixes ['real', 'uniform', 'skew']
+[autopsy] === ceilings (in-session) ===
+[autopsy]   dense bf16 2048x4096x4096: 4.760 ms 14.44 TF
+[autopsy]   dense bf16 4096x4096x4096: 9.268 ms 14.83 TF
+[autopsy]   dense bf16 8192x4096x4096: 18.205 ms 15.10 TF
+[autopsy]   dense bf16 4096x8192x8192: 36.247 ms 15.17 TF
+[autopsy]   ceiling: 15.17 TF dense-bf16 / 437 GB/s BW
+[spike]   real r0 v19d  full 65.89 ms  gate 19.25 up 19.25 dn 18.53
+[spike]   real r0 v19e  full 65.52 ms  gate 19.27 up 19.20 dn 18.50
+[spike]   real r0 v20   full 63.94 ms  gate 18.60 up 18.73 dn 18.01
+[spike]   real r1 v20   full 64.04 ms  gate 18.64 up 18.65 dn 18.05
+[spike]   real r1 v19e  full 65.76 ms  gate 19.20 up 19.12 dn 18.56
+[spike]   real r1 v19d  full 65.80 ms  gate 19.34 up 19.27 dn 18.55
+[spike]   real r2 v19d  full 65.83 ms  gate 19.26 up 19.26 dn 18.56
+[spike]   real r2 v19e  full 65.77 ms  gate 19.26 up 19.25 dn 18.56
+[spike]   real r2 v20   full 63.98 ms  gate 18.65 up 18.64 dn 18.01
+[spike]   real r3 v20   full 64.03 ms  gate 18.69 up 18.63 dn 18.01
+[spike]   real r3 v19e  full 65.76 ms  gate 19.27 up 19.25 dn 18.55
+[spike]   real r3 v19d  full 65.79 ms  gate 19.19 up 19.26 dn 18.56
+[spike]   real r4 v19d  full 65.88 ms  gate 19.26 up 19.26 dn 18.55
+[spike]   real r4 v19e  full 65.73 ms  gate 19.34 up 19.29 dn 18.56
+[spike]   real r4 v20   full 64.01 ms  gate 18.64 up 18.64 dn 18.02
+[spike]   uniform r0 v19d  full 48.80 ms  gate 13.54 up 13.58 dn 13.23
+[spike]   uniform r0 v19e  full 49.08 ms  gate 13.60 up 13.55 dn 13.24
+[spike]   uniform r0 v20   full 48.13 ms  gate 13.10 up 13.13 dn 13.13
+[spike]   uniform r1 v20   full 48.12 ms  gate 13.13 up 13.12 dn 13.12
+[spike]   uniform r1 v19e  full 49.01 ms  gate 13.54 up 13.59 dn 13.25
+[spike]   uniform r1 v19d  full 49.06 ms  gate 13.60 up 13.52 dn 13.19
+[spike]   uniform r2 v19d  full 49.24 ms  gate 13.59 up 13.59 dn 13.20
+[spike]   uniform r2 v19e  full 49.01 ms  gate 13.51 up 13.60 dn 13.22
+[spike]   uniform r2 v20   full 48.07 ms  gate 13.11 up 13.12 dn 13.15
+[spike]   uniform r3 v20   full 48.15 ms  gate 13.13 up 13.11 dn 13.14
+[spike]   uniform r3 v19e  full 49.20 ms  gate 13.53 up 13.53 dn 13.21
+[spike]   uniform r3 v19d  full 49.35 ms  gate 13.53 up 13.69 dn 13.31
+[spike]   uniform r4 v19d  full 49.20 ms  gate 13.69 up 13.60 dn 13.31
+[spike]   uniform r4 v19e  full 49.06 ms  gate 13.53 up 13.58 dn 13.23
+[spike]   uniform r4 v20   full 48.18 ms  gate 13.08 up 13.13 dn 13.14
+[spike]   skew r0 v19d  full 57.68 ms  gate 16.53 up 16.51 dn 15.96
+[spike]   skew r0 v19e  full 57.59 ms  gate 16.53 up 16.50 dn 15.96
+[spike]   skew r0 v20   full 56.23 ms  gate 15.97 up 16.03 dn 15.54
+[spike]   skew r1 v20   full 56.14 ms  gate 16.03 up 15.98 dn 15.50
+[spike]   skew r1 v19e  full 57.56 ms  gate 16.50 up 16.49 dn 15.96
+[spike]   skew r1 v19d  full 57.61 ms  gate 16.51 up 16.52 dn 15.97
+[spike]   skew r2 v19d  full 57.77 ms  gate 16.60 up 16.52 dn 15.96
+[spike]   skew r2 v19e  full 57.66 ms  gate 16.55 up 16.43 dn 15.96
+[spike]   skew r2 v20   full 56.30 ms  gate 15.97 up 15.97 dn 15.49
+[spike]   skew r3 v20   full 56.17 ms  gate 15.98 up 16.02 dn 15.53
+[spike]   skew r3 v19e  full 57.65 ms  gate 16.46 up 16.52 dn 15.98
+[spike]   skew r3 v19d  full 57.74 ms  gate 16.59 up 16.51 dn 15.97
+[spike]   skew r4 v19d  full 57.60 ms  gate 16.53 up 16.51 dn 15.98
+[spike]   skew r4 v19e  full 57.67 ms  gate 16.45 up 16.51 dn 15.96
+[spike]   skew r4 v20   full 56.28 ms  gate 15.98 up 15.98 dn 15.50
+P0 noise band: v19d real sigma=0.047 ms (0.07%) 3sigma=0.140 ms (0.21%)
+gate#2 [real] v19e vs v19d: full delta=+0.12% (+0.08 ms; need >=5.0%)  3sigma=0.140 ms -> clears(>=5% & >3sigma): NO
+gate#2 [real] v20 vs v19d: full delta=+2.77% (+1.82 ms; need >=5.0%)  3sigma=0.140 ms -> clears(>=5% & >3sigma): NO
+gate#2 [uniform] v19e vs v19d: full delta=+0.29% (+0.14 ms; need >=5.0%)  3sigma=0.140 ms -> clears(>=5% & >3sigma): NO
+gate#2 [uniform] v20 vs v19d: full delta=+2.17% (+1.07 ms; need >=5.0%)  3sigma=0.140 ms -> clears(>=5% & >3sigma): NO
+gate#2 [skew] v19e vs v19d: full delta=+0.06% (+0.04 ms; need >=5.0%)  3sigma=0.140 ms -> clears(>=5% & >3sigma): NO
+gate#2 [skew] v20 vs v19d: full delta=+2.53% (+1.46 ms; need >=5.0%)  3sigma=0.140 ms -> clears(>=5% & >3sigma): NO
+[spike] [real] autopsy_baseline_TF=6.630 in_session_mix_roofline_TF=14.981 v19d_TF=6.605 v19d_pct_mix=44.093 v19e_TF=6.613 v19e_pct_mix=44.146 v20_TF=6.794 v20_pct_mix=45.349
+[spike] [uniform] autopsy_baseline_TF=8.850 in_session_mix_roofline_TF=15.171 v19d_TF=8.839 v19d_pct_mix=58.260 v19e_TF=8.864 v19e_pct_mix=58.428 v20_TF=9.035 v20_pct_mix=59.552
+[spike] [skew] autopsy_baseline_TF=7.550 in_session_mix_roofline_TF=15.121 v19d_TF=7.539 v19d_pct_mix=49.857 v19e_TF=7.544 v19e_pct_mix=49.889 v20_TF=7.734 v20_pct_mix=51.150
+[spike] DONE -> /tmp/p20moe_spike/p20_moe_spike_bench.json

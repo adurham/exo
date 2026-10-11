@@ -1,0 +1,11 @@
+[limiter] spawn mode=default -> /Users/adam.durham/repos/exo/.venv/bin/python
+[limiter] --- stdout(default) ---
+[limiter] mode=default real=True ck=True gpu_live=True
+[limiter] [real] busy_weighted=99.0%  gu_gate=98.7% gu_up=99.1% dn=99.1%
+[limiter] [uniform] busy_weighted=98.7%  gu_gate=98.6% gu_up=98.8% dn=98.8%
+[limiter] [ablation] {'full_ms': 19.281540997326374, 'no_tload_ms': 14.970958000048995, 'tl_saving_pct': 22.356008774791885, 'source': 'measured (gu shape, real mix, v19d)'}
+[limiter] PARTIAL_WROTE /var/folders/_v/f6dgc0056znfw21n8_zhr6000000gn/T/lim_partial_default.json
+P1 limiter: operand-stall/occupancy
+gate#1: CLEARED
+[limiter] B=99.0% (mix=real)  TL=22.4% (measured (gu shape, real mix, v19d))  -> operand-stall/occupancy/CLEARED
+[limiter] DONE -> /tmp/p20moe_spike/p20_moe_spike_limiter.json

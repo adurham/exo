@@ -1,0 +1,27 @@
+skip mix real: trace missing /private/tmp/docs/benchmarks/phase10-planb-gate-2026-09-28/raw/p30_exl3_trace_clamp.json
+ablate start gemv_metal=/tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py reps=9 vers=['v19d', 'v19e', 'v20'] mixes=['uniform192'] shapes=['gu', 'dn']
+v19d  full      uniform192   gu    13.392 ms
+v19d  full      uniform192   dn    12.978 ms
+v19d  no_mma    uniform192   gu     0.265 ms
+v19d  no_mma    uniform192   dn     0.489 ms
+v19d  no_tload  uniform192   gu    11.798 ms
+v19d  no_tload  uniform192   dn    11.460 ms
+v19d  no_aload  uniform192   gu    11.116 ms
+v19d  no_aload  uniform192   dn    11.008 ms
+v19e  full      uniform192   gu    13.311 ms
+v19e  full      uniform192   dn    12.953 ms
+v19e  no_mma    uniform192   gu     0.259 ms
+v19e  no_mma    uniform192   dn     0.497 ms
+v19e  no_tload  uniform192   gu    11.808 ms
+v19e  no_tload  uniform192   dn    11.471 ms
+v19e  no_aload  uniform192   gu    11.105 ms
+v19e  no_aload  uniform192   dn    10.987 ms
+v20   full      uniform192   gu    12.835 ms
+v20   full      uniform192   dn    12.886 ms
+v20   no_mma    uniform192   gu     0.261 ms
+v20   no_mma    uniform192   dn     0.490 ms
+v20   no_tload  uniform192   gu    11.523 ms
+v20   no_tload  uniform192   dn    11.465 ms
+v20   no_aload  uniform192   gu    10.818 ms
+v20   no_aload  uniform192   dn    10.938 ms
+DONE -> /tmp/p20moe_spike/p20_moe_spike_ablate.json

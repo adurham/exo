@@ -1,0 +1,57 @@
+[p4] start mlx=0.32.3.dev20260918+603f16eb7 gemv_metal=/tmp/p20moe_partition_pkg/mlx_lm/models/exl3/gemv_metal.py (pin /tmp/p20moe_partition_pkg)
+[p4] weights=real (ckpt /Users/adam.durham/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw present=True) rounds=5 mixes=['real', 'uniform']
+[p4] built tag=v19d cb=2 (src 10421 B, name p4_seg_k3_cb2_v19d)
+[p4] built tag=v19p cb=2 (src 11960 B, name p4_seg_k3_cb2_v19p)
+[p4] built tag=v19dnd cb=2 (src 10011 B, name p4_seg_k3_cb2_v19dnd)
+[p4] raw/synthetic-smokeE8 gu v19p==v19d          OK  bitdiff=0 maxabs=0 elems=55296 nonfinite=0/0
+[p4] raw/real/real gate v19p==v19d                OK  bitdiff=0 maxabs=0 elems=14155776 nonfinite=0/0
+[p4] raw/real/real up v19p==v19d                  OK  bitdiff=0 maxabs=0 elems=14155776 nonfinite=0/0
+[p4] raw/real/real dn v19p==v19d                  OK  bitdiff=0 maxabs=0 elems=62914560 nonfinite=0/0
+[p4] chain/real/real v19p==v19d                   OK  bitdiff=0 maxabs=0 elems=62914560 nonfinite=0/0
+[p4] raw/real/uniform gate v19p==v19d             OK  bitdiff=0 maxabs=0 elems=14155776 nonfinite=0/0
+[p4] raw/real/uniform up v19p==v19d               OK  bitdiff=0 maxabs=0 elems=14155776 nonfinite=0/0
+[p4] raw/real/uniform dn v19p==v19d               OK  bitdiff=0 maxabs=0 elems=62914560 nonfinite=0/0
+[p4] chain/real/uniform v19p==v19d                OK  bitdiff=0 maxabs=0 elems=62914560 nonfinite=0/0
+[p4]   real r0 v19d   full 65.65 ms | seg3 gate 19.24 up 19.28 dn 18.48
+[p4]   real r0 v19p   full 64.43 ms | seg3 gate 18.73 up 18.82 dn 18.16
+[p4]   real r0 v19dnd full 63.64 ms | seg3 gate 18.50 up 18.51 dn 17.84
+[p4]   real r1 v19dnd full 63.47 ms | seg3 gate 18.48 up 18.56 dn 17.85
+[p4]   real r1 v19p   full 64.58 ms | seg3 gate 18.79 up 18.77 dn 18.16
+[p4]   real r1 v19d   full 65.70 ms | seg3 gate 19.21 up 19.20 dn 18.60
+[p4]   real r2 v19d   full 65.71 ms | seg3 gate 19.21 up 19.20 dn 18.48
+[p4]   real r2 v19p   full 64.43 ms | seg3 gate 18.81 up 18.73 dn 18.18
+[p4]   real r2 v19dnd full 63.57 ms | seg3 gate 18.58 up 18.49 dn 17.85
+[p4]   real r3 v19dnd full 63.72 ms | seg3 gate 18.49 up 18.54 dn 17.84
+[p4]   real r3 v19p   full 64.53 ms | seg3 gate 18.79 up 18.73 dn 18.17
+[p4]   real r3 v19d   full 65.64 ms | seg3 gate 19.28 up 19.18 dn 18.50
+[p4]   real r4 v19d   full 65.67 ms | seg3 gate 19.27 up 19.27 dn 18.48
+[p4]   real r4 v19p   full 64.62 ms | seg3 gate 18.81 up 18.73 dn 18.17
+[p4]   real r4 v19dnd full 63.63 ms | seg3 gate 18.56 up 18.51 dn 17.85
+[p4]   real v19d   med 65.67 ms (sigma 0.030) TF 6.62 | seg3 56.93 ms (TF 7.64)
+[p4]   real v19p   med 64.53 ms (sigma 0.086) TF 6.74 | seg3 55.70 ms (TF 7.81)
+[p4]   real v19dnd med 63.63 ms (sigma 0.095) TF 6.83 | seg3 54.85 ms (TF 7.93)
+[p4]   uniform r0 v19d   full 48.98 ms | seg3 gate 13.52 up 13.60 dn 13.20
+[p4]   uniform r0 v19p   full 48.37 ms | seg3 gate 13.00 up 13.04 dn 13.06
+[p4]   uniform r0 v19dnd full 47.98 ms | seg3 gate 13.06 up 13.29 dn 12.90
+[p4]   uniform r1 v19dnd full 47.96 ms | seg3 gate 13.28 up 13.12 dn 12.91
+[p4]   uniform r1 v19p   full 47.90 ms | seg3 gate 13.05 up 13.04 dn 13.04
+[p4]   uniform r1 v19d   full 48.90 ms | seg3 gate 13.59 up 13.67 dn 13.20
+[p4]   uniform r2 v19d   full 48.77 ms | seg3 gate 13.59 up 13.59 dn 13.20
+[p4]   uniform r2 v19p   full 47.93 ms | seg3 gate 12.98 up 12.97 dn 13.04
+[p4]   uniform r2 v19dnd full 47.98 ms | seg3 gate 13.19 up 13.20 dn 12.88
+[p4]   uniform r3 v19dnd full 48.10 ms | seg3 gate 13.26 up 13.12 dn 12.81
+[p4]   uniform r3 v19p   full 47.89 ms | seg3 gate 13.03 up 13.03 dn 13.05
+[p4]   uniform r3 v19d   full 49.15 ms | seg3 gate 13.58 up 13.52 dn 13.20
+[p4]   uniform r4 v19d   full 48.96 ms | seg3 gate 13.68 up 13.52 dn 13.20
+[p4]   uniform r4 v19p   full 47.92 ms | seg3 gate 13.04 up 13.04 dn 13.05
+[p4]   uniform r4 v19dnd full 48.00 ms | seg3 gate 13.20 up 13.20 dn 12.82
+[p4]   uniform v19d   med 48.96 ms (sigma 0.139) TF 8.88 | seg3 40.38 ms (TF 10.77)
+[p4]   uniform v19p   med 47.92 ms (sigma 0.207) TF 9.08 | seg3 39.12 ms (TF 11.12)
+[p4]   uniform v19dnd med 47.98 ms (sigma 0.056) TF 9.06 | seg3 39.27 ms (TF 11.07)
+P0 noise band: v19d real sigma=0.030 ms (0.05%) 3sigma=0.091 ms (0.14%)
+gate [real] v19p vs v19d: full +1.74% (+1.14 ms) seg3 +2.16% (pin-pong); 3sigma=0.091 ms -> clears: NO
+gate [real] v19dnd vs v19d: full +3.11% (+2.04 ms) seg3 +3.65% (decode-ALU ablation); 3sigma=0.091 ms -> clears: NO
+gate [uniform] v19p vs v19d: full +2.13% (+1.04 ms) seg3 +3.12% (pin-pong); 3sigma=0.091 ms -> clears: NO
+gate [uniform] v19dnd vs v19d: full +2.00% (+0.98 ms) seg3 +2.75% (decode-ALU ablation); 3sigma=0.091 ms -> clears: NO
+P4: v19p +1.74% vs v19d in-chain [bit-exact]; gate#2 FAILS
+DONE -> /tmp/p20moe_spike/p20_moe_spike_p4.json
