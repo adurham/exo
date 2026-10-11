@@ -111,10 +111,12 @@ from exo.worker.engines.mlx.disaggregated.adapter import (
 from exo.worker.engines.mlx.dsv41.coord import (
     MAX_CANDIDATES,
     Candidate,
+    CheckpointOutcome,
     ParkCoordinator,
     RestoreDecision,
     build_identity_digest,
     key_int,
+    run_checkpoint,
     run_park,
     run_restore,
 )
@@ -139,6 +141,7 @@ __all__ = [
     "PARK_MAGIC",
     "PARK_VERSION",
     "ParkedStore",
+    "checkpoint_conversation",
     "park_conversation",
     "park_safe",
     "restore_conversation",
@@ -405,6 +408,287 @@ def park_safe(conv: "Conversation") -> bool:
 # serialize
 # ---------------------------------------------------------------------------
 
+class _GenerationWriter:
+    """Unit-by-unit serializer for ONE generation directory (§G1 split).
+
+    ``park_conversation`` (eviction) and the §G1 keep-resident checkpoint share
+    this writer, so the on-disk format is byte-for-byte the same either way.
+    The work is split into small UNITS (``ids`` + manifest skeleton at
+    :meth:`begin`; then one unit per cache layer -- its window ring, live
+    compressed-KV / index-key rows and compressor carry -- then engram ids, the
+    draft windows, each ladder snapshot, each draft snapshot, each anchor), so a
+    caller can stop between units: the §G1 checkpoint polls for a pending
+    request between every unit and aborts within one unit.
+
+    MLX BUFFER DONATION. A unit looks its arrays up on the LIVE cache when it
+    runs (never at construction), copies them to the host, writes, and drops
+    every reference before returning; the writer itself holds only Python ints,
+    file descriptors and the manifest dict. No cache array is referenced across
+    a unit boundary, so nothing pins a buffer across the next forward pass and
+    the in-place decode writes keep donating (T9).
+
+    CONSISTENCY. Every unit first asserts that the conversation is still at the
+    offset it was at in :meth:`begin` and is not mid-turn; a mismatch raises, and
+    the caller aborts (no partial generation is ever committed: the manifest is
+    the commit record and is written only by :meth:`commit`).
+    """
+
+    def __init__(
+        self,
+        conv: "Conversation",
+        d: Path,
+        *,
+        key: str | None,
+        fingerprint: "BuildFingerprint | None",
+        rank: int | None,
+    ) -> None:
+        self.conv = conv
+        self.dir = d
+        self.tmp = d.with_name(f"{d.name}.tmp")
+        self.key = key
+        self.fingerprint = fingerprint
+        self.rank = rank
+        self.man: dict[str, Any] = {}
+        self.offset = -1
+        self._units: list[Any] = []
+        self._next = 0
+        self._began = False
+        self._cache_id = 0
+
+    # -- lifecycle --------------------------------------------------------
+
+    def begin(self) -> bool:
+        """Create ``<dir>.tmp/``, write ``ids.bin`` and plan the units.
+
+        ``False`` (nothing created) when the conversation is not park-safe or
+        the target exists. Raises on an I/O error (the caller cleans up).
+        """
+        conv = self.conv
+        if not park_safe(conv):
+            return False
+        if self.dir.exists():  # never clobber an existing session
+            return False
+        mc = conv.cache.cache
+        self._cache_id = id(mc)
+        n_layers = len(mc.layers)
+        offset = int(mc.offset)
+        capacity = int(mc.capacity)
+        self.offset = offset
+        self.tmp.mkdir(parents=True, exist_ok=False)
+        self._began = True
+
+        ids = np.ascontiguousarray(
+            np.asarray(conv.cache.tokens, dtype=np.int64).astype("<i4"))
+        _write_bytes_synced(self.tmp / "ids.bin", ids.tobytes())
+
+        gen_parsed = _gen_from_name(self.dir.name)
+        fp = self.fingerprint
+        self.man = {
+            "magic": PARK_MAGIC,
+            "version": PARK_VERSION,
+            "created": time.time(),
+            "key": self.key,
+            # The build fingerprint (plan §G2): computed once by the store and
+            # passed in; never computed here. None makes the dir "legacy".
+            FINGERPRINT_FIELD: (fp.as_dict() if fp is not None else None),
+            "generation": gen_parsed[1] if gen_parsed is not None else 0,
+            # The TP rank that wrote this shard (plan §G4); None = unknown /
+            # single-rank store. Informational: admission is the fingerprint.
+            "rank": None if self.rank is None else int(self.rank),
+            "offset": offset,
+            "capacity": capacity,
+            "max_seq_len": int(mc.max_seq_len),
+            "n_layers": n_layers,
+            "window": int(getattr(mc.args, "window_size", 0)),
+            "bsz": int(mc.bsz),
+            "token_count": int(ids.shape[0]),
+            "prefix_key": prefix_hash(ids),
+            "ids": {"file": "ids.bin", "dtype": "int32", "count": int(ids.shape[0])},
+            "n_turns": int(conv.n_turns),
+            "cache_turns": int(conv.cache.n_turns),
+            "base": int(conv._base),
+            "gen": [int(t) for t in conv._gen],
+            "win_kv": [None] * n_layers,
+            "comp_kv": [None] * n_layers,
+            "index_k": [None] * n_layers,
+            "carry": [None] * n_layers,
+            "engram": None,
+            "draft": [],
+            "has_draft": conv.draft_state is not None,
+            "snapshots": [],
+            "draft_snaps": [],
+            "anchors": [],
+        }
+        # Plan the units over INDICES / POSITIONS only (no array references).
+        units: list[Any] = [
+            (lambda i=i: self._layer_unit(i)) for i in range(n_layers)
+        ]
+        if mc.engram_ids is not None:
+            units.append(self._engram_unit)
+        if conv.draft_state is not None:
+            units.append(self._draft_unit)
+        for pos in list(conv.cache._snaps.keys()):
+            units.append(lambda pos=pos: self._snapshot_unit(pos))
+        for pos in list(conv._draft_snaps.keys()):
+            units.append(lambda pos=pos: self._draft_snap_unit(pos))
+        for pos in list(conv._anchor_at.keys()):
+            units.append(lambda pos=pos: self._anchor_unit(pos))
+        self._units = units
+        return True
+
+    @property
+    def total_units(self) -> int:
+        return len(self._units)
+
+    @property
+    def units_written(self) -> int:
+        return self._next
+
+    def has_more(self) -> bool:
+        return self._began and self._next < len(self._units)
+
+    def write_next(self) -> bool:
+        """Write ONE unit; returns whether more remain. Raises on any error."""
+        if not self.has_more():
+            return False
+        self._check_unchanged()
+        unit = self._units[self._next]
+        unit()
+        self._next += 1
+        return self.has_more()
+
+    def commit(self) -> bool:
+        """Write the manifest (the commit record) and rename into place.
+
+        ``manifest.json.tmp`` -> fsync -> rename -> fsync the dir, then the
+        whole generation directory is renamed into place atomically and the
+        containing (root) directory fsynced (plan §G5.2/§G5.3). A crash at any
+        point leaves either a ``.tmp`` (swept at startup) or a fully committed
+        generation -- never a half-valid one. Raises on error.
+        """
+        if not self._began or self.has_more():
+            raise RuntimeError("park commit before every unit was written")
+        self._check_unchanged()
+        tmp_man = self.tmp / f"{MANIFEST}.tmp"
+        _write_bytes_synced(tmp_man, json.dumps(self.man, indent=1).encode("utf-8"))
+        os.replace(tmp_man, self.tmp / MANIFEST)
+        _fsync_dir(self.tmp)
+        os.replace(self.tmp, self.dir)
+        _fsync_dir(self.dir.parent)
+        self._release()
+        return True
+
+    def abort(self) -> None:
+        """Remove the temp dir; a committed generation is never touched."""
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        self._release()
+
+    def _release(self) -> None:
+        self._units = []
+        self._next = 0
+        self._began = False
+
+    def _check_unchanged(self) -> None:
+        conv = self.conv
+        mc = conv.cache.cache
+        if mc is None or id(mc) != self._cache_id:
+            raise RuntimeError("conversation cache replaced mid-park")
+        if int(mc.offset) != self.offset or conv._inflight:
+            raise RuntimeError(
+                f"conversation advanced mid-park ({self.offset} -> {int(mc.offset)})")
+
+    # -- units (each looks its arrays up live and releases them) ----------
+
+    def _layer_unit(self, i: int) -> None:
+        mc = self.conv.cache.cache
+        lc = mc.layers[i]
+        offset, capacity = self.offset, int(mc.capacity)
+        man, tmp = self.man, self.tmp
+        man["win_kv"][i] = _write_blob(tmp, f"win_kv.{i}.bin", lc.win_kv)
+        ratio = max(int(lc.ratio or 0), 1)
+        used = -(-min(offset, capacity) // ratio)
+        if lc.comp_kv is not None:
+            rows = min(used, int(lc.comp_kv.shape[1]))
+            desc = _write_blob(tmp, f"comp_kv.{i}.bin", lc.comp_kv[:, :rows])
+            desc["used_rows"] = rows
+            desc["ratio"] = ratio
+            man["comp_kv"][i] = desc
+        if lc.index_k is not None:
+            rows = min(used, int(lc.index_k.shape[1]))
+            desc = _write_blob(tmp, f"index_k.{i}.bin", lc.index_k[:, :rows])
+            desc["used_rows"] = rows
+            man["index_k"][i] = desc
+        cs = lc.comp_state
+        if cs is not None:
+            desc = _write_framed(tmp, f"carry.{i}.bin", cs.kv_state, cs.score_state)
+            desc["m"] = int(offset % ratio)
+            desc["ratio"] = ratio
+            man["carry"][i] = desc
+
+    def _engram_unit(self) -> None:
+        mc = self.conv.cache.cache
+        used = min(self.offset, int(mc.engram_ids.shape[1]))
+        arr = np.ascontiguousarray(mc.engram_ids[:, :used], dtype=np.int64)
+        _write_bytes_synced(self.tmp / "engram_ids.bin", arr.tobytes())
+        self.man["engram"] = {
+            "file": "engram_ids.bin",
+            "dtype": "int64",
+            "shape": [int(s) for s in mc.engram_ids.shape],
+            "used_rows": used,
+        }
+
+    def _draft_unit(self) -> None:
+        draft = self.conv.draft_state
+        if draft is None:
+            raise RuntimeError("draft window vanished mid-park")
+        out = []
+        for stage, w in enumerate(draft):
+            desc = _write_blob(self.tmp, f"draft.{stage}.bin", w.win_kv)
+            desc["n_ctx"] = int(w.n_ctx)
+            out.append(desc)
+        self.man["draft"] = out
+
+    def _snapshot_unit(self, pos: int) -> None:
+        snap = self.conv.cache._snaps[pos]
+        tmp = self.tmp
+        entry: dict[str, Any] = {"pos": int(pos), "rings": [], "carries": []}
+        for j, ring in enumerate(snap.rings):
+            entry["rings"].append(
+                None if ring is None
+                else _write_blob(tmp, f"snapshot.{pos}.ring.{j}.bin", ring))
+        for j, carry in enumerate(snap.carries):
+            if carry is None:
+                entry["carries"].append(None)
+            elif carry[0] is None:  # spec.snap's m==0 sentinel: (None, None, 0)
+                entry["carries"].append({"empty": True, "m": int(carry[2])})
+            else:
+                kv_rows, sc_rows, m = carry
+                desc = _write_framed(
+                    tmp, f"snapshot.{pos}.carry.{j}.bin", kv_rows, sc_rows)
+                desc["m"] = int(m)
+                entry["carries"].append(desc)
+        self.man["snapshots"].append(entry)
+
+    def _draft_snap_unit(self, pos: int) -> None:
+        saved = self.conv._draft_snaps[pos]
+        entry: dict[str, Any] = {"pos": int(pos), "windows": None}
+        if saved is not None:
+            entry["windows"] = [
+                dict(_write_blob(self.tmp, f"draftsnap.{pos}.{stage}.bin", kv),
+                     n_ctx=int(n_ctx))
+                for stage, (kv, n_ctx) in enumerate(saved)
+            ]
+        self.man["draft_snaps"].append(entry)
+
+    def _anchor_unit(self, pos: int) -> None:
+        # Persist the prompt-end anchor logits: without them an exact resubmit
+        # (zero new rows) would hard-refuse after a restore, whereas before
+        # parking it fell back to a cold prefill.
+        logits = self.conv._anchor_at[pos]
+        self.man["anchors"].append(dict(
+            _write_blob(self.tmp, f"anchor.{pos}.bin", logits), pos=int(pos)))
+
+
 def park_conversation(
     conv: "Conversation",
     dir: "str | Path",  # noqa: A002
@@ -423,166 +707,20 @@ def park_conversation(
     ``fingerprint`` -- the store's build fingerprint (computed once at store
     construction, never here) -- is written into the manifest under
     :data:`FINGERPRINT_FIELD` so a later build can refuse a foreign park.
+
+    One-shot driver over :class:`_GenerationWriter` (the same unit sequence the
+    §G1 checkpoint writes with polls in between).
     """
-    d = Path(dir)
-    tmp = d.with_name(f"{d.name}.tmp")
+    w = _GenerationWriter(conv, Path(dir), key=key, fingerprint=fingerprint, rank=rank)
     try:
-        if not park_safe(conv):
+        if not w.begin():
             return False
-        if d.exists():  # never clobber an existing session
-            return False
-        mc = conv.cache.cache
-        layers = list(mc.layers)
-        offset = int(mc.offset)
-        capacity = int(mc.capacity)
-        tmp.mkdir(parents=True, exist_ok=False)
-
-        ids = np.ascontiguousarray(
-            np.asarray(conv.cache.tokens, dtype=np.int64).astype("<i4"))
-        _write_bytes_synced(tmp / "ids.bin", ids.tobytes())
-
-        gen_parsed = _gen_from_name(d.name)
-        man: dict[str, Any] = {
-            "magic": PARK_MAGIC,
-            "version": PARK_VERSION,
-            "created": time.time(),
-            "key": key,
-            # The build fingerprint (plan §G2): computed once by the store and
-            # passed in; never computed here. None makes the dir "legacy".
-            FINGERPRINT_FIELD: (
-                fingerprint.as_dict() if fingerprint is not None else None
-            ),
-            "generation": gen_parsed[1] if gen_parsed is not None else 0,
-            # The TP rank that wrote this shard (plan §G4); None = unknown /
-            # single-rank store. Informational: admission is the fingerprint.
-            "rank": None if rank is None else int(rank),
-            "offset": offset,
-            "capacity": capacity,
-            "max_seq_len": int(mc.max_seq_len),
-            "n_layers": len(layers),
-            "window": int(getattr(mc.args, "window_size", 0)),
-            "bsz": int(mc.bsz),
-            "token_count": int(ids.shape[0]),
-            "prefix_key": prefix_hash(ids),
-            "ids": {"file": "ids.bin", "dtype": "int32", "count": int(ids.shape[0])},
-            "n_turns": int(conv.n_turns),
-            "cache_turns": int(conv.cache.n_turns),
-            "base": int(conv._base),
-            "gen": [int(t) for t in conv._gen],
-            "win_kv": [],
-            "comp_kv": [],
-            "index_k": [],
-            "carry": [],
-            "engram": None,
-            "draft": [],
-            "has_draft": conv.draft_state is not None,
-            "snapshots": [],
-            "draft_snaps": [],
-        }
-
-        for i, lc in enumerate(layers):
-            man["win_kv"].append(_write_blob(tmp, f"win_kv.{i}.bin", lc.win_kv))
-
-        for i, lc in enumerate(layers):
-            ratio = max(int(lc.ratio or 0), 1)
-            used = -(-min(offset, capacity) // ratio)
-            if lc.comp_kv is not None:
-                rows = min(used, int(lc.comp_kv.shape[1]))
-                desc = _write_blob(tmp, f"comp_kv.{i}.bin", lc.comp_kv[:, :rows])
-                desc["used_rows"] = rows
-                desc["ratio"] = ratio
-                man["comp_kv"].append(desc)
-            else:
-                man["comp_kv"].append(None)
-            if lc.index_k is not None:
-                rows = min(used, int(lc.index_k.shape[1]))
-                desc = _write_blob(tmp, f"index_k.{i}.bin", lc.index_k[:, :rows])
-                desc["used_rows"] = rows
-                man["index_k"].append(desc)
-            else:
-                man["index_k"].append(None)
-            cs = lc.comp_state
-            if cs is not None:
-                desc = _write_framed(tmp, f"carry.{i}.bin", cs.kv_state, cs.score_state)
-                desc["m"] = int(offset % ratio)
-                desc["ratio"] = ratio
-                man["carry"].append(desc)
-            else:
-                man["carry"].append(None)
-
-        if mc.engram_ids is not None:
-            used = min(offset, int(mc.engram_ids.shape[1]))
-            arr = np.ascontiguousarray(mc.engram_ids[:, :used], dtype=np.int64)
-            _write_bytes_synced(tmp / "engram_ids.bin", arr.tobytes())
-            man["engram"] = {
-                "file": "engram_ids.bin",
-                "dtype": "int64",
-                "shape": [int(s) for s in mc.engram_ids.shape],
-                "used_rows": used,
-            }
-
-        draft = conv.draft_state
-        if draft is not None:
-            for stage, w in enumerate(draft):
-                desc = _write_blob(tmp, f"draft.{stage}.bin", w.win_kv)
-                desc["n_ctx"] = int(w.n_ctx)
-                man["draft"].append(desc)
-
-        for pos, snap in conv.cache._snaps.items():
-            entry: dict[str, Any] = {"pos": int(pos), "rings": [], "carries": []}
-            for j, ring in enumerate(snap.rings):
-                entry["rings"].append(
-                    None if ring is None
-                    else _write_blob(tmp, f"snapshot.{pos}.ring.{j}.bin", ring))
-            for j, carry in enumerate(snap.carries):
-                if carry is None:
-                    entry["carries"].append(None)
-                elif carry[0] is None:  # spec.snap's m==0 sentinel: (None, None, 0)
-                    entry["carries"].append({"empty": True, "m": int(carry[2])})
-                else:
-                    kv_rows, sc_rows, m = carry
-                    desc = _write_framed(
-                        tmp, f"snapshot.{pos}.carry.{j}.bin", kv_rows, sc_rows)
-                    desc["m"] = int(m)
-                    entry["carries"].append(desc)
-            man["snapshots"].append(entry)
-
-        for pos, saved in conv._draft_snaps.items():
-            entry = {"pos": int(pos), "windows": None}
-            if saved is not None:
-                entry["windows"] = [
-                    dict(_write_blob(tmp, f"draftsnap.{pos}.{stage}.bin", kv),
-                         n_ctx=int(n_ctx))
-                    for stage, (kv, n_ctx) in enumerate(saved)
-                ]
-            man["draft_snaps"].append(entry)
-
-        # Persist the prompt-end anchor logits: without them an exact resubmit
-        # (zero new rows) would hard-refuse after a restore, whereas before
-        # parking it fell back to a cold prefill. Small if unused, correct when
-        # the client re-sends an identical prompt or re-requests after eviction.
-        anchors: list[dict[str, Any]] = []
-        for pos, logits in conv._anchor_at.items():
-            anchors.append(dict(
-                _write_blob(tmp, f"anchor.{pos}.bin", logits), pos=int(pos)))
-        man["anchors"] = anchors
-
-        # The manifest is the commit record: written LAST as
-        # ``manifest.json.tmp`` -> fsync -> rename -> fsync the dir, then the
-        # whole generation directory is renamed into place atomically and the
-        # containing (root) directory fsynced (plan §G5.2/§G5.3). A crash at any
-        # point leaves either a ``.tmp`` (swept at startup) or a fully committed
-        # generation -- never a half-valid one.
-        tmp_man = tmp / f"{MANIFEST}.tmp"
-        _write_bytes_synced(tmp_man, json.dumps(man, indent=1).encode("utf-8"))
-        os.replace(tmp_man, tmp / MANIFEST)
-        _fsync_dir(tmp)
-        os.replace(tmp, d)
-        _fsync_dir(d.parent)
-        return True
+        while w.has_more():
+            w.write_next()
+        return w.commit()
     except Exception as exc:  # noqa: BLE001 - a park must never break a turn
         logger.warning(f"[DSV41] park failed ({type(exc).__name__}: {exc}); discarding")
-        shutil.rmtree(tmp, ignore_errors=True)
+        w.abort()
         return False
 
 
@@ -1384,6 +1522,39 @@ class ParkedStore:
             logger.warning(f"[DSV41] park store error: {type(exc).__name__}: {exc}")
             return None
 
+    def open_generation(
+        self, conv: "Conversation", gen: int, *, key: str | None = None
+    ) -> "_GenerationWriter | None":
+        """Start writing ``conv`` as generation ``gen`` WITHOUT closing it (§G1).
+
+        The keep-resident half of the split serialize/evict: headroom is
+        reserved exactly as in :meth:`write_generation`, the temp dir is created
+        and ``ids.bin`` written, and the caller then drives the writer one unit
+        at a time (``write_next``) and finally ``commit``/``abort``. ``None`` when
+        the policy refuses (disabled, too short, not park-safe) or the dir could
+        not be opened. Never raises; never touches an existing generation.
+        """
+        w: _GenerationWriter | None = None
+        try:
+            if not self.should_park(conv):
+                return None
+            self.root.mkdir(parents=True, exist_ok=True)
+            key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+            d = self.root / _gen_dir_name(key_hash, gen, self.rank)
+            self._reserve_headroom(protect_prefix=key_hash)
+            w = _GenerationWriter(
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank)
+            if not w.begin():
+                w.abort()
+                return None
+            return w
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[DSV41] checkpoint open failed: {type(exc).__name__}: {exc}")
+            if w is not None:
+                w.abort()
+            return None
+
     def prune_acked(
         self, key_hash: str, floor: int, *, keep: int = _KEEP_GENERATIONS,
         keep_dir: Path | None = None,
@@ -1515,3 +1686,136 @@ def coordinated_park(
             f"prune_floor={out.floor} rank={coord.rank}"
         )
     return out.written
+
+
+# ---------------------------------------------------------------------------
+# §G1 driver: the cancellable keep-resident checkpoint
+# ---------------------------------------------------------------------------
+
+#: A world-of-one coordinator for the single-rank (no coord group) case, so the
+#: single-rank and TP paths run the SAME exchange sequence and pure decisions.
+def _local_coordinator() -> ParkCoordinator:
+    return ParkCoordinator(lambda row: [list(row)], rank=0, world=1)
+
+
+def checkpoint_conversation(
+    coord: "ParkCoordinator | None",
+    store: "ParkedStore | None",
+    conv: "Conversation | None",
+    *,
+    key: str | None = None,
+    request_pending: Any = None,
+    on_unit: Any = None,
+) -> CheckpointOutcome:
+    """Write ``conv`` as a NEW generation while it STAYS RESIDENT (plan §G1).
+
+    Reuses the §G4 generation protocol (agreed ``N``, ack-gated prune) and the
+    §G5 durability protocol (``.tmp`` + fsync + atomic rename) via
+    :meth:`ParkedStore.open_generation`. The write is split into units (one per
+    layer, then the small tail units); ``request_pending()`` is polled -- on
+    EVERY rank, through a ``CKPT_POLL`` exchange -- before each unit, and any
+    rank seeing a request makes EVERY rank abort: the temp dir is removed, the
+    previous generation is untouched, and the caller serves the request after
+    at most one unit's write.
+
+    ``coord=None`` = single rank (a world-of-one coordinator is used so the
+    sequence is identical). ``store``/``conv`` may be ``None`` (this rank cannot
+    checkpoint); the rank still takes part in every exchange and reports
+    ``ok=0``, which turns the decision into a rank-invariant no-go. Never raises
+    on local errors; a transport failure of a collective propagates (as for
+    every other coord exchange).
+
+    ``on_unit`` (tests / instrumentation) is called after each unit is written.
+    """
+    c = coord if coord is not None else _local_coordinator()
+    usable = store if (store is not None and store.enabled) else None
+    pending = request_pending if request_pending is not None else (lambda: False)
+    key_hash = ""
+    offset = 0
+    if conv is not None:
+        try:
+            key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+            offset = int(conv.offset)
+        except Exception:  # noqa: BLE001 - unkeyable -> ok=0 (no-go)
+            key_hash, offset = "", 0
+    try:
+        wire = key_int(key_hash) if key_hash else 0
+    except Exception:  # noqa: BLE001
+        wire = 0
+    state: dict[str, Any] = {}
+
+    def ready() -> bool:
+        return (usable is not None and conv is not None and bool(key_hash)
+                and usable.should_park(conv))
+
+    def local_max() -> int:
+        if usable is None or not key_hash:
+            return 0
+        return usable.max_generation(key_hash)
+
+    def begin(gen: int) -> bool:
+        if usable is None or conv is None or not key_hash:
+            return False
+        w = usable.open_generation(conv, gen, key=key)
+        if w is None:
+            return False
+        state["w"] = w
+        return True
+
+    def has_more() -> bool:
+        w = state.get("w")
+        return bool(w is not None and w.has_more())
+
+    def write_next() -> bool:
+        more = bool(state["w"].write_next())
+        if on_unit is not None:
+            on_unit(state["w"])
+        return more
+
+    def commit() -> bool:
+        w = state.get("w")
+        if w is None:
+            return False
+        ok = bool(w.commit())
+        if ok:
+            state["dir"] = w.dir
+        return ok
+
+    def committed(gen: int) -> bool:
+        if usable is None or not key_hash:
+            return False
+        return usable.has_committed(key_hash, gen)
+
+    def prune(floor: int) -> None:
+        if usable is None or not key_hash:
+            return
+        usable.prune_acked(key_hash, floor, keep_dir=state.get("dir"))
+
+    def abort() -> None:
+        w = state.pop("w", None)
+        if w is not None:
+            w.abort()
+
+    t0 = time.perf_counter()
+    out = run_checkpoint(
+        c, wire, offset,
+        ready=ready, pending=pending, local_max=local_max, begin=begin,
+        write_next=write_next, has_more=has_more, commit=commit,
+        committed=committed, prune=prune, abort=abort,
+    )
+    state.pop("w", None)  # drop the writer (it holds no arrays; belt+braces)
+    try:
+        if usable is not None and "dir" in state:
+            usable.enforce_budget(keep=state["dir"])
+    except Exception as exc:  # noqa: BLE001 - a checkpoint must never raise
+        logger.warning(
+            f"park.ckpt budget enforce failed ({type(exc).__name__}: {exc})")
+    with contextlib.suppress(Exception):
+        if out.go:
+            logger.info(
+                f"park.ckpt {out.reason} gen={out.generation} rows={offset} "
+                f"units={out.units} polls={out.polls} written={out.written} "
+                f"all_ranks={out.all_committed} rank={c.rank} "
+                f"secs={time.perf_counter() - t0:.3f}"
+            )
+    return out

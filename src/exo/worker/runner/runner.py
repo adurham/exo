@@ -333,7 +333,9 @@ class Runner:
         self._start_task_reader()
         try:
             while True:
-                item = self._work_queue.get()
+                item = self._next_work_item()
+                if item is None:
+                    continue  # an idle tick ran; go back to waiting
                 if isinstance(item, _TaskStreamClosed):
                     break
                 if isinstance(item, PrefillTask):
@@ -354,6 +356,34 @@ class Runner:
             if self._task_reader_thread is not None:
                 self._task_reader_thread.join(timeout=5)
                 self._task_reader_thread = None
+
+    def _next_work_item(self) -> WorkItem | None:
+        """Block for the next work item, or run ONE engine idle tick.
+
+        Unchanged blocking ``get()`` unless the runner is Ready AND the engine
+        asks for idle ticks (DSv4.1 with ``EXO_DSV41_CKPT=1``, plan §G1): then
+        the wait is bounded by the engine's tick interval and, on timeout, the
+        engine's ``idle_tick`` runs HERE, on the runner thread that owns every
+        MLX call (never a separate thread). ``request_pending`` lets the tick
+        abort its work the moment a new item lands. Returns ``None`` after a
+        tick so the caller re-enters the wait.
+        """
+        tick: float | None = None
+        gen = self.generator
+        if isinstance(self.current_status, RunnerReady) and isinstance(gen, Engine):
+            try:
+                tick = gen.idle_tick_seconds()
+            except Exception:  # noqa: BLE001 - a bad hook must not stop serving
+                tick = None
+        if tick is None:
+            return self._work_queue.get()
+        try:
+            return self._work_queue.get(timeout=tick)
+        except queue.Empty:
+            pass
+        assert isinstance(gen, Engine)
+        gen.idle_tick(request_pending=lambda: not self._work_queue.empty())
+        return None
 
     def handle_first_task(self, task: Task):
         self.send_task_status(task.task_id, TaskStatus.Running)

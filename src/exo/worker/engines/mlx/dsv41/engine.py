@@ -101,7 +101,11 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _stop_index,
     _stop_sequences,
 )
-from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
+from exo.worker.engines.mlx.dsv41.session import (
+    Dsv41Sessions,
+    TurnOutcome,
+    ckpt_tick_seconds,
+)
 from exo.worker.engines.mlx.dsv41.vision import (
     Dsv41Vision,
     build_embeddings,
@@ -412,6 +416,11 @@ class Dsv41Engine(Engine):
     #: for the >30 s spacing watchdog. ``0.0`` (never called) is treated as
     #: "first call" and never warns.
     _last_fence_heartbeat_monotonic: float = field(default=0.0, init=False)
+    #: Monotonic time of the last ``step()`` entry. The §G1 idle tick waits
+    #: ``EXO_DSV41_CKPT_IDLE_S`` past it, so a peer still finishing the same
+    #: request (identical stream, deterministic finish) is long out of
+    #: ``step()`` before this rank issues any idle-tick collective.
+    _last_step_monotonic: float = field(default=0.0, init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -506,6 +515,66 @@ class Dsv41Engine(Engine):
         assert isinstance(task, TextGeneration)
         self._agreement.submit(task)
 
+    # ------------------------------------------------------- §G1 idle checkpoint
+
+    def idle_tick_seconds(self) -> float | None:
+        """Runner idle-tick cadence; ``None`` unless ``EXO_DSV41_CKPT=1``."""
+        return ckpt_tick_seconds()
+
+    def idle_tick(self, request_pending: Any = None) -> Any:
+        """One between-requests tick: maybe disk-checkpoint ONE idle conversation.
+
+        Runs on the runner/engine thread (the runner calls it from its idle wait),
+        so every MLX call stays on the thread that owns the streams. Sequence:
+
+        1. LOCAL gate, no collectives: no request active/queued on this rank and
+           ``Dsv41Sessions.checkpoint_candidate`` names a conversation (between
+           turns, ``>= PARK_MIN_TOKENS``, dirty ``>= CKPT_MIN_DELTA`` or never on
+           disk, idle ``>= CKPT_IDLE_S``). Nothing qualifies -> return; the
+           common idle tick costs nothing and issues NO collective.
+        2. ``agree_on_tasks()`` -- the SAME collective prefix ``step()`` issues
+           with no active request. If ANY rank has a pending task (the peer is in
+           ``step()``), the exchange pairs with the peer's own
+           ``agree_on_tasks`` (this rank contributes no task, so nothing is
+           agreed) and the tick stands down; the runner then picks up the task
+           and both ranks meet in ``step()``.
+        3. Only when every rank is task-free (so the peer is in its own idle
+           tick at the same program point) does the coordinated checkpoint run
+           (``Dsv41Sessions.maybe_checkpoint`` -> IDLE agreement, G4 agreed N,
+           per-unit cancellation polls, PARK_ACK).
+
+        ``request_pending`` (from the runner: its work queue is non-empty) is
+        polled between units; any rank seeing a request makes every rank abort
+        within one unit. Never raises on LOCAL errors; a coord transport fault
+        propagates exactly as it does from ``step()``.
+        """
+        if self._active is not None or self._agreement.queue or self._agreement.maybe_queue:
+            return None  # not idle on this rank: never enter a collective here
+        if time.monotonic() - self._last_step_monotonic < self._sessions.ckpt_idle_s:
+            return None  # this rank served a request too recently
+        try:
+            cand = self._sessions.checkpoint_candidate()
+        except Exception as exc:  # noqa: BLE001 - the gate must never raise
+            logger.warning(f"[DSV41] checkpoint gate failed ({type(exc).__name__}: {exc})")
+            return None
+        if cand is None:
+            return None
+        if self._agreement.agree_on_tasks() or self._agreement.queue:
+            # A peer has a task (it is in step()); this rank contributed none, so
+            # nothing was agreed. Stand down and let the runner fetch the task.
+            return None
+        local_pending = request_pending if request_pending is not None else (lambda: False)
+
+        def pending() -> bool:
+            return bool(local_pending()) or bool(self._agreement.maybe_queue)
+
+        try:
+            return self._sessions.maybe_checkpoint(request_pending=pending, candidate=cand)
+        finally:
+            # Return the freed CPU staging copies to the OS between requests, as
+            # the runner's own idle reclaim does; never inside the decode loop.
+            mx.clear_cache()
+
     def step(
         self,
     ) -> Iterator[
@@ -514,6 +583,7 @@ class Dsv41Engine(Engine):
         output: list[
             tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
         ] = []
+        self._last_step_monotonic = time.monotonic()
         if self._active is None:
             self._agreement.agree_on_tasks()
             self._activate_next(output)
