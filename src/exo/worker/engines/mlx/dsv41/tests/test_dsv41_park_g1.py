@@ -919,3 +919,159 @@ def test_runner_idle_wait_unchanged_when_off_and_ticks_when_on() -> None:
     assert r._next_work_item() is None and r.generator.ticks == [False]
     r._work_queue.put("x")
     assert r._next_work_item() == "x"
+
+
+# ---------------------------------------------------------------------------
+# hardening: independent adversarial audit (HIGH-1 / MED-1 / MED-2)
+# ---------------------------------------------------------------------------
+
+def _gen_dir_count(root: Path) -> int:
+    return len([d for d in root.iterdir()
+                if pk._gen_from_name(d.name) is not None]) if root.is_dir() else 0
+
+
+def _fresh_store(root: Path) -> pk.ParkedStore:
+    return pk.ParkedStore(_body(), None, root=root, conv_kw=CONV_KW,
+                          min_tokens=MIN_TOKENS, fingerprint=_fp())
+
+
+def test_audit_h1_budget_abort_keeps_previous_generation(tmp_path: Path) -> None:
+    """HIGH-1: an aborted checkpoint under byte-budget pressure must never delete
+    the conversation's OWN earlier generation.
+
+    Mutation caught: pre-fix ``_reserve_headroom`` protected only dirs whose name
+    prefix equals the CURRENT stream's ``prefix_hash``. A grown conversation's
+    previous generation lives under an EARLIER (shorter) stream's hash, so the
+    headroom pass deleted it before the new generation existed; the abort then
+    left ZERO generations on disk (data loss). With
+    ``protect=self._protect_own(conv, key)`` the previous generation survives the
+    abort, byte-unchanged, and still restores.
+    """
+    body = _body()
+    store = _store(tmp_path, body)
+    sess = _sessions(body, store)
+    conv, _ = _turn(sess, IDS)
+    assert sess.maybe_checkpoint().all_committed       # gen 1 = the only generation
+    off1 = conv.offset
+    prev = _gens(tmp_path)
+    assert set(prev) == {1}
+    prev_files = {p.name: p.read_bytes() for p in prev[1].iterdir()}
+    # Room for the previous generation plus ONE new write, but NOT the full 2x
+    # headroom: headroom eviction MUST fire.
+    store.max_bytes = int(pk.park_dir_size(prev[1]) * 2.5)
+    # Grow the conversation (a new turn, a new prefix hash) and abort mid-write.
+    ids2 = np.concatenate([np.asarray(conv.tokens), np.arange(500, 520)])
+    _turn(sess, ids2)
+    n = {"n": 0}
+
+    def on_unit(_w: Any) -> None:
+        n["n"] += 1
+
+    out = sess.maybe_checkpoint(request_pending=lambda: n["n"] >= 1, on_unit=on_unit)
+    assert out.go and out.pending_abort and not out.all_committed
+    assert not _tmp_dirs(tmp_path)
+    # The conversation's own previous generation SURVIVED the abort, unchanged...
+    assert set(_gens(tmp_path)) == {1}
+    assert {p.name: p.read_bytes() for p in prev[1].iterdir()} == prev_files
+    # ...and still restores.
+    restored = _fresh_store(tmp_path).try_restore(IDS.tolist(), key="A")
+    assert restored is not None and restored.offset == off1
+
+
+def test_audit_med1_same_offset_branch_change_is_dirty_and_rewritten(
+    tmp_path: Path,
+) -> None:
+    """MED-1: a rewind+refeed back to the SAME offset on a different branch must
+    be seen as dirty and rewritten, not believed clean.
+
+    Mutation caught: pre-fix ``dirty_tokens = offset - ckpt_offset`` was ``0`` for
+    a same-offset branch change, so ``checkpoint_candidate`` returned ``None`` and
+    eviction's clean-skip never rewrote the generation: ``ids.bin`` kept the
+    pre-rewind branch. ``stream_changed`` (the checkpointed stream's hash) now
+    flags it, the candidate is offered, the rewrite commits, and a restart
+    restores the NEW branch.
+    """
+    body = _body()
+    store = _store(tmp_path, body)
+    sess = _sessions(body, store)
+    conv, _ = _turn(sess, IDS)
+    assert sess.maybe_checkpoint().all_committed
+    off = conv.offset
+    before_tokens = list(conv.tokens)
+    # Rewind into the prompt, then a DIFFERENT tail of equal total length -> the
+    # SAME final offset, a different branch.
+    ids2 = np.concatenate([IDS[:60], np.arange(1000, 1000 + (len(before_tokens) - 60) - 5)])
+    conv2, _ = _turn(sess, ids2)
+    assert conv2 is conv and conv.offset == off
+    assert list(conv.tokens) != before_tokens
+    # The offset-only test said "clean"; the stream identity says otherwise.
+    assert conv.dirty_tokens == 0 and conv.stream_changed
+    cand = sess.checkpoint_candidate()
+    assert cand is not None and cand[1] is conv
+    # The rewrite commits the NEW branch...
+    assert sess.maybe_checkpoint().all_committed
+    assert not conv.stream_changed
+    # ...and a restart restores the new branch, not the stale one.
+    restored = _fresh_store(tmp_path).try_restore(ids2.tolist(), key="A")
+    assert restored is not None
+    assert list(restored.tokens) == list(conv.tokens)
+
+
+def test_audit_med2_keyed_restore_newest_and_bounded(tmp_path: Path) -> None:
+    """MED-2: a keyed restore returns the NEWEST generation (not arbitrary), and
+    a growing keyed conversation's dirs stay bounded by ``_KEEP_GENERATIONS``.
+
+    Mutation caught: pre-fix key-mode ``find`` broke ties by generation alone
+    (every turn produced a fresh ``prefix_hash`` with generation 1), so the
+    restore picked the FIRST dir by name -- offset 152 when the newest was 177 --
+    and ``prune_acked`` / ``_KEEP_GENERATIONS`` (keyed on ``prefix_hash``) never
+    pruned, so one dir accumulated per turn. Now key-mode ordering is by stored
+    stream LENGTH and ``retain_keyed`` keeps the newest ``_KEEP_GENERATIONS``.
+    """
+    body = _body()
+    store = _store(tmp_path, body)
+    sess = _sessions(body, store)
+    ids = IDS
+    offs: list[int] = []
+    conv = None
+    for i in range(5):
+        conv, _ = _turn(sess, ids)
+        assert sess.maybe_checkpoint().all_committed
+        offs.append(conv.offset)
+        ids = np.concatenate([np.asarray(conv.tokens), np.arange(500 + 40 * i, 520 + 40 * i)])
+    assert offs == sorted(offs) and offs[-1] > offs[0]
+    # Accumulation is bounded to _KEEP_GENERATIONS dirs for one conversation.
+    assert _gen_dir_count(tmp_path) <= pk._KEEP_GENERATIONS
+    # A fresh single-rank restore returns the NEWEST generation.
+    restored = _fresh_store(tmp_path).try_restore(ids.tolist(), key="A")
+    assert restored is not None and restored.offset == offs[-1]
+
+
+def test_audit_med2_two_ranks_keyed_restore_newest(tmp_path: Path) -> None:
+    """MED-2 (cross-rank): after several keyed checkpoints the G4 agreed restore
+    returns the NEWEST generation on BOTH ranks, and retention is bounded."""
+    ls, a, b = _two(tmp_path)
+    offs: list[int] = []
+    ids = IDS
+    for i in range(4):
+        outs = _both([lambda: a.sess.maybe_checkpoint(),
+                      lambda: b.sess.maybe_checkpoint()])
+        assert all(o.go and o.all_committed for o in outs)
+        assert outs[0].generation == outs[1].generation
+        offs.append(a.conv.offset)
+        ids = np.concatenate([np.asarray(a.conv.tokens), np.arange(500 + 40 * i, 520 + 40 * i)])
+        _both([lambda ids=ids: _turn(a.sess, ids),
+               lambda ids=ids: _turn(b.sess, ids)])
+    assert offs == sorted(offs) and offs[-1] > offs[0]
+    assert ls.calls[0] == ls.calls[1]
+    for r in (a, b):
+        assert _gen_dir_count(r.root) <= pk._KEEP_GENERATIONS
+    fresh = [
+        s_.Dsv41Sessions(r.body, None, max_seq_len=256, park_store=r.store,
+                         coordinator=r.coord, rank=i, **CONV_KW)
+        for i, r in enumerate((a, b))
+    ]
+    convs = _both([lambda: fresh[0].get(ids.tolist(), "A"),
+                   lambda: fresh[1].get(ids.tolist(), "A")])
+    assert [s.stats["restored"] for s in fresh] == [1, 1]
+    assert [c.offset for c in convs] == [offs[-1], offs[-1]]

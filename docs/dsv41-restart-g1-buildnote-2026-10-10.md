@@ -184,6 +184,112 @@ Other G1 tests:
 - Engine `idle_tick` default-off + gating; runner idle-wait unchanged when off,
   one tick on the runner thread when on.
 
+## Hardening (independent adversarial audit)
+
+An independent adversarial audit of the committed G1 change found three real
+defects and one pre-default-on gate concern. Each defect was reproduced before
+the fix with a standalone script (`repro_headroom.py`, `repro_dirty.py`,
+`repro_keyed.py`), fixed, and guarded by a mutation-checked regression test (each
+new test fails against the pre-fix behaviour, verified in-process). Suite:
+**318 → 322 passed** (+4). `ruff check` clean on every touched path.
+
+### HIGH-1 — an aborted checkpoint could delete the conversation's only generation
+
+*Finding.* `_reserve_headroom(protect_prefix=key_hash)` protected only dirs whose
+NAME prefix equals `prefix_hash(conv.tokens)` — the CURRENT, grown stream. A
+conversation that grew has its previous generation under an EARLIER (shorter)
+stream's hash, so it was NOT protected, and headroom eviction deleted it BEFORE
+the new generation existed (`open_generation`, `write_generation`, `park`). If
+the write was then aborted, zero generations remained. Repro (pre-fix):
+`prev ckpt dirs ['…gen1…']` → `aborted True dirs after abort []`.
+
+*Fix.* `ParkedStore._reserve_headroom` now also takes a `protect` predicate.
+`ParkedStore._protect_own(conv, key)` matches EVERY generation of the
+conversation, using the identity rules `find` / `local_restore_candidates` already
+use: a client `key` match, or the stored ids being a strict PREFIX (ancestor) of
+the live stream. All three call sites pass it. Under byte-budget pressure the
+previous generation now survives an abort (or an ENOSPC write failure).
+
+*Regression test.* `test_audit_h1_budget_abort_keeps_previous_generation`. Mutation
+(protect-predicate forced to always-False) → the test fails at
+`assert set(_gens(tmp_path)) == {1}` (dirs after the abort are empty).
+
+### MED-1 — offset-only dirty tracking missed a rewind+refeed to the same offset
+
+*Finding.* `dirty_tokens = offset - max(ckpt_offset, 0)`; a turn that rewinds to a
+lower row and refeeds back to the SAME offset on a different branch gave
+`dirty_tokens == 0`, so `checkpoint_candidate()` returned `None` and eviction's
+clean-skip never rewrote the generation: the on-disk `ids.bin` kept the
+pre-rewind branch. Repro (pre-fix): `candidate None`; dirs unchanged after a
+same-offset token change.
+
+*Fix.* `Conversation.ckpt_hash` records the `prefix_hash` of the checkpointed
+token stream at commit (`maybe_checkpoint`) and at restore (`_restore_parked`).
+`Conversation.stream_changed` compares the live stream's hash against it
+(`False` when no hash was ever recorded — a manual/legacy state — so the
+offset-only behaviour is a strict fallback). The idle gate treats a stream change
+as dirty regardless of the offset delta, and eviction's `clean` check now also
+requires `not stream_changed`.
+
+*Regression test.*
+`test_audit_med1_same_offset_branch_change_is_dirty_and_rewritten`. Mutation
+(`stream_changed` forced always-False) → the candidate is `None` and the test
+fails.
+
+### MED-2 — a keyed restore picked an arbitrary generation; a growing conversation never pruned
+
+*Finding.* Key-mode `find` broke ties by generation alone and
+`local_restore_candidates` set `pref = 0`. Every turn of a grown stream produced a
+fresh `prefix_hash` with generation 1, so the restore picked the FIRST dir by name
+(offset 152 when the newest was 177), and `prune_acked` / `_KEEP_GENERATIONS`
+(keyed on `prefix_hash`) never fired — one dir accumulated per turn up to
+`max_count`. Repro (pre-fix): 5 checkpoints → 5 dirs ALL named `…gen1…`; the keyed
+restore returned 152, not 177.
+
+*Fix (both parts).*
+- **Newest wins.** Key-mode `find` and `local_restore_candidates` now order by the
+  stored stream LENGTH (`token_count`, then `created`, then generation).
+  `Candidate.pref` in key mode is now the stream length — its long-standing
+  documented meaning (G4 OQ-6). `find` also uses `created` to break a same-length
+  tie (a rewind+refeed to the same offset), so a single-round restart
+  deterministically restores the newest branch.
+- **Bounded accumulation (contained fix, NOT merely documented).**
+  `ParkedStore.retain_keyed(key, keep=_KEEP_GENERATIONS, keep_dir=…)` groups a
+  conversation's generations by the manifest's stable client `key` and keeps the
+  newest `_KEEP_GENERATIONS` (2) by `(created, generation, name)`. It runs at the
+  ack-gated prune point of both the §G1 checkpoint (`checkpoint_conversation`) and
+  the §G4 park (`coordinated_park`), and after `_prune_generations` in the local
+  `park`. Measured: a keyed conversation's dirs are now bounded to 2 (5
+  checkpoints → 2 dirs).
+
+*Regression tests.* `test_audit_med2_keyed_restore_newest_and_bounded` (single
+rank; also asserts the dir count ≤ `_KEEP_GENERATIONS`) and
+`test_audit_med2_two_ranks_keyed_restore_newest` (G4 agreed restore returns the
+newest on BOTH ranks). Mutation (pre-fix key ordering + no `retain_keyed`) → both
+fail.
+
+### MED-3 — idle-tick `mx_any` mispairing (pre-default-on gate)
+
+Left unchanged, exactly as before: the hot path is untouched. This is the same
+pre-existing invariant, with the same mitigations already recorded in
+OPEN-QUESTION 2 below (an idle collective only after `CKPT_IDLE_S` since this
+rank's last `step()`, plus strict magic validation of the IDLE / POLL rows; a
+magic tag on `agree_on_tasks`' `mx_any` is recommended before default-on).
+
+### Residual OPEN-QUESTION (from MED-2, cross-rank)
+
+`decide_restore` orders the wire candidates by `(pref, gen, key)`, and `pref` is
+the stored stream length. Two generations of the SAME keyed conversation that
+differ only by branch but share a length (a rewind+refeed to the same offset,
+considered on two ranks) therefore tie on `(pref, gen)` and are broken by the wire
+key (`key_int(prefix_hash)`) — arbitrary. The single-rank `find` breaks this tie
+deterministically by `created`; the wire cannot carry `created` safely (per-rank
+`created` timestamps differ by milliseconds, so a rank-invariant `min pref`
+packing is not sound). *Recommendation:* give a keyed conversation's generations a
+stable prefix (so generation numbers order them) before default-on, or carry
+recency on the wire explicitly. Probability is low (a same-length branch rewrite
+on both ranks) and the outcome is COLD-safe per G4 OQ-4.
+
 ## Deliberately NOT done
 
 - **G3** park-on-shutdown (signal handling, drain, forced checkpoint). The

@@ -631,9 +631,13 @@ class Conversation:
         self._inflight = False
         #: §G1 dirty tracking. ``ckpt_offset`` is the cache offset of the newest
         #: generation known to be on disk on EVERY rank (-1 = never), so
-        #: ``dirty_tokens`` is the delta a checkpoint would add.
+        #: ``dirty_tokens`` is the delta a checkpoint would add. ``ckpt_hash`` is
+        #: the ``prefix_hash`` of the checkpointed token stream: an offset-only
+        #: test misses a rewind+refeed to the SAME offset on a different branch
+        #: (MED-1), so ``stream_changed`` compares against it.
         #: ``last_turn_end_ts`` (monotonic) is set at the turn-commit point.
         self.ckpt_offset = -1
+        self.ckpt_hash = ""
         self.last_turn_end_ts = 0.0
 
     # -- §G1 dirty tracking ---------------------------------------------
@@ -641,6 +645,33 @@ class Conversation:
     def dirty_tokens(self) -> int:
         """Rows added since the last committed disk generation (all rows if never)."""
         return self.offset - max(self.ckpt_offset, 0)
+
+    @property
+    def stream_changed(self) -> bool:
+        """Whether the LIVE token stream differs from the checkpointed one.
+
+        ``dirty_tokens`` is offset-only, so a turn that rewinds to a lower row
+        and refeeds back to the SAME offset on a different branch reads as clean
+        (``dirty_tokens == 0``) and its stale generation would be believed
+        current (MED-1). Comparing the checkpointed stream's hash catches it.
+
+        ``True`` when never checkpointed. When ``ckpt_offset`` is set but no
+        stream hash was ever recorded (a manual/legacy state, or a hashing
+        failure), this is ``False``: with no recorded identity there is nothing
+        to differ FROM, so the caller falls back to the offset-only test --
+        exactly the pre-MED-1 behaviour.
+        """
+        if self.ckpt_offset < 0:
+            return True
+        if not self.ckpt_hash:
+            return False
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        try:
+            live = _sc.prefix_hash(np.asarray(self.tokens, dtype=np.int64))
+        except Exception:  # noqa: BLE001 - unhashable stream -> conservatively dirty
+            return True
+        return self.ckpt_hash != live
 
     @property
     def ever_checkpointed(self) -> bool:
@@ -1181,8 +1212,13 @@ class Dsv41Sessions:
             return None
         store_key = self.key_for(ids, key)
         # §G1: the restored generation is on disk on every rank (the restore
-        # was agreed / is local-only), so it is clean at its offset.
+        # was agreed / is local-only), so it is clean at its offset AND at its
+        # token stream identity.
         conv.ckpt_offset = int(conv.offset)
+        try:
+            conv.ckpt_hash = self._ckpt_hash(conv)
+        except Exception:  # noqa: BLE001 - unhashable stream stays conservatively dirty
+            conv.ckpt_hash = ""
         conv.last_turn_end_ts = time.monotonic()
         self._entries[store_key] = _Entry(conv)
         self.stats["restored"] += 1
@@ -1229,6 +1265,9 @@ class Dsv41Sessions:
             ckpt_enabled()
             and getattr(session, "ever_checkpointed", False)
             and getattr(session, "dirty_tokens", 1) == 0
+            # A same-offset branch change is NOT clean: the on-disk generation is
+            # the pre-rewind branch and must be rewritten on eviction (MED-1).
+            and not getattr(session, "stream_changed", True)
         )
         if self._coordinator is not None:
             # §G4: always take part in the cross-rank park exchange (agree N,
@@ -1320,9 +1359,11 @@ class Dsv41Sessions:
                     continue  # no committed turn yet
                 if conv.offset < min_tokens:
                     continue
-                if conv.ever_checkpointed and conv.dirty_tokens < self.ckpt_min_delta:
-                    continue
-                if conv.ever_checkpointed and conv.dirty_tokens <= 0:
+                if (conv.ever_checkpointed and not conv.stream_changed
+                        and conv.dirty_tokens < max(self.ckpt_min_delta, 1)):
+                    # Clean: the generation on disk still matches both the offset
+                    # AND the token stream. A same-offset branch change bypasses
+                    # this (MED-1).
                     continue
                 if now - conv.last_turn_end_ts < self.ckpt_idle_s:
                     continue
@@ -1399,6 +1440,9 @@ class Dsv41Sessions:
             self._ckpt_cooldown_until = time.monotonic() + max(self.ckpt_retry_s / 4.0, 1.0)
         elif out.all_committed:
             conv.ckpt_offset = int(conv.offset)
+            # Record the checkpointed stream's identity so a later same-offset
+            # branch change is seen as dirty (MED-1).
+            conv.ckpt_hash = khash
             self._ckpt_backoff.pop(khash, None)
             self.stats["ckpt_committed"] += 1
             logger.info(

@@ -90,7 +90,7 @@ import re
 import shutil
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -935,6 +935,9 @@ class _Usage(NamedTuple):
     dir: Path
     size: int
     foreign: bool
+    #: The dir's manifest, kept so headroom eviction can tell whether a dir is a
+    #: generation of the conversation being re-parked (HIGH-1).
+    man: dict[str, Any]
 
 
 class ParkedStore:
@@ -1165,6 +1168,14 @@ class ParkedStore:
 
     # -- LRU / budget (plan §G5.7, §G5.8) ---------------------------------
 
+    @staticmethod
+    def _created_of(man: dict[str, Any]) -> float:
+        """``created`` as a float; a non-numeric value is treated as OLDEST."""
+        try:
+            return float(man.get("created", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
     def _usage_entries(self) -> list[_Usage]:
         """Size + restore eligibility of every parked generation."""
         out: list[_Usage] = []
@@ -1188,6 +1199,7 @@ class ParkedStore:
                 dir=d,
                 size=park_dir_size(d),
                 foreign=not ok,
+                man=man,
             ))
         return out
 
@@ -1196,7 +1208,12 @@ class ParkedStore:
         """Sort key: foreign/legacy dirs FIRST, then oldest-first (LRU)."""
         return (0 if entry.foreign else 1, entry.created)
 
-    def _reserve_headroom(self, *, protect_prefix: str | None = None) -> None:
+    def _reserve_headroom(
+        self,
+        *,
+        protect_prefix: str,
+        protect: Callable[[Path, dict[str, Any]], bool] | None = None,
+    ) -> None:
         """Evict until free space can hold a new generation beside its old one.
 
         Headroom = 2 x (largest parked generation), so the new generation can be
@@ -1204,6 +1221,13 @@ class ParkedStore:
         order is foreign/legacy first, then oldest. A generation belonging to
         ``protect_prefix`` (the conversation being re-parked) is never evicted
         here -- its old generations are pruned only after the new one commits.
+
+        ``protect`` is an extra ``(dir, manifest) -> bool`` predicate marking the
+        conversation's OWN earlier generations. A grown conversation's previous
+        generation lives under an EARLIER (shorter) stream's prefix hash, which
+        ``protect_prefix`` alone misses: without ``protect`` the headroom pass
+        can delete the conversation's ONLY generation before its replacement is
+        committed, and an aborted checkpoint then leaves zero (HIGH-1).
         """
         entries = self._usage_entries()
         if not entries:
@@ -1213,12 +1237,73 @@ class ParkedStore:
         for entry in sorted(entries, key=self._evict_key):
             if total + reserve <= self.max_bytes:
                 break
-            if protect_prefix is not None:
-                parsed = _gen_from_name(entry.dir.name)
-                if parsed is not None and parsed[0] == protect_prefix:
-                    continue
+            parsed = _gen_from_name(entry.dir.name)
+            if parsed is not None and parsed[0] == protect_prefix:
+                continue
+            if protect is not None and protect(entry.dir, entry.man):
+                continue
             self.remove(entry.dir)
             total -= entry.size
+
+    def _protect_own(
+        self, conv: "Conversation", key: str | None
+    ) -> Callable[[Path, dict[str, Any]], bool]:
+        """A predicate matching EVERY on-disk generation of ``conv``.
+
+        The identity rules are the ones :meth:`find` /
+        :meth:`local_restore_candidates` already use: a client ``key`` match, or
+        the stored ids being a strict PREFIX (an ancestor) of the live stream.
+        ``prefix_hash`` of the CURRENT stream alone is not enough -- a grown
+        conversation's newest generation is written under a SHORTER earlier
+        stream's hash (HIGH-1).
+        """
+        ids_arr = np.asarray(conv.tokens, dtype=np.int64)
+        live_len = int(ids_arr.shape[0])
+
+        def protects(d: Path, man: dict[str, Any]) -> bool:
+            if key is not None and man.get("key") == key:
+                return True
+            try:
+                stored = self._load_ids(d, man)
+            except (OSError, KeyError, ValueError):
+                return False
+            n = int(stored.shape[0])
+            if n == 0 or n > live_len:
+                return False
+            return int(common_prefix_len(ids_arr, stored)) == n
+
+        return protects
+
+    def retain_keyed(
+        self, key: str | None, *, keep: int = _KEEP_GENERATIONS,
+        keep_dir: Path | None = None,
+    ) -> None:
+        """Delete all but the newest ``keep`` generations of a KEYED conversation.
+
+        A keyed conversation's generations do NOT share a ``prefix_hash``: each
+        turn grows the stream, so every checkpoint / park lands under a fresh
+        prefix and the prefix-keyed ``_prune_generations`` / ``prune_acked``
+        never fire -- one dir accumulates per turn up to ``max_count`` (MED-2).
+        Retention here groups by the manifest's stable client ``key`` instead.
+        Newest is by ``(created, generation, name)``; ``keep_dir`` (the
+        just-committed generation) is never deleted. A no-op without a key.
+        """
+        if not key:
+            return
+        entries: list[tuple[float, int, str, Path]] = []
+        for d, man in self._candidates():
+            if man.get("key") == key:
+                entries.append(
+                    (self._created_of(man), _generation_of(d, man), d.name, d))
+        keep_n = max(int(keep), 0)
+        if len(entries) <= keep_n:
+            return
+        entries.sort()
+        doomed = entries[:-keep_n] if keep_n > 0 else entries
+        for _c, _g, _n, d in doomed:
+            if keep_dir is not None and d == keep_dir:
+                continue
+            self.remove(d)
 
     def enforce_budget(self, *, keep: Path | None = None) -> None:
         """Evict until under the byte and count caps (plan §G5.8).
@@ -1260,7 +1345,8 @@ class ParkedStore:
             d = self.root / _gen_dir_name(key_hash, gen, self.rank)
             # Reserve room for the new generation BEFORE writing it, so the old
             # one is never deleted to make space for a write that could fail.
-            self._reserve_headroom(protect_prefix=key_hash)
+            self._reserve_headroom(
+                protect_prefix=key_hash, protect=self._protect_own(conv, key))
             if not park_conversation(
                 conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank
             ):
@@ -1268,6 +1354,9 @@ class ParkedStore:
             # New generation is on disk: now it is safe to prune the older ones.
             self._prune_generations(
                 key_hash, keep=_KEEP_GENERATIONS, keep_dir=d)
+            # A grown keyed conversation's older generations live under earlier
+            # prefixes, so the prefix-keyed prune above misses them (MED-2).
+            self.retain_keyed(key, keep_dir=d)
             self.enforce_budget(keep=d)
             return True
         except Exception as exc:  # noqa: BLE001
@@ -1280,9 +1369,11 @@ class ParkedStore:
         """Best RESTORABLE parked session for ``ids``.
 
         With ``key`` (a client conversation id), the manifest key must match
-        exactly and no prefix threshold applies. Without it, the longest common
-        token prefix wins, and it must reach :data:`MIN_REUSE_TOKENS`. Ties on
-        the same conversation are broken by the HIGHEST generation.
+        exactly and no prefix threshold applies; the NEWEST generation wins
+        (longest stored stream, then highest generation). Without it, the
+        longest common token prefix wins, and it must reach
+        :data:`MIN_REUSE_TOKENS`. Ties on the same conversation are broken by
+        the HIGHEST generation.
 
         A candidate the current build may not restore (foreign fingerprint or a
         legacy/pre-v2 manifest) is SKIPPED -- logged ``park.skip reason=<reason>``
@@ -1291,6 +1382,7 @@ class ParkedStore:
         """
         ids_arr = np.asarray(ids, dtype=np.int64)
         best_dir, best_lcp, best_gen = None, 0, -1
+        best_key: tuple[int, float, int] | None = None
         for d, man in self._candidates():
             ok, reason = self._admit(man)
             if not ok:
@@ -1298,8 +1390,17 @@ class ParkedStore:
                 continue
             gen = _generation_of(d, man)
             if key is not None:
-                if man.get("key") == key and gen > best_gen:
-                    best_dir, best_lcp, best_gen = d, int(ids_arr.shape[0]), gen
+                if man.get("key") == key:
+                    # Newest wins: the LONGEST stored stream (its token count),
+                    # then the newest ``created`` (a rewind+refeed can return to
+                    # the SAME offset -- MED-1), then the highest generation. Key
+                    # mode has no LCP to compare, and a grown conversation's
+                    # generations share neither a prefix nor a generation number.
+                    cnt = int(man.get("token_count") or man.get("offset") or 0)
+                    rank = (cnt, self._created_of(man), gen)
+                    if best_key is None or rank > best_key:
+                        best_dir, best_lcp, best_gen = d, cnt, gen
+                        best_key = rank
                 continue
             try:
                 lcp = common_prefix_len(ids_arr, self._load_ids(d, man))
@@ -1392,8 +1493,8 @@ class ParkedStore:
         Same admission + matching rules as :meth:`find` (fingerprint/version
         gate, ``key`` match or LCP >= :data:`MIN_REUSE_TOKENS`), but returns
         EVERY admissible generation -- the cluster then picks the highest one
-        present on all ranks. ``pref`` is the LCP (prefix mode) or 0 (key
-        mode, where :meth:`find` breaks ties by generation alone); the wire key
+        present on all ranks. ``pref`` is the LCP (prefix mode) or the stored
+        stream length (key mode, so the NEWEST generation wins); the wire key
         is the manifest's ``prefix_key`` (a function of the token stream, so
         identical on every rank). Bounded to :data:`MAX_CANDIDATES`, best
         first. A disabled store reports none.
@@ -1419,7 +1520,10 @@ class ParkedStore:
             if key is not None:
                 if man.get("key") != key:
                     continue
-                pref = 0
+                # Key mode has no LCP to compare; rank generations by the stored
+                # stream LENGTH so the NEWEST / longest generation wins, not an
+                # arbitrary one (MED-2). (Matches ``find``.)
+                pref = int(man.get("token_count") or man.get("offset") or 0)
             else:
                 try:
                     pref = int(common_prefix_len(ids_arr, self._load_ids(d, man)))
@@ -1512,7 +1616,8 @@ class ParkedStore:
             self.root.mkdir(parents=True, exist_ok=True)
             key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
             d = self.root / _gen_dir_name(key_hash, gen, self.rank)
-            self._reserve_headroom(protect_prefix=key_hash)
+            self._reserve_headroom(
+                protect_prefix=key_hash, protect=self._protect_own(conv, key))
             if not park_conversation(
                 conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank
             ):
@@ -1541,7 +1646,8 @@ class ParkedStore:
             self.root.mkdir(parents=True, exist_ok=True)
             key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
             d = self.root / _gen_dir_name(key_hash, gen, self.rank)
-            self._reserve_headroom(protect_prefix=key_hash)
+            self._reserve_headroom(
+                protect_prefix=key_hash, protect=self._protect_own(conv, key))
             w = _GenerationWriter(
                 conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank)
             if not w.begin():
@@ -1662,6 +1768,7 @@ def coordinated_park(
         if usable is None or not key_hash:
             return
         usable.prune_acked(key_hash, floor, keep_dir=written.get("dir"))
+        usable.retain_keyed(key, keep_dir=written.get("dir"))
 
     out = run_park(coord, wire, local_max, write, committed, prune)
     # Everything past the two exchanges is best-effort LOCAL work. ``run_park``
@@ -1790,6 +1897,9 @@ def checkpoint_conversation(
         if usable is None or not key_hash:
             return
         usable.prune_acked(key_hash, floor, keep_dir=state.get("dir"))
+        # Bind a grown keyed conversation's generations to their stable client
+        # key for retention: the prefix-keyed prune above cannot see them (MED-2).
+        usable.retain_keyed(key, keep_dir=state.get("dir"))
 
     def abort() -> None:
         w = state.pop("w", None)
