@@ -288,9 +288,10 @@ Source: live A/B post-mortem `docs/dsv41-indexer-qsplit-live-ab-postmortem-2026-
 (origin/main `01fd85f33`): `identity_3` (2126 tok, chunks 2048 + 78) diverged at token
 4 with the flag ON; only chunk 2 (even n=78 -> bands of 39) engaged the band.
 Fixed offline on the SAME (never-shipped) branches, in place: mlx-lm
-`perf/dsv41-indexer-qsplit` `e0340628` -> **`de6caa2e`**; exo `p20/dsv41-indexer-qsplit`
-(this commit) advances the gitlink + `uv.lock:1501` to `de6caa2e`. 0 boots, 0 deploys,
-0 generation requests.
+`perf/dsv41-indexer-qsplit` `e0340628` -> `de6caa2e` -> **`6a5c78f`** (`de6caa2e` =
+token-identity; `6a5c78f` = the residual **D3** route fix, below); exo
+`p20/dsv41-indexer-qsplit` (this commit) advances the gitlink + `uv.lock:1501` to
+`6a5c78f`. 0 boots, 0 deploys, 0 generation requests.
 
 ### Root cause (neither named hypothesis)
 
@@ -347,7 +348,7 @@ The actual cause is (b)'s *class* (shape-dependent rounding) one stage earlier: 
 query **projection** GEMMs, selected by row count. Only the EXL3 row-limit knob,
 which makes both row counts take the same kernel, clears it.
 
-### Fix (mlx-lm `de6caa2e`)
+### Fix (mlx-lm `de6caa2e`; residual D3 at `6a5c78f`)
 
 `Indexer.__call__` runs `wq_b(qr)` and `weights_proj(x)` on all `n_full` rows and
 slices the band **after** the projections. Everything downstream (rope at absolute
@@ -390,13 +391,32 @@ proof is `test_ties_rowcount_sensitive`.
 
 ### Suites
 
-- mlx-lm qsplit: **34 passed** (21 -> 34).
+- mlx-lm qsplit: **35 passed** (21 -> 34 -> 35; `6a5c78f` adds `D3TiledRouteTest`).
 - exo dsv41 `src/exo/worker/engines/mlx/dsv41/tests/`: **367 passed**.
 - alignment guard `src/exo/shared/tests/test_submodule_lock_pin_alignment.py`: green after commit (see commit log).
 - Out of lane, pre-existing (identical at `e0340628`, not touched): sibling mlx-lm
   suites `test_dsv41_indexer_smallm_hier` (5), `test_dsv41_hier_integration` (2),
   `test_dsv41_consumer_skip` (1), `test_dsv41_indexer_bf16_row` (1) fail standalone
   on this host both before and after this fix.
+
+### D3 (residual, audit 2) — fixed at mlx-lm `6a5c78f`
+
+Audit 2 (`~/.hermes/cache/scratch/p20-idxsplit-audit2/REPORT.md`) found the
+token-identity fix left one gap on the **non-default `DSV41_INDEXER_HIER=0`**
+path. `indexer.py:716` keyed the tiled/untiled ROUTE on the **band's** row count,
+so the replicated run (n_full rows) could take TILED while each band (n rows) took
+UNTILED; the two paths are not equivalent on consumer layers (L1: untiled has no
+`isfinite` guard), so the band's consumer selection diverged (audit sweep 5/84
+shapes; prod h=64 b=1 n=78, nb in [6670,13339] ~ start_pos 26.6K-53K). Fixed by
+`tile = tiled(bsz, n_full, ...)` — the audit's verified control (0/84; re-confirmed
+on the fixed tree, `sweep h0_default`: cases=84 diverging=0). `band is None`
+(flag OFF) is unchanged, and HIER=1 returns in the hier branch **before** the
+line-716 consumer, so neither the flag-off default nor the re-bench geometry moves.
+
+`tests/test_dsv41_indexer_qsplit.py` 34 -> **35** (`D3TiledRouteTest`, production
+tile geometry b=2 n=78 sp=16384 nb=4115); sabotage-proven: revert line 716 ->
+**RED** (`cons_diff_rows` 134, the audit probe's exact 67/78-per-batch), restore ->
+green. The projection-revert mutation is still **10 RED**. `ruff` clean.
 
 ### Speed
 
@@ -410,9 +430,27 @@ differ). Against the bench's indexer saving (e.g. L20 @25K 132.3 -> 61.1 ms, ~71
 on one layer) this is a small fraction of the win; the re-bench below is the
 authority.
 
-> **RE-BENCH NUMBERS: _PLACEHOLDER — to be filled by the re-bench wave._**
->
-> **AUDIT FINDINGS: _PLACEHOLDER — to be filled by the audit wave._**
+### Re-bench (idle-guarded, offline, node `macstudio-m4-2`; fixed mlx-lm; wall-fold primary)
+
+| depth | new d% wall-fold | pre-fix d% | change pp |
+|---|---|---|---|
+| 25K | 7.69 | 7.79 | -0.10 |
+| 50K | 10.22 | 10.36 | -0.14 |
+| 100K | 14.38 | 14.47 | -0.09 |
+| 130K | 16.74 | 16.81 | -0.07 |
+
+Absolute wall-fold full->band (ms): 6649.2->6137.8 / 7106.1->6380.2 / 7986.7->6838.3 / 8574.1->7138.4. `indexer_fold` full->band: 964.10->448.17 / 1404.51->669.38 / 2250.74->1091.30 / 2824.27->1377.67. Added projection cost: band-arm per-layer indexer +0.96..+1.73 ms vs pre-fix band; banded fraction f 0.543->0.535 / 0.528->0.523 / 0.518->0.515 / 0.515->0.512. All 4 non-index layer types byte-identical between arms. Full arm reproduced within +0.38..+0.58% of the prior run. Guard exit 0, idle ok before AND after, no `ABORTED_*`; sentinel `mlx_lm/models/exl3/gemv_metal.py` md5 `649d2d6a0a68c8d6eab2a8a5394b7ab9` BEFORE==AFTER both nodes; prod `deepseek_v41/indexer.py` `af7be506...` unchanged; all_sum census 2->3/forward; node writes confined to `/tmp/p20_idxsplit_rebench/`; raw blobs there + local `/private/tmp/p20-idxsplit-rebench/raw/`. Caveat: single-node all_sum stubbed identity, so the +1 cidx exchange (+2.0% wire, ~0.04-0.08% of chunk) is not charged -- optimistic bound by that amount (same as pre-fix).
+
+### Audit findings (audit 2)
+
+Report `~/.hermes/cache/scratch/p20-idxsplit-audit2/REPORT.md` (independent out-of-repo re-derivation):
+
+- **D3** (MEDIUM, non-default HIER=0 path) — **FIXED** in this commit + test (details above).
+- **L1** (LOW, pre-existing untiled `isfinite`) — documented, not fixed (out of lane).
+- Root cause **CONFIRMED**: `wq_b` kernel by row count at `exl3_linear.py:123/146/157/162`; downstream M-invariance 0/1206 cases (b in {1,2}; n 34..2048; tile 8..4096).
+- Shape sweep banded==replicated: hier 0/252; COMPILE=0 0/84; HIER=0 TILE_FORCE 0/84; HIER=0 untiled 0/84; small-geometry 0/276; world=3 0/8; **HIER=0 default-tiling 5/84** (the D3 gap).
+- flag-off byte-identical 24/24; D1 call site intact; memory: full-width `q_full` is 32 MiB at n=2048 (peak unchanged vs replicated); 23/23 mutations caught, 0 escaped (old escapes M5/M10/M12 now caught); the new tests are 10 RED pre-fix.
+- Advisory: keep the full projection (kernel-pinning unproven; exchanging q ~32 MiB vs ~0.5 MiB for the cidx exchange would likely cancel the win; regime guards rely on undocumented MLX thresholds).
 
 Unverified here: the exact live node-side cost of the full-row projections, and a
 live re-run of the 5-prompt identity gate (needs a user-gated deploy).
