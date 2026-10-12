@@ -278,3 +278,141 @@ same sha; the alignment guard
 
 None. Bench shapes are n=2048 (far above the fence) so neither fix changes the
 band geometry there — **no re-bench**.
+
+
+---
+
+## Post-mortem remediation (token-identity divergence)
+
+Source: live A/B post-mortem `docs/dsv41-indexer-qsplit-live-ab-postmortem-2026-10-11.md`
+(origin/main `01fd85f33`): `identity_3` (2126 tok, chunks 2048 + 78) diverged at token
+4 with the flag ON; only chunk 2 (even n=78 -> bands of 39) engaged the band.
+Fixed offline on the SAME (never-shipped) branches, in place: mlx-lm
+`perf/dsv41-indexer-qsplit` `e0340628` -> **`de6caa2e`**; exo `p20/dsv41-indexer-qsplit`
+(this commit) advances the gitlink + `uv.lock:1501` to `de6caa2e`. 0 boots, 0 deploys,
+0 generation requests.
+
+### Root cause (neither named hypothesis)
+
+`mlx_lm/models/deepseek_v41/indexer.py` (pre-fix `e0340628`, L678-692): the band
+branch sliced `x`/`qr` to the band rows **before** the query projections,
+`q = self.wq_b(qr[:, lo:hi])` (L687) and `w = self.weights_proj(x[:, lo:hi])` (L692).
+Neither GEMM is row-count invariant:
+
+- production `indexer.wq_b` is an `EXL3Linear` (fused with `attn.wq_b`,
+  `exl3_build.py:_GROUPS`) whose kernel is picked by the call's row count
+  (`mlx_lm/models/exl3/exl3_linear.py` `__call__`: rows<=16 simd GEMM,
+  rows<=`FUSED_GEMM_ROW_LIMIT`=64 fused trellis GEMM, else `decode_full` + native
+  matmul). Band 39 rows -> fused GEMM; full 78 rows -> decode_full + matmul;
+- MLX native bf16 matmul (`weights_proj`, 4096->64) is also M-dependent.
+
+So the same query row got a different `q`/`w` banded vs replicated; fp4 fake-quant
+(`fake_quant_fp4_ue8m0`) amplifies a 1-ulp difference into a scale-step change, and
+the k=512 boundary flips. Single-chunk 2048 is exposed too (band 1024 vs 2048:
+`weights_proj` 41 rows differ); n=64 fp32 `nn.Linear` (the old suite) is M-invariant,
+which is why 21 tests stayed green.
+
+Decisive experiments (production indexer geometry: q_lora 1024 -> EXL3 wq_b 8192,
+64 heads x 128, k=512, ratio 4, start_pos=2048, n=78, nb=531; harness
+`~/.hermes/cache/scratch/p20-idxsplit-fix2/`):
+
+| measurement (pre-fix) | result |
+|---|---|
+| band-vs-full intermediates, seed 0 | `wq_b` out: 2027 elems / 78 rows differ (max 0.5); fp4 q: 9 elems / 8 rows (max 16); score: 2035 elems / 8 rows; `weights_proj` 0 |
+| same at n=2048, sp=0 | `wq_b` 0; `weights_proj` 41 rows; score 4713 elems / 40 rows |
+| EXL3Linear alone, rows n vs n/2 | n=34/64/130/256/2048: 0 diff; **n=66/78/128 (band crosses 64): 6460/7207/13682 diff** |
+| selection sweep, 32 seeds | **8/32 seeds diverge, 12 rows** (e.g. seed 4 row 38, 1 swapped slot) |
+| score expressions with IDENTICAL q/w (shared fp32/bf16, gathered fp32), n=78 & 2048 | **0 diff** -> routing/score math is M-invariant |
+
+Knob sweep on the 8 diverging seeds (pre-fix, one knob each):
+
+| knob | diverging seeds |
+|---|---|
+| baseline | 8/8 |
+| `EXL3_FUSED_ROW_LIMIT=16` (39 & 78 both decode_full) | **0/8** |
+| `EXL3_FUSED_ROW_LIMIT=100` (39 & 78 both fused) | **0/8** |
+| `DSV41_INDEXER_HIER=0` (tiled) | 4/8 |
+| `HIER=0 TILE=0` (untiled) | 4/8 |
+| `HIER=0 TILE_FORCE=1` | 4/8 |
+| `HIER=0 ROW_BF16=0` | 8/8 |
+| `L2_FULL=0` | 8/8 |
+| `COMPILE=0` | 8/8 |
+
+Adjudication: **(a) position/offset/mask frame — refuted** (qpos/lens/rope/offset are
+absolute; with q/w equalised every band reproduces the full selection, the candidate
+mask, and the consumer layer, incl. `start_pos=2048/16384`). **(b) as stated
+(tiled/untiled/tile width/row dtype/compiled body keyed on band n) — refuted**: no
+indexer routing knob clears it, and the score expressions are bitwise M-invariant.
+The actual cause is (b)'s *class* (shape-dependent rounding) one stage earlier: the
+query **projection** GEMMs, selected by row count. Only the EXL3 row-limit knob,
+which makes both row counts take the same kernel, clears it.
+
+### Fix (mlx-lm `de6caa2e`)
+
+`Indexer.__call__` runs `wq_b(qr)` and `weights_proj(x)` on all `n_full` rows and
+slices the band **after** the projections. Everything downstream (rope at absolute
+`qpos`, fp4 quant, score, top-k, candidate mask) is row-local and verified
+M-invariant, so a band row is bitwise the replicated row -> identical selection,
+identical argpartition tie-break (same op on identical inputs, same `[nb]` row
+shape), identical downstream outputs. `band=None` is unchanged (flag-OFF
+byte-identical). No tie-rule or rescoring change was needed.
+
+### Repro before / after
+
+| check | pre-fix `e0340628` | post-fix `de6caa2e` |
+|---|---|---|
+| identity_3 geometry, real EXL3 wq_b, 32 seeds | 8/32 diverge (12 rows) | **0/32** |
+| source(L20)->consumer pair, n=2048 sp=16384 nb=4608, 2 seeds | seed0: src 2 / consumer 2 rows; seed1: src 3 / consumer 2 rows diverge | **0** (cand mask equal) |
+| margin-0 tie class at k=512 (1/3 keys duplicated), hier + untiled, n=78/2048 | — | **0** |
+
+### Tests (mlx-lm `tests/test_dsv41_indexer_qsplit.py` 21 -> **34**)
+
+`NonFirstChunkBandTest` (8: chunk-2 n=78@sp=2048 with row-count-sensitive
+wq_b / weights_proj on hier + tiled, even band rows n=80, plain role, even/odd
+boundary gate for 3/129/79/78/80/2048/34, structural "projections see n_full rows"),
+`MarginZeroTieTest` (3), `ProductionExl3ChunkTwoTest` (real EXL3 wq_b, identity_3
+geometry, seed 4), `MultiChunkAttentionTest` (2-chunk prompt 40+78 through real
+`Attention.__call__`, 2-rank simulated exchange: cidx AND attention output bitwise
+equal on both chunks). ruff clean.
+
+Sabotage (mutation applied to the fixed `indexer.py`, suite re-run, file restored):
+
+| mutation | result |
+|---|---|
+| M1 full revert (project band rows only) | **10 RED** / 24 pass |
+| M2 `wq_b` on band rows only | **8 RED** (incl. real-EXL3 identity_3, 2-chunk attention) |
+| M3 `weights_proj` on band rows only | **5 RED** |
+| restored | 34 passed |
+
+Margin-0 tie controls `test_ties_hier` / `test_ties_untiled` are green pre- and
+post-fix (expected: with identical inputs the tie-break is identical); their RED
+proof is `test_ties_rowcount_sensitive`.
+
+### Suites
+
+- mlx-lm qsplit: **34 passed** (21 -> 34).
+- exo dsv41 `src/exo/worker/engines/mlx/dsv41/tests/`: **367 passed**.
+- alignment guard `src/exo/shared/tests/test_submodule_lock_pin_alignment.py`: green after commit (see commit log).
+- Out of lane, pre-existing (identical at `e0340628`, not touched): sibling mlx-lm
+  suites `test_dsv41_indexer_smallm_hier` (5), `test_dsv41_hier_integration` (2),
+  `test_dsv41_consumer_skip` (1), `test_dsv41_indexer_bf16_row` (1) fail standalone
+  on this host both before and after this fix.
+
+### Speed
+
+The fix does **not** change the band geometry: the score / top-k pass (the part the
+split halves) still runs `n/2` rows at n=2048. What moves is the two small query
+projections, now at `n_full` rows per rank (= the replicated cost; the pre-fix band
+had halved them too). Local measurement (EXL3 1024->8192 + bf16 4096->64):
+**2.06 ms @1024 rows -> 3.78 ms @2048 rows, +1.72 ms per index layer per chunk**;
+x 8 index layers ~ **+14 ms per 2048-row chunk** (local M-series; node numbers may
+differ). Against the bench's indexer saving (e.g. L20 @25K 132.3 -> 61.1 ms, ~71 ms
+on one layer) this is a small fraction of the win; the re-bench below is the
+authority.
+
+> **RE-BENCH NUMBERS: _PLACEHOLDER — to be filled by the re-bench wave._**
+>
+> **AUDIT FINDINGS: _PLACEHOLDER — to be filled by the audit wave._**
+
+Unverified here: the exact live node-side cost of the full-row projections, and a
+live re-run of the 5-prompt identity gate (needs a user-gated deploy).
