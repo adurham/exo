@@ -2710,6 +2710,14 @@ for NODE in "${NODES[@]}"; do
   # Audited: no stale values.
   [ -n "${DSV41_INDEXER_L2_FULL:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_L2_FULL=$DSV41_INDEXER_L2_FULL"
   [ -n "${DSV41_INDEXER_SMALLN_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_ROW_BF16=$DSV41_INDEXER_SMALLN_ROW_BF16"
+  # DSV41_INDEXER_SMALLN_WIDE_TILE: the small-n wide-tile fix for the 128MiB
+  # route cliff (mlx_lm deepseek_v41/indexer.py, read at import; idxprof5/6).
+  # Verify rounds at L>254.2K ran fence-bound: 628 ms/round at 300K live vs
+  # 103.5 ms below the crossing; the fix (aligned budget-cap width at
+  # n_full<=16) measures 17-23x on the affected calls. Default ON in the
+  # engine; =0 restores the old min(512,cap) rule byte-for-byte (67/67),
+  # so a rollback is an env flip at relaunch.
+  [ -n "${DSV41_INDEXER_SMALLN_WIDE_TILE:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_WIDE_TILE=$DSV41_INDEXER_SMALLN_WIDE_TILE"
   # DSV41_INDEXER_QSPLIT: split the indexer's QUERY side across the 2 TP ranks
   # (mlx_lm deepseek_v41/indexer.py + attention.py, default OFF in the engine).
   # Each rank scores / top-ks / emits half the chunk's query rows; the KEY side
