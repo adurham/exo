@@ -55,6 +55,8 @@ rows (`n`); the KEY side (`index_k`) stays FULL on every rank (`indexer.py:159-1
   provenance** (searched docs/, bench/, repo — 2026-10-12). It is a reproduction
   target in 1B; if it does not reproduce (±20%, after one harness fix attempt ≤1.5 h)
   it is **re-baselined and flagged** (provenance gap), per the plan's own stop rule.
+  Owner queried 2026-10-12: no recollection of the source — treat the figure as
+  unrecoverable; the re-baselined crossover in §1B becomes the record.
 
 ### 0.2 "verify-ratio" — pinned
 
