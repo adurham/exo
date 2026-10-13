@@ -1,6 +1,6 @@
-# DSv4.1 — small-n wide tile (R-B): LIVE ROUND result — gate FAIL → ROLLED BACK (2026-10-13)
+# DSv4.1 — small-n wide tile (R-B): LIVE ROUND result — gate FAIL → rolled back; then **BANKED** on owner decision (2026-10-13)
 
-**Verdict:** the fix is real, exact and large (4.4–5.1× on deep decode rounds), but it missed its
+**Verdict (round 1):** the fix is real, exact and large (4.4–5.1× on deep decode rounds), but it missed its
 pre-registered decode gate (≤ 1.2× the 245K control). Per protocol the treatment was rolled back with
 the reserve boot; production is back on `60008939` / `6a5c78f4` — verified independently: HEAD, mlx-lm
 sha, `indexer.py` md5 `2879c87e…`, runner env, baseline identity 5/5 byte-identical, API 200.
@@ -38,7 +38,7 @@ verdict exists — the treatment was never shipped, so none is owed).
 **Hygiene:** clean on both boots (0 ERROR/CRITICAL/SIGKILL/OOM; the Tracebacks are WARNING-level model-card
 and file-fetch messages, present before).
 
-**End state:** production = `deploy/next23b-qsplit @ 60008939` + mlx-lm `6a5c78f4`, flags
+**Round-1 end state (superseded — see the banking update below):** production = `deploy/next23b-qsplit @ 60008939` + mlx-lm `6a5c78f4`, flags
 `EXO_DSV41_CKPT=1` + `DSV41_INDEXER_QSPLIT=1`; runners m4-1 90300 / m4-2 11226; API 200.
 `deploy/next24-routing` remains staged and redeployable as-is. Side effect: a local
 `deploy/next24-routing` ref in both node checkouts (harmless).
@@ -47,3 +47,28 @@ and file-fetch messages, present before).
 (2) investigate the residual first — offline-first, then likely one live round.
 
 Artifacts: `scratch/idxprof8/` (REPORT.md, raw/, out/, pre|post|rb/, battery partial).
+
+---
+
+## UPDATE — banking redeploy (2026-10-13 ~04:30Z): **BANKED — the fix is LIVE**
+
+Owner decision: "bank now" (accept the revised bar). Redeploy of the same artifact
+(`deploy/next24-routing @ 9fe1d593`, mlx-lm `a0573e3`); revised acceptance = abort only on identity
+mismatch / battery dirty / errors / >250 ms steady rounds.
+
+- **Redeploy:** 1 boot, ~3.6 min downtime, CLEAN_EXIT both nodes, READY 2/2.
+- **Mechanical: PASS** on both nodes (HEAD, submodule, venv md5 `bfcf067b…`, env, helper regenerated).
+- **Identity: PASS** — 5/5 byte-identical vs the `idxprof8/pre` captures; deep p300k and p245k also
+  identical to the idxprof6 captures.
+- **Quality battery quick (120K, `--skip-park`): CLEAN** — needles 6/6, tools 10/10, prose 0 dirty /
+  0 review of 20 (= qsplitB reference; no regression). The gate that never ran in round 1 is closed.
+- **p300k deep decode: PASS** — steady median **148 ms** (mean 146.8, p10–p90 146–150) vs 628 ms
+  pre-fix → **4.24×**; **14.7 tok/s**; 128-token decode 8.6 s (was 36.2 s); first round 229 ms.
+  245K control 98 ms. GPU ~70 % during decode (the known residual, unchanged).
+- p500k not re-run (190 ms measured on this same build in round 1); the ≥350K needle variant not run.
+- **Orchestrator verification (independent):** both nodes `9fe1d593` / `a0573e3f`; runner env
+  `DSV41_INDEXER_QSPLIT=1` + `EXO_DSV41_CKPT=1`, `DSV41_INDEXER_SMALLN_WIDE_TILE` unset (default ON);
+  runners m4-1 97629 / m4-2 18287; API smoke OK.
+- **End state: LIVE.** Rollback if ever needed: `DSV41_INDEXER_SMALLN_WIDE_TILE=0` (relaunch) or
+  idxprof8 §5 (switch back to `deploy/next23b-qsplit` + submodule update + relaunch).
+- Artifacts: round 1 `scratch/idxprof8/`; banking round `scratch/idxprof9/`.
