@@ -42,9 +42,23 @@ that revision. mlx-lm pin `a0573e3f`, mlx pin `603f16eb`.
 `gamma - accepted >= 2`, `rollback` keeps `position+accepted+1` as the new offset but
 leaves the rejected rows in the ring. Slot `p % 128` is also the slot of the
 already-committed position `p-128`, so the **next** forward's read of `p-128` returns the
-rejected draft's KV instead of the committed token's KV. Because a slot is only rewritten
-when position `q+128` arrives — i.e. exactly when `q` leaves the window — the stale row
-serves every read of `q` for the rest of `q`'s window life.
+rejected draft's KV instead of the committed token's KV.
+
+**How long the dirt lives (corrected — my first pass got this wrong).** The stale slot set
+is `{r mod 128 : r ∈ [s, position+gamma+1)}` with `s = position+accepted+1`, and the next
+round's verify forward writes positions `[s, s+gamma'+1)`; when `gamma' >= gamma - accepted`
+(as it normally is) that write set covers every stale slot, so the stale KV is consumed by
+**exactly one forward** (the one immediately after the rejection) and then overwritten.
+The exceptions are the ones that matter, because they let it persist or cross a turn:
+* a round that writes fewer rows than the stale span — adaptive-gamma shrink, the 1-row
+  DSpark priming round (`rounds.py:438-456`), the 1-row forced-think-end round
+  (`rounds.py:387-412`), or a plain greedy round (`rounds.py:414-423`);
+* end of turn, or any ladder/turn-end checkpoint taken while slots are dirty —
+  `session.py:898-905` snapshots the ring *including* dirt, and `session_cache.py:412-413`
+  restores it on a later rewind, so restored dirt is read by a later forward and can cross
+  the turn boundary (verified: `cache.snapshot()` at `session_cache.py:367-374` takes
+  `ring_snapshot()` per layer).
+
 
 **Independently reproduced by me** on the real `Attention` / `ModelCache` / `spec` code
 (shared venv, `PYTHONPATH` pinned to the fork's mlx-lm):
@@ -74,20 +88,40 @@ of `q - window`"*, and that is exactly why session checkpoints copy the ring
 (`session_cache.py:367-374`, restored at `:412-413`) and why `prefill.decode_prime`
 saves/restores ring slots. Only the spec-rollback path was left out.
 
-**Falsifiable prediction (session-walk).** Because the aliased reads are the *oldest*
-`gamma - accepted` entries of the window, and only for positions whose owner is within
-128 of the rejection point:
-1. Any first divergence between the warm walk and a cold rebuild must appear **inside a
-   turn, within ≤128 committed tokens after a round with `gamma - accepted >= 2`**, and
-   must not appear in a lineage with no such round in the preceding 128 tokens.
-2. It must **not** be gradual across turns; the ~40-turn reuse history is not cumulative
-   here (the ring self-cleans within 128 positions).
-3. Discriminating run: replay the loop turn from the recorded state **with the ring
-   patched in `snap`/`rollback`** (save/restore slots for `[target, position+gamma]`).
-   *Confirms M1* if the first divergence moves or the loop disappears; *falsifies M1*
-   if the patched replay loops identically at the same token.
-4. Cheap settle: the two scratch tests above; for the live question, patched-vs-unpatched
-   replay of just the loop turn.
+**The dirt does not stay in the ring — the real cumulative channel.** `comp_kv`/`index_k`
+rows are not *addressed* wrongly, but in the one corrupted forward every layer above the
+first computes its hidden states from attention over the stale keys; those hidden states
+then *write* the window KV of the **accepted** positions and the compressor latents and
+indexer keys for those same positions. Those positions are committed and never recomputed,
+so the perturbation is **permanent in the compressed/indexer caches** and propagates from
+there for the rest of the context. "The compressed caches are safe" therefore holds for
+*addressing* only, not for *content*. This makes the effect cumulative across a long
+lineage — thousands of small permanent perturbations in the warm state that a cold prefill
+of the same tokens does not contain — which is the strongest form of the warm ≠ fresh
+argument, and the reason the ring's quick self-overwrite does not bound the damage.
+(One-layer scratch tests cannot see this: they have no layer above to be perturbed.)
+
+**Falsifiable prediction (session-walk).** Rejection-conditioned, not turn-conditioned:
+1. The first **logit-level** divergence warm-vs-cold must appear in the round
+   **immediately after** a round with `gamma - accepted >= 2` — not anywhere in the
+   following 128 tokens. Token-level divergence may appear later and is then *consistent*
+   with M1 via the propagation above, so "must not be gradual across turns" is **not** a
+   valid exclusion (I had this wrong at first).
+2. Exposure test, free: extract `mtp_cycles`/`mtp_accepted` from the recorded per-call
+   responses of the incident sessions and of the clean-era captures and compare the
+   rejection rate (rounds with `gamma - accepted >= 2`). If that rate is flat across
+   2026-10-13, M1 can at most be a co-factor. (The engine log does not carry per-round
+   gamma/accept — only the cumulative counters on the response, `rounds.py:200-239`.)
+3. Discriminating runs must be **three** arms, because a single patched-replay result is
+   asymmetric evidence (any perturbation can break a fragile loop, so "patched ⇒ no loop"
+   does not prove M1 caused it): **A** unpatched; **B** ring patched in `snap`/`rollback`
+   (save/restore only the `gamma+1` slots the verify will overwrite, per layer); **C**
+   unpatched **plus a matched-magnitude injected perturbation** (e.g. ~1e-3 noise on the
+   ring's oldest few rows each round) as the fragility control. Over ~20 prompts/seeds:
+   `B ≈ A` ⇒ M1 not causal; `B < A` **and** `C ≈ A` ⇒ M1 specifically causal; `B ≠ A` and
+   `C ≠ A` ⇒ general fragility, fix M1 anyway and keep looking for what changed on 10-13.
+4. Cheap settle: the two scratch tests above (they already fail).
+
 
 **Causality caveat — read this before blaming M1.** `spec.rollback`'s body last changed
 **2026-09-29** (mlx-lm `4091b5f`, `git log -L 61,73:...spec.py`), so the mechanism was
@@ -234,9 +268,21 @@ at most to the common prefix and heals it. No drift found.
 ## NOT VERIFIED
 
 * **M1's magnitude on the real model.** Measured divergence is 0.0074–0.236 on a tiny
-  random model (`head_dim` 32, 1 layer). Whether it flips a **greedy argmax** at
+  random model (`head_dim` 32, **1 layer**). Whether it flips a **greedy argmax** at
   `head_dim` 512 over 40+ layers, and hence whether it can tip a marginal reasoning channel
-  into a repeat loop, is unmeasured. This is the single most important open question.
+  into a repeat loop, is unmeasured — and a one-layer test cannot see the *content*
+  propagation channel at all (there is no layer above to be perturbed), so the scratch
+  tests understate the mechanism even though they prove it. Next step: repeat with ≥2
+  layers and a compressor, and assert on the compressed-cache contents after rollback +
+  one round. Also: a token-level flip at 100K+ context is not specific evidence, since the
+  reasoning channel runs near top-1/top-2 ties (this cuts *for* M1's plausibility, not for
+  its uniqueness).
+* **The exposure question.** Per-round `gamma`/`accepted` are not in the engine log (only
+  cumulative `mtp_cycles`/`mtp_accepted` on the response, `rounds.py:200-239`), so the
+  rejection-rate-before-vs-after-2026-10-13 test is not answerable from the logs I read; it
+  *is* answerable from the recorded per-call responses (the replay captures carry those
+  counters). Until that is run, M1 is a proven mechanism with an unproven onset.
+
 * **Whether a limiter cut ever fired in the incident turns** (M2). No cut line appears in
   the window, but the cut may be silent — check `reasoning_budget.py` for its logging.
 * **Production rejection-tail statistics** — how often `gamma - accepted >= 2` occurs at the
