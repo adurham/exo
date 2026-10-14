@@ -52,18 +52,18 @@ as a residual in the buildnote instead.
 
 FINISH-REASON POLICY. The default action is ``"error"`` -- the SAME knob and the
 SAME default as the generic path, so the two engines cannot silently disagree
-about what a detected loop means. Rationale for keeping the loud failure (full
-argument in ``docs/dsv41-degeneration-guards-2026-10-13.md``): the client DOES
-auto-retry a ``finish_reason="error"`` stream (Hermes retries the same provider
-call up to 3 times), and this engine is greedy, so a retry replays the identical
-loop and its success probability is exactly 0. That waste is accepted because it
-is BOUNDED BY THE DETECTOR -- the guard fires at the loop's ONSET (~150-900
-committed tokens), not at the runaway's end (the incident that motivated this
-port streamed ~3m41s of unbroken repetition) -- and because the alternative,
-``"stop"``, would silently hand the agent loop a degenerate turn as a
-*successful* reply (and a loop inside a tool-call argument as a truncated,
-malformed tool call on a turn the client believes completed). ``"stop"`` and
-``"warn"`` remain available through the same ``EXO_LOOP_DETECT_ACTION`` knob.
+about what a detected loop means. What the CLIENT then does is source-traced in
+``docs/dsv41-degeneration-guards-2026-10-13.md`` and is NOT the x3-api-retry
+story an earlier revision of this note told: a guard error reaches the wire as an
+SSE ``data: {"error": ...}`` (never a ``finish_reason="error"`` delta), and after
+PARTIAL delivery Hermes does NOT retry -- it returns a partial ``length`` stub and
+auto-continues (bounded, truncation-surfaced). ``"error"`` stays the default for
+signal integrity and parity with the generic path: ``"stop"`` would surface the
+already-degenerate text to the agent as a *successful* turn (and a loop inside a
+tool-call argument as a truncated, malformed tool call on a turn the client
+believes completed). ``"stop"`` and ``"warn"`` remain available through the same
+knob; ``"warn"`` is the recommended FIRST staging step (measure the real fire rate
+before arming the kill).
 """
 # pyright: reportPrivateUsage=false
 #   (deliberate: the guard reuses batch_generate's detectors and knobs verbatim so the
@@ -76,7 +76,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -104,7 +104,9 @@ __all__ = [
     "DegenerationGuard",
     "LoopAction",
     "LoopHit",
+    "assert_guard_env_agrees_across_ranks",
     "guard_env_digest",
+    "guard_env_fingerprint",
     "guard_env_report",
     "guard_env_values",
     "loop_action",
@@ -216,6 +218,56 @@ def guard_env_report(rank: int, world: int) -> str:
     )
 
 
+def guard_env_fingerprint() -> int:
+    """A non-negative int fingerprint of the effective guard env, for the
+    cross-rank equality reduce.
+
+    Masked to 31 bits so the value marshals cleanly through the int32 the
+    collective sends; the full (32-bit) hex digest stays the human-facing one in
+    the log lines, so a fingerprint collision would still leave the digests
+    diffable by eye.
+    """
+    return int(guard_env_digest(), 16) & 0x7FFFFFFF
+
+
+def assert_guard_env_agrees_across_ranks(group: Any) -> None:
+    """Fail the BOOT when the TP ranks' guard knobs differ.
+
+    A knob that differs between ranks is a hang class, not a cosmetic drift: the
+    guard's verdict is a pure function of the committed ids (identical on both
+    ranks), so with, say, a different ``EXO_LOOP_DETECT_MIN_REPEATS`` one rank
+    terminates a degenerate turn while its peer keeps decoding -- and the peer
+    then blocks forever in the model's own TP ``all_sum``. The previous feature
+    only LOGGED the effective env per rank, so a mismatch survived startup and
+    only showed up as a hung decode.
+
+    The check reduces each rank's :func:`guard_env_fingerprint` with BOTH a min
+    and a max over ``group`` (the coord subgroup) and raises on disagreement.
+    It is placed at the engine-construction point, where ``get_coord_group`` is
+    ALREADY called by both ranks in matching order (its docstring's own
+    requirement: "same code path on both ranks at the same point"), and reuses
+    the existing ``mx_min_int`` collective helper rather than inventing a new
+    one. ``group is None`` (single rank, PP mode -- see ``get_coord_group`` -- or
+    the unit tests) is a no-op: there is nothing to compare against.
+    """
+    if group is None:
+        return
+    from exo.worker.engines.mlx.utils_mlx import mx_min_int
+
+    fingerprint = guard_env_fingerprint()
+    lo = mx_min_int(fingerprint, group)
+    hi = -mx_min_int(-fingerprint, group)
+    if lo != hi:
+        raise RuntimeError(
+            f"[DSV41] loop-guard env MISMATCH across ranks: min={lo} max={hi} "
+            f"(this rank fingerprint={fingerprint}, digest={guard_env_digest()}). "
+            "A guard knob differs between the TP ranks, so one rank would "
+            "terminate a degenerate turn while its peer keeps decoding -- a "
+            "silent hang. Align the runner environments (the launcher must pass "
+            "every EXO_LOOP_DETECT* var to BOTH ranks) and restart."
+        )
+
+
 @dataclass(frozen=True)
 class LoopHit:
     """One CONFIRMED repetition cycle, over the committed-token stream.
@@ -261,6 +313,13 @@ class DegenerationGuard:
     long_max_period: int = _LOOP_DETECT_LONG_MAX_PERIOD
     long_min_repeats: int = _LOOP_DETECT_LONG_MIN_REPEATS
     long_window_blocks: int = _LOOP_DETECT_LONG_WINDOW_BLOCKS
+    #: Decodes a list of committed ids to text. When set, the tight detector
+    #: exempts a run of a single SEPARATOR glyph (whitespace/punctuation only: a
+    #: markdown rule, an ``=====`` banner, a dotted ellipsis, a code-fence or
+    #: ASCII-art row, a table separator) -- formatting, not degeneration. It is
+    #: deliberately optional so a bare guard (the unit tests, and any caller with
+    #: no tokenizer) keeps the pre-fix behaviour.
+    token_text: Callable[[list[int]], str] | None = None
     #: Bounded sliding window of recent committed ids (the tight detector's input).
     recent_token_ids: list[int] = field(default_factory=list)
     #: Partial trailing 24-token block (the long detector's input).
@@ -302,7 +361,9 @@ class DegenerationGuard:
         ids.append(token_id)
         if len(ids) > self.window:
             del ids[: len(ids) - self.window]
-        loop = _detect_token_loop(ids, self.max_period, self.min_repeats)
+        loop = _detect_token_loop(
+            ids, self.max_period, self.min_repeats, self.token_text
+        )
         if loop is None:
             return None
         self._token_warned = True

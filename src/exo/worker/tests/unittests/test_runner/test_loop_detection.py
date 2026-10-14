@@ -32,6 +32,8 @@ hashes. See the "Long-period (multi-sentence) degeneration detection" comment
 block in batch_generate.py for the full rationale.
 """
 
+from typing import Callable
+
 from exo.shared.types.chunks import ErrorChunk
 from exo.shared.types.common import ModelId
 from exo.shared.types.worker.runner_response import GenerationResponse
@@ -139,6 +141,80 @@ class TestDetectTokenLoop:
         period, repeats = result
         assert period == 14
         assert repeats >= _LOOP_DETECT_MIN_REPEATS
+
+
+def _decoder(mapping: dict[int, str]) -> Callable[[list[int]], str]:
+    """A stand-in ``token_text``: ids -> their decoded text. An id absent from
+    ``mapping`` decodes to ``""`` -- a decode that yields nothing, which must NOT
+    be read as a separator (there is no text to judge)."""
+
+    def decode(ids: list[int]) -> str:
+        return "".join(mapping.get(int(i), "") for i in ids)
+
+    return decode
+
+
+class TestSeparatorExemption:
+    """A run of separator glyphs -- a markdown horizontal rule, an ``=====``
+    banner, a dotted ellipsis, a code-fence/ASCII-art row, a table separator row
+    -- is legitimate formatting, not decode degeneration. A single-token run used
+    to fire the period-1 detector and kill the turn. The exemption is driven by
+    the token's DECODED text, so it applies only when a decoder is supplied; the
+    bare-detector tests above (no ``token_text``) pin the pre-fix behaviour.
+
+    Every case here is a negative: the detector must return ``None``.
+    """
+
+    def test_markdown_horizontal_rule_does_not_fire(self):
+        assert _detect_token_loop([45] * 12, token_text=_decoder({45: "-"})) is None
+
+    def test_equals_banner_does_not_fire(self):
+        assert _detect_token_loop([61] * 12, token_text=_decoder({61: "="})) is None
+
+    def test_dotted_ellipsis_does_not_fire(self):
+        assert _detect_token_loop([46] * 9, token_text=_decoder({46: "."})) is None
+
+    def test_code_fence_and_ascii_art_rows_do_not_fire(self):
+        fence = _decoder({96: "`"})
+        art = _decoder({42: "*", 45: "-"})
+        assert _detect_token_loop([96] * 10, token_text=fence) is None
+        assert _detect_token_loop([42] * 15, token_text=art) is None
+
+    def test_table_separator_row_does_not_fire(self):
+        # A '|---|---|...' separator row: the repeating unit is punctuation only.
+        assert (
+            _detect_token_loop(
+                [124, 45, 45] * 8, token_text=_decoder({124: "|", 45: "-"})
+            )
+            is None
+        )
+
+    def test_indentation_whitespace_run_does_not_fire(self):
+        assert _detect_token_loop([32] * 12, token_text=_decoder({32: " "})) is None
+
+    # ---- positives: content cycles MUST still fire (no over-reach) ----
+
+    def test_period_one_word_loop_still_fires(self):
+        # " the the the ..." carries content: exactly as before.
+        result = _detect_token_loop([71] * 8, token_text=_decoder({71: " the"}))
+        assert result is not None
+        assert result[0] == 1
+
+    def test_word_plus_separator_cycle_still_fires(self):
+        result = _detect_token_loop(
+            [71, 45] * 8, token_text=_decoder({71: " the", 45: "-"})
+        )
+        assert result is not None
+
+    def test_empty_decode_is_not_treated_as_a_separator(self):
+        # An unknown id decodes to "" -- no text, so it cannot be called a
+        # separator; the conservative behaviour (fire) is kept.
+        assert _detect_token_loop([5] * 10, token_text=_decoder({})) is not None
+
+    def test_real_token_text_is_not_exempted(self):
+        assert (
+            _detect_token_loop([5] * 10, token_text=_decoder({5: "word"})) is not None
+        )
 
 
 class TestLoopDetectAction:

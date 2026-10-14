@@ -54,7 +54,9 @@ from exo.worker.engines.mlx.dsv41.degeneration import (
     DUMP_DIR_ENV,
     DUMP_TOKEN_LIMIT,
     DegenerationGuard,
+    assert_guard_env_agrees_across_ranks,
     guard_env_digest,
+    guard_env_fingerprint,
     guard_env_report,
     guard_env_values,
     loop_action,
@@ -787,6 +789,131 @@ def test_real_recorded_sessions_do_not_false_positive():
         assert "0 detection(s) []" in line or "NO TEXT" in line, (
             f"the guard fired on real (non-degenerate) recorded text: {line}"
         )
+
+
+# ------------------------------------------------- separator false-positive fix
+
+
+class TestSeparatorExemption:
+    """A run of one separator glyph -- a markdown horizontal rule, an ``=====``
+    banner, a code-fence/ASCII-art row -- is legitimate formatting and used to
+    fire the period-1 detector, killing the turn. The engine wires the
+    tokenizer's decode in, so the tight detector can tell a separator run from a
+    word cycle. Proven here through the REAL engine: the run must NOT error, and
+    a SUSTAINED separator spam must still be caught (later) by the long-period
+    detector, so termination is not lost -- only the false positive is.
+    """
+
+    def test_engine_does_not_fire_on_a_markdown_rule(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv(DUMP_DIR_ENV, str(tmp_path))
+        # 40 dashes (well past min_repeats=6) then EOS.
+        engine, _m, _t, _e = _engine(
+            [45] * 40 + [1],
+            text_of={**ANSWER_TEXT, 45: "-"},
+            max_output_tokens=60,
+        )
+        chunks = _drain(engine)
+        assert not any(isinstance(c, ErrorChunk) for c in chunks)
+        assert "".join(c.text for c in chunks if isinstance(c, TokenChunk)) == "-" * 40
+        assert not list(tmp_path.glob("*guard-*.json")), "no guard-fire, no dump"
+
+    def test_sustained_separator_spam_is_still_caught_by_the_long_detector(self):
+        # The tight detector exempts the separator run; the block-hash detector
+        # (72+ identical tokens = 3 identical 24-token blocks) still terminates it.
+        guard = DegenerationGuard(token_text=lambda ids: "-" * len(ids))
+        hit = None
+        for _ in range(200):
+            hit = guard.feed(45)
+            if hit is not None:
+                break
+        assert hit is not None
+        assert hit.detector == "long_period"
+        assert hit.period == 1
+
+    def test_engine_still_terminates_sustained_separator_spam(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv(DUMP_DIR_ENV, str(tmp_path))
+        engine, _m, _t, _e = _engine(
+            [45] * 80,
+            text_of={**ANSWER_TEXT, 45: "-"},
+            max_output_tokens=100,
+        )
+        chunks = _drain(engine)
+        errors = [c for c in chunks if isinstance(c, ErrorChunk)]
+        assert errors and errors[0].error_message == DEGENERATION_ERROR_TEXT
+
+
+# ------------------------------------------------------- rank-env fail-fast
+
+
+class TestRankEnvAgreement:
+    """A guard knob that differs between the TP ranks is a hang class: one rank
+    terminates a degenerate turn while its peer keeps decoding (and wedges in the
+    model's TP all_sum). The startup check reduces the env fingerprint with a min
+    AND a max over the coord subgroup and fails the boot on disagreement.
+    """
+
+    def test_no_group_is_a_noop(self):
+        # single rank / PP mode / the unit tests: nothing to compare against.
+        assert_guard_env_agrees_across_ranks(None)
+
+    def test_fingerprint_is_nonnegative_and_int32_safe(self):
+        fp = guard_env_fingerprint()
+        assert 0 <= fp < 2**31
+
+    def test_matching_env_passes(self, monkeypatch: pytest.MonkeyPatch):
+        import exo.worker.engines.mlx.utils_mlx as um
+
+        # A reduce that returns the value unchanged == every rank agrees.
+        monkeypatch.setattr(um, "mx_min_int", lambda value, group: value)
+        assert_guard_env_agrees_across_ranks(object())
+
+    def test_mismatch_raises_loudly(self, monkeypatch: pytest.MonkeyPatch):
+        import exo.worker.engines.mlx.utils_mlx as um
+
+        # min != max: the ranks disagree.
+        monkeypatch.setattr(um, "mx_min_int", lambda value, group: value - 1)
+        with pytest.raises(RuntimeError, match="MISMATCH"):
+            assert_guard_env_agrees_across_ranks(object())
+
+
+# ------------------------------------------------------- feed alignment (anchor)
+
+
+def test_guard_stream_starts_at_the_first_generated_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """No 1-token offset vs the generic path.
+
+    The generic path feeds the guard every GENERATED token from the first one.
+    The engine's ``anchor`` IS that first generated token -- ``rounds._one_round``
+    emits only the token PREDICTED from the anchor, never the anchor itself -- so
+    ``produced = [anchor] + rounds`` is exactly "first generated token onward".
+    This pins it: the anchor is the dump's first committed id, and the engine
+    fires one flat position later than a token-at-a-time feed of the round stream
+    (i.e. the anchor is fed, and nothing is fed twice).
+    """
+    monkeypatch.setenv(DUMP_DIR_ENV, str(tmp_path))
+    stream = CYCLE * 40
+    engine, _m, _t, _e = _engine(
+        stream + [1], text_of=ANSWER_TEXT, max_output_tokens=1000
+    )
+    _drain(engine)
+    dumps = list(tmp_path.glob("*guard-token*.json"))
+    assert len(dumps) == 1
+    payload = json.loads(dumps[0].read_text())
+    # The first fed id is the anchor, which for this script is the first token of
+    # the cycle -> the anchor is part of what the guard judged.
+    assert payload["token_ids"][0] == CYCLE[0]
+    # ... and the fire lands on the SAME flat token as a raw token-at-a-time feed
+    # of the round stream (index expected_index), i.e. exactly one count for the
+    # anchor, not a duplicate and not a skip.
+    expected_index, _hit = _feed(stream)
+    assert expected_index is not None
+    assert payload["returned_tokens"] == expected_index + 1
 
 
 # ------------------------------------------------------------------ test helpers

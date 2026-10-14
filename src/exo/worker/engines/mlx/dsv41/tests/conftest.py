@@ -186,7 +186,15 @@ class FakeTokenizer:
         return f"<|User|>hello{header}"
 
     def decode(self, tokens: Any) -> str:
-        return "".join(DEFAULT_CHUNKS.get(int(t), "") for t in tokens)
+        # Decode with the SAME table the streaming detokenizer uses, so the fake's
+        # ``decode`` and its ``detokenizer`` can never disagree about a token's
+        # text (the real TokenizerWrapper is ONE tokenizer for both). This used to
+        # hardcode DEFAULT_CHUNKS, so a FakeTokenizer built with a custom
+        # ``text_of`` decoded every id absent from DEFAULT_CHUNKS to "" -- which
+        # silently disabled the guard's separator exemption (it needs the decoded
+        # text) in any test that exercised it.
+        text_of = self._detokenizer._text_of
+        return "".join(text_of.get(int(t), "") for t in tokens)
 
 
 @pytest.fixture

@@ -502,10 +502,29 @@ def _stop_sequences(task_params: TextGenerationTaskParams) -> list[str]:
     return task_params.stop
 
 
+def _is_separator_only_text(text: str) -> bool:
+    """True when decoded text carries NO word/number content.
+
+    A token that decodes to whitespace or punctuation ONLY -- a rule dash, a
+    fence/banner run, an ellipsis dot, a table bar/plus -- is a SEPARATOR glyph.
+    A run of one such glyph is legitimate formatting (a markdown horizontal rule
+    ``----------``, an ``=====`` banner, a ``...`` ellipsis, a code-fence or
+    ASCII-art row, a table separator row) and must NOT be read as decode
+    degeneration. Word and whitespace+word tokens (`` the``) DO carry content
+    and are detected exactly as before.
+
+    An EMPTY decode (an unknown/special id) is deliberately NOT a separator: with
+    no text we cannot tell, and the conservative choice is the detector's
+    pre-existing behaviour (keep scanning).
+    """
+    return text != "" and not any(ch.isalnum() for ch in text)
+
+
 def _detect_token_loop(
     token_ids: list[int],
     max_period: int = _LOOP_DETECT_MAX_PERIOD,
     min_repeats: int = _LOOP_DETECT_MIN_REPEATS,
+    token_text: Callable[[list[int]], str] | None = None,
 ) -> tuple[int, int] | None:
     """Detect a repeating token cycle at the TAIL of ``token_ids``.
 
@@ -513,10 +532,24 @@ def _detect_token_loop(
     whose cycle repeats back-to-back at least ``min_repeats`` times ending
     at the most recent token, else ``None``. Cheap: O(max_period * window),
     no allocation beyond slices. Used only for logging — never gates output.
+
+    ``token_text`` (optional) decodes a list of token ids to text. When given, a
+    tail whose last ``max_period`` tokens carry NO word/number content (only
+    whitespace/punctuation -- see :func:`_is_separator_only_text`) is EXEMPT: a
+    markdown horizontal rule, an ``=====`` banner, a dotted ellipsis, a
+    code-fence/ASCII-art row or a table separator row is formatting, not
+    degeneration, and a period-1 hit on it was a false positive that killed
+    legitimate turns. Every candidate cycle is a suffix of that window, so one
+    decode decides the whole call; word and whitespace+word cycles (`` the``)
+    still fire exactly as before. Sustained single-glyph spam is still caught,
+    later, by the block-hash long-period detector (72+ identical tokens = 3
+    identical 24-token blocks). With ``token_text=None`` the detector behaves
+    exactly as it did before this option existed.
     """
     n = len(token_ids)
     if n < min_repeats:
         return None
+    exempt: bool | None = None
     for period in range(1, max_period + 1):
         if n < period * min_repeats:
             break
@@ -528,6 +561,17 @@ def _detect_token_loop(
             repeats += 1
             pos -= period
         if repeats >= min_repeats:
+            if token_text is not None and exempt is None:
+                # ONE decode, on the (rare) first match: if the window has no
+                # word/number content the tail is pure separator formatting and
+                # no candidate period is degeneration.
+                window = token_ids[max(0, n - max_period) :]
+                try:
+                    exempt = _is_separator_only_text(token_text(window))
+                except Exception:  # noqa: BLE001 - a decode fault must not weaken it
+                    exempt = False
+            if exempt:
+                return None
             return period, repeats
     return None
 
@@ -4405,7 +4449,9 @@ class ExoBatchGenerator:
                 # Otherwise scan every token (not just until first warn) so the
                 # termination fires the instant the cycle crosses threshold.
                 loop = (
-                    _detect_token_loop(ids) if not state.degeneration_warned else None
+                    _detect_token_loop(ids, token_text=self.tokenizer.decode)
+                    if not state.degeneration_warned
+                    else None
                 )
                 if loop is not None:
                     period, repeats = loop

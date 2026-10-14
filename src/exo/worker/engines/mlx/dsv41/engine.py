@@ -86,6 +86,7 @@ from exo.worker.engines.mlx.dsv41.degeneration import (
     DegenerationGuard,
     LoopAction,
     LoopHit,
+    assert_guard_env_agrees_across_ranks,
     guard_env_digest,
     guard_env_report,
     loop_action,
@@ -523,6 +524,13 @@ class Dsv41Engine(Engine):
         # line makes the EFFECTIVE values checkable (and diffable between the two
         # runner logs) instead of assumed.
         logger.info(guard_env_report(self.loaded.rank, self.loaded.world))
+        # ... and FAIL THE BOOT if the ranks disagree. A knob that differs
+        # between ranks desyncs the guard: one rank terminates a degenerate turn
+        # while its peer keeps decoding, and the peer then wedges in the model's
+        # TP all_sum. The log line above is only checkable by eye; this makes the
+        # mismatch fatal at the existing construction-point coord collective
+        # (get_coord_group, called by both ranks in matching order two lines up).
+        assert_guard_env_agrees_across_ranks(self._agreement.group)
 
     def warmup(self) -> None:
         """A short real generation, to compile the EXL3/Metal kernels.
@@ -1126,17 +1134,26 @@ class Dsv41Engine(Engine):
         # speculative round commits a whole batch at once, while the detectors'
         # cycle alignment is defined over the raw committed stream). Both TP ranks
         # commit byte-identical tokens, so this verdict is rank-invariant and the
-        # two ranks always stop together -- no extra collective is involved.
-        guard = DegenerationGuard()
+        # two ranks always stop together -- the per-request verdict needs no
+        # collective (the startup knob-equality check in __init__ is separate).
+        guard = DegenerationGuard(token_text=tokenizer.decode)
         guard_action: LoopAction = loop_action()
 
-        def log_turn_end(reason: str) -> None:
-            """One bounded summary line per request (see OBS_RATE_INTERVAL_SECONDS)."""
+        def log_turn_end(reason: str, committed: int | None = None) -> None:
+            """One bounded summary line per request (see OBS_RATE_INTERVAL_SECONDS).
+
+            ``committed`` defaults to ``len(produced)`` -- every id the cache
+            holds, which for a normal turn INCLUDES a final round's overshoot past
+            a stop point (those ids were committed to the cache, just not
+            emitted). The guard path passes ``guard_consumed`` instead: the
+            aborted round's tail is rolled back and never committed, so the count
+            the guard actually judged is the honest one there.
+            """
             elapsed = time.perf_counter() - request_started
-            committed = len(produced)
-            rate = committed / elapsed if elapsed > 0 else 0.0
+            committed_count = len(produced) if committed is None else committed
+            rate = committed_count / elapsed if elapsed > 0 else 0.0
             logger.info(
-                f"[DSV41] obs turn-end turn={task_id} committed={committed} "
+                f"[DSV41] obs turn-end turn={task_id} committed={committed_count} "
                 f"emitted={emitted} elapsed={elapsed:.1f}s tok_s={rate:.1f} "
                 f"reason={reason}"
             )
@@ -1150,6 +1167,14 @@ class Dsv41Engine(Engine):
         try:
             for tid, lp_entry in committed_tokens():
                 last_tid = tid
+                # Parity with the generic path, which never feeds the token that
+                # carries the terminating finish_reason: the EOS token ENDS the
+                # turn, it is not part of the generated content the guard judges.
+                # (A single EOS could not form a cycle anyway, but skipping it
+                # keeps the fed stream byte-identical to the generic path's.)
+                if tid in eos_ids:
+                    final_reason = "stop"
+                    break
                 guard_consumed += 1
                 hit = guard.feed(tid)
                 if hit is not None:
@@ -1170,7 +1195,9 @@ class Dsv41Engine(Engine):
                     )
                     if guard_action in ("stop", "error"):
                         self._abort_turn(session, keep)
-                        log_turn_end(f"degeneration-{guard_action}")
+                        log_turn_end(
+                            f"degeneration-{guard_action}", committed=guard_consumed
+                        )
                         yield _final_response(
                             token=tid,
                             text=(
@@ -1207,9 +1234,6 @@ class Dsv41Engine(Engine):
                         f"tok_s={(done / elapsed if elapsed > 0 else 0.0):.1f}"
                     )
                     last_rate_log = now
-                if tid in eos_ids:
-                    final_reason = "stop"
-                    break
                 detokenizer.add_token(tid)
                 text = detokenizer.last_segment
                 emitted += 1
@@ -1253,16 +1277,21 @@ class Dsv41Engine(Engine):
             # generation was cancelled by hand and NOTHING of its text was
             # recorded anywhere. The reason carries the exception type so the dump
             # is self-explanatory.
+            reason = (
+                "client-cancel"
+                if isinstance(exc, PrefillCancelled)
+                else f"aborted-{type(exc).__name__}"
+            )
             self._dump_short_turn(
                 produced,
-                reason=(
-                    "client-cancel"
-                    if isinstance(exc, PrefillCancelled)
-                    else f"aborted-{type(exc).__name__}"
-                ),
+                reason=reason,
                 task_id=task_id,
                 generated=emitted,
             )
+            # A cut-short turn still gets its one summary line (the guard-fire and
+            # normal paths already do), so every turn is accounted for; the count
+            # is what was judged before the unwind, not the rolled-back round tail.
+            log_turn_end(reason, committed=guard_consumed)
             session.cancel()
             if not keep:
                 self._sessions.drop(session)
