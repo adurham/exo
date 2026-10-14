@@ -2,7 +2,7 @@
 
 2026-10-13 (ported, commit `12548e373`) · **fix-up pass 2026-10-13b, after an adversarial audit**
 
-## Verdict (SHIPPED on `main`, unit-verified; NO live-cluster contact)
+## Verdict (SHIPPED on `main`, unit-verified; live STAGE-1 deployment in warn mode 2026-10-13 — see LIVE section)
 
 The two degeneration detectors the GENERIC MLX path already shipped (exact-token cycle +
 long-period block-hash cycle) are wired into the custom `dsv41` engine's decode path, which
@@ -349,3 +349,32 @@ on the tokenizer and the DB existing, so CI without them skips it loudly rather 
      the dump's `produced[:guard_consumed]`); the "ruff reflowed 2 lines" claim corrected to **3 sites**;
      `guard.feed` now runs **after** the EOS check so the terminating EOS is not fed (parity with the
      generic path).
+
+## LIVE — staged deployment (2026-10-13 22:40 CDT, WARN stage) — construct `deploy/next25-guards`
+
+Deployed from the laptop via `./start_cluster.sh` with `EXO_TARGET_BRANCH=deploy/next25-guards`
+and `EXO_LOOP_DETECT_ACTION=warn`. Construct rev `0e9c7d93d` (= `deploy/next24-routing` @
+`9fe1d593` + this guard as cherry-picks; construct note
+`docs/dsv41-next25-guards-construct-2026-10-13.md` on the branch). 0 extra boots.
+
+Live evidence, all from this deployment:
+- **Sync + READY:** both nodes `Nodes synchronized on commit 0e9c7d93d`; READY (2/2);
+canaries 14.80 (m4-1) / 14.71 (m4-2) TFLOPS — healthy band.
+- **Guard env live on BOTH ranks, digests MATCH:** startup banner
+`[DSV41] loop-guard env (rank 0/2, digest=fb0de5b4): ... EXO_LOOP_DETECT_ACTION=warn ...`
+(rank 1/2 identical) — i.e. the construction-time cross-rank equality check passed in a
+real boot.
+- **Output identity vs the incumbent (end-to-end):** fixed greedy prompt, pre-deploy vs
+post-deploy byte-identical (sha `6bc9214ced408ec6`), 2x pre / 2x post, deterministic.
+- **Observability live:** `obs first-token`, `obs progress` (~10s), `obs turn-end` lines
+present with correct shapes (`reason=stop` / `reason=length`).
+- **LIVE FIRE (warn mode, deliberate repetition probe):**
+`WARNING ... [DSV41] DEGENERATION DETECTED turn=771117a2-... at committed=144 emitted=143:
+raw-token cycle period=1 repeated>=6x action=warn` — logged on BOTH ranks (22:41:54.922 /
+.923), the turn was NOT terminated (warn-staged behavior; it continued to `reason=length`),
+and the bounded dump fired immediately:
+`dsv41-degeneration-guard-token-20261013-224154-5634.json` (140 ids; digest `fb0de5b4`;
+trailing 6x id 51406 = the repeated token).
+
+Next (separate user-gated relaunch): flip to the armed default — relaunch WITHOUT
+`EXO_LOOP_DETECT_ACTION` so the runner env's engine default `error` arms termination.
