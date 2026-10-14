@@ -2738,6 +2738,18 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_LOOP_DETECT_LONG_BLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_BLOCK=$EXO_LOOP_DETECT_LONG_BLOCK"
   [ -n "${EXO_LOOP_DETECT_LONG_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MAX_PERIOD=$EXO_LOOP_DETECT_LONG_MAX_PERIOD"
   [ -n "${EXO_LOOP_DETECT_LONG_MIN_REPEATS:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MIN_REPEATS=$EXO_LOOP_DETECT_LONG_MIN_REPEATS"
+  # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
+  # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
+  # 2026-10-13.md). Once a still-open reasoning block has run
+  # fraction x max_tokens (capped at the max), the round after the cut is
+  # forced to the think-END delimiter, so a self-doubt/paraphrase-drift loop
+  # cannot consume the whole generation and leave the answer channel empty.
+  # Knobs are read at import; a fraction <= 0 (or cap <= 0) disables the
+  # limiter. Forwarded as a FAMILY so tuning/disable stay env flips at
+  # relaunch, not rebuilds (the runner env is an allow-list — unforwarded
+  # knobs are silently absent).
+  [ -n "${EXO_REASONING_BUDGET_FRACTION:-}" ] && EXO_ENV="$EXO_ENV EXO_REASONING_BUDGET_FRACTION=$EXO_REASONING_BUDGET_FRACTION"
+  [ -n "${EXO_REASONING_BUDGET_MAX_TOKENS:-}" ] && EXO_ENV="$EXO_ENV EXO_REASONING_BUDGET_MAX_TOKENS=$EXO_REASONING_BUDGET_MAX_TOKENS"
   # DSV41_INDEXER_QSPLIT: split the indexer's QUERY side across the 2 TP ranks
   # (mlx_lm deepseek_v41/indexer.py + attention.py, default OFF in the engine).
   # Each rank scores / top-ks / emits half the chunk's query rows; the KEY side

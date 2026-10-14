@@ -126,6 +126,12 @@ KV_ALLOWLIST: frozenset[str] = frozenset(
         # a turn and roll the session back, so its presence changes what survives
         # to a park (allowlisted by policy default -- it is on the decode path).
         "exo.worker.engines.mlx.dsv41.degeneration",
+        # Reasoning-budget limiter (guard PHASE 2): it cuts a round mid-batch and
+        # rolls the cache back to the committed prefix, then forces the think-END
+        # delimiter on the next round, so it is on the decode path and can change
+        # what survives to a park (allowlisted by policy default, same rationale
+        # as the loop-guard above).
+        "exo.worker.engines.mlx.dsv41.reasoning_budget",
         # --- exo disaggregated wire (KV serialization/transport) ----------------
         "exo.worker.engines.mlx.disaggregated.adapter",  # the byte codec park uses verbatim (bf16 bitcast)
         "exo.worker.engines.mlx.disaggregated.client",  # decodes/injects composite KV from the wire
