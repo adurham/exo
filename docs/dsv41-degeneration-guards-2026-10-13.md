@@ -376,5 +376,17 @@ and the bounded dump fired immediately:
 `dsv41-degeneration-guard-token-20261013-224154-5634.json` (140 ids; digest `fb0de5b4`;
 trailing 6x id 51406 = the repeated token).
 
-Next (separate user-gated relaunch): flip to the armed default — relaunch WITHOUT
-`EXO_LOOP_DETECT_ACTION` so the runner env's engine default `error` arms termination.
+## LIVE — STAGE 2 (ARMED) (2026-10-13 22:53 CDT)
+
+Flipped via a relaunch WITHOUT `EXO_LOOP_DETECT_ACTION` (engine default `error`), same
+construct rev. Live evidence:
+- Both ranks' startup banners: `EXO_LOOP_DETECT_ACTION=error`, matching digests (633711af).
+- Runner env: the ACTION var is absent from the allow-list-forwarded env on both nodes
+  (engine default in effect, as intended).
+- Output identity vs the baseline: byte-identical (sha `6bc9214ced408ec6`).
+- ERROR-MODE FIRE (deliberate repetition probe): `DEGENERATION DETECTED ... action=error
+  guard_env_digest=633711af` logged on BOTH ranks; the turn TERMINATED at the detection
+  point — `obs turn-end ... committed=144 emitted=143 elapsed=5.1s reason=degeneration-error`
+  (warn mode ran the same probe to 401 tokens / 11s); the client received a clean failure
+  in ~5s: 'Generation terminated: repetition-loop degeneration detected ... Failing the
+  turn cleanly so it can be retried.'
