@@ -43,7 +43,7 @@ def t_chunk(cache, rows, reps=3):
     for _ in range(reps):
         from mlx_lm.models.deepseek_v41 import spec as SP
         pos = cache.offset
-        sn = SP.snap(cache, pos)
+        sn = SP.snap(cache, pos, rows)       # the chunk forward writes `rows` rows
         s = time.perf_counter()
         out = model(mx.array([base[:rows]]), cache, last_logit_only=True, argmax=True)
         mx.eval(out)

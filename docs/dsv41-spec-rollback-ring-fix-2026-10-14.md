@@ -6,7 +6,7 @@ touched.** Reviewer: this doc is written to be falsified — see
 
 | item | value |
 |---|---|
-| mlx-lm branch | `fix/dsv41-spec-rollback-ring-2026-10-14` — tip **08a4f45b287bddc1396abb70ad1588837fd9dab3** (pushed to `origin` = adurham/mlx-lm); the fix itself is **c4d19826118a8da823a33e0115d9ea71f933dcf9**, the bench call-site sweep 08a4f45 |
+| mlx-lm branch | `fix/dsv41-spec-rollback-ring-2026-10-14` — tip **894815ae54d7ac4ff1845d36903bc6224d9f826d** (pushed to `origin` = adurham/mlx-lm); chain: fix **c4d19826118a8da823a33e0115d9ea71f933dcf9**, bench call-site sweep `08a4f45`, sweep completion (p67 replay oracle + pW21/pW24 + the archived exo probes) `894815a` |
 | mlx-lm base | `a0573e3` (the current live pin; **not** an ancestor of `origin/main` @ 6cc9c1e — the pin is on the deploy lineage, which is the point) |
 | exo branch | `fix/dsv41-spec-rollback-ring-2026-10-14` off `a5d33b46b` (live deploy tip `deploy/next26-limiter`) — one-line call-site update + this doc. Branch tip = the commit carrying this file. |
 | bug source | `docs/dsv41-state-machinery-audit-2026-10-14.md` M1 (`audit/dsv41-state-machinery-2026-10-14` @ c1841c287) |
@@ -120,6 +120,53 @@ what makes the span check pass. Sweep is mechanical: anchors asserted unique per
 file, all 15 files compile, `grep -rn "SP.snap(cache, pos)" bench` is empty, ruff
 12 errors before and 12 after (zero NEW). **They were not executed** (model
 package dirs; pU4/pU6/pU7/pU8 also need the cluster hostfile).
+
+### Sweep completion (mlx-lm commit 894815a) — the audit's one required change
+
+The adversarial audit found 08a4f45's grep covered only `bench/`, leaving three
+stale old-API call sites. All are now fixed (commit `894815a`, mlx-lm):
+
+| file:line | old call | new call | why this width |
+|---|---|---|---|
+| `tests/p67_serve.py:571` | `SP.snap(c, off)` | `SP.snap(c, off, len(rows))` | the replay loop's `rows` is the recorded chunk and the forward fed two lines below is `rows[None]`, i.e. exactly `len(rows)` rows — exact span, replay semantics unchanged. **This is the audit's required change.** |
+| `benchmarks/dsv41/pW21_whathelps.py:148,155` | `SP.snap(cache, pos)` | `SP.snap(cache, pos, 1)` | arm E snapshots before a single-token `step` (`model(nxt[None], ...)`, `nxt` shape `(1,)`) then rolls back to `pos`. Write width 1. |
+| `benchmarks/dsv41/pW24_absorb.py:87` | `SP.snap(cache, pos)` | `SP.snap(cache, pos, 1)` | arm `warmstep`: same single-token throwaway step + rollback. Write width 1. |
+
+Sweep method (so the "all callers" claim is auditable): an AST pass over both
+repos that reports every `Call` whose callee attribute or name is
+`snap`/`rollback`/`stashes`/`carries` — aliases and wrapped lines cannot hide a
+stale site the way a fixed-spelling grep can. Post-sweep, **zero** `snap(` call
+sites anywhere carry fewer than 3 positional args (80 call sites in mlx-lm, 28 in
+exo). The lone 1-argument `rollback(` in exo is
+`mlx/speculative/mtp_batch_generator.py:346` `c.rollback(n_accepted)` — a
+cache-object method of the generic MTP generator, unrelated to `spec.rollback`.
+
+### The five archived exo bench scripts — updated (path chosen: update)
+
+The five archived exo probes that still called `SP.snap(cache, pos)`:
+`docs/benchmarks/phase16-dsv41-dspark-spec-2026-09-28/scripts/p56_spec.py`,
+`phase17-dsv41-verify-cost-2026-09-28/scripts/p48_bench.py`,
+`phase17-dsv41-verify-cost-2026-09-28/scripts/p56_spec.py`,
+`phase18-dsv41-adaptive-gamma-2026-09-28/scripts/p63_spec2.py`,
+`phase21-dsv41-context-scaling-2026-09-29/scripts/p66_ctxscale.py`.
+
+**Chosen path: update them (not leave + document).** The correct argument is
+unambiguous at every site from the script's own context — each snapshot sits
+directly above the forward whose width it must cover:
+
+| file:line | new call | width source |
+|---|---|---|
+| phase16/17 `p56_spec.py:148`, phase18 `p63_spec2.py:148` | `SP.snap(cache, pos, vin.shape[1])` | `vin = mx.concatenate([nxt.reshape(1,1), d], axis=1)` on the line above; `= 1 + gamma` |
+| phase16/17 `p56_spec.py:184`, phase18 `p63_spec2.py:184` | `SP.snap(cache, pos, R)` | `vin = mx.array([[int(nxt.item())] * R], ...)` on the line above (the `vcost` sweep) |
+| phase17 `p48_bench.py:116` | `SP.snap(cache, pos, ROWS)` | `ROWS = int(os.environ.get("P48_ROWS", "1"))`; the branch is `if ROWS > 1:` and feeds `[chunk]` of length `ROWS` |
+| phase21 `p66_ctxscale.py:46` | `SP.snap(cache, pos, rows)` | `t_chunk(cache, rows, ...)` feeds `mx.array([base[:rows]])` on the next line |
+
+Rationale: these are archived records, and fail-loud on a stale API is acceptable
+for an archive — but an unambiguous one-argument change keeps the archive
+*executable* at no interpretive risk, which is strictly better than leaving five
+known-broken scripts in-tree. They are still **not executed here** (they need the
+model package dirs; the pU4/pU6/pU7/pU8-class probes also need the cluster
+hostfile): compile-checked (`py_compile`) and reviewed-by-anchor only.
 
 ## 3. The invariant, stated exactly
 
@@ -323,6 +370,13 @@ call site cannot move it; say so rather than implying a type gate passed.
   package dirs, and `pU4`/`pU6`/`pU7`/`pU8` also need the cluster hostfile. Only
   compile-checked + reviewed-by-anchor. If a probe's rollback span were wrong, the
   new span check would raise rather than corrupt — but that path is untested here.
+* **The sweep-completion edits were not executed either**: `tests/p67_serve.py` is
+  a GPU replay oracle (needs the EXL3 model package dirs and, for `P67_HEAD=real`,
+  ~7.3 GB of DSpark-head weights) so it cannot run on this Mac; `pW21`/`pW24` and
+  the five archived exo probes likewise need the model dirs. All were
+  `py_compile`-checked; the p67 edit is a one-argument addition (`len(rows)`) at
+  the exact call site, and the archived-probe edits are one-argument additions
+  whose value is copied from the forward on the adjacent line.
 * **Not a deploy.** The exo call-site change and this doc are on a branch. Landing
   it live requires a deploy-branch assembly + relaunch, which is out of scope
   here.
