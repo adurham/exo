@@ -475,7 +475,10 @@ def _one_round(
     verify_in = mx.concatenate(
         [anchor.reshape(1, 1), drafted.reshape(1, gamma)], axis=1
     )
-    snapshot = spec.snap(cache, position)
+    # 1 + gamma: the verify forward feeds the anchor plus EVERY drafted row, and
+    # the snapshot must cover the ring slots of all of them or a rejection cannot
+    # put the overwritten slots back (spec.snap/rollback).
+    snapshot = spec.snap(cache, position, 1 + gamma)
     if logprobs:
         logits, taps, lp = model(verify_in, cache, return_taps=True, argmax=True,
                                  logprobs=logprobs)
