@@ -155,6 +155,29 @@ class FakeTokenizer:
     def think_end_tokens(self) -> tuple[int, ...] | None:
         return self.__dict__.get("_think_end_tokens")
 
+    # The single-token id properties the real ``TokenizerWrapper`` exposes (and
+    # that ``safe_think_token_id`` reads): None when the marker is unresolved,
+    # ValueError when it tokenizes to more than one vocab token -- exactly the
+    # wrapper's contract, so the limiter's "no single-token delimiter => disabled"
+    # fallback is exercised for real.
+    @property
+    def think_start_id(self) -> int | None:
+        tokens = self.__dict__.get("_think_start_tokens")
+        if tokens is None:
+            return None
+        if len(tokens) > 1:
+            raise ValueError("The start thinking sequence is more than 1 token")
+        return tokens[0]
+
+    @property
+    def think_end_id(self) -> int | None:
+        tokens = self.__dict__.get("_think_end_tokens")
+        if tokens is None:
+            return None
+        if len(tokens) > 1:
+            raise ValueError("The end thinking sequence is more than 1 token")
+        return tokens[0]
+
     @property
     def eos_token_ids(self) -> set[int]:
         return set(self._eos_token_ids)

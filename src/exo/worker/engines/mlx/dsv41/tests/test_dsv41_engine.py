@@ -325,6 +325,9 @@ def _engine(
     tools: list[dict[str, Any]] | None = None,
     content: str = "hello",
     device_rank: int = 0,
+    enable_thinking: bool | None = None,
+    reasoning_budget_tokens: int | None = None,
+    bench: bool = False,
 ) -> tuple[Dsv41Engine, ScriptedModel, FakeTokenizer, list[Any]]:
     tokenizer = FakeTokenizer(text_of=text_of)
     model = ScriptedModel(script)
@@ -361,6 +364,9 @@ def _engine(
         images=images or [],
         use_prefix_cache=use_prefix_cache,
         logprobs=logprobs,
+        enable_thinking=enable_thinking,
+        reasoning_budget_tokens=reasoning_budget_tokens,
+        bench=bench,
     )
     task = TextGeneration(
         task_id=TaskId("task-1"),
@@ -454,8 +460,16 @@ def test_generation_stops_on_eos_before_max_tokens():
 
 
 def test_max_output_tokens_stops_the_turn_with_length():
+    # A NON-thinking turn (enable_thinking=False), so the reasoning-budget limiter
+    # is inapplicable and the max_output_tokens cap is what this test exercises --
+    # with thinking on and a 2-token cap the limiter (budget = int(2 * 0.75) = 1)
+    # would force think_end after the first token, which is correct but not what
+    # this test is about (see test_dsv41_reasoning_budget.py).
     engine, _model, _tokenizer, _events = _engine(
-        [34, 35, 36, 34, 35], text_of=ANSWER_TEXT, max_output_tokens=2
+        [34, 35, 36, 34, 35],
+        text_of=ANSWER_TEXT,
+        max_output_tokens=2,
+        enable_thinking=False,
     )
     chunks = _drain(engine)
     # Two tokens from the first round, then the cap truncates the second round's

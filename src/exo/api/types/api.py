@@ -284,6 +284,12 @@ class ChatCompletionRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     reasoning_effort: ReasoningEffort | None = None
     enable_thinking: bool | None = None
+    # Optional client cap on the reasoning phase: how many tokens a still-open
+    # reasoning block may run before the serve path forces a clean end-of-thinking
+    # transition (the degeneration guard's reasoning-budget limiter). Omitted =>
+    # the engine default applies. The wire field a client sets; carried through to
+    # TextGenerationTaskParams unchanged.
+    reasoning_budget_tokens: int | None = None
     min_p: float | None = None
     repetition_penalty: float | None = None
     repetition_context_size: int | None = None

@@ -83,6 +83,7 @@ from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
     DEGENERATION_ERROR_TEXT,
+    REPETITION_LOOP_ERROR_CODE,
     DegenerationGuard,
     LoopAction,
     LoopHit,
@@ -99,7 +100,12 @@ from exo.worker.engines.mlx.dsv41.errors import (
 )
 from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
-from exo.worker.engines.mlx.dsv41.output import dsv41_output_parser
+from exo.worker.engines.mlx.dsv41.output import _starts_in_thinking, dsv41_output_parser
+from exo.worker.engines.mlx.dsv41.reasoning_budget import (
+    ReasoningBudgetLimiter,
+    budget_tokens_from_request,
+    make_reasoning_budget_limiter,
+)
 from exo.worker.engines.mlx.dsv41.rounds import (
     _cache_capacity,
     _final_response,
@@ -125,7 +131,10 @@ from exo.worker.engines.mlx.dsv41.vision import (
     render_prompt,
     splice_embeddings,
 )
-from exo.worker.engines.mlx.generator.generate import PrefillCancelled
+from exo.worker.engines.mlx.generator.generate import (
+    PrefillCancelled,
+    safe_think_token_id,
+)
 from exo.worker.engines.mlx.utils_mlx import apply_chat_template, get_coord_group
 from exo.worker.runner.bootstrap import logger
 
@@ -1094,10 +1103,44 @@ class Dsv41Engine(Engine):
         anchor_lp: list[Any] = []
         _row_logprobs(turn.anchor_logits, lp_k, anchor_lp)
 
+        # ── reasoning-budget limiter (PHASE 2 of the degeneration guard) ──
+        # The generic MLX path forces a clean end-of-thinking transition once a
+        # still-open reasoning block has run for 0.75 x the generation budget
+        # (generate.make_reasoning_budget_limiter), so a self-doubt loop cannot
+        # consume the whole max_tokens budget and leave the answer channel empty.
+        # This engine has no logits-processor pipeline (its round argmaxes a whole
+        # verify batch at once), so its round-batched port
+        # (dsv41/reasoning_budget.py) is threaded into _rounds/_one_round instead.
+        # Skipped for bench requests (parity with the generic call site: bench bans
+        # EOS to force a fixed decode length, so an early think_end would only
+        # perturb what bench exists to measure), and whenever the tokenizer exposes
+        # no single-token think delimiters or the budget resolves <= 0.
+        limiter: ReasoningBudgetLimiter | None = None
+        if not params.bench:
+            limiter = make_reasoning_budget_limiter(
+                think_start_id=safe_think_token_id(tokenizer, "think_start_id"),
+                think_end_id=safe_think_token_id(tokenizer, "think_end_id"),
+                budget_tokens=budget_tokens_from_request(
+                    params.reasoning_budget_tokens, max_tokens
+                ),
+                starts_in_thinking=_starts_in_thinking(prompt, tokenizer),
+            )
+        if limiter is not None:
+            # The anchor IS the first generated token, and the generic limiter
+            # counts it too -- feed it before the first round so the reasoning
+            # window starts where the model's does (never inferred from markers).
+            limiter.feed([anchor])
+            logger.info(
+                f"[DSV41] reasoning-budget limiter armed turn={task_id}: "
+                f"budget={limiter.budget_tokens} think_start={limiter.think_start_id} "
+                f"think_end={limiter.think_end_id} "
+                f"starts_in_thinking={limiter.starts_in_thinking}"
+            )
+
         def committed_tokens() -> Iterator[tuple[int, Any]]:
             yield anchor, (anchor_lp[0] if anchor_lp else None)
             for batch, lps in self._rounds(
-                session, anchor, max_tokens - 1, logprobs=lp_k
+                session, anchor, max_tokens - 1, logprobs=lp_k, limiter=limiter
             ):
                 produced.extend(batch)
                 for i, t in enumerate(batch):
@@ -1211,6 +1254,13 @@ class Dsv41Engine(Engine):
                             reason=("error" if guard_action == "error" else "stop"),
                             task_id=task_id,
                             reused_tokens=turn.reused_tokens,
+                            # Structured, classifiable code on the clean-fail so a
+                            # client can react without string-matching the message.
+                            error_code=(
+                                REPETITION_LOOP_ERROR_CODE
+                                if guard_action == "error"
+                                else None
+                            ),
                             mtp_cycles=self._spec_drafted,
                             mtp_accepted=self._spec_accepted,
                         )
@@ -1513,7 +1563,13 @@ class Dsv41Engine(Engine):
         return turn, anchor
 
     def _rounds(
-        self, session: Any, anchor: int, max_tokens: int, *, logprobs: int = 0
+        self,
+        session: Any,
+        anchor: int,
+        max_tokens: int,
+        *,
+        logprobs: int = 0,
+        limiter: "ReasoningBudgetLimiter | None" = None,
     ) -> Iterator[tuple[list[int], list[Any]]]:
         """Decode rounds from the anchor; yields each round's committed tokens
         and (when ``logprobs`` > 0) their log-prob entries.
@@ -1521,6 +1577,14 @@ class Dsv41Engine(Engine):
         Stops once ``max_tokens`` tokens after the anchor are committed or a
         round commits EOS. A round's whole batch is yielded: the cache already
         holds its rows (the emitter applies EOS / stop / the cap).
+
+        ``limiter`` is the per-request reasoning-budget limiter (see
+        ``dsv41/reasoning_budget.py``). ``_one_round`` admits each round's batch
+        through it, which may CUT the batch short at the reasoning-budget
+        threshold; the limiter then latches ``next_force``, so the FOLLOWING round
+        steps plainly and emits the forced ``think_end`` (the cold start the cut
+        requires). Both ranks compute the same latch from byte-identical committed
+        ids, so the two stay in step with no collective.
         """
         head = self.loaded.head if self.speculative else None
         policy = (
@@ -1530,6 +1594,10 @@ class Dsv41Engine(Engine):
         )
         n = 0
         token = anchor
+        # The anchor is fed to the limiter by the caller (_generate) before the
+        # first round, so it can ALREADY have latched a force (a budget small enough
+        # to be spent by the anchor itself): honour it on the very first round.
+        force: int | None = limiter.next_force if limiter is not None else None
         while n < max_tokens:
             active = self._active
             self._check_cancel(active.task.task_id if active is not None else None)
@@ -1544,6 +1612,8 @@ class Dsv41Engine(Engine):
                 draft_state=session.draft_state,
                 logprobs=logprobs,
                 lp_out=lps if logprobs else None,
+                limiter=limiter,
+                force_think_end=force,
             )
             # Cumulative spec counters (deltas across requests = live
             # acceptance rate; _accepted == _gamma means a fully-accepted round).
@@ -1552,8 +1622,19 @@ class Dsv41Engine(Engine):
                 self._spec_accepted += int(_accepted)
                 self._spec_drafted += int(_gamma)
             batch = [int(t) for t in committed]
+            if not batch:
+                # A round ALWAYS commits >= 1 token: the limiter admits the
+                # threshold token itself and its forced round emits one. An empty
+                # round would spin this loop, so fail loud rather than hang.
+                raise RuntimeError(
+                    "DSV4.1: a decode round committed no tokens "
+                    "(reasoning-budget limiter invariant violated)"
+                )
             n += len(batch)
             token = batch[-1]
+            # The limiter latches the force for the round AFTER the one that
+            # tripped the budget; pass it in on the next iteration.
+            force = limiter.next_force if limiter is not None else None
             # Decode-side ladder: the draft window is in step with the cache at
             # a round boundary (``_one_round`` appends exactly the accepted
             # rows), so the same cadence guard applies. Without this, an

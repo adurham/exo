@@ -50,6 +50,9 @@ from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids a circular import)
     from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
+    from exo.worker.engines.mlx.dsv41.reasoning_budget import (
+        ReasoningBudgetLimiter,
+    )
 
 #: Fallback cache capacity when neither the instance cap nor the checkpoint's
 #: ``max_seq_len`` is available. Deliberately small: a wrong-large value would
@@ -195,6 +198,7 @@ def _final_response(
     logprob: Any = None,
     mtp_cycles: int = 0,
     mtp_accepted: int = 0,
+    error_code: str | None = None,
 ) -> GenerationResponse:
     """The terminal response for a request, with usage and stats attached.
 
@@ -207,6 +211,11 @@ def _final_response(
     ``mtp_cycles``/``mtp_accepted`` are the session-cumulative speculative
     counters (same meaning as the batch-generator's ``mtp_*_cumulative``:
     deltas across successive requests give the live acceptance rate).
+
+    ``error_code`` is the OPTIONAL OpenAI-style structured code carried on an
+    ``finish_reason="error"`` terminal (``map_responses_to_chunks`` copies it
+    onto the ``ErrorChunk``). None for an ordinary terminal, so clients that
+    only read the message are unaffected.
     """
     del task_id, prefill_tokens  # the split is reported through usage/stats below
     hit = "partial" if reused_tokens > 0 else "none"
@@ -237,6 +246,7 @@ def _final_response(
         top_logprobs=top,
         finish_reason=reason,
         stats=stats,
+        error_code=error_code,
         usage=Usage(
             prompt_tokens=prompt_tokens,
             completion_tokens=generated,
@@ -336,6 +346,8 @@ def _one_round(
     draft_state: Any | None = None,
     logprobs: int = 0,
     lp_out: list[Any] | None = None,
+    limiter: "ReasoningBudgetLimiter | None" = None,
+    force_think_end: int | None = None,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -349,6 +361,16 @@ def _one_round(
     :func:`rows_fed` so its token history can be kept in step with the cache
     across the rollback.
 
+    ``limiter`` (the round-batched reasoning-budget limiter, see
+    ``dsv41/reasoning_budget.py``): when set, this round's committed batch is
+    ADMITTED through it and may be cut short at the reasoning-budget threshold
+    (the tokens past the cut, including the round's bonus token, are dropped and
+    the cache/draft rollback below follows the SHORTENED batch). ``force_think_end``
+    (a token id) makes THIS round a plain single-row STEP -- no speculative draft,
+    the cold start the limiter requires after a cut -- whose output is overridden
+    to that id. The forced token's own KV is deliberately NOT computed here: the
+    NEXT round feeds it as its anchor (see the module docstring's off-by-one note).
+
     Draft-context priming. The DSpark head drafts from its own window of
     context taps, and the harnesses prime it from the PREFILL forward's taps
     (``return_taps=True``). This engine's prefill deliberately does not carry
@@ -361,17 +383,48 @@ def _one_round(
     """
     started = time.perf_counter()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
+
+    if force_think_end is not None:
+        # FORCED round: one plain greedy row whose output is the think-END
+        # delimiter. It is a COLD START (no DSpark draft) on purpose -- the draft
+        # window conditions on target hidden states, and the round that tripped the
+        # budget was cut mid-batch, so the first post-force round re-primes rather
+        # than drafting from context a truncated forward no longer reflects.
+        _ensure_capacity_for_round(cache, 1)
+        if head is None:
+            model(anchor, cache, last_logit_only=True)
+        else:
+            _, taps = model(anchor, cache, last_logit_only=True, return_taps=True)
+            taps_ids = list(model.args.dspark_target_layer_ids)
+            cat = mx.concatenate([taps[layer] for layer in taps_ids], axis=-1)
+            if draft_state is None:
+                draft_state = engine._draft_windows.get(_DRAFT_KEY)
+            if draft_state is None:
+                draft_state = head.make_cache(1)
+                engine._draft_windows[_DRAFT_KEY] = draft_state
+            # Keep the draft window in step with the committed prefix (this row's
+            # tap is the anchor the forced token sits on) -- one row, no draft.
+            head.append_ctx(cat[:, :1], draft_state)
+        if limiter is not None:
+            # Feed the forced token so the phase CLOSES the block and next_force is
+            # cleared; it does not re-trigger (think_end is always admissible).
+            limiter.feed([int(force_think_end)])
+        return [int(force_think_end)], (time.perf_counter() - started) * 1e3, 0, 1
+
     if head is None:
         # Plain greedy: one row in, one token out. Grow for that row first.
         _ensure_capacity_for_round(cache, 1)
         logits = model(anchor, cache, last_logit_only=True)
         next_token = int(mx.argmax(logits.reshape(-1), axis=-1).item())
         _row_logprobs(logits, logprobs, lp_out)
-        return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
+        committed = [next_token]
+        if limiter is not None:
+            committed = limiter.feed(committed)
+        return committed, (time.perf_counter() - started) * 1e3, 1, 1
 
     from mlx_lm.models.deepseek_v41 import spec
 
-    taps_ids: list[int] = list(model.args.dspark_target_layer_ids)
+    taps_ids = list(model.args.dspark_target_layer_ids)
 
     def tapcat(taps: dict[int, mx.array]) -> mx.array:
         return mx.concatenate([taps[layer] for layer in taps_ids], axis=-1)
@@ -397,7 +450,10 @@ def _one_round(
             "drafting from the next round (the prefill forward carries no taps "
             "-- see rounds._one_round)."
         )
-        return [next_token], (time.perf_counter() - started) * 1e3, 1, 1
+        committed = [next_token]
+        if limiter is not None:
+            committed = limiter.feed(committed)
+        return committed, (time.perf_counter() - started) * 1e3, 1, 1
 
     gamma = int(policy.next()) if policy is not None else 1
     # Speculative verify feeds the anchor + EVERY drafted row in ONE forward
@@ -445,13 +501,19 @@ def _one_round(
     # round then commits what it did produce plus the target's answer for the next
     # position, so the decoded count still advances by one.
     committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
+    if limiter is not None:
+        # Reasoning-budget cut: admit only up to the threshold. A SHORTER batch
+        # means the rollback target and the draft-window append below both follow
+        # the shortened committed prefix (the tokens past the cut -- including the
+        # bonus -- are dropped, never committed, and rolled out of the cache).
+        committed = limiter.feed(committed)
     if lp is not None and lp_out is not None:
         # committed[i] == target[i] (accepted drafts match the target), so row
         # i of the verify forward carries committed token i's log-probs.
         _rows_logprobs(lp, len(committed), lp_out)
-    committed_position = position + accepted + 1
+    committed_position = position + len(committed)
     spec.rollback(cache, snapshot, committed_position, stashes)
-    head.append_ctx(tapcat(taps)[:, : accepted + 1], draft_state)
+    head.append_ctx(tapcat(taps)[:, : len(committed)], draft_state)
     return (
         committed,
         (time.perf_counter() - started) * 1e3,

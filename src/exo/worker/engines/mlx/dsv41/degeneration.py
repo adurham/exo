@@ -101,6 +101,7 @@ __all__ = [
     "DEFAULT_LOOP_ACTION",
     "DEGENERATION_ERROR_TEXT",
     "DUMP_TOKEN_LIMIT",
+    "REPETITION_LOOP_ERROR_CODE",
     "DegenerationGuard",
     "LoopAction",
     "LoopHit",
@@ -131,6 +132,13 @@ LoopAction = Literal["error", "stop", "warn"]
 #: The diagnostic that REPLACES the degenerate partial under the "error" action
 #: (re-exported so ``engine.py`` has one import seam for the whole guard).
 DEGENERATION_ERROR_TEXT = _DEGENERATION_ERROR_TEXT
+
+#: Structured OpenAI-style error code carried on a guard clean-fail ``ErrorChunk``
+#: (``finish_reason="error"``). A client can classify a degeneration kill WITHOUT
+#: string-matching the human message; the message itself is unchanged. Emitted
+#: through ``_final_response(error_code=...)`` -> ``map_responses_to_chunks`` ->
+#: ``ErrorChunk.error_code``, the same plumbing the context-length refusal uses.
+REPETITION_LOOP_ERROR_CODE = "repetition_loop"
 
 #: Committed token ids dumped to the log dir when a turn is cut short by the
 #: guard or by a client cancel. Bounded on purpose: the dump exists so the next
