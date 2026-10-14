@@ -159,3 +159,36 @@ cd ~/repos/exo && EXO_TARGET_BRANCH=deploy/next27-ringfix ./start_cluster.sh
   so it cannot run on this Mac. Its edit is a one-argument addition (`len(rows)`) at
   the exact call site.
 - **The 15 swept pU/pV probes remain unexecuted** (carried from the fix buildnote).
+
+## Addendum (same day, later): gate-fold — mlx-lm pin bump + 3 default-OFF launcher lines
+
+The final external review approved the direction but required the deploy gates be
+folded in before asking the owner for relaunch approval. Gate 1 (a TP=2
+rank-consistency check on the rollback path) needs a tiny debug hook in
+`spec.rollback`, so the mlx-lm fix tip advanced and the construct gained a second
+commit:
+
+- **mlx-lm fix tip:** `894815a` -> **`2071ba4532264e4e377408a5dd408776b1ed5cfa`**
+  (`feat(dsv41): env-gated TP=2 rank-consistency hash on the spec rollback path`,
+  pushed to `adurham/mlx-lm`, branch `fix/dsv41-spec-rollback-ring-2026-10-14`).
+  Adds `spec.rollback_hash_enabled()` (gated on `EXO_DSV41_SPEC_ROLLBACK_HASH`,
+  default OFF, zero cost when off) and one `[DSV41-RB-HASH] rank=… start=… target=…
+  rows=… ring=… latents=… engram=… combined=…` line per **rejected** round, plus 12
+  focused tests (the ring suite is now **29 passed**; the mlx-lm scoped suite is
+  still **67 passed** at the new tip).
+- **Construct commit 2:** `mlx-lm` gitlink + `uv.lock:1501` -> `2071ba4`, **plus a
+  3-line default-OFF launcher allow-list addition** to `start_cluster.sh`
+  (`EXO_DSV41_SPECULATIVE`, `EXO_DSV41_SPEC_ROLLBACK_HASH`,
+  `EXO_DSV41_SPEC_ROLLBACK_TURN`).
+
+  **Why the launcher lines (a departure from the first commit's "no launcher
+  change"):** the runner env is an allow-list, so a knob not added to `EXO_ENV`
+  never reaches the runner. **`EXO_DSV41_SPECULATIVE` is the DSv4.1 engine's OWN
+  spec master switch (`builder._SPEC_ENV`) and was NOT forwarded** — the generic
+  `EXO_SPECULATIVE` (which *is* forwarded, line ~2103) is **ignored by this
+  engine**, so the Gate-2 spec-OFF arm could not be launched without this line.
+  All three additions are `[ -n … ]`-guarded, so a launch with none of them set is
+  byte-identical to `next26`. `zsh -n start_cluster.sh` clean.
+
+- **Construct tip:** `827e30212` -> the second commit (this addendum's commit).
+  Rollback target is unchanged (`deploy/next26-limiter` @ `a5d33b46b`).

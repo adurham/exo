@@ -2854,6 +2854,22 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_SHUTDOWN_DRAIN_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_DRAIN_S=$EXO_DSV41_SHUTDOWN_DRAIN_S"
   [ -n "${EXO_DSV41_SHUTDOWN_PARK_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_PARK_S=$EXO_DSV41_SHUTDOWN_PARK_S"
   [ -n "${EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S=$EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S"
+  # next27-ringfix GATE knobs. BOTH default OFF: with neither set, a launch is
+  # byte-identical to next26. They are forwarded so the deploy gate procedures
+  # are EXECUTABLE on the deployed tip -- the runner env is an allow-list, so a
+  # var not added here never reaches the runner (the read-at-code /
+  # dead-in-deployment bug class this launcher repeatedly warns about).
+  #   EXO_DSV41_SPECULATIVE   -- the DSv4.1 engine's OWN spec master switch
+  #       (builder._SPEC_ENV). The generic EXO_SPECULATIVE above is IGNORED by
+  #       this engine; setting EXO_SPECULATIVE=0 alone does NOT make DSv4.1
+  #       greedy. =0 skips the DSpark draft head and serves plain greedy decode
+  #       (the Gate-2 spec-OFF arm). Read at engine build, so it needs a
+  #       relaunch to change.
+  #   EXO_DSV41_SPEC_ROLLBACK_HASH / _TURN -- arm the mlx-lm TP=2 rank-
+  #       consistency hash on the rollback path (Gate 1).
+  [ -n "${EXO_DSV41_SPECULATIVE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SPECULATIVE=$EXO_DSV41_SPECULATIVE"
+  [ -n "${EXO_DSV41_SPEC_ROLLBACK_HASH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SPEC_ROLLBACK_HASH=$EXO_DSV41_SPEC_ROLLBACK_HASH"
+  [ -n "${EXO_DSV41_SPEC_ROLLBACK_TURN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SPEC_ROLLBACK_TURN=$EXO_DSV41_SPEC_ROLLBACK_TURN"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).
