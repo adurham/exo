@@ -6,9 +6,9 @@ touched.** Reviewer: this doc is written to be falsified — see
 
 | item | value |
 |---|---|
-| mlx-lm branch | `fix/dsv41-spec-rollback-ring-2026-10-14` @ **c4d19826118a8da823a33e0115d9ea71f933dcf9** (pushed to `origin` = adurham/mlx-lm) |
+| mlx-lm branch | `fix/dsv41-spec-rollback-ring-2026-10-14` — tip **08a4f45b287bddc1396abb70ad1588837fd9dab3** (pushed to `origin` = adurham/mlx-lm); the fix itself is **c4d19826118a8da823a33e0115d9ea71f933dcf9**, the bench call-site sweep 08a4f45 |
 | mlx-lm base | `a0573e3` (the current live pin; **not** an ancestor of `origin/main` @ 6cc9c1e — the pin is on the deploy lineage, which is the point) |
-| exo branch | `fix/dsv41-spec-rollback-ring-2026-10-14` off `a5d33b46b` (live deploy tip `deploy/next26-limiter`) — one-line call-site update + this doc |
+| exo branch | `fix/dsv41-spec-rollback-ring-2026-10-14` off `a5d33b46b` (live deploy tip `deploy/next26-limiter`) — one-line call-site update + this doc. Branch tip = the commit carrying this file. |
 | bug source | `docs/dsv41-state-machinery-audit-2026-10-14.md` M1 (`audit/dsv41-state-machinery-2026-10-14` @ c1841c287) |
 | worktrees used | `~/.hermes/cache/scratch/mlx-lm-ringfix` (mlx-lm), `~/.hermes/cache/scratch/exo-ringfix-wt` (exo). Both main checkouts left clean/untouched. |
 
@@ -105,6 +105,21 @@ consumes `spec.rollback`/`spec.snap`/`spec.stashes`** (grep of
 `src/exo/worker/engines/mlx/dsv41/`: only `rounds.py`; `park.py:711` reads the
 *carry row* format, which is unchanged). The exo side is a call-site consistency
 change, not a second fix.
+
+### Call-site sweep (mlx-lm commit 08a4f45)
+
+15 offline bench probes also called `SP.snap(cache, pos)` with two arguments and
+would have failed the new required-argument contract: `bench/pDC_model_ab.py`,
+`bench/pU0_memprobe.py`, `pU2_divergence`, `pU3_decompose`, `pU4_collectives`,
+`pU5_identity`, `pU6_collectives`, `pU7_two_rank`, `pU8_census`, `pV2_census`,
+`pV4_verify`, `pV6_phases`, `pV7_attrib`, `pV13_parity`, `pV18_attn`. Each now
+passes the width of the chunk it actually feeds (`vin.shape[1]`, `len(chunk)`, or
+`R`); `pU6`/`pU7` snap *after* their own verify forward (they measure rollback
+cost, not state) so they pass `1 + GAMMA`, which is that round's row count and
+what makes the span check pass. Sweep is mechanical: anchors asserted unique per
+file, all 15 files compile, `grep -rn "SP.snap(cache, pos)" bench` is empty, ruff
+12 errors before and 12 after (zero NEW). **They were not executed** (model
+package dirs; pU4/pU6/pU7/pU8 also need the cluster hostfile).
 
 ## 3. The invariant, stated exactly
 
@@ -304,6 +319,10 @@ call site cannot move it; say so rather than implying a type gate passed.
 * **`origin/main` (6cc9c1e) does not contain this lineage** (`a0573e3` is not an
   ancestor of it), so no rebase/duplication check against main was possible; the
   branch is deliberately based on the live pin.
+* **The swept bench probes (15 files) were not executed.** They need the model
+  package dirs, and `pU4`/`pU6`/`pU7`/`pU8` also need the cluster hostfile. Only
+  compile-checked + reviewed-by-anchor. If a probe's rollback span were wrong, the
+  new span check would raise rather than corrupt — but that path is untested here.
 * **Not a deploy.** The exo call-site change and this doc are on a branch. Landing
   it live requires a deploy-branch assembly + relaunch, which is out of scope
   here.
