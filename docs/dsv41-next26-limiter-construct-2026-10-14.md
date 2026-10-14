@@ -70,3 +70,19 @@ cd ~/repos/exo && EXO_TARGET_BRANCH=deploy/next26-limiter ./start_cluster.sh
 - The post-force round is a cold start; the draft window is rolled to the committed prefix
   rather than re-primed (hint-only inconsistency; the target verifies every draft).
 - `reasoning_budget_tokens` is not sent by any client yet — the env default governs.
+
+## LIVE — deployed 2026-10-14 (production = arm B)
+
+- Construct pushed: `deploy/next26-limiter` @ `248ec7a6b`; both nodes reset to it by the launcher.
+- **Arm A (test, guard OFF + phase-2 ON):** `EXO_TARGET_BRANCH=deploy/next26-limiter EXO_LOOP_DETECT=0 ./start_cluster.sh`
+  → READY (2/2); both ranks `EXO_LOOP_DETECT=0` (banner digest `7885d105`).
+- **Arm B (production, guard armed + phase-2 ON):** `EXO_TARGET_BRANCH=deploy/next26-limiter ./start_cluster.sh`
+  → READY (2/2); both ranks `EXO_LOOP_DETECT=1`, banner digest `633711af` (same values as next25 armed).
+- **Guard on/off A/B (Fable-requested verification):** four probes (3x fixed enumeration prompt + 1
+  recorded Oct-13 client request body) sent identically to both arms —
+  **all four A==B byte-identical** (content + reasoning_content + finish_reason), and 3/3 repeats
+  byte-identical WITHIN each arm. The guard's presence does not perturb non-degenerate generation;
+  the code-purity argument is now empirically closed.
+- Phase-2 limiter is live in this construct (defaults `0.75 x max_tokens`, cap 16384; knobs forwarded
+  via `EXO_REASONING_BUDGET*`); it only acts inside a still-open reasoning block past the threshold,
+  which none of the probes approached.
