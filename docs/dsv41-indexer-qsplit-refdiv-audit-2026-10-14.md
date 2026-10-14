@@ -148,7 +148,21 @@ reaches the same primitive through its strip merge. Keep `DSV41_INDEXER_TILED_IM
 frozen (already §1.3) **and** apply finding 1's mitigation if a digests-differ result
 appears in the A/B with no other explanation.
 
-**4 — NOT findings.** The `de6caa2` projection fix (structurally immune to any
+**4 — MINOR (instrumentation hazard for the A/B's own §1.1 precondition).** The per-shape
+geometry line the pre-registered A/B wants
+(`docs/dsv41-indexer-relaunch-ab-prereg-2026-10-14.md` §1.1) must report the **full
+chunk's** row count, not the calling arm's. The existing precedent in the module,
+`_log_hier_geometry(bsz, n, …)` at `indexer.py:800`, is called with the *band's* `n`, so
+on a banded rank it emits the band's `strips/indexer-layer` — a different number from the
+replicated run's for the same forward (measured: 1 vs 2 at n=78/nb=3000; 7 vs 13 at
+n=512/nb=4096). Copying that shape for the new line would make two ranks' geometry lines
+disagree for a reason that is *not* a divergence, and — worse for §3.2 — a line that
+logged the band's `n` would report `wide=0` / `route=untiled` on a rank whose actual route
+(and wide-tile engagement) was decided from `n_full` by D3. Log `n_full` (or both `n` and
+`n_full`), and log the resolved `estrip` / strip count so finding 1 is observable from the
+runner log instead of re-derived.
+
+**5 — NOT findings.** The `de6caa2` projection fix (structurally immune to any
 deterministic row-count-dependent kernel, and the pre-fix model is non-vacuously
 divergent at eps ≥ 2⁻¹⁶); the D3 route key; the D2 dtype; the padded-`all_sum`
 reconstruction (contributor disjointness, zero support outside the band, byte-exact
