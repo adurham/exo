@@ -2718,6 +2718,26 @@ for NODE in "${NODES[@]}"; do
   # engine; =0 restores the old min(512,cap) rule byte-for-byte (67/67),
   # so a rollback is an env flip at relaunch.
   [ -n "${DSV41_INDEXER_SMALLN_WIDE_TILE:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_WIDE_TILE=$DSV41_INDEXER_SMALLN_WIDE_TILE"
+  # EXO_LOOP_DETECT*: the degeneration loop-guard ported into the dsv41 engine
+  # (batch_generate.py detectors imported verbatim; knobs read at import).
+  # Context: a turn that falls into an exact token-cycle repeats forever under
+  # greedy decode -- no sampling randomness, no penalty, and (before this port)
+  # no detector in the dsv41 path at all (2026-10-13 live incident: 3m41s of
+  # unbroken repetition, killed only by the client). ACTION is the rollout
+  # knob: "warn" logs + dumps WITHOUT terminating, "error" (engine default)
+  # terminates the turn, "stop" ends it cleanly. Forwarded as a FAMILY so the
+  # staged flip (warn -> error) and any post-observation tuning are env flips
+  # at relaunch, not rebuilds. Verify live via 'ps eww' + the runner's
+  # startup guard-env banner.
+  [ -n "${EXO_LOOP_DETECT:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT=$EXO_LOOP_DETECT"
+  [ -n "${EXO_LOOP_DETECT_WINDOW:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_WINDOW=$EXO_LOOP_DETECT_WINDOW"
+  [ -n "${EXO_LOOP_DETECT_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_MAX_PERIOD=$EXO_LOOP_DETECT_MAX_PERIOD"
+  [ -n "${EXO_LOOP_DETECT_MIN_REPEATS:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_MIN_REPEATS=$EXO_LOOP_DETECT_MIN_REPEATS"
+  [ -n "${EXO_LOOP_DETECT_ACTION:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_ACTION=$EXO_LOOP_DETECT_ACTION"
+  [ -n "${EXO_LOOP_DETECT_LONG:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG=$EXO_LOOP_DETECT_LONG"
+  [ -n "${EXO_LOOP_DETECT_LONG_BLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_BLOCK=$EXO_LOOP_DETECT_LONG_BLOCK"
+  [ -n "${EXO_LOOP_DETECT_LONG_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MAX_PERIOD=$EXO_LOOP_DETECT_LONG_MAX_PERIOD"
+  [ -n "${EXO_LOOP_DETECT_LONG_MIN_REPEATS:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MIN_REPEATS=$EXO_LOOP_DETECT_LONG_MIN_REPEATS"
   # DSV41_INDEXER_QSPLIT: split the indexer's QUERY side across the 2 TP ranks
   # (mlx_lm deepseek_v41/indexer.py + attention.py, default OFF in the engine).
   # Each rank scores / top-ks / emits half the chunk's query rows; the KEY side

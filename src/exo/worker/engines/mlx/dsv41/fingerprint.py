@@ -122,6 +122,10 @@ KV_ALLOWLIST: frozenset[str] = frozenset(
         "exo.worker.engines.mlx.dsv41.load",  # TP geometry + build wiring (rank/world, layer subset)
         "exo.worker.engines.mlx.dsv41.builder",  # installs the prefill patch + engine wiring
         "exo.worker.engines.mlx.dsv41.engram",  # engram token map -> engram_ids history (KV-affecting)
+        # Degeneration loop-guard on the committed-token stream: it can terminate
+        # a turn and roll the session back, so its presence changes what survives
+        # to a park (allowlisted by policy default -- it is on the decode path).
+        "exo.worker.engines.mlx.dsv41.degeneration",
         # --- exo disaggregated wire (KV serialization/transport) ----------------
         "exo.worker.engines.mlx.disaggregated.adapter",  # the byte codec park uses verbatim (bf16 bitcast)
         "exo.worker.engines.mlx.disaggregated.client",  # decodes/injects composite KV from the wire
