@@ -81,6 +81,16 @@ from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
+from exo.worker.engines.mlx.dsv41.degeneration import (
+    DEGENERATION_ERROR_TEXT,
+    DegenerationGuard,
+    LoopAction,
+    LoopHit,
+    guard_env_digest,
+    guard_env_report,
+    loop_action,
+    write_degeneration_dump,
+)
 from exo.worker.engines.mlx.dsv41.errors import (
     Dsv41InvalidRequest,
     Dsv41UnsupportedFeature,
@@ -226,6 +236,12 @@ FENCE_HEARTBEAT_MAX_SPACING_SECONDS = 30.0
 
 #: Exhaustion marker for step()'s parser pull (the parser also yields None).
 _END = object()
+
+#: Per-request observability: how often the committed-token count + tokens/s
+#: line is emitted while a turn is generating. Deliberately wall-clock spaced
+#: (not token spaced): a degenerate loop and a healthy long generation both need
+#: to be readable from the runner log at a predictable cadence.
+OBS_RATE_INTERVAL_SECONDS = 10.0
 
 #: Canonical OpenAI error code for a request whose prompt exceeds the served
 #: window. Emitted on the wire so OpenAI-compatible clients (and Hermes'
@@ -498,6 +514,15 @@ class Dsv41Engine(Engine):
                 get_coord_group(self.group), rank=self.loaded.rank),
             rank=self.loaded.rank,
         )
+        # Degeneration-guard configuration, logged ONCE per rank at startup: the
+        # guard's verdict is a pure function of the committed token ids (which are
+        # byte-identical on both TP ranks), so the ONLY way the two ranks could
+        # disagree about whether to kill a turn is a knob that differs between the
+        # nodes -- and the launcher builds each runner's environment from an
+        # explicit allow-list, so an unlisted variable is silently absent. This
+        # line makes the EFFECTIVE values checkable (and diffable between the two
+        # runner logs) instead of assumed.
+        logger.info(guard_env_report(self.loaded.rank, self.loaded.world))
 
     def warmup(self) -> None:
         """A short real generation, to compile the EXL3/Metal kernels.
@@ -603,8 +628,7 @@ class Dsv41Engine(Engine):
             self._activate_next(output)
             if self._active is None:
                 output.extend(
-                    (task_id, CancelledResponse())
-                    for task_id in self._cancelled_tasks
+                    (task_id, CancelledResponse()) for task_id in self._cancelled_tasks
                 )
                 return iter(output)
 
@@ -956,6 +980,9 @@ class Dsv41Engine(Engine):
         session, so a follow-up turn only feeds what is new), then the engine's
         decode rounds from the prefill's anchor, then the detokenized stream.
         """
+        # Wall-clock origin for this request's observability lines (time to first
+        # committed token, the ~10 s throughput cadence, and the turn summary).
+        request_started = time.perf_counter()
         model = self.loaded.model
         tokenizer = self.loaded.tokenizer
         vision = self.vision_processor
@@ -1061,7 +1088,9 @@ class Dsv41Engine(Engine):
 
         def committed_tokens() -> Iterator[tuple[int, Any]]:
             yield anchor, (anchor_lp[0] if anchor_lp else None)
-            for batch, lps in self._rounds(session, anchor, max_tokens - 1, logprobs=lp_k):
+            for batch, lps in self._rounds(
+                session, anchor, max_tokens - 1, logprobs=lp_k
+            ):
                 produced.extend(batch)
                 for i, t in enumerate(batch):
                     yield t, (lps[i] if i < len(lps) else None)
@@ -1090,9 +1119,94 @@ class Dsv41Engine(Engine):
             else 0.0
         )
         last_tid = anchor
+        # ── per-request observability + the degeneration (repetition-loop) guard ──
+        # The guard is fed EVERY committed token, in order, as it is committed --
+        # never a draft token (an unconfirmed draft never reaches the client and
+        # must not shape the verdict) and never only a round boundary (one
+        # speculative round commits a whole batch at once, while the detectors'
+        # cycle alignment is defined over the raw committed stream). Both TP ranks
+        # commit byte-identical tokens, so this verdict is rank-invariant and the
+        # two ranks always stop together -- no extra collective is involved.
+        guard = DegenerationGuard()
+        guard_action: LoopAction = loop_action()
+
+        def log_turn_end(reason: str) -> None:
+            """One bounded summary line per request (see OBS_RATE_INTERVAL_SECONDS)."""
+            elapsed = time.perf_counter() - request_started
+            committed = len(produced)
+            rate = committed / elapsed if elapsed > 0 else 0.0
+            logger.info(
+                f"[DSV41] obs turn-end turn={task_id} committed={committed} "
+                f"emitted={emitted} elapsed={elapsed:.1f}s tok_s={rate:.1f} "
+                f"reason={reason}"
+            )
+
+        first_token_logged = False
+        last_rate_log = request_started
+        #: Committed tokens actually handed to the guard (``produced`` is extended by
+        #: a whole ROUND before its tokens are yielded, so it runs ahead of the fire
+        #: point; the dump must be the stream the guard JUDGED, not the round's tail).
+        guard_consumed = 0
         try:
             for tid, lp_entry in committed_tokens():
                 last_tid = tid
+                guard_consumed += 1
+                hit = guard.feed(tid)
+                if hit is not None:
+                    # A confirmed repetition cycle: log it (all ranks, identical
+                    # apart from the env digest), dump the tail on rank 0, and --
+                    # for a terminating action -- close the turn through the
+                    # engine's EXISTING terminal path. ``tid`` is deliberately NOT
+                    # detokenized: the token that completes the cycle is the one
+                    # token we can still not send.
+                    self._record_degeneration(
+                        hit=hit,
+                        action=guard_action,
+                        tokenizer=tokenizer,
+                        task_id=task_id,
+                        produced=produced[:guard_consumed],
+                        emitted=emitted,
+                        prompt_tokens=turn.prompt_tokens,
+                    )
+                    if guard_action in ("stop", "error"):
+                        self._abort_turn(session, keep)
+                        log_turn_end(f"degeneration-{guard_action}")
+                        yield _final_response(
+                            token=tid,
+                            text=(
+                                DEGENERATION_ERROR_TEXT
+                                if guard_action == "error"
+                                else ""
+                            ),
+                            prefill_tps=prefill_tps,
+                            prompt_tokens=turn.prompt_tokens,
+                            generated=emitted,
+                            reason=("error" if guard_action == "error" else "stop"),
+                            task_id=task_id,
+                            reused_tokens=turn.reused_tokens,
+                            mtp_cycles=self._spec_drafted,
+                            mtp_accepted=self._spec_accepted,
+                        )
+                        return
+                if not first_token_logged:
+                    first_token_logged = True
+                    logger.info(
+                        f"[DSV41] obs first-token turn={task_id} "
+                        f"latency={time.perf_counter() - request_started:.2f}s "
+                        f"(prefill {turn.prefill_seconds:.2f}s, "
+                        f"{turn.prompt_tokens} prompt tokens, "
+                        f"reuse={turn.reused_tokens})"
+                    )
+                now = time.perf_counter()
+                if now - last_rate_log >= OBS_RATE_INTERVAL_SECONDS:
+                    done = emitted + 1
+                    elapsed = now - request_started
+                    logger.info(
+                        f"[DSV41] obs progress turn={task_id} committed={done} "
+                        f"elapsed={elapsed:.1f}s "
+                        f"tok_s={(done / elapsed if elapsed > 0 else 0.0):.1f}"
+                    )
+                    last_rate_log = now
                 if tid in eos_ids:
                     final_reason = "stop"
                     break
@@ -1108,6 +1222,7 @@ class Dsv41Engine(Engine):
                     final_reason = "length"
                 if final_reason is not None:
                     self._end_turn(session, tokens_list, turn, produced, keep)
+                    log_turn_end(str(final_reason))
                     yield _final_response(
                         token=tid,
                         text=text,
@@ -1123,11 +1238,37 @@ class Dsv41Engine(Engine):
                     )
                     return
                 yield _mid_response(tid, text, task_id, as_logprob(lp_entry))
-        except BaseException:
+        except GeneratorExit:
+            # The consumer abandoned the generator (a close/GC), which is NOT a
+            # client cancel: keep the pre-existing rollback semantics but do not
+            # treat it as an incident worth dumping -- nothing was cut short.
             session.cancel()
             if not keep:
                 self._sessions.drop(session)
             raise
+        except BaseException as exc:
+            # A client cancel (or any other unwind) mid-turn: capture the
+            # committed tail before it is rolled away. This is the observability
+            # half of the incident that motivated the guard -- a runaway
+            # generation was cancelled by hand and NOTHING of its text was
+            # recorded anywhere. The reason carries the exception type so the dump
+            # is self-explanatory.
+            self._dump_short_turn(
+                produced,
+                reason=(
+                    "client-cancel"
+                    if isinstance(exc, PrefillCancelled)
+                    else f"aborted-{type(exc).__name__}"
+                ),
+                task_id=task_id,
+                generated=emitted,
+            )
+            session.cancel()
+            if not keep:
+                self._sessions.drop(session)
+            raise
+        final_reason = final_reason or ("stop" if emitted == 0 else "length")
+        log_turn_end(str(final_reason))
         self._end_turn(session, tokens_list, turn, produced, keep)
         # the stream ended on an EOS token, or on the conversation's budget
         yield _final_response(
@@ -1137,7 +1278,7 @@ class Dsv41Engine(Engine):
             prompt_tokens=turn.prompt_tokens,
             generated=emitted,
             # EOS break sets final_reason="stop"; only budget exhaustion is "length".
-            reason=final_reason or ("stop" if emitted == 0 else "length"),
+            reason=final_reason,
             task_id=task_id,
             reused_tokens=turn.reused_tokens,
             mtp_cycles=self._spec_drafted,
@@ -1145,8 +1286,12 @@ class Dsv41Engine(Engine):
         )
 
     def _end_turn(
-        self, session: Any, tokens: list[int], turn: TurnOutcome,
-        produced: list[int], keep: bool,
+        self,
+        session: Any,
+        tokens: list[int],
+        turn: TurnOutcome,
+        produced: list[int],
+        keep: bool,
     ) -> None:
         """Close a turn: history in step with the cache, checkpoint, maybe drop."""
         turn.tokens = list(produced)
@@ -1155,6 +1300,103 @@ class Dsv41Engine(Engine):
         turn.committed = True
         if not keep:
             self._sessions.drop(session)
+
+    def _abort_turn(self, session: Any, keep: bool) -> None:
+        """Roll an in-flight turn back instead of committing it.
+
+        Mirrors the engine's FAILURE path exactly (``session.cancel()`` plus the
+        drop of a one-off conversation) rather than its completion path, for the
+        one caller that exists today: a degeneration guard-fire. That is
+        deliberate. ``_end_turn`` would ``sync_history`` + ``finish(checkpoint=True)``
+        the whole (degenerate) turn, publishing a collapsed generation as a
+        reusable checkpoint and parking it to SSD with the conversation -- the
+        next turn on that conversation would then extend a corrupt state. After
+        this rollback the cache, the draft window and the token history all sit at
+        the pre-turn point the cache genuinely holds, which is what ``Conversation.cancel``
+        re-establishes (it rewinds to ``_base`` and prunes the orphaned draft/anchor
+        snapshots the decode-side ladder took above it).
+        """
+        session.cancel()
+        if not keep:
+            self._sessions.drop(session)
+
+    def _record_degeneration(
+        self,
+        *,
+        hit: LoopHit,
+        action: LoopAction,
+        tokenizer: Any,
+        task_id: TaskId | None,
+        produced: list[int],
+        emitted: int,
+        prompt_tokens: int,
+    ) -> None:
+        """Log a confirmed repetition cycle and dump the committed tail.
+
+        The line is emitted on EVERY rank (identical but for
+        ``guard_env_digest``, which is a pure function of the guard knobs): the
+        two ranks can be diffed directly on a guard-fire, which is the cross-rank
+        knob check for this feature. The dump itself is rank 0 only -- one copy on
+        the API/log node rather than two.
+        """
+        try:
+            cycle_text = tokenizer.decode(hit.cycle_token_ids)
+        except Exception:  # noqa: BLE001 - a diagnostic must never break serving
+            cycle_text = "<decode-failed>"
+        units = (
+            "raw-token cycle"
+            if hit.detector == "token"
+            else "block cycle (x24-token blocks)"
+        )
+        logger.warning(  # pyright: ignore[reportUnknownMemberType]
+            f"[DSV41] DEGENERATION DETECTED turn={task_id} "
+            f"at committed={len(produced)} emitted={emitted}: "
+            f"{units} period={hit.period} repeated>={hit.repeats}x "
+            f"action={action} guard_env_digest={guard_env_digest()} "
+            f"prompt_tokens~{prompt_tokens} "
+            f"cycle_token_ids={hit.cycle_token_ids} cycle_text={cycle_text!r}"
+        )
+        self._dump_short_turn(
+            produced,
+            reason=f"guard-{hit.detector}",
+            task_id=task_id,
+            generated=emitted,
+            extra={
+                "detector": hit.detector,
+                "period": hit.period,
+                "repeats": hit.repeats,
+                "action": str(action),
+            },
+        )
+
+    def _dump_short_turn(
+        self,
+        produced: list[int],
+        *,
+        reason: str,
+        task_id: TaskId | None,
+        generated: int,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Rank 0: write the last ~2048 committed ids to the exo log dir.
+
+        Bounded and best-effort (``degeneration.write_degeneration_dump`` swallows
+        its own errors), so this can sit on a cancel/guard path without a cost or a
+        failure mode. The point is that the NEXT incident's loop text is on disk:
+        the one that motivated this port streamed ~3m41s of unbroken repetition and
+        its text was never captured anywhere.
+        """
+        if self.device_rank != 0:
+            return
+        path = write_degeneration_dump(
+            token_ids=produced,
+            reason=reason,
+            task_id=str(task_id),
+            generated=generated,
+            extra=extra,
+        )
+        if path is not None:
+            logger.warning(f"[DSV41] committed-token dump written: {path}")
 
     def _run_turn(
         self,
@@ -1207,7 +1449,11 @@ class Dsv41Engine(Engine):
         as the reference does; the mask is installed for this prefill only.
         """
         total = len(tokens)
-        plan = _first_chunk_covers(total, self._chunk, image_span_end) if embeddings is not None else None
+        plan = (
+            _first_chunk_covers(total, self._chunk, image_span_end)
+            if embeddings is not None
+            else None
+        )
         # A stale fence timestamp from the PREVIOUS request's last fence must not
         # make this request's FIRST fence look like a >30 s gap (observed live:
         # a spurious "spacing 429.8s exceeds 30s" on the first fence after an
