@@ -194,6 +194,14 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     chat_template_messages: list[dict[str, ChatTemplateValue]] | None = None
     reasoning_effort: ReasoningEffort | None = None
     enable_thinking: bool | None = None
+    # Optional client cap on how many tokens a still-open reasoning block may run
+    # for before the serve path forces a clean end-of-thinking transition (the
+    # degeneration guard's reasoning-budget limiter -- see
+    # ``dsv41/reasoning_budget.py``). None => the engine's own default
+    # (``EXO_REASONING_BUDGET_FRACTION`` x ``max_output_tokens``, capped by
+    # ``EXO_REASONING_BUDGET_MAX_TOKENS``). A client sends this to bound reasoning
+    # depth without lowering the whole generation budget.
+    reasoning_budget_tokens: int | None = None
     logprobs: bool = False
     top_logprobs: int | None = None
     min_p: float | None = None

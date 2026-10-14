@@ -26,6 +26,12 @@ class GenerationResponse(BaseRunnerResponse):
     stats: GenerationStats | None = None
     usage: Usage | None
     is_thinking: bool = False
+    # OpenAI-style structured error code carried on a finish_reason == "error"
+    # terminal, when the failure has one (e.g. "repetition_loop" for a
+    # degeneration-guard clean-fail). Copied onto the ErrorChunk by
+    # map_responses_to_chunks so a client can classify without string matching.
+    # None for any other terminal.
+    error_code: str | None = None
     # Set only when finish_reason == "error" AND the error is a tool-call parse
     # failure; carried to the master so the failure is counted by kind. None for
     # any other error (runner crash, generation error).

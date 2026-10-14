@@ -200,6 +200,7 @@ async def chat_request_to_text_generation(
         tools=request.tools,
         reasoning_effort=resolved_effort,
         enable_thinking=resolved_thinking,
+        reasoning_budget_tokens=request.reasoning_budget_tokens,
         chat_template_messages=chat_template_messages
         if chat_template_messages
         else None,

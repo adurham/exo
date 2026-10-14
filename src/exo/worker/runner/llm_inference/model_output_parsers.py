@@ -131,6 +131,7 @@ def map_responses_to_chunks(
                 return ErrorChunk(
                     error_message=response.text,
                     model=model_id,
+                    error_code=response.error_code,
                     tool_call_parse_failure_kind=(
                         response.tool_call_parse_failure_kind
                     ),
