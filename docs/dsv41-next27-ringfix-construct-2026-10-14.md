@@ -287,3 +287,36 @@ The fix has **no env off-switch**; rolling the branch back *is* the rollback.
   `notes.md`, and the two launch logs (`logs/launch1_specoff_20261015T143117Z.log`,
   `logs/launch2_primary_20261015T165303Z.log`).
 - Attempt-1 failure evidence: `~/.hermes/cache/scratch/deploy-run/GATE2_FAILURE_EVIDENCE.md`.
+
+### LIVE record correction — residual comparator provenance (2026-10-15 afternoon, docs-only)
+
+*Provenance audit: `~/.hermes/cache/scratch/regime-deviation/REPORT.md` (headline, §1, §6.1). No
+measured data changes; this refines the **reading** of the branch-B paragraph above and of the
+attempt-2 gate package.*
+
+The LIVE section's branch-B note that "the previously documented **~0.0156-nat** figure does not
+describe this regime" is refined as follows:
+
+- The **~0.0156-nat figure was an internal conflation, not a residual measurement.** It mixes (a) the
+  dsv41 logprob **emission lattice step** 1/64 = 0.015625 nats (`notes.md:249`, `:279`;
+  `gate2-corrected/teacherforce.py:310-312`) and (b) an **n = 1 near-tie difference** (0.109375 −
+  0.09375 = 0.015625, `notes.md:188-193`) that happened to equal one lattice step. It was then used in
+  `GATE2_AMENDMENT.md` §5.2b/§7/§8.2 as if it were a measured residual.
+- **The real documented comparator shows in-regime scale.** The campaign's own 2026-10-01 chunk-shape
+  measurement (full 40-layer TP=2, taken *before* every era-diff change) is mean **0.14–0.22** / max
+  **0.99–1.86** nats `max|Δlogit|`
+  (`docs/benchmarks/phase22-dsv41-prefill-speed-2026-10-01/README.md:170-173`; cross-ref
+  `mlx-lm/docs/benchmarks/wsC-prefill-2026-09-28/README.md:53-65`). Today's **γ=0 median 0.258** sits
+  **inside** that regime → **no median regression**.
+- **No 16.5× regression.** The "10–25×" / "≈6–17×" / "16.5×" framings were a pair-margin-change
+  distribution divided by the lattice step (or a one-instance delta); they are superseded.
+- **Tail lead remains.** The only unsettled quantity is the **tail**: γ=0 max ≈ 3.66–4.06 vs phase22
+  max 1.86 — **~2× on non-identical statistics** (chunk-size `max|Δlogit|` on one prompt vs
+  warm-vs-cold `|Δ(top1↔top2 margin)|` over 274 positions). Bounded, and still a legitimate lead
+  (the named next steps — in-engine KV-path probe, chunk-plan-matched A/B — are unchanged).
+- **Branch-A threshold was lattice-anchored / unreachable by construction** — anchored on the same
+  conflated 0.0156 figure.
+
+Net effect on the deploy decision: **none.** Branch B already fired and the candidate is live because
+it strictly dominates `next26-limiter`; this correction only removes a mis-calibrated comparator from
+the record so a future gate does not inherit it.
