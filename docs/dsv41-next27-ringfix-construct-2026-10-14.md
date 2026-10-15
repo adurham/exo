@@ -192,3 +192,98 @@ commit:
 
 - **Construct tip:** `827e30212` -> the second commit (this addendum's commit).
   Rollback target is unchanged (`deploy/next26-limiter` @ `a5d33b46b`).
+
+## LIVE — deployed 2026-10-15 11:53 CDT (primary, spec-ON; no gate knobs)
+
+`deploy/next27-ringfix` @ `c758bcce5` (mlx-lm pin `2071ba4`) is the **LIVE PRIMARY** as of
+**2026-10-15 11:53 CDT** (16:53Z), serving DSv4.1 with speculation ON (γ=3) and **no gate
+knobs / no escape hatches** set — the plain production launch:
+
+```
+cd ~/repos/exo
+unset EXO_SPECULATIVE EXO_DSV41_SPECULATIVE EXO_DSV41_SPEC_ROLLBACK_HASH \
+      EXO_DSV41_SPEC_ROLLBACK_TURN EXO_DSV41_PARK_ALLOW_STALE EXO_DSV41_PARK_ALLOW_MLX_DRIFT
+EXO_TARGET_BRANCH=deploy/next27-ringfix ./start_cluster.sh
+```
+
+- **Both nodes** reset by the launcher to exo `c758bcce5` + mlx-lm `2071ba4`; **READY (2/2)**
+  (`HEALTHY! Nodes: 2, Identities: 2`). Engine `40/40 layers, speculative=True (gamma=3)`,
+  prefill chunk 2048; loop-guard digest **`633711af`** on both ranks; `DSV41_INDEXER_QSPLIT=0`
+  on both. No gate knobs / hatches in either runner env.
+- **Smoke** (1 live request): `POST /v1/chat/completions` → HTTP 200, `finish=length`,
+  `usage = {prompt 10, completion 48, reasoning_tokens 36}`; `/v1/models` serves DSv4.1.
+
+### Gate history (why this build is live without a waiver)
+
+1. **Attempt 1 (2026-10-14) — false-fail → rollback.** The original pre-registered Gate 2 (a
+   spec-ON vs spec-OFF *walk* compare) returned FAIL — 33/40 turns divergent from turn 1 — and
+   triggered the pre-registered §(c) rollback to `deploy/next26-limiter`. The reading was a
+   **control artifact, not a fix signal**: on 5 of 6 sampled forks a same-arm (spec-OFF) greedy
+   re-fire did not reproduce the first spec-OFF stream, so the spec-off arm had low
+   discriminating power (this heavily-quantized model is not greedy-bit-reproducible at
+   near-ties). A **corrected Gate 2 was pre-registered** (teacher-forced warm-vs-cold, with a
+   prefix-cache-off cold baseline) and attempt 2 ran against it.
+
+2. **Attempt 2 (2026-10-15).**
+   - **Gate 1 (TP=2 rank consistency on the rollback path) — PASSED live.** `2536` rejected
+     speculative rounds compared rank-0 vs rank-1 (`gate1_rbhash_compare.out`): **0 cross-rank
+     mismatches**, nothing missing-in-one-rank; VERDICT PASS.
+   - **Corrected Gate 2 (warm-vs-cold teacher-forced, ε = 0.5 nat) — REGISTERED NOT-PASS, by
+     exactly one position at exact ε.** **682 / 682** forceable positions swept (100 %
+     coverage; 2 positions unforceable by construction). Exactly **one** position reaches the
+     bar — **turn 6, warm token 80 (char 267)** — whose *registered* value (faithful
+     chained-walk, k=2) is **0.5000000** nats, i.e. **equal to ε exactly**; **no** position
+     *exceeds* ε (the other seven live realisations of that same context span
+     `[0.109375, 0.5000000]`, all ≤ ε). The **rate clause passes**: `1/682 = 0.001466 ≤ 1/128`.
+   - **γ=0 (spec-off) control — BRANCH B.** The pre-registered discriminator (one relaunch with
+     speculation off) landed in **branch B**: the warm↔cold **residual deviation is NOT
+     spec-attributable**. Matched-set median `|Δtop1↔top2|` = **0.258 nats at γ=0** vs **0.266
+     with spec-ON** (slightly *larger* on tight pairs under γ=0) — the excess **survives with
+     the fix's code path never executed** (γ=0 runs no `spec.snap` / `spec.rollback`), so it
+     **pre-dates the fix by construction**. The previously documented **~0.0156-nat** figure
+     does not describe this regime; the ~0.26-nat excess is **prefill-vs-decode /
+     chunk-boundary numerics**, not the speculative verify path.
+   - **No waiver** (per the pre-registered branches — branch B ⇒ deeper triage, never a waiver).
+     The candidate is live **anyway**, because it **strictly dominates the previous build**:
+     same regime behaviour as next26 *plus* the ring-alias corruption class **eliminated**.
+
+**Net.** The fix stands as: **it removes the ring-alias corruption class; it leaves the
+pre-existing regime deviation untouched.** The gross warm↔cold divergences the bug produced are
+gone (turn 12: a 7.5469-nat displacement / rank 7-of-8 → byte-identical), and the two remaining
+flips reproduce the *buggy* build's signature bit-for-bit (fix-independent).
+
+### Known issues / residual (watch window)
+
+- **Regime residual ≈ 0.26 nats** of warm↔cold top-1↔top-2 local deviation, present both with
+  and without speculation, concentrated on **near-tie pairs**, together with the near-tie
+  *density* that lets such a residual occasionally flip a greedy argmax. Not attributable to
+  this fix and **un-triaged** (named next steps: in-engine KV-path probe on the gate-1 RB-HASH
+  arm; chunk-plan-matched A/B).
+- **Watch tripwire.** Any **production non-near-tie** warm/cold divergence, **if sampled**,
+  triggers a **rollback review**. (Near-tie flips are in-regime and are not by themselves a
+  trip.)
+
+### Rollback (one-liner)
+
+Relax to the prior live build (no ring fix, no pin bump):
+
+```
+cd ~/repos/exo && EXO_TARGET_BRANCH=deploy/next26-limiter ./start_cluster.sh
+```
+
+The fix has **no env off-switch**; rolling the branch back *is* the rollback.
+
+### Artifacts (scratch only — `~/repos/exo` is rsync'd verbatim to both nodes)
+
+- `~/.hermes/cache/scratch/deploy-run/attempt2/` — attempt-2 harness + results: invariant-suite
+  logs (`suites_01..08_*.log`), `gate1_rbhash_*` (rank-consistency compare), `gate1_walk/`,
+  `gate2_next27_PROFILE.md`, `gate2_next27_summary.json`, `GATE2_AMENDMENT.md`, `notes.md`,
+  `OWNER_ASK.md`.
+- `~/.hermes/cache/scratch/gate2-corrected/` — corrected Gate-2 harness (`gate2_corrected.py`,
+  `teacherforce.py`, `freeze.py`, `MANIFEST.sha256`, `DESIGN.md`, `RESULT.md`, `results/`,
+  `captures/`).
+- `~/.hermes/cache/scratch/deploy-run/attempt2/gamma0/` — the γ=0 control: `gamma0_driver.py` +
+  `gamma0_runs.jsonl`, `analysis.py`, `m1_specoff.json` / `m2_specoff*.json` / `m3_specoff.json`,
+  `notes.md`, and the two launch logs (`logs/launch1_specoff_20261015T143117Z.log`,
+  `logs/launch2_primary_20261015T165303Z.log`).
+- Attempt-1 failure evidence: `~/.hermes/cache/scratch/deploy-run/GATE2_FAILURE_EVIDENCE.md`.
