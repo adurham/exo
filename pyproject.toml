@@ -49,7 +49,7 @@ dev = [
 build = ["nanobind"]
 mlx-none = ["anyio"]
 mlx = [
-  "mlx==0.32.0",
+  "mlx>=0.32.0",
   "mlx-lm",
   "mlx-vlm>=0.3.11",
   "mflux==0.17.5",

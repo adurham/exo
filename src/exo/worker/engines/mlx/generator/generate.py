@@ -1065,6 +1065,12 @@ def prefill(
     with T("prefill.clear_cache"):
         mx.clear_cache()
 
+    # upstream #2393: the batch's next decode step may still be running: let it
+    # finish before this prefill's collectives, as for the batch's own prompts
+    # (see opt_batch_gen._prompt_after_decode_step). Rare TP+fast-synch deadlock.
+    with T("prefill.sync_decode_step"):
+        mx.synchronize(generation_stream)
+
     with T("prefill.barrier"):
         mx_barrier(group)
 

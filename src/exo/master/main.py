@@ -1,4 +1,7 @@
+import time
+from collections import deque
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 
 import anyio
 from loguru import logger
@@ -17,7 +20,9 @@ from exo.master.placement_utils import (
     jit_instances_to_reap,
 )
 from exo.shared.apply import apply
-from exo.shared.constants import EXO_EVENT_LOG_DIR, EXO_TRACING_ENABLED
+from exo.shared.constants import EXO_TRACING_ENABLED
+from exo.shared.models.model_cards import ModelId
+from exo.shared.types.chunks import ErrorChunk, ImageChunk
 from exo.shared.types.commands import (
     AddCustomModelCard,
     CreateInstance,
@@ -39,6 +44,7 @@ from exo.shared.types.commands import (
 )
 from exo.shared.types.common import CommandId, NodeId, SessionId, SystemId
 from exo.shared.types.events import (
+    ChunkGenerated,
     CustomModelCardAdded,
     CustomModelCardDeleted,
     Event,
@@ -51,6 +57,7 @@ from exo.shared.types.events import (
     LocalForwarderEvent,
     NodeGatheredInfo,
     NodeTimedOut,
+    StateSnapshot,
     TaskCreated,
     TaskDeleted,
     TaskStatusUpdated,
@@ -75,10 +82,57 @@ from exo.shared.types.tasks import (
 )
 from exo.shared.types.worker.instances import InstanceId
 from exo.utils.channels import Receiver, Sender
-from exo.utils.disk_event_log import DiskEventLog
 from exo.utils.event_buffer import MultiSourceBuffer
 from exo.utils.log_format import truncate_for_log
 from exo.utils.task_group import TaskGroup
+
+# Every node reports its info about once a second. A node the master hasn't heard from for
+# this long is treated as gone (crashed, frozen, asleep or cut off), and its instances are
+# deleted so that requests on them end with an error instead of waiting. On four busy nodes
+# (800 events/s) a healthy node's reports were never more than 6.3 s apart.
+# adurham fork: kept at the previously deployed 30 s (upstream #2361 uses 15 s). Our
+# nodes run very large models whose load/prefill can starve a worker's event loop
+# for longer than upstream's measured 6.3 s; a false timeout deletes a live instance.
+NODE_SILENCE_TIMEOUT = timedelta(seconds=30)
+# How often the master looks for silent nodes and for instances that lost a node
+PLAN_INTERVAL = 1.0
+# How long to wait for a removal to be applied before sending it again
+REMOVAL_RESEND_INTERVAL = 5.0
+# A check this late means the master itself was stalled (frozen, asleep or overloaded) and
+# couldn't hear anyone. Nodes then get time to reconnect (discovery holds off for a while
+# after a stall) and a full NODE_SILENCE_TIMEOUT to report again before any is removed.
+MASTER_STALL = 5.0
+RECONNECT_ALLOWANCE = timedelta(seconds=15)
+# Recent events kept for nodes that missed a few. A node further behind than this
+# is sent a snapshot of the current state instead of the whole history.
+REPLAYABLE_EVENTS = 10_000
+# ...holding at most this much image data. Image chunks are the only large events, and a
+# few requests with large images would otherwise make the window hold gigabytes.
+REPLAYABLE_IMAGE_BYTES = 256 * 1024 * 1024
+# Events replayed per RequestEventLog; the requester asks again for the rest.
+REPLAY_BATCH_SIZE = 1000
+
+
+def _image_bytes(event: Event) -> int:
+    match event:
+        case InputChunkReceived(chunk=chunk):
+            return len(chunk.data)
+        case ChunkGenerated(chunk=ImageChunk() as chunk):
+            return len(chunk.data)
+        case _:
+            return 0
+
+
+def task_for_command(state: State, command_id: CommandId) -> TaskId | None:
+    """The generation task created for a command, as state has it. Unlike the master's own map
+    from commands to tasks, state carries over to the next master."""
+    for task_id, task in state.tasks.items():
+        if (
+            isinstance(task, (TextGenerationTask, ImageGenerationTask, ImageEditsTask))
+            and task.command_id == command_id
+        ):
+            return task_id
+    return None
 
 
 def _prefill_endpoint_for(state: State, decode_instance_id: InstanceId) -> str | None:
@@ -121,6 +175,36 @@ def _prefill_endpoint_for(state: State, decode_instance_id: InstanceId) -> str |
     return None
 
 
+def _without_requests(state: State) -> State:
+    """The state without its requests' tasks. Requests don't outlast their master: every
+    node's API ends the ones in flight when the master changes, since the old master was
+    routing their output, so their tasks would only linger."""
+    return state.model_copy(
+        update={
+            "tasks": {
+                task_id: task
+                for task_id, task in state.tasks.items()
+                if not isinstance(
+                    task, (TextGenerationTask, ImageGenerationTask, ImageEditsTask)
+                )
+            }
+        }
+    )
+
+
+# How many processed command ids the master remembers, to act on a repeated command only once
+PROCESSED_COMMANDS_KEPT = 100_000
+
+
+class NoInstanceForModelError(Exception):
+    """A request for a model with no running instance, such as one deleted after the API checked
+    for it. The request is ended with this error: dropping it would leave it open forever."""
+
+    def __init__(self, model: str):
+        super().__init__(f"No instance found for model {model}")
+        self.model = ModelId(model)
+
+
 class Master:
     def __init__(
         self,
@@ -130,21 +214,40 @@ class Master:
         command_receiver: Receiver[ForwarderCommand],
         local_event_receiver: Receiver[LocalForwarderEvent],
         global_event_sender: Sender[GlobalForwarderEvent],
+        snapshot_sender: Sender[StateSnapshot],
         download_command_sender: Sender[ForwarderDownloadCommand],
+        initial_state: State | None = None,
     ):
         self.node_id = node_id
         self.session_id = session_id
-        self.state = State()
+        # A master elected in a running cluster carries on from the state its node already
+        # has, so model instances survive the change of master. Its events are numbered on
+        # from that state, and other nodes catch up from a snapshot of it.
+        self.state = (
+            _without_requests(initial_state) if initial_state is not None else State()
+        )
         self._tg: TaskGroup = TaskGroup()
         self.command_task_mapping: dict[CommandId, TaskId] = {}
         self.command_receiver = command_receiver
         self.local_event_receiver = local_event_receiver
         self.global_event_sender = global_event_sender
+        self.snapshot_sender = snapshot_sender
         self.download_command_sender = download_command_sender
         self._system_id = SystemId()
         self._multi_buffer = MultiSourceBuffer[SystemId, Event]()
-        self._event_log = DiskEventLog(EXO_EVENT_LOG_DIR / "master")
+        self._recent_events: deque[Event] = deque()
+        self._recent_image_bytes = 0
+        self._replayable_events = REPLAYABLE_EVENTS
+        self._replayable_image_bytes = REPLAYABLE_IMAGE_BYTES
         self._pending_traces: dict[TaskId, dict[int, list[TraceEventData]]] = {}
+        # When a removal was last sent, for nodes and instances not yet removed from the state
+        self._removing_nodes: dict[NodeId, float] = {}
+        self._deleting_instances: dict[InstanceId, float] = {}
+        # Since when the master has been able to hear nodes, and when it last checked on them
+        self._listening_since = time.monotonic()
+        self._last_check: float | None = None
+        self._processed_commands: set[CommandId] = set()
+        self._processed_order: deque[CommandId] = deque()
         self._expected_ranks: dict[TaskId, set[int]] = {}
         # JIT idle reaper: per-instance last-use wall-clock (anyio.current_time).
         # Bumped on every generation dispatch to that instance; the reaper unloads
@@ -166,8 +269,8 @@ class Master:
                 tg.start_soon(self._plan)
                 tg.start_soon(self._jit_idle_reaper)
         finally:
-            self._event_log.close()
             self.global_event_sender.close()
+            self.snapshot_sender.close()
             self.local_event_receiver.close()
             self.command_receiver.close()
 
@@ -206,9 +309,33 @@ class Master:
 
         return sorted(instance_task_counts.keys(), key=_key)
 
+    def _first_time(self, command_id: CommandId) -> bool:
+        """Whether this command hasn't been processed yet. The API sends a chat request again
+        if it doesn't see it accepted, so the same command can arrive more than once. A new
+        master doesn't know what the old one processed, but a request it accepted is a task."""
+        if command_id in self._processed_commands or self._has_task_for(command_id):
+            return False
+        self._processed_commands.add(command_id)
+        self._processed_order.append(command_id)
+        if len(self._processed_order) > PROCESSED_COMMANDS_KEPT:
+            self._processed_commands.discard(self._processed_order.popleft())
+        return True
+
+    def _has_task_for(self, command_id: CommandId) -> bool:
+        return any(
+            isinstance(task, (TextGenerationTask, ImageGenerationTask, ImageEditsTask))
+            and task.command_id == command_id
+            for task in self.state.tasks.values()
+        )
+
     async def _command_processor(self) -> None:
         with self.command_receiver as commands:
             async for forwarder_command in commands:
+                if not self._first_time(forwarder_command.command.command_id):
+                    logger.debug(
+                        f"Ignoring command {forwarder_command.command.command_id}: already processed"
+                    )
+                    continue
                 try:
                     logger.info(
                         f"Executing command: {truncate_for_log(forwarder_command.command)}"
@@ -245,9 +372,7 @@ class Master:
                                     )
 
                             if not instance_task_counts:
-                                raise ValueError(
-                                    f"No instance found for model {command.task_params.model}"
-                                )
+                                raise NoInstanceForModelError(command.task_params.model)
 
                             available_instance_ids = self._sort_by_load_then_node(
                                 instance_task_counts
@@ -297,9 +422,7 @@ class Master:
                                     )
 
                             if not instance_task_counts:
-                                raise ValueError(
-                                    f"No instance found for model {command.task_params.model}"
-                                )
+                                raise NoInstanceForModelError(command.task_params.model)
 
                             available_instance_ids = self._sort_by_load_then_node(
                                 instance_task_counts
@@ -351,9 +474,7 @@ class Master:
                                     )
 
                             if not instance_task_counts:
-                                raise ValueError(
-                                    f"No instance found for model {command.task_params.model}"
-                                )
+                                raise NoInstanceForModelError(command.task_params.model)
 
                             available_instance_ids = self._sort_by_load_then_node(
                                 instance_task_counts
@@ -410,6 +531,7 @@ class Master:
                                 self.state.node_backends,
                                 download_status=self.state.downloads,
                                 node_rdma_ctl=self.state.node_rdma_ctl,
+                                runners=self.state.runners,
                             )
                             transition_events = get_transition_events(
                                 self.state.instances, placement, self.state.tasks
@@ -434,7 +556,7 @@ class Master:
                             )
                         case TaskCancelled():
                             if (
-                                task_id := self.command_task_mapping.get(
+                                task_id := self._task_for_command(
                                     command.cancelled_command_id
                                 )
                             ) is not None:
@@ -449,16 +571,17 @@ class Master:
                                     f"Nonexistent command {command.cancelled_command_id} cancelled"
                                 )
                         case TaskFinished():
+                            # The API resends a finish while the task is still in its state,
+                            # so a finish for a task already deleted is expected
                             if (
-                                task_id := self.command_task_mapping.pop(
-                                    command.finished_command_id, None
+                                task_id := self._task_for_command(
+                                    command.finished_command_id
                                 )
                             ) is not None:
-                                generated_events.append(TaskDeleted(task_id=task_id))
-                            else:
-                                logger.warning(
-                                    f"Finished command {command.finished_command_id} finished"
+                                self.command_task_mapping.pop(
+                                    command.finished_command_id, None
                                 )
+                                generated_events.append(TaskDeleted(task_id=task_id))
 
                         case AddCustomModelCard():
                             generated_events.append(
@@ -484,40 +607,107 @@ class Master:
                                 InstanceLinkDeleted(link_id=command.link_id)
                             )
                         case RequestEventLog():
-                            # We should just be able to send everything, since other buffers will ignore old messages
-                            # rate limit to 1000 at a time
-                            end = min(command.since_idx + 1000, len(self._event_log))
-                            for i, event in enumerate(
-                                self._event_log.read_range(command.since_idx, end),
-                                start=command.since_idx,
-                            ):
-                                await self._send_event(IndexedEvent(idx=i, event=event))
+                            await self._serve_event_log_request(
+                                command.since_idx,
+                                forwarder_command.origin,
+                                snapshot=command.snapshot,
+                            )
                     for event in generated_events:
                         await self._index_apply_broadcast(event)
+                except NoInstanceForModelError as error:
+                    command_id = forwarder_command.command.command_id
+                    logger.warning(f"Ending request {command_id}: {error}")
+                    await self._index_apply_broadcast(
+                        ChunkGenerated(
+                            command_id=command_id,
+                            chunk=ErrorChunk(
+                                model=error.model, error_message=str(error)
+                            ),
+                        )
+                    )
                 except ValueError as e:
                     logger.opt(exception=e).warning("Error in command processor")
+
+    def _task_for_command(self, command_id: CommandId) -> TaskId | None:
+        """The task this cluster created for a request. The mapping holds only what this master
+        created; a request started under a previous master is found in the state, so it can
+        still be finished or cancelled after the master changes."""
+        if (task_id := self.command_task_mapping.get(command_id)) is not None:
+            return task_id
+        return next(
+            (
+                task_id
+                for task_id, task in self.state.tasks.items()
+                if isinstance(
+                    task, (TextGenerationTask, ImageGenerationTask, ImageEditsTask)
+                )
+                and task.command_id == command_id
+            ),
+            None,
+        )
 
     # These plan loops are the cracks showing in our event sourcing architecture - more things could be commands
     async def _plan(self) -> None:
         while True:
-            # kill broken instances
-            connected_node_ids = set(self.state.topology.list_nodes())
-            for instance_id, instance in self.state.instances.items():
-                for node_id in instance.shard_assignments.node_to_runner:
-                    if node_id not in connected_node_ids:
-                        await self._index_apply_broadcast(
-                            InstanceDeleted(instance_id=instance_id)
-                        )
-                        break
+            await self._remove_silent_nodes_and_broken_instances()
+            await anyio.sleep(PLAN_INTERVAL)
 
-            # time out dead nodes
-            for node_id, time in self.state.last_seen.items():
-                now = datetime.now(tz=timezone.utc)
-                if now - time > timedelta(seconds=30):
-                    logger.info(f"Manually removing node {node_id} due to inactivity")
-                    await self._index_apply_broadcast(NodeTimedOut(node_id=node_id))
+    async def _remove_silent_nodes_and_broken_instances(self) -> None:
+        check = time.monotonic()
+        if self._last_check is not None and check - self._last_check > MASTER_STALL:
+            logger.warning(
+                f"Master was unresponsive for {check - self._last_check:.0f}s; "
+                "giving nodes time to report before removing any"
+            )
+            self._listening_since = check + RECONNECT_ALLOWANCE.total_seconds()
+        self._last_check = check
+        # A node is silent only if the master was listening and didn't hear from it
+        listened = timedelta(seconds=check - self._listening_since)
+        now = datetime.now(tz=timezone.utc)
+        silent = {
+            node_id: now - seen
+            for node_id, seen in self.state.last_seen.items()
+            if min(now - seen, listened) > NODE_SILENCE_TIMEOUT
+        }
+        for node_id, silence in silent.items():
+            if self._resend_due(self._removing_nodes, node_id):
+                logger.info(
+                    f"Manually removing node {node_id} due to inactivity "
+                    f"({silence.total_seconds():.0f}s without hearing from it)"
+                )
+                await self._index_apply_broadcast(NodeTimedOut(node_id=node_id))
 
-            await anyio.sleep(10)
+        # An instance that lost a node can't serve anything, so delete it straight away,
+        # without waiting for the node's removal to be applied
+        connected = set(self.state.topology.list_nodes()) - silent.keys()
+        for instance_id, instance in self.state.instances.items():
+            if any(
+                node_id not in connected
+                for node_id in instance.shard_assignments.node_to_runner
+            ) and self._resend_due(self._deleting_instances, instance_id):
+                await self._index_apply_broadcast(
+                    InstanceDeleted(instance_id=instance_id)
+                )
+
+        # Forget what has been applied
+        self._removing_nodes = {
+            k: v for k, v in self._removing_nodes.items() if k in self.state.last_seen
+        }
+        self._deleting_instances = {
+            k: v
+            for k, v in self._deleting_instances.items()
+            if k in self.state.instances
+        }
+
+    @staticmethod
+    def _resend_due[K](sent: dict[K, float], key: K) -> bool:
+        """Whether to send a removal for key: not sent yet, or sent a while ago and still
+        not applied."""
+        now = time.monotonic()
+        if key in sent and now - sent[key] < REMOVAL_RESEND_INTERVAL:
+            return False
+        sent[key] = now
+        return True
 
     async def _jit_idle_reaper(self) -> None:
         """Unload JIT-placed instances idle beyond EXO_JIT_IDLE_UNLOAD_SECONDS.
@@ -631,8 +821,42 @@ class Master:
 
                     await self._index_apply_broadcast(event)
 
+    def _remember(self, event: Event) -> None:
+        self._recent_events.append(event)
+        self._recent_image_bytes += _image_bytes(event)
+        while (
+            len(self._recent_events) > self._replayable_events
+            or self._recent_image_bytes > self._replayable_image_bytes
+        ):
+            self._recent_image_bytes -= _image_bytes(self._recent_events.popleft())
+
+    async def _serve_event_log_request(
+        self, since_idx: int, requester: SystemId, snapshot: bool = False
+    ):
+        next_idx = self.state.last_event_applied_idx + 1
+        oldest_idx = next_idx - len(self._recent_events)
+        if snapshot or since_idx < oldest_idx:
+            logger.info(
+                f"Sending a state snapshot at event {next_idx - 1} to a node "
+                f"that asked for events from {since_idx}"
+            )
+            await self.snapshot_sender.send(
+                StateSnapshot(
+                    session=self.session_id, requester=requester, state=self.state
+                )
+            )
+            return
+        # Copy before sending: new events evict old ones from the deque while we await.
+        end = min(since_idx + REPLAY_BATCH_SIZE, next_idx)
+        events = list(
+            islice(self._recent_events, since_idx - oldest_idx, end - oldest_idx)
+        )
+        # Other nodes ignore events they already have
+        for idx, event in enumerate(events, start=since_idx):
+            await self._send_indexed_event(IndexedEvent(idx=idx, event=event))
+
     # This function is re-entrant, take care!
-    async def _send_event(self, event: IndexedEvent):
+    async def _send_indexed_event(self, event: IndexedEvent) -> None:
         # Convenience method since this line is ugly
         await self.global_event_sender.send(
             GlobalForwarderEvent(
@@ -649,8 +873,8 @@ class Master:
         This is the master's only path for committing events into state. It
         is called from both command_processor (for events the master itself
         generates) and event_processor (for events received from workers).
-        The lock serializes the read-modify-write of `_event_log` length and
-        `state`, which is what allows the command processor to make routing
+        The lock serializes the read-modify-write of the event index
+        (state.last_event_applied_idx) and `state`, which is what allows the command processor to make routing
         decisions based on its own just-emitted events without waiting for a
         network round-trip.
         """
@@ -663,11 +887,16 @@ class Master:
                     update={"when": str(datetime.now(tz=timezone.utc))}
                 )
 
-            indexed = IndexedEvent(event=event, idx=len(self._event_log))
+            # Numbered on from state (not a per-master log) so a master elected
+            # with initial_state continues the cluster's event numbering (#2369).
+            indexed = IndexedEvent(
+                event=event, idx=self.state.last_event_applied_idx + 1
+            )
             logger.debug(f"Master indexing event: {str(event)[:100]}")
             self.state = apply(self.state, indexed)
-            self._event_log.append(event)
-            await self._send_event(indexed)
+            # Bounded in-memory replay window replaces the DiskEventLog (#2322)
+            self._remember(event)
+            await self._send_indexed_event(indexed)
             return indexed
 
     async def _handle_traces_collected(self, event: TracesCollected) -> None:

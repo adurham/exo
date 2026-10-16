@@ -25,6 +25,7 @@ from .types import Model
 from .utils_mlx import (
     initialize_mlx,
     load_mlx_items,
+    use_generation_stream_by_default,
 )
 from .vision import VisionProcessor
 
@@ -42,6 +43,12 @@ class MlxBuilder(Builder):
     # caps (max_prefix_sessions, max_prefix_bytes, max_kv_tokens,
     # kv_cache_bits) when constructing the prefix cache.
     bound_instance: BoundInstance | None = None
+
+    def __post_init__(self) -> None:
+        # upstream #2391. adurham fork: EXO_SINGLE_GPU_STREAM=0 skips it (kill switch,
+        # restores the pre-merge default-stream behavior without a deploy).
+        if os.environ.get("EXO_SINGLE_GPU_STREAM", "1") != "0":
+            use_generation_stream_by_default()
 
     def connect(self, bound_instance: BoundInstance) -> None:
         self.group = initialize_mlx(bound_instance)

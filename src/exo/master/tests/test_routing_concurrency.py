@@ -42,6 +42,7 @@ from exo.shared.types.events import (
     InstanceCreated,
     LocalForwarderEvent,
     NodeGatheredInfo,
+    StateSnapshot,
     TaskCreated,
 )
 from exo.shared.types.memory import Memory
@@ -136,6 +137,7 @@ async def test_concurrent_text_generation_distributes_across_instances():
         node_id,
         session_id,
         global_event_sender=ge_sender,
+        snapshot_sender=channel[StateSnapshot]()[0],
         local_event_receiver=le_receiver,
         command_receiver=co_receiver,
         download_command_sender=fcds,
@@ -274,6 +276,7 @@ async def test_text_generation_does_not_cross_model_boundaries():
         node_id,
         session_id,
         global_event_sender=ge_sender,
+        snapshot_sender=channel[StateSnapshot]()[0],
         local_event_receiver=le_receiver,
         command_receiver=co_receiver,
         download_command_sender=fcds,

@@ -18,7 +18,11 @@ def apply_mlx_patches() -> None:
     _applied = True
     patch_yarn_rope()
     # Skip fast_next patch when speculative is enabled — it bypasses _next()
-    # which MTPBatchGenerator overrides for speculative decoding
+    # which MTPBatchGenerator overrides for speculative decoding. NOTE: this
+    # also gates upstream #2393's PromptProcessingBatch.prompt sync (same
+    # apply_batch_gen_patch) -- deployed speculative path unchanged.
+    # upstream #2379 patch_detokenizer is NOT applied: our mlx-lm fork's
+    # TokenizerWrapper.detokenizer already copies one prebuilt detokenizer.
     if os.environ.get("EXO_SPECULATIVE") != "1":
         apply_batch_gen_patch()
 
