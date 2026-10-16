@@ -147,3 +147,11 @@ the owner raised the same day.
   closeouts (`5984ddad8`, `d53666166`); PERFORMANCE_HISTORY 2026-10-11/12/13
   entries; live `/state` 2026-10-15; session `20261015_143731_a6c67d` (build
   `next27-ringfix`). Owner statements recorded with intent (verbatim where quoted).
+
+### 2.4 Owner follow-up (2026-10-15, same day)
+
+Owner note recorded: **"but it could be built."** — correct, and stated plainly for the record: the engine's refusal (§2.3) is a statement about the current code, not an impossibility. A DSv4.1 pipeline build is an open owner-option.
+
+- **Build shape** (from the code facts on file): ~22/21 layer split, each stage full-width (the layer-subset hook in `load.py` + the world=1 path already exist — today as test facilities); boundary-aligned placement of the 8 indexer source→consumer groups so top-k reuse stays intra-stage; transport across the boundary of the cross-layer state the loader names (top-k indices ~[rows, 512] int32 × 8 source layers, compressed-KV carry, engram ids, candidate-layer state) plus the activation handoff; spec-decode across stages (never existed on this engine); and the maturity items the old PP path lacked (cancellation, cross-phase concurrency — the batched-PP design, never shipped).
+- **Honest expected value** (only measured anchors: old model, old configs): PP prefill edge ~+14 % at 500K (364 vs 319); hybrid realized ~11 % best case cold-500K / zero on cached follow-ups; decode worse. DSv4.1 makes parts harder (bigger model → worse co-residency/swap math; the cross-layer transport is new cost the old PP never paid) and current TP has had 3+ months of optimization since. Expected class `[guess]`: single-digit-to-low-teens % prefill, plus decode risk and a reopened-architecture cost — vs TP3's +24–39 % (needs a node) and SP's ~+4 % (2-node, cheap). It is the only remaining double-digit 2-node prefill candidate, and the least scoped.
+- **Entry point**: the offline scoping pass (mirror of the TP3 / attention-sharding studies) — can the engine take boundary-aligned layer ranges + explicit state transport; modeled band on DSv4.1; effort. **Unstarted; requires owner go.**
