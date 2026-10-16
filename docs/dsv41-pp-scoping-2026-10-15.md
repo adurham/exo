@@ -304,3 +304,18 @@ DERIVED: `C_d` ms, `S_d/2` range, `2h` bytes, all item-3 table numbers, weighted
 7.1 chunks/14.5 K rows, 1.75×/2.03×, 3.2 GiB caches. BOUND: `C_d ≤ 5 ms` (direct measurement, not 81×p95).
 MODELED: the `C + R/2` model itself and the +14–18 % it produces. ESTIMATE: candidates mask size, `S_d/2`
 upper ~40 ms (adds sharded dense/attention), the handoff size (~164 KB/round).
+
+
+---
+
+## 3. Reviewer reconciliation (Fable, 2026-10-15) — kill upheld; record tightened
+
+Gate 0 was fed back to the plan's author per the campaign loop. Verdict: the kill passes, with these corrections folded into the record.
+
+- **Robust form of item 1 (use THIS for the kill).** At the zero-inefficiency floor (`S_d/2` = 9.0 ms, the expert slice at its pure roofline), parity still requires `C_d >= ~9.3 ms` against a measured `C_d <= 5.0 ms` — **the inequality fails by >= 1.8x even with zero inefficiency assumed**; "3-10x" is the central estimate, and only the lower bound carries the conclusion. The 1.5-3x inefficiency range is corroborative, not load-bearing.
+- **Decode-range reconciliation (the 25-33 tok/s row).** The 33.1 tok/s top is the single most PP-favourable corner (full-width experts at pure roofline, zero sharded dense/attention scaling); even there PP sits **below current TP parity (34.6)** and merely grazes the 95 percent bar (32.87). Central corners 28-31 are decisively below. **No corner beats TP.**
+- **Hybrid clause.** Item 1 kills *full-PP decode* only; it does not by itself kill a PP-prefill/TP-decode hybrid — for that variant **items 2 and 3 are the load-bearing kill** (measured chunk-loop -1.3 percent; workload-weighted below bar even under the model's own optimistic gain). The hybrid would additionally need dual weight layouts or a reshard (memory fit not assessed).
+- **p5-borrow legitimacy.** The old-model p5 head-to-head is the right comparison regime **because it postdates the 2026-08-22 async-fence fix** — its TP arm was the already-fixed TP. (That fix left prefill at parity and lifted decode +23-67 percent; it is also why "current TP is not collective-bound" is the correct frame.)
+- **Corrected reopen triggers** (superseding the wording in §1/§2): (1) interconnect latency **worsening** ~2x (pushes `C_d` to ~5.6-10 ms, reaching the floor bar); (2) **TP decode becomes collective-bound again** — measured `C_d` share above ~9 percent of decode wall (the mechanism the kill rests on); (3) **multi-stream / batched serving becomes a target** (batched PP fills its own bubble; most likely real reopen); (4) **the draft no longer depends on committed tokens** (tree/lookahead drafting unblocking speculative pipelining).
+- **NEEDS-GO residue is PARKED, trigger-gated.** Run the m=4 full-width microbench only if a trigger fires — the floor-form argument shows it cannot flip the result.
+- **TP-SP + overlap desk close (dominance check).** Ceiling is approximately the row-local share/2 (~4.1 pp of wall at w=2 — the P2-P1 marginal in the attention-scoping doc, independent of the sync-span question) plus overlap of a now-small real collective share (decode-corrected 2.9-5.3 percent; prefill's instrument value is suspect by the same artifact class). Total **<= ~5-8 percent — below the +8 percent bar, closed as dominated** (desk close; no cluster pass). Note: the shelved "partition" item was the small-n MoE-block route (+2.9 percent), not SP.
