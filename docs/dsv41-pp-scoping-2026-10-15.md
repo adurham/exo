@@ -303,4 +303,4 @@ census distribution, checkpoint config, code facts (source lists, ratios, engram
 DERIVED: `C_d` ms, `S_d/2` range, `2h` bytes, all item-3 table numbers, weighted +5.98 % / −8.36 %, crossover
 7.1 chunks/14.5 K rows, 1.75×/2.03×, 3.2 GiB caches. BOUND: `C_d ≤ 5 ms` (direct measurement, not 81×p95).
 MODELED: the `C + R/2` model itself and the +14–18 % it produces. ESTIMATE: candidates mask size, `S_d/2`
-upper ~40 ms (adds sharded dense/attention), 2.12 h.
+upper ~40 ms (adds sharded dense/attention), the handoff size (~164 KB/round).
