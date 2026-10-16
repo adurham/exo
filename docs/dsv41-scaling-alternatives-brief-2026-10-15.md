@@ -186,3 +186,14 @@ The Fable-restructured offline scoping study ran Gate 0 and **killed PP on three
 
 
 **Reviewer reconciliation (Fable, same day) — folded into the study doc's §3:** kill upheld; robust kill form = fails >= 1.8x at the zero-inefficiency floor ("3-10x" central); the modeled 25-33 tok/s range's top corner (33.1) is still below current TP parity (34.6) and only grazes the 95 percent bar; for the PP-prefill/TP-decode hybrid variant, items 2-3 are the load-bearing kill (item 1 alone kills full-PP only); the p5 borrow is legitimate because p5 postdates the 2026-08-22 async-fence fix. Corrected reopen triggers: interconnect latency WORSENING ~2x; TP decode collective-bound again (C_d above ~9 percent of decode wall); multi-stream/batched serving becomes a target; draft no longer depends on committed tokens. NEEDS-GO parked (trigger-gated). SP+overlap desk-closed as dominated (ceiling <= ~5-8 percent, below bar).
+
+
+## 6. Owner reply to the framing question (2026-10-15, same day)
+
+Owner: "my goal is DSv4.1 Flash — with as fast as prefill as possible". Recorded:
+multi-stream/batched throughput is NOT a goal (batched-PP stays closed; §5 trigger 3 not activated);
+the objective is maximum single-stream PREFILL on DSv4.1. Consequence: the only remaining lever with a
+modeled double-digit prefill gain is the **3rd-node TP3 package** (+24-39% prefill; 15-32 eng-days; hardware
+checklist in the tp3 study; its offline half — transport N>2 (critical path), geometry, launcher, pad — does
+not require the hardware to start). SP+overlap remains desk-closed as dominated (<= ~5-8% ceiling). Every
+other 2-node prefill track is measured-closed. Open owner decisions: node acquisition; package green-light.
