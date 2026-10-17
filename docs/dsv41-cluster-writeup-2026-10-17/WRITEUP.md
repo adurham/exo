@@ -576,7 +576,7 @@ tension is the 8.8-14.8 GB weight-vs-cap gap column in
 `docs/deepseek-v41-memory-budget-correction-2026-09-27.md:88-95`.
 
 And yet it runs at 1M. Both nodes sit at ~127 GB of the 137 GB (128 GiB) in use while
-serving -- real pressure, no wedge. Stated plainly, not papered over: the -8.2 to -15.3 GB
+serving -- real pressure, no wedge. Stated plainly, not papered over: the -2.3 to -9.4 GB
 figure is a paper budget whose dominant term is an ESTIMATE (16-22 GB, borrowed from V4-Flash
 plus V4.1 additions, not measured), so either the true overhead is under the low end, or the
 MLX allocator reuses freed scratch rather than holding the high-water mark resident. We have
