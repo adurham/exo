@@ -56,7 +56,7 @@ from exo.shared.types.text_generation import (
 from exo.shared.types.worker.instances import InstanceId
 from exo.shared.types.worker.runner_response import FinishedResponse
 from exo.worker.engines.mlx.dsv41.dsml import CALLS_END_V41, CALLS_START_V41, DSML_V41
-from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
+from exo.worker.engines.mlx.dsv41.engine import MAX_OUTPUT_TOKENS_CEILING, Dsv41Engine
 from exo.worker.engines.mlx.dsv41.errors import (
     Dsv41InvalidRequest,
     reclassify_input_error,
@@ -793,7 +793,10 @@ def test_cache_capacity_refusal_is_client_classifiable():
     assert f"maximum context length is {capacity} tokens" in message
     # The prompt / max-output breakdown is preserved (semantics unchanged).
     assert "3 prompt tokens" in message
-    assert "100000 max_output_tokens" in message
+    # ...but it reports the RESOLVED value, not the raw request: 100000 is
+    # clamped by ``EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING`` (32768), and the
+    # refusal must describe the cap the engine actually served.
+    assert f"{MAX_OUTPUT_TOKENS_CEILING} max_output_tokens" in message
     # And the structured code, for clients that read ``error.code``.
     assert errs[0].error_code == "context_length_exceeded"
 

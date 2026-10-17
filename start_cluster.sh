@@ -2738,6 +2738,37 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_LOOP_DETECT_LONG_BLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_BLOCK=$EXO_LOOP_DETECT_LONG_BLOCK"
   [ -n "${EXO_LOOP_DETECT_LONG_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MAX_PERIOD=$EXO_LOOP_DETECT_LONG_MAX_PERIOD"
   [ -n "${EXO_LOOP_DETECT_LONG_MIN_REPEATS:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MIN_REPEATS=$EXO_LOOP_DETECT_LONG_MIN_REPEATS"
+  # EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS / EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING:
+  # output-length defaults for the dsv41 engine (engine.py
+  # resolve_max_output_tokens, read per request). A request with no
+  # max_output_tokens (or <=0) used to resolve to MAX_TOKENS (32168), so one
+  # runaway generation could hold the single served slot -- and both TP ranks,
+  # locked in the same collectives -- for 32K tokens with the client gone.
+  # DEFAULT (8192) caps the un-asked-for case; CEILING (32768) clamps ANY
+  # resolved value, including an explicit client maximum. 0 disables either
+  # (DEFAULT=0 restores the old MAX_TOKENS behaviour byte-for-byte). Forwarded
+  # because the runner env is an allow-list: an unlisted var is silently
+  # absent (the read-at-code/dead-in-deployment bug class).
+  [ -n "${EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS=$EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS"
+  [ -n "${EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING=$EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING"
+  # EXO_DSV41_NO_REPEAT_NGRAM / _WINDOW: the no-repeat n-gram ban for the dsv41
+  # engine (no_repeat.py, read per turn). Greedy-only engine, no sampler and no
+  # repetition-penalty pipeline, so an argmax attractor ("Let me write." family)
+  # is an ABSORBING state -- cloud stacks escape it by sampling, and this masks
+  # (-inf) the token that would close a repeated n-gram right before each
+  # round's argmax. NGRAM is the n-gram length: unset/0 = DISABLED = byte-
+  # identical behaviour, only n >= 3 has any effect, n=6 (no_repeat.SUGGESTED_N)
+  # is the suggested value when enabled. WINDOW (2048) bounds how far back an
+  # earlier occurrence may sit, in produced tokens. EXEMPT_IDS (optional,
+  # comma-separated) EXTENDS the control-token exemption: the EOS and think
+  # start/end ids are never banned by default, and this adds more. Forwarded as
+  # a FAMILY because the runner env is an allow-list: an unlisted var is silently
+  # absent (the read-at-code / dead-in-deployment bug class). DEFAULT OFF -- do
+  # not enable without a live A/B; this block only makes the flip possible at
+  # relaunch.
+  [ -n "${EXO_DSV41_NO_REPEAT_NGRAM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM=$EXO_DSV41_NO_REPEAT_NGRAM"
+  [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_WINDOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_WINDOW=$EXO_DSV41_NO_REPEAT_NGRAM_WINDOW"
+  [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS=$EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS"
   # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
   # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
   # 2026-10-13.md). Once a still-open reasoning block has run
