@@ -813,7 +813,7 @@ def test_the_telemetry_line_format_is_stable() -> None:
     ban = nr.NoRepeatNgram(n=6, window=2048)
     line = nr.format_ban_line(ban, nr.BanTurnStats(rows_changed=3, masked_total=7))
     assert line == (
-        "[DSV41] no-repeat-ngram n=6 window=2048 rows_changed=3 masked_total=7"
+        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 rows_changed=3 masked_total=7"
     )
 
 
@@ -831,7 +831,7 @@ def test_rounds_emits_one_telemetry_line_only_when_enabled(
             eng_mod.Dsv41Engine._rounds(engine, None, 0, 0)  # type: ignore[arg-type]
         ) == []
     assert cap.of("INFO") == [
-        "[DSV41] no-repeat-ngram n=6 window=2048 rows_changed=0 masked_total=0"
+        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 rows_changed=0 masked_total=0"
     ]
 
     monkeypatch.delenv(eng_mod.NO_REPEAT_NGRAM_ENV, raising=False)
@@ -848,3 +848,50 @@ def test_rounds_emits_one_telemetry_line_only_when_enabled(
 def test_the_suggested_n_is_six() -> None:
     assert nr.SUGGESTED_N == 6
     assert nr.SUGGESTED_N > nr.MIN_NGRAM
+
+
+# ---------------------------------------------------------------------------
+# contiguous-period escape (the SHIPPED loop escape)
+# ---------------------------------------------------------------------------
+
+
+def test_contig_period1_bans_after_three_blocks():
+    h = [10, 11, 12, 7, 7, 7]
+    assert nr.contiguous_repeat_banned_ids(h, 64, 3) == {7}
+
+
+def test_contig_phrase_needs_min_blocks():
+    phrase = [101, 102, 103, 104]
+    assert nr.contiguous_repeat_banned_ids([9] + phrase + phrase, 64, 3) == set()
+    assert nr.contiguous_repeat_banned_ids([9] + phrase * 3, 64, 3) == {101}
+
+
+def test_contig_ignores_repetition_elsewhere_in_the_window():
+    # The boilerplate case: the same phrase 300 tokens earlier must NOT ban.
+    phrase = [201, 202, 203, 204, 205, 206]
+    h = phrase + [55] + list(range(300)) + phrase[:2]
+    assert nr.contiguous_repeat_banned_ids(h, 64, 3) == set()
+
+
+def test_contig_respects_exempt():
+    assert nr.contiguous_repeat_banned_ids([7, 7, 7], 64, 3, frozenset({7})) == set()
+
+
+def test_contig_off_is_a_noop():
+    assert nr.contiguous_repeat_banned_ids([5, 5, 5, 5], 0, 3) == set()
+    assert nr.contiguous_repeat_banned_ids([5, 5, 5, 5], 64, 1) == set()
+
+
+def test_dataclass_union_and_defaults():
+    ban = nr.NoRepeatNgram(n=0, window=0, contig_max_period=64, contig_min_blocks=3)
+    assert ban.enabled and ban.contig_enabled and not ban.legacy_enabled
+    assert ban.banned([5, 5, 5]) == {5}
+    off = nr.NoRepeatNgram()
+    assert not off.enabled
+    assert off.banned([5, 5, 5, 5]) == set()
+
+
+def test_contig_per_row_uses_draft_context():
+    ban = nr.NoRepeatNgram(n=0, window=0, contig_max_period=64, contig_min_blocks=3)
+    rows = ban.banned_per_row([42, 42, 42], [])
+    assert rows == [{42}]

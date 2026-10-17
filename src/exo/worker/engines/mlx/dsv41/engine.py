@@ -346,6 +346,15 @@ NO_REPEAT_NGRAM_WINDOW_DEFAULT = 2048
 #: and unset by default: the EOS and think start/end ids this engine already
 #: resolves are exempt WITHOUT it (see resolve_no_repeat_ngram_exempt_ids).
 NO_REPEAT_NGRAM_EXEMPT_ENV = "EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS"
+#: CONTIGUOUS-PERIOD escape -- the SHIPPED loop escape. 0 = off (the default);
+#: 64 is the suggested max period in tokens. It fires ONLY while the model is
+#: repeating a block back-to-back (see no_repeat.contiguous_repeat_banned_ids),
+#: never on a phrase reused elsewhere in the window, so legitimate repetition
+#: (paths, identifiers, JSON keys, boilerplate) is untouched.
+CONTIG_REPEAT_MAX_PERIOD_ENV = "EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD"
+CONTIG_REPEAT_MAX_PERIOD_DEFAULT = 0
+CONTIG_REPEAT_MIN_BLOCKS_ENV = "EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS"
+CONTIG_REPEAT_MIN_BLOCKS_DEFAULT = 3
 
 
 def resolve_no_repeat_ngram_exempt_ids(
@@ -408,7 +417,18 @@ def resolve_no_repeat_ngram(tokenizer: Any | None = None) -> NoRepeatNgram:
     window = _read_int_env(
         NO_REPEAT_NGRAM_WINDOW_ENV, NO_REPEAT_NGRAM_WINDOW_DEFAULT
     )
-    ban = NoRepeatNgram(n=n, window=window)
+    max_period = _read_int_env(
+        CONTIG_REPEAT_MAX_PERIOD_ENV, CONTIG_REPEAT_MAX_PERIOD_DEFAULT
+    )
+    min_blocks = _read_int_env(
+        CONTIG_REPEAT_MIN_BLOCKS_ENV, CONTIG_REPEAT_MIN_BLOCKS_DEFAULT
+    )
+    ban = NoRepeatNgram(
+        n=n,
+        window=window,
+        contig_max_period=max_period,
+        contig_min_blocks=min_blocks,
+    )
     if ban.enabled:
         ban = ban.with_exempt(resolve_no_repeat_ngram_exempt_ids(tokenizer))
     return ban

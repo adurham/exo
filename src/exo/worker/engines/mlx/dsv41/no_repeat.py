@@ -71,6 +71,7 @@ __all__ = [
     "NEG_INF",
     "SUGGESTED_N",
     "BanTurnStats",
+    "contiguous_repeat_banned_ids",
     "NoRepeatNgram",
     "argmax_after_ban",
     "argmax_after_ban_detailed",
@@ -148,6 +149,52 @@ def banned_next_ids(
     if exempt:
         banned -= {int(i) for i in exempt}
     return banned
+
+
+def contiguous_repeat_banned_ids(
+    history: list[int],
+    max_period: int = 0,
+    min_blocks: int = 3,
+    exempt: frozenset[int] = frozenset(),
+) -> set[int]:
+    """Ids that would EXTEND a CONTIGUOUS periodic repeat (empty when off).
+
+    Pure over an id list. The class this engine must escape is a BACK-TO-BACK
+    repeat: the model emits the same block of ``p`` tokens ``k`` times in a row
+    ("Let me write." x6, a 4-line planning cycle x6, a single token xN). Only
+    then is the token that would extend the pattern masked -- the token that
+    followed the previous identical block.
+
+    This is deliberately NOT the global no-repeat-n-gram rule: that rule also
+    fires on legitimate repetition anywhere in the window (a phrase reused 300
+    tokens later, a repeated file path, a JSON key chain, boilerplate), and
+    forcing those to mutate is silent corruption of good output. A contiguous
+    check only triggers while the model is actually stuck emitting a cycle.
+
+    ``min_blocks`` identical blocks of exactly ``p`` tokens must sit back to
+    back at the END of ``history`` for period ``p`` to fire; the banned id is
+    ``history[-p]`` (the first token of the previous block, i.e. the token the
+    next block would start with). ``exempt`` control tokens are subtracted
+    afterwards, so a delimiter can never be banned.
+    """
+    if int(max_period) < 1 or int(min_blocks) < 2:
+        return set()
+    h = [int(t) for t in history]
+    out: set[int] = set()
+    limit = min(int(max_period), len(h) // int(min_blocks))
+    for p in range(1, limit + 1):
+        last = h[-p:]
+        ok = True
+        for b in range(2, int(min_blocks) + 1):
+            if h[-b * p:-(b - 1) * p] != last:
+                ok = False
+                break
+        if ok:
+            out.add(int(last[0]))
+    if exempt:
+        out -= {int(i) for i in exempt}
+    return out
+
 
 
 def _clone(logits: Any) -> Any:
@@ -263,6 +310,8 @@ def format_ban_line(ban: "NoRepeatNgram", stats: BanTurnStats) -> str:
     """The ONE per-turn INFO line: stable field order and spelling."""
     return (
         f"[DSV41] no-repeat-ngram n={int(ban.n)} window={int(ban.window)} "
+        f"contig_max_period={int(ban.contig_max_period)} "
+        f"contig_min_blocks={int(ban.contig_min_blocks)} "
         f"rows_changed={int(stats.rows_changed)} "
         f"masked_total={int(stats.masked_total)}"
     )
@@ -285,20 +334,48 @@ class NoRepeatNgram:
     n: int = 0
     window: int = 0
     exempt: frozenset[int] = field(default_factory=frozenset)
+    #: CONTIGUOUS-PERIOD escape (the shipped rule): mask only while the model
+    #: repeats a block back-to-back. 0 = off; ``contig_min_blocks`` identical
+    #: blocks of period p <= ``contig_max_period`` must end the history.
+    contig_max_period: int = 0
+    contig_min_blocks: int = 3
+
+    @property
+    def legacy_enabled(self) -> bool:
+        return int(self.n) >= MIN_NGRAM
+
+    @property
+    def contig_enabled(self) -> bool:
+        return int(self.contig_max_period) >= 1 and int(self.contig_min_blocks) >= 2
 
     @property
     def enabled(self) -> bool:
-        return int(self.n) >= MIN_NGRAM
+        return self.legacy_enabled or self.contig_enabled
 
     def with_exempt(self, exempt: "frozenset[int] | set[int] | None") -> "NoRepeatNgram":
         """A copy with the control-token ``exempt`` set installed (frozen)."""
         return replace(self, exempt=frozenset(int(i) for i in (exempt or ())))
 
     def banned(self, history: list[int]) -> set[int]:
-        """The banned set for the next token after ``history`` (empty if off)."""
+        """The banned set for the next token after ``history`` (empty if off).
+
+        Both rules can be armed at once; the shipped configuration uses the
+        contiguous-period rule alone (the global rule is kept for A/B work and
+        remains default-off).
+        """
         if not self.enabled:
             return set()
-        return banned_next_ids(history, self.n, self.window, self.exempt)
+        out: set[int] = set()
+        if self.legacy_enabled:
+            out |= banned_next_ids(history, self.n, self.window, self.exempt)
+        if self.contig_enabled:
+            out |= contiguous_repeat_banned_ids(
+                history,
+                self.contig_max_period,
+                self.contig_min_blocks,
+                self.exempt,
+            )
+        return out
 
     def banned_per_row(self, history: list[int], draft: list[int]) -> list[set[int]]:
         """One ban per verify-batch row.

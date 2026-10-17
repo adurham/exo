@@ -2769,6 +2769,11 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_NO_REPEAT_NGRAM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM=$EXO_DSV41_NO_REPEAT_NGRAM"
   [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_WINDOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_WINDOW=$EXO_DSV41_NO_REPEAT_NGRAM_WINDOW"
   [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS=$EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS"
+  # EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD / _MIN_BLOCKS: the CONTIGUOUS-PERIOD loop
+  # escape (the shipped rule). Fires only while the model repeats a block
+  # back-to-back; legitimate repetition elsewhere is untouched. 0/unset = off.
+  [ -n "${EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD=$EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD"
+  [ -n "${EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS=$EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS"
   # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
   # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
   # 2026-10-13.md). Once a still-open reasoning block has run
