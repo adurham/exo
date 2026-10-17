@@ -124,8 +124,9 @@ replicated, not TP-sharded.
 ### 1.4 Software stack
 
 Three downstream forks, all under `~/repos/`: exo (fork of exo-explore/exo), mlx (fork of
-ml-explore/mlx), mlx-lm (fork of ml-explore/mlx-lm). Deployed HEAD at capture: exo `991cf11` (the §12
-liveness fix, one commit past branch `deploy/next28`); mlx `b177818`; mlx-lm `676f803`. The mlx and mlx-lm SHAs are
+ml-explore/mlx), mlx-lm (fork of ml-explore/mlx-lm). Deployed exo HEAD through the capture window: `5a18b81` (`deploy/next28`) for the
+overnight runs, then `991cf11` (the §12 liveness fix) from its 10:05-10:12 deploy onward;
+mlx `b177818`; mlx-lm `676f803`. The mlx and mlx-lm SHAs are
 pinned in `uv.lock` and match the submodule gitlinks, an invariant CI enforces
 (`src/exo/shared/tests/test_submodule_lock_pin_alignment.py`).
 
