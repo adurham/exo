@@ -2757,14 +2757,18 @@ for NODE in "${NODES[@]}"; do
   # is an ABSORBING state -- cloud stacks escape it by sampling, and this masks
   # (-inf) the token that would close a repeated n-gram right before each
   # round's argmax. NGRAM is the n-gram length: unset/0 = DISABLED = byte-
-  # identical behaviour, only n >= 3 has any effect, n=5 is the suggested value
-  # when enabled. WINDOW (2048) bounds how far back an earlier occurrence may
-  # sit, in produced tokens. Forwarded as a FAMILY because the runner env is an
-  # allow-list: an unlisted var is silently absent (the read-at-code /
-  # dead-in-deployment bug class). DEFAULT OFF -- do not enable without a live
-  # A/B; this block only makes the flip possible at relaunch.
+  # identical behaviour, only n >= 3 has any effect, n=6 (no_repeat.SUGGESTED_N)
+  # is the suggested value when enabled. WINDOW (2048) bounds how far back an
+  # earlier occurrence may sit, in produced tokens. EXEMPT_IDS (optional,
+  # comma-separated) EXTENDS the control-token exemption: the EOS and think
+  # start/end ids are never banned by default, and this adds more. Forwarded as
+  # a FAMILY because the runner env is an allow-list: an unlisted var is silently
+  # absent (the read-at-code / dead-in-deployment bug class). DEFAULT OFF -- do
+  # not enable without a live A/B; this block only makes the flip possible at
+  # relaunch.
   [ -n "${EXO_DSV41_NO_REPEAT_NGRAM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM=$EXO_DSV41_NO_REPEAT_NGRAM"
   [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_WINDOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_WINDOW=$EXO_DSV41_NO_REPEAT_NGRAM_WINDOW"
+  [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS=$EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS"
   # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
   # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
   # 2026-10-13.md). Once a still-open reasoning block has run

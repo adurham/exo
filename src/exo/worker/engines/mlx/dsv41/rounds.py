@@ -47,8 +47,10 @@ from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.engines.mlx.dsv41.no_repeat import (
+    NEG_INF,
+    BanTurnStats,
     NoRepeatNgram,
-    argmax_after_ban,
+    argmax_after_ban_detailed,
 )
 from exo.worker.runner.bootstrap import logger
 
@@ -310,7 +312,10 @@ def _spec_policy(gamma: int) -> Any:
 
 
 def _greedy_token(
-    logits: mx.array, ban: NoRepeatNgram | None, history: list[int] | None
+    logits: mx.array,
+    ban: NoRepeatNgram | None,
+    history: list[int] | None,
+    stats: BanTurnStats | None = None,
 ) -> int:
     """This row's greedy token: plain argmax, or the argmax over BANNED logits.
 
@@ -319,13 +324,43 @@ def _greedy_token(
     the default path stays byte-identical. With the ban on, the single row is
     masked (``-inf`` on every id that would close a repeated n-gram of the produced
     history) before the argmax -- see ``dsv41/no_repeat.py`` for the why.
+
+    ``stats`` (optional) accumulates the turn telemetry: one committed row is
+    counted, its mask size added, and ``rows_changed`` bumped only when the ban
+    actually moved the argmax. The raw argmax used for that comparison is computed
+    inside the ban helper, never here.
     """
     if ban is None or not ban.enabled:
         return int(mx.argmax(logits.reshape(-1), axis=-1).item())
-    ids, _masked = argmax_after_ban(
-        logits.reshape(1, -1), [ban.banned(history or [])]
+    banned = [ban.banned(history or [])]
+    ids, _masked, changed, masked_counts = argmax_after_ban_detailed(
+        logits.reshape(1, -1), banned
     )
+    if stats is not None:
+        stats.rows_changed += int(changed[0])
+        stats.masked_total += int(masked_counts[0])
     return int(ids[0])
+
+
+def _assert_full_vocab_row(logits: mx.array, model: Any) -> None:
+    """The ban path must run on the FULL vocab row on EVERY rank.
+
+    With the ban on, ``_one_round`` asks the verify forward for ``argmax=False``
+    rows -- the path that rebuilds the full vocab row on each rank instead of the
+    sharded ``combine_argmax``. A shard (narrower last dim than the model's vocab)
+    cannot be masked identically across rank boundaries without a collective, which
+    is the one thing this ban exists to avoid, so FAIL LOUD rather than silently
+    mask a partial row (a wrong-vocab mask would ban the wrong ids per rank).
+    """
+    vocab = int(getattr(getattr(model, "args", None), "vocab_size", 0) or 0)
+    width = int(logits.shape[-1])
+    if vocab and width != vocab:
+        raise RuntimeError(
+            f"DSV4.1: the no-repeat n-gram ban needs the FULL vocab row on every "
+            f"rank (the argmax=False verify forward), but it returned {width} "
+            f"columns for a vocab of {vocab}. A sharded row cannot be masked "
+            f"identically across ranks without a collective -- refusing to decode."
+        )
 
 
 def _ensure_capacity_for_round(cache: Any, rows: int) -> None:
@@ -373,6 +408,7 @@ def _one_round(
     force_think_end: int | None = None,
     ban: NoRepeatNgram | None = None,
     history: list[int] | None = None,
+    ban_stats: BanTurnStats | None = None,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -411,9 +447,16 @@ def _one_round(
     ``token`` (the row this round feeds); ``ban`` is the resolved knob. When the
     ban is on, every row that the round can commit argmaxes over logits masked
     (-inf) on the ids that would close a repeated n-gram of that row's own
-    history -- applied BEFORE the argmax, over the whole verify batch. Both are
-    optional and default to "off": with ``ban`` None (or ``n < MIN_NGRAM``) this
-    round is byte-for-byte the pre-ban round.
+    history -- applied BEFORE the argmax, over the whole verify batch. THE TARGET
+    CHOICE IS ALWAYS THE MASKED ARGMAX: the draft-accept comparison, the token
+    committed at the first mismatch and the all-accepted bonus all read the same
+    masked ``target``, and the log-prob of a committed row is read off the MASKED
+    row too. No raw/sharded argmax is consulted on the enabled path, so an
+    absorbing loop whose draft agrees with the UNMASKED target is still rejected --
+    otherwise the ban would never fire. ``ban_stats`` accumulates the turn
+    telemetry (see :func:`_greedy_token`); both are optional and default to "off":
+    with ``ban`` None (or ``n < MIN_NGRAM``) this round is byte-for-byte the
+    pre-ban round.
     """
     started = time.perf_counter()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
@@ -449,7 +492,7 @@ def _one_round(
         # Plain greedy: one row in, one token out. Grow for that row first.
         _ensure_capacity_for_round(cache, 1)
         logits = model(anchor, cache, last_logit_only=True)
-        next_token = _greedy_token(logits, ban, history)
+        next_token = _greedy_token(logits, ban, history, ban_stats)
         _row_logprobs(logits, logprobs, lp_out)
         committed = [next_token]
         if limiter is not None:
@@ -474,7 +517,7 @@ def _one_round(
         # taps so round 2 can draft.
         _ensure_capacity_for_round(cache, 1)
         logits, taps = model(anchor, cache, last_logit_only=True, return_taps=True)
-        next_token = _greedy_token(logits, ban, history)
+        next_token = _greedy_token(logits, ban, history, ban_stats)
         _row_logprobs(logits, logprobs, lp_out)
         draft_state = head.make_cache(1)
         head.append_ctx(tapcat(taps), draft_state)
@@ -533,13 +576,20 @@ def _one_round(
     mx.eval(logits)
     stashes = spec.stashes(cache)
     draft = [int(v) for v in drafted[0]]
+    masked_rows: mx.array | None = None
+    changed: list[bool] = []
+    masked_counts: list[int] = []
     if ban_policy is not None:
+        # The ban path runs on the FULL vocab row (argmax=False). A shard here
+        # means the model took the wrong forward -- fail loud before masking.
+        _assert_full_vocab_row(logits, model)
         # Per-row ban over the whole verify batch (row 0 after the produced
         # history's last id, row i after the i-th fed draft token -- see
         # ``NoRepeatNgram.banned_per_row``), applied BEFORE the argmax. A row
         # whose every candidate is banned falls back to its unmasked argmax, so a
-        # round can never emit an invalid token.
-        target, _masked = argmax_after_ban(
+        # round can never emit an invalid token. ``target`` is THE masked argmax:
+        # the accept loop, the first-mismatch commit and the bonus all read it.
+        target, masked_rows, changed, masked_counts = argmax_after_ban_detailed(
             logits[0], ban_policy.banned_per_row(history or [], draft)
         )
     else:
@@ -565,17 +615,36 @@ def _one_round(
         # the shortened committed prefix (the tokens past the cut -- including the
         # bonus -- are dropped, never committed, and rolled out of the cache).
         committed = limiter.feed(committed)
+    if ban_policy is not None and ban_stats is not None:
+        # Turn telemetry over the COMMITTED rows only (the rows this round can
+        # actually emit): how many saw the ban move the argmax, and how many ids
+        # the ban removed in total. Diagnostics only -- the tokens above do not
+        # depend on these counters.
+        for i in range(min(len(committed), len(masked_counts))):
+            ban_stats.rows_changed += int(changed[i])
+            ban_stats.masked_total += int(masked_counts[i])
     if lp is not None and lp_out is not None:
         # committed[i] == target[i] (accepted drafts match the target), so row
         # i of the verify forward carries committed token i's log-probs.
         _rows_logprobs(lp, len(committed), lp_out)
     elif ban_policy is not None and logprobs and lp_out is not None:
-        # Same rows, read off the RAW rows: the ban steers the ARGMAX, it does
-        # not change what the model thought of the token the round did commit, so
-        # the reported log-probs stay the model's own (the argmax=True + logprobs
-        # path reports the identical quantity).
+        # The ban steers the ARGMAX, so the log-prob of a committed row must be
+        # read for the MASKED committed id, not the raw argmax: read it off the
+        # MASKED row, which makes ``from_logits`` select exactly that id (and its
+        # top-k are taken over the masked row, so a banned id never appears as a
+        # competitor). A fully-banned row fell back to its RAW argmax, so its raw
+        # row is the faithful read there.
+        # NOTE the (correct) semantic shift: log_softmax(masked)[id] >=
+        # log_softmax(raw)[id] at a ban-changed position, because the banned mass
+        # is renormalised onto the survivors -- so a client comparing logprobs ON
+        # vs OFF sees the number move at exactly the rows the ban moved. When the
+        # ban is off this branch does not run and the value is byte-identical.
+        assert masked_rows is not None
         for i in range(len(committed)):
-            _row_logprobs(logits[0, i], logprobs, lp_out)
+            row = masked_rows[i]
+            if float(mx.max(row)) == NEG_INF:
+                row = logits[0, i]
+            _row_logprobs(row, logprobs, lp_out)
     committed_position = position + len(committed)
     spec.rollback(cache, snapshot, committed_position, stashes)
     head.append_ctx(tapcat(taps)[:, : len(committed)], draft_state)

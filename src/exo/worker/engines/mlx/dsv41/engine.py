@@ -101,7 +101,11 @@ from exo.worker.engines.mlx.dsv41.errors import (
 )
 from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
-from exo.worker.engines.mlx.dsv41.no_repeat import NoRepeatNgram
+from exo.worker.engines.mlx.dsv41.no_repeat import (
+    BanTurnStats,
+    NoRepeatNgram,
+    format_ban_line,
+)
 from exo.worker.engines.mlx.dsv41.output import _starts_in_thinking, dsv41_output_parser
 from exo.worker.engines.mlx.dsv41.reasoning_budget import (
     ReasoningBudgetLimiter,
@@ -330,30 +334,84 @@ def resolve_max_output_tokens(requested: int | None) -> int:
 # by sampling, and a no-repeat n-gram ban is the cheapest deterministic escape
 # that keeps the engine greedy. EXO_DSV41_NO_REPEAT_NGRAM is the n-gram length:
 # 0 or unset (the DEFAULT) = DISABLED = byte-identical behaviour, and only
-# n >= no_repeat.MIN_NGRAM (3) has any effect; n=5 is the suggested value when
-# enabled. EXO_DSV41_NO_REPEAT_NGRAM_WINDOW bounds how far back an earlier
-# occurrence may sit, in PRODUCED tokens. Both are read at RESOLVE time, like
-# this package's other knobs, so a test can monkeypatch.setenv.
+# n >= no_repeat.MIN_NGRAM (3) has any effect; no_repeat.SUGGESTED_N (6) is the
+# suggested value when enabled. EXO_DSV41_NO_REPEAT_NGRAM_WINDOW bounds how far
+# back an earlier occurrence may sit, in PRODUCED tokens. Both are read at RESOLVE
+# time, like this package's other knobs, so a test can monkeypatch.setenv.
 NO_REPEAT_NGRAM_ENV = "EXO_DSV41_NO_REPEAT_NGRAM"
 NO_REPEAT_NGRAM_DEFAULT = 0
 NO_REPEAT_NGRAM_WINDOW_ENV = "EXO_DSV41_NO_REPEAT_NGRAM_WINDOW"
 NO_REPEAT_NGRAM_WINDOW_DEFAULT = 2048
+#: Comma-separated EXTRA control-token ids that must never be banned. OPTIONAL
+#: and unset by default: the EOS and think start/end ids this engine already
+#: resolves are exempt WITHOUT it (see resolve_no_repeat_ngram_exempt_ids).
+NO_REPEAT_NGRAM_EXEMPT_ENV = "EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS"
 
 
-def resolve_no_repeat_ngram() -> NoRepeatNgram:
+def resolve_no_repeat_ngram_exempt_ids(
+    tokenizer: Any | None = None,
+) -> frozenset[int]:
+    """Control-token ids the no-repeat n-gram ban must NEVER mask (pure).
+
+    Repetition of special/control tokens is normal: EOS ends a turn and the think
+    start/end delimiters open/close a reasoning block, so banning one could stop
+    the model closing a block or a tool call. The DEFAULT exempt set is the
+    tokenizer's EOS ids plus the think start/end ids this engine already resolves
+    for the reasoning-budget limiter (``safe_think_token_id``, which degrades to
+    None rather than raising). The comma-separated
+    ``EXO_DSV41_NO_REPEAT_NGRAM_EXEMPT_IDS`` EXTENDS the set; a malformed entry
+    warns and is skipped, never crashes.
+
+    Pure in the same sense as the other resolvers: a deterministic function of the
+    environment and the tokenizer alone, so both TP ranks resolve the identical
+    set with no collective.
+    """
+    ids: set[int] = set()
+    raw = os.environ.get(NO_REPEAT_NGRAM_EXEMPT_ENV)
+    if raw is not None and raw.strip():
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.add(int(part))
+            except ValueError:
+                logger.warning(
+                    f"[DSV41] ignoring non-integer {NO_REPEAT_NGRAM_EXEMPT_ENV} "
+                    f"entry {part!r}"
+                )
+    if tokenizer is not None:
+        for eos in getattr(tokenizer, "eos_token_ids", None) or ():
+            try:
+                ids.add(int(eos))
+            except (TypeError, ValueError):
+                continue
+        for attr in ("think_start_id", "think_end_id"):
+            tid = safe_think_token_id(tokenizer, attr)
+            if tid is not None:
+                ids.add(int(tid))
+    return frozenset(ids)
+
+
+def resolve_no_repeat_ngram(tokenizer: Any | None = None) -> NoRepeatNgram:
     """Resolve the no-repeat n-gram ban from the environment (pure).
 
     No engine state is touched: the result is a deterministic function of the two
-    env knobs alone, exactly like ``resolve_max_output_tokens``. An unset or
-    malformed knob resolves to the disabled default (``n=0``), so a launcher typo
-    cannot turn the ban on by accident -- and a knob that turns it on is still
-    inert below ``no_repeat.MIN_NGRAM``.
+    env knobs (and, when the knob is ON, the tokenizer's control-token ids) alone,
+    exactly like ``resolve_max_output_tokens``. An unset or malformed knob
+    resolves to the disabled default (``n=0``), so a launcher typo cannot turn the
+    ban on by accident -- and a knob that turns it on is still inert below
+    ``no_repeat.MIN_NGRAM``. The control-token exemption is installed ONLY when the
+    ban is enabled, so the disabled path touches neither the tokenizer nor the env.
     """
     n = _read_int_env(NO_REPEAT_NGRAM_ENV, NO_REPEAT_NGRAM_DEFAULT)
     window = _read_int_env(
         NO_REPEAT_NGRAM_WINDOW_ENV, NO_REPEAT_NGRAM_WINDOW_DEFAULT
     )
-    return NoRepeatNgram(n=n, window=window)
+    ban = NoRepeatNgram(n=n, window=window)
+    if ban.enabled:
+        ban = ban.with_exempt(resolve_no_repeat_ngram_exempt_ids(tokenizer))
+    return ban
 
 
 class Dsv41ContextLengthExceeded(Dsv41UnsupportedFeature):  # noqa: N818 - name
@@ -1696,7 +1754,9 @@ class Dsv41Engine(Engine):
         ``_one_round`` together with the produced-token ``history`` this loop keeps
         in lockstep with the cache. It is a pure function of that history, so both
         ranks build the identical ban and stay in step with no collective, exactly
-        like the limiter above.
+        like the limiter above. When it is ON, the resolver also installs the
+        CONTROL-TOKEN exemption (EOS + think start/end + ``_EXEMPT_IDS``), and this
+        loop emits ONE INFO telemetry line at turn end (``format_ban_line``).
         """
         head = self.loaded.head if self.speculative else None
         policy = (
@@ -1711,94 +1771,111 @@ class Dsv41Engine(Engine):
         # produced-token history it reads is built here, one round at a time, in
         # lockstep with the cache: it ENDS with ``token`` (the row the next round
         # feeds), which is exactly the sequence position the round predicts from.
-        ban = resolve_no_repeat_ngram()
+        # The tokenizer is passed only so the control-token exemption (EOS + think
+        # start/end) resolves when -- and only when -- the knob is enabled.
+        ban = resolve_no_repeat_ngram(getattr(self.loaded, "tokenizer", None))
+        # Turn-cumulative ban telemetry (None == knob off == never allocated, so the
+        # disabled path does no extra work and logs nothing).
+        ban_stats: BanTurnStats | None = BanTurnStats() if ban.enabled else None
         history: list[int] = [int(anchor)]
         # The anchor is fed to the limiter by the caller (_generate) before the
         # first round, so it can ALREADY have latched a force (a budget small enough
         # to be spent by the anchor itself): honour it on the very first round.
         force: int | None = limiter.next_force if limiter is not None else None
-        while n < max_tokens:
-            active = self._active
-            self._check_cancel(active.task.task_id if active is not None else None)
-            lps: list[Any] = []
-            committed, _round_ms, _accepted, _gamma = _one_round(
-                self,
-                model=self.loaded.model,
-                cache=session.cache.cache,
-                token=token,
-                head=head,
-                policy=policy,
-                draft_state=session.draft_state,
-                logprobs=logprobs,
-                lp_out=lps if logprobs else None,
-                limiter=limiter,
-                force_think_end=force,
-                ban=ban,
-                history=history,
-            )
-            # Cumulative spec counters (deltas across requests = live
-            # acceptance rate; _accepted == _gamma means a fully-accepted round).
-            if head is not None:
-                self._spec_rounds += 1
-                self._spec_accepted += int(_accepted)
-                self._spec_drafted += int(_gamma)
-            batch = [int(t) for t in committed]
-            if not batch:
-                # A round ALWAYS commits >= 1 token: the limiter admits the
-                # threshold token itself and its forced round emits one. An empty
-                # round would spin this loop, so fail loud rather than hang.
-                raise RuntimeError(
-                    "DSV4.1: a decode round committed no tokens "
-                    "(reasoning-budget limiter invariant violated)"
+        try:
+            while n < max_tokens:
+                active = self._active
+                self._check_cancel(active.task.task_id if active is not None else None)
+                lps: list[Any] = []
+                committed, _round_ms, _accepted, _gamma = _one_round(
+                    self,
+                    model=self.loaded.model,
+                    cache=session.cache.cache,
+                    token=token,
+                    head=head,
+                    policy=policy,
+                    draft_state=session.draft_state,
+                    logprobs=logprobs,
+                    lp_out=lps if logprobs else None,
+                    limiter=limiter,
+                    force_think_end=force,
+                    ban=ban,
+                    history=history,
+                    ban_stats=ban_stats,
                 )
-            n += len(batch)
-            token = batch[-1]
-            # Keep the ban's history in step with the cache: this round committed
-            # every id in ``batch`` (its rows are in the cache), so the NEXT round
-            # predicts from a sequence ending in ``batch[-1]``. Trim to the scan
-            # window -- older ids can never be reached by the ban -- so the list
-            # does not grow with the whole turn.
-            history.extend(batch)
-            if ban.enabled:
-                keep = int(ban.window) + int(ban.n)
-                if keep > 0 and len(history) > 2 * keep:
-                    del history[:-keep]
-            # ── DECODE-PHASE LIVENESS BEAT ──────────────────────────────────
-            # Re-emit the runner status once per COMPLETED round, below the
-            # empty-batch guard, so every beat is backed by a finished
-            # collective AND a non-empty committed batch. Rationale: the engine
-            # beats every <=15 s during LOAD and PREFILL (the loading progress
-            # path and the fence hook), but the DECODE path emitted nothing the
-            # supervisor counts. The runner-loop decode heartbeat
-            # (runner.py handle_generation_tasks) cannot stand in for it: it
-            # needs step() to RETURN, and the output parser can hold tokens back
-            # for a whole reasoning phase, so step() stays inside one round for
-            # minutes and its 15 s re-emit never runs. The supervisor's hang
-            # watchdog then saw >45 s of silence from runners that were
-            # decoding HEALTHY -- committed tokens advancing every ~10 s right
-            # up to each kill (22 SIGKILLs observed live 2026-10-17). This is
-            # the design doctrine of
-            # docs/dsv41-prefill-liveness-and-hang-guard-design-2026-10-05.md:
-            # signal real progress, never widen the timeout. A genuinely WEDGED
-            # round (a collective that never returns) still goes SILENT -- it
-            # never reaches this line, so no beat. Active on BOTH TP ranks (each
-            # rank's own supervisor must see its own runner's events).
-            # ``prefill_heartbeat`` is internally throttled to one call per
-            # 15 s and is installed by the runner
-            # (``self.generator.heartbeat = lambda: self.update_status(...)``).
-            self.prefill_heartbeat()
-            # The limiter latches the force for the round AFTER the one that
-            # tripped the budget; pass it in on the next iteration.
-            force = limiter.next_force if limiter is not None else None
-            # Decode-side ladder: the draft window is in step with the cache at
-            # a round boundary (``_one_round`` appends exactly the accepted
-            # rows), so the same cadence guard applies. Without this, an
-            # assistant-turn seam undershoot rewinds to the previous turn start
-            # = unbounded refeed.
-            session.maybe_checkpoint()  # pyright: ignore[reportAny]
-            yield batch, lps
-            if session.eos_id in batch:
-                return
+                # Cumulative spec counters (deltas across requests = live
+                # acceptance rate; _accepted == _gamma means a fully-accepted round).
+                if head is not None:
+                    self._spec_rounds += 1
+                    self._spec_accepted += int(_accepted)
+                    self._spec_drafted += int(_gamma)
+                batch = [int(t) for t in committed]
+                if not batch:
+                    # A round ALWAYS commits >= 1 token: the limiter admits the
+                    # threshold token itself and its forced round emits one. An empty
+                    # round would spin this loop, so fail loud rather than hang.
+                    raise RuntimeError(
+                        "DSV4.1: a decode round committed no tokens "
+                        "(reasoning-budget limiter invariant violated)"
+                    )
+                n += len(batch)
+                token = batch[-1]
+                # Keep the ban's history in step with the cache: this round committed
+                # every id in ``batch`` (its rows are in the cache), so the NEXT round
+                # predicts from a sequence ending in ``batch[-1]``. Trim to the scan
+                # window -- older ids can never be reached by the ban -- so the list
+                # does not grow with the whole turn.
+                history.extend(batch)
+                if ban.enabled:
+                    keep = int(ban.window) + int(ban.n)
+                    if keep > 0 and len(history) > 2 * keep:
+                        del history[:-keep]
+                # ── DECODE-PHASE LIVENESS BEAT ──────────────────────────────────
+                # Re-emit the runner status once per COMPLETED round, below the
+                # empty-batch guard, so every beat is backed by a finished
+                # collective AND a non-empty committed batch. Rationale: the engine
+                # beats every <=15 s during LOAD and PREFILL (the loading progress
+                # path and the fence hook), but the DECODE path emitted nothing the
+                # supervisor counts. The runner-loop decode heartbeat
+                # (runner.py handle_generation_tasks) cannot stand in for it: it
+                # needs step() to RETURN, and the output parser can hold tokens back
+                # for a whole reasoning phase, so step() stays inside one round for
+                # minutes and its 15 s re-emit never runs. The supervisor's hang
+                # watchdog then saw >45 s of silence from runners that were
+                # decoding HEALTHY -- committed tokens advancing every ~10 s right
+                # up to each kill (22 SIGKILLs observed live 2026-10-17). This is
+                # the design doctrine of
+                # docs/dsv41-prefill-liveness-and-hang-guard-design-2026-10-05.md:
+                # signal real progress, never widen the timeout. A genuinely WEDGED
+                # round (a collective that never returns) still goes SILENT -- it
+                # never reaches this line, so no beat. Active on BOTH TP ranks (each
+                # rank's own supervisor must see its own runner's events).
+                # ``prefill_heartbeat`` is internally throttled to one call per
+                # 15 s and is installed by the runner
+                # (``self.generator.heartbeat = lambda: self.update_status(...)``).
+                self.prefill_heartbeat()
+                # The limiter latches the force for the round AFTER the one that
+                # tripped the budget; pass it in on the next iteration.
+                force = limiter.next_force if limiter is not None else None
+                # Decode-side ladder: the draft window is in step with the cache at
+                # a round boundary (``_one_round`` appends exactly the accepted
+                # rows), so the same cadence guard applies. Without this, an
+                # assistant-turn seam undershoot rewinds to the previous turn start
+                # = unbounded refeed.
+                session.maybe_checkpoint()  # pyright: ignore[reportAny]
+                yield batch, lps
+                if session.eos_id in batch:
+                    return
+        finally:
+            # ── NO-REPEAT N-GRAM TELEMETRY ──────────────────────────────────
+            # ONE INFO line per turn, ONLY when the knob is on (the disabled path
+            # allocates no counters and logs nothing -- byte-identical behaviour).
+            # Emitted from a ``finally`` so a turn that ends early (an EOS
+            # ``return`` above, or a consumer that abandons this generator once it
+            # has its tokens) still reports its counts. Fields and spelling are
+            # pinned by no_repeat.format_ban_line.
+            if ban.enabled and ban_stats is not None:
+                logger.info(format_ban_line(ban, ban_stats))
 
     # ------------------------------------------------------------------ rounds
 
