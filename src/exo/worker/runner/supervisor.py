@@ -57,11 +57,17 @@ from exo.utils.task_group import TaskGroup
 from exo.worker.runner.bootstrap import RunnerTerminationError, entrypoint
 from exo.worker.runner.diagnostics import (
     RunnerDiagnosticCollector,
+    RunnerRingTransportError,
     RunnerUnknown,
 )
 
 PREFILL_TIMEOUT_SECONDS = 60
 DECODE_TIMEOUT_SECONDS = 5
+# How often the supervisor checks that its runner is alive and can still reach the others
+RUNNER_WATCH_INTERVAL = 5.0
+# A generating runner reports a token every step and progress every prefill chunk, so this
+# long without a word means it is stuck (its instance's runners can wait on each other forever)
+RUNNER_STALL_TIMEOUT = 90.0
 
 
 # Hang watchdog: if a runner has in-progress work but emits NO event (prefill
@@ -682,6 +688,8 @@ class RunnerSupervisor:
     in_progress: dict[TaskId, Task] = field(default_factory=dict, init=False)
     completed: set[TaskId] = field(default_factory=set, init=False)
     cancelled: set[TaskId] = field(default_factory=set, init=False)
+    # When the runner last sent anything, for noticing a runner that is stuck mid-generation
+    _last_heard: float = field(default_factory=lambda: anyio.current_time(), init=False)
     _cancel_watch_runner: anyio.CancelScope = field(
         default_factory=anyio.CancelScope, init=False
     )
@@ -819,7 +827,16 @@ class RunnerSupervisor:
             await self._task_sender.send_async(task)
         except ClosedResourceError:
             self.in_progress.pop(task.task_id, None)
+            self.pending.pop(task.task_id, None)
             logger.warning(f"Task {task} dropped, runner closed communication.")
+            return
+        # A runner that is generating only picks up new tasks between steps, so behind a
+        # long prompt the acknowledgement can take minutes, and the caller (the worker's
+        # planning for every runner on this node) would wait that long. Generation tasks
+        # are tracked by id in in_progress, so there's no need. Other tasks change the
+        # runner's status before it acknowledges them, and the worker plans from that
+        # status, so those still wait.
+        if isinstance(task, (TextGeneration, ImageGeneration, ImageEdits)):
             return
         await event.wait()
 
@@ -829,6 +846,22 @@ class RunnerSupervisor:
             self.cancelled.add(task_id)
             return
         self.cancelled.add(task_id)
+        acknowledged = self.pending.get(task_id)
+        if acknowledged is not None and not acknowledged.is_set():
+            # The runner hasn't picked the task up yet, and it ignores cancellations for
+            # tasks it doesn't know, so send this one once it has. (A runner that has gone
+            # away releases every waiting task.)
+            self._tg.start_soon(self._cancel_when_acknowledged, task_id, acknowledged)
+            return
+        await self._send_cancel(task_id)
+
+    async def _cancel_when_acknowledged(
+        self, task_id: TaskId, acknowledged: anyio.Event
+    ) -> None:
+        await acknowledged.wait()
+        await self._send_cancel(task_id)
+
+    async def _send_cancel(self, task_id: TaskId) -> None:
         with anyio.move_on_after(0.5) as scope:
             try:
                 await self._cancel_sender.send_async(task_id)
@@ -857,6 +890,8 @@ class RunnerSupervisor:
                     self._hang_probe_last_cputime_seconds = None
                     self._hang_probe_wall_last_monotonic = 0.0
                     self._hang_probe_sample_failed_once = False
+                    # upstream #2370 stall clock (see _stuck)
+                    self._last_heard = anyio.current_time()
                     if isinstance(event, RunnerTerminationError):
                         # try to get exception if possible
                         await self._check_runner(event)
@@ -894,9 +929,29 @@ class RunnerSupervisor:
     async def _watch_runner(self) -> None:
         with self._cancel_watch_runner:
             while True:
-                await anyio.sleep(5)
+                await anyio.sleep(RUNNER_WATCH_INTERVAL)
                 if not self.runner_process.is_alive():
                     await self._check_runner(RuntimeError("Runner found to be dead"))
+                    return
+                if self._lost_its_peers():
+                    # MLX gave up on the connection to the other runners of this instance, but
+                    # the process lives on, stuck: every request on the instance would hang.
+                    # Stopping it fails its requests with an error, and the runner and its
+                    # peers are recreated.
+                    await self._check_runner(
+                        RuntimeError(
+                            "Lost the connection to the instance's other runners"
+                        )
+                    )
+                    return
+                if self._stuck():
+                    # Stopping it fails its requests with an error; the runner and the
+                    # instance's other runners are then recreated.
+                    await self._check_runner(
+                        RuntimeError(
+                            f"Runner made no progress for {RUNNER_STALL_TIMEOUT:.0f}s while generating"
+                        )
+                    )
                     return
                 await self._check_hang()
                 self._check_stuck_init()
@@ -1290,6 +1345,29 @@ class RunnerSupervisor:
         with contextlib.suppress(Exception):
             os.kill(self.runner_process.pid, signal.SIGKILL)
 
+    def _stuck(self) -> bool:
+        """Whether the runner is generating but has gone silent. Only the first rank of an
+        instance reports tokens and prefill progress, so only its supervisor can tell.
+
+        adurham fork: only a FALLBACK for when our hang watchdog (_check_hang,
+        EXO_RUNNER_HANG_TIMEOUT_SECONDS, with the memory-growth liveness probe) is
+        disabled. Upstream's flat 90 s kill (#2370) would otherwise SIGTERM a rank-0
+        runner inside one long, genuinely-progressing prefill chunk that the probe
+        exists to extend."""
+        return (
+            HANG_TIMEOUT_SECONDS <= 0
+            and self.bound_instance.bound_shard.device_rank == 0
+            and isinstance(self.status, RunnerRunning)
+            and any(isinstance(t, TextGeneration) for t in self.in_progress.values())
+            and anyio.current_time() - self._last_heard > RUNNER_STALL_TIMEOUT
+        )
+
+    def _lost_its_peers(self) -> bool:
+        return any(
+            isinstance(diagnostic, RunnerRingTransportError)
+            for diagnostic in self._runner_stdio_handler.diagnostics.diagnostics()
+        )
+
     async def _check_runner(
         self, e: RunnerTerminationError | Exception | None = None
     ) -> None:
@@ -1374,12 +1452,11 @@ class RunnerSupervisor:
             for d in self._runner_stdio_handler.diagnostics.diagnostics()
             if not isinstance(d, RunnerUnknown)
         ]
-        # Snapshot: the awaits below yield to the event loop, which can
-        # mutate in_progress (task completion/cleanup) mid-iteration —
-        # observed 2026-07-10 as "RuntimeError: dictionary changed size
-        # during iteration" here, escalating a contained runner crash into
-        # killing the whole exo-main process (no self-heal).
+        # Each send yields to the event loop, where the runner's last results can still finish
+        # requests (and take them out of in_progress), so walk a copy and skip those.
         for task in list(self.in_progress.values()):
+            if task.task_id not in self.in_progress:
+                continue
             if isinstance(task, (TextGeneration, ImageGeneration, ImageEdits)):
                 with anyio.CancelScope(shield=True):
                     await self._event_sender.send(

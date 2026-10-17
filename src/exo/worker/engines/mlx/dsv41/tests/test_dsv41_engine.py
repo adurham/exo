@@ -34,6 +34,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import mlx.core as mx
+import numpy as np
 import pytest
 from mlx_lm.models.deepseek_v41.cache import CapacityError as _ScCapacityError
 
@@ -290,6 +291,7 @@ def _submit(
     content: str,
     max_output_tokens: int | None = None,
     images: list[Base64Image] | None = None,
+    correlation_id: str | None = None,
 ) -> None:
     """Queue one more request on an engine built by ``_engine``."""
     params = TextGenerationTaskParams(
@@ -298,6 +300,7 @@ def _submit(
         max_output_tokens=max_output_tokens,
         temperature=0.0,
         images=images or [],
+        correlation_id=correlation_id,
     )
     engine.submit(
         TextGeneration(
@@ -1186,3 +1189,125 @@ def test_engine_kwargs_ignores_a_malformed_transient_budget(monkeypatch: pytest.
     monkeypatch.setenv("EXO_PREFILL_TRANSIENT_BUDGET_MB", "not-a-number")
     kwargs = _engine_kwargs_from_instance(_fake_bound_instance())
     assert "prefill_transient_budget_mb" not in kwargs
+
+
+# ------------------------------------------------ vision x session reuse
+
+
+def test_store_reuse_disabled_opens_a_cold_conversation():
+    """(a) ``Dsv41Sessions.get(reuse=False)`` skips the resident prefix match.
+
+    This is the selection the engine now uses for an image-carrying request. A
+    resident conversation is seeded with a matching prefix; the SAME prompt as
+    a text request WOULD reuse it (the exact path the live warm-session image
+    crash took), but ``reuse=False`` -- the image path -- must open a fresh cold
+    conversation instead. Reusing would delta-prefill from a nonzero offset and
+    trip the vision splice.
+    """
+    from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions
+    from exo.worker.engines.mlx.dsv41.tests._stub_harness import StubBody, run_turn
+
+    store = Dsv41Sessions(
+        StubBody(), None, max_seq_len=256, chunk=4, long_chunk=4,
+        long_threshold=10**9, max_sessions=4,
+    )
+    #: Comfortably over ``MIN_REUSE_TOKENS`` (64) so a text prompt this long is
+    #: eligible for prefix reuse -- the precondition of the live bug.
+    ids = np.arange(10, 10 + 120, dtype=np.int64)
+    resident, _fed, _gen = run_turn(store, ids, key=None)
+    assert store.stats["cold"] == 1 and store.stats["reuse"] == 0
+
+    # Sanity: a normal (non-image) request with the same prompt reuses it.
+    assert store.get(ids.tolist(), reuse=True) is resident
+    assert store.stats["reuse"] == 1
+
+    # An image-carrying request must go COLD -- not reuse the resident.
+    image_conv = store.get(ids.tolist(), reuse=False)
+    assert image_conv is not resident
+    assert store.stats["reuse"] == 1 and store.stats["cold"] == 2
+
+
+def test_store_reuse_disabled_ignores_a_named_conversation_key():
+    """(a) The client-named-key path is skipped too: an image request that names
+    a resident conversation id must still open cold (no reuse by key)."""
+    from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions
+    from exo.worker.engines.mlx.dsv41.tests._stub_harness import StubBody, run_turn
+
+    store = Dsv41Sessions(
+        StubBody(), None, max_seq_len=256, chunk=4, long_chunk=4,
+        long_threshold=10**9, max_sessions=4,
+    )
+    ids = np.arange(10, 10 + 80, dtype=np.int64)
+    resident, _fed, _gen = run_turn(store, ids, key="conv-1")
+    # A text request naming the key reuses the resident...
+    assert store.get(ids.tolist(), "conv-1", reuse=True) is resident
+    assert store.stats["reuse"] == 1
+    # ... but the image request must not. NOTE the key-miss path does not count
+    # ``cold`` (only the no-key path does), so the forced-cold open is the first.
+    image_conv = store.get(ids.tolist(), "conv-1", reuse=False)
+    assert image_conv is not resident
+    assert store.stats["reuse"] == 1 and store.stats["cold"] == 1
+
+
+def _stub_image_expansion(monkeypatch: pytest.MonkeyPatch, tokens: list[int],
+                          span: tuple[int, int]) -> None:
+    """Replace the engine's vision seams with a deterministic stand-in.
+
+    No ViT, no checkpoint: only the SELECTION behaviour (reuse vs cold) is under
+    test here, so ``render_prompt`` / ``prompt_tokens_for_request`` /
+    ``image_spans`` / ``build_embeddings`` are replaced by stand-ins that return
+    a fixed token list and image span. The engine reads them as module globals.
+    """
+    from exo.worker.engines.mlx.dsv41 import engine as engine_mod
+
+    start, end = span
+    fake_inputs = [SimpleNamespace(start=start, types=[0] * (end - start))]
+    monkeypatch.setattr(engine_mod, "render_prompt", lambda *_a, **_k: "PROMPT")
+    monkeypatch.setattr(
+        engine_mod, "prompt_tokens_for_request",
+        lambda _v, _p, _i, _t: (list(tokens), [0] * len(tokens), list(fake_inputs)),
+    )
+    monkeypatch.setattr(engine_mod, "image_spans", lambda _ii: [span])
+    monkeypatch.setattr(
+        engine_mod, "build_embeddings",
+        lambda _m, _v, toks, _ii: mx.zeros((1, len(toks), 4)),
+    )
+
+
+def test_engine_routes_an_image_request_to_a_cold_session(monkeypatch: pytest.MonkeyPatch):
+    """(a) The ENGINE selects a COLD session for an image-carrying request.
+
+    A resident conversation is created by a text turn under conversation id
+    ``conv-1``. A second, image-carrying request with the SAME conversation id
+    and a prompt that extends the resident must NOT reuse it: reusing is what
+    made the live image request delta-prefill from a nonzero cache offset and
+    trip the vision splice (RuntimeError -> both ranks die). The engine's signal
+    is the same one that logs "prompt expanded with N image(s)": the request's
+    embedded image path makes ``embeddings is not None``.
+    """
+    engine, _model, _tokenizer, _events = _engine(
+        [34, 1], text_of=ANSWER_TEXT, max_output_tokens=8
+    )
+
+    class _Vision:
+        placeholder = "<\uff5cdeepseek_image\uff5c>"
+
+    engine.vision_processor = _Vision()  # type: ignore[assignment]
+    _stub_image_expansion(monkeypatch, [10, 11, 12, 13, 14, 15], (2, 4))
+
+    # Request 1: a TEXT turn under conversation id "conv-1" -> resident "id:conv-1".
+    _submit(engine, "task-1", content="hello", max_output_tokens=8,
+            correlation_id="conv-1")
+    # Request 2: an IMAGE request with the SAME conversation id.
+    _submit(engine, "task-2", content="hello", max_output_tokens=8,
+            correlation_id="conv-1", images=[Base64Image("A")])
+
+    _drain_pairs(engine)
+
+    # Without the fix, request 2 reused the resident (reuse == 1). With it, the
+    # image request took the forced-cold path and nothing was ever reused.
+    assert engine._sessions.stats["reuse"] == 0, (
+        "an image-carrying request must not reuse a resident conversation"
+    )
+    assert engine._sessions.stats["cold"] == 2
+    assert engine._active is None

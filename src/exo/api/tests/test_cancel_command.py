@@ -18,6 +18,7 @@ def _make_api() -> Any:
     api.app = app
     api._text_generation_queues = {}  # pyright: ignore[reportPrivateUsage]
     api._image_generation_queues = {}  # pyright: ignore[reportPrivateUsage]
+    api._cancelled_command_ids = set()  # pyright: ignore[reportPrivateUsage]
     api._send = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     # 2026-08-09: cancel_command() now looks up the command's task_id via
     # self.state.tasks (see _find_task_for_command's own docstring) to poll

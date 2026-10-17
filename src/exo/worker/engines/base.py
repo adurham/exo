@@ -39,6 +39,42 @@ class Engine(ABC):
             or CANCEL_ALL_TASKS in self._cancelled_tasks
         )
 
+    def idle_tick_seconds(self) -> float | None:
+        """Interval at which the runner should call :meth:`idle_tick` while it
+        has no generation task, or ``None`` (the default) to keep the runner's
+        blocking idle wait exactly as before."""
+        return None
+
+    def idle_tick(self, request_pending: Callable[[], bool] | None = None) -> object:
+        """Opportunistic between-requests work on the RUNNER (engine) thread.
+
+        Called only when the runner is Ready and its work queue stayed empty for
+        :meth:`idle_tick_seconds`. ``request_pending()`` turns True as soon as a
+        new work item arrives; an implementation must poll it and yield quickly.
+        Default: no-op.
+        """
+        del request_pending
+        return None
+
+    def begin_shutdown(self) -> None:
+        """Plan §G3 step 1: stop admitting new requests. Default: no-op.
+
+        The DSv4.1 engine sets a flag so ``step()`` will not start a queued turn
+        while the runner drains the in-flight one. Called only when §G3
+        park-on-shutdown is armed (``EXO_DSV41_SHUTDOWN_PARK=1``).
+        """
+        return None
+
+    def shutdown_park(self, **kwargs: object) -> object:
+        """Plan §G3 steps (3)+(4): abort the in-flight turn, force-checkpoint the
+        remaining dirty conversations. Default: no-op (returns ``None``).
+
+        Only reached when the fast path is armed; the DSv4.1 engine implements the
+        real sequence on the runner/engine thread.
+        """
+        del kwargs
+        return None
+
     @abstractmethod
     def warmup(self) -> None: ...
 

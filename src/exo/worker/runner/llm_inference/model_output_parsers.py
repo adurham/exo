@@ -1435,6 +1435,9 @@ def parse_tool_calls(
             tool_call_text_parts = []
 
             if parsed is None:
+                # adurham fork: clean-fail with a typed parse-failure kind (counted by the
+                # API's tool-call parse-failure metric) rather than upstream #2394's
+                # "return it as text and keep streaming" -- deployed behavior, REVIEW.
                 logger.warning(f"tool call parsing failed for text {combined}")
                 yield response.model_copy(
                     update={

@@ -6,13 +6,17 @@ import signal
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Self, cast
+from typing import Any, Self, cast
 
 import loguru
 
 from exo.shared.types.events import Event
 from exo.shared.types.tasks import Task, TaskId
-from exo.shared.types.worker.instances import BoundInstance
+from exo.shared.types.worker.instances import (
+    BoundInstance,
+    Instance,
+    MlxJacclInstance,
+)
 from exo.utils.channels import ClosedResourceError, MpReceiver, MpSender
 from exo.worker.engines.base import Builder
 
@@ -195,6 +199,25 @@ def _release_gpu_memory_before_exit() -> None:
         logger.warning(f"Best-effort MLX buffer release on exit failed: {e!r}")
 
 
+def use_fast_synch(instance: Instance, override: str | None) -> bool:
+    """Whether MLX should synchronise its CPU and GPU work by spinning on shared memory.
+
+    It saves latency on every hand-over between the GPU and the CPU, which an RDMA
+    (JACCL) instance makes for each collective. Over the TCP ring it makes no measurable
+    difference to a model's speed, and it breaks down when two runners share a Mac's GPU:
+    both models slow to a crawl, the ring fails with EFAULT, or the GPU deadlocks.
+    `--fast-synch` / `--no-fast-synch` (EXO_FAST_SYNCH) override the choice.
+    """
+    # adurham fork: start_cluster.sh exports EXO_FAST_SYNCH=1, so accept 1/0 as
+    # aliases. Without this, "1" fell through to the instance-type rule and
+    # silently turned fast synch OFF for ring instances (deployed: always on).
+    if override in ("true", "1"):
+        return True
+    if override in ("false", "0"):
+        return False
+    return isinstance(instance, MlxJacclInstance)
+
+
 def entrypoint(
     bound_instance: BoundInstance,
     event_sender: MpSender[Event | RunnerTerminationError],
@@ -220,12 +243,33 @@ def entrypoint(
         logger.info("Runner received SIGTERM — exiting cleanly to tear down RDMA.")
         raise SystemExit(0)
 
-    try:
-        signal.signal(signal.SIGTERM, _graceful_sigterm)
-    except (ValueError, OSError):
-        # Not on the main thread (shouldn't happen for the runner entrypoint),
-        # or signals unavailable — non-fatal; fall back to default disposition.
-        logger.warning("Could not install SIGTERM handler in runner entrypoint.")
+    # Plan §G3: park-on-shutdown is a DEFAULT-OFF fast path. With the gate unset
+    # the handler above is installed UNCHANGED (exact pre-G3 behaviour). With it
+    # armed, a ShutdownSignal is installed for SIGTERM (+SIGINT): it records the
+    # request and lets the runner's main loop drive the drain / abort /
+    # force-checkpoint sequence, unwinding directly (the SystemExit above) ONLY
+    # when the signal lands before that loop exists (during builder setup / load),
+    # so the RDMA-teardown guarantee is preserved in every case. Duplicate signals
+    # are idempotent no-ops.
+    from exo.worker.engines.mlx.dsv41.shutdown import (
+        ShutdownSignal,
+        shutdown_park_enabled,
+    )
+
+    shutdown_signal: Any = None
+    if shutdown_park_enabled():
+        shutdown_signal = ShutdownSignal(park=True)
+        shutdown_signal.install()
+        logger.info(
+            "[DSV41] §G3 park-on-shutdown armed (EXO_DSV41_SHUTDOWN_PARK=1)."
+        )
+    else:
+        try:
+            signal.signal(signal.SIGTERM, _graceful_sigterm)
+        except (ValueError, OSError):
+            # Not on the main thread (shouldn't happen for the runner entrypoint),
+            # or signals unavailable — non-fatal; fall back to default disposition.
+            logger.warning("Could not install SIGTERM handler in runner entrypoint.")
 
     # Live Python-stack dumper for the PP+DSpark decode-loop stall investigation
     # (2026-07-21). `sample <pid>` only shows the native C stack (mostly opaque
@@ -293,11 +337,10 @@ def entrypoint(
     if qos_choice.lower() != "off":
         _set_self_qos_class_darwin(qos_choice)
 
-    fast_synch_override = os.environ.get("EXO_FAST_SYNCH")
-    if fast_synch_override == "false":
-        os.environ["MLX_METAL_FAST_SYNCH"] = "0"
-    else:
-        os.environ["MLX_METAL_FAST_SYNCH"] = "1"
+    fast_synch = use_fast_synch(
+        bound_instance.instance, os.environ.get("EXO_FAST_SYNCH")
+    )
+    os.environ["MLX_METAL_FAST_SYNCH"] = "1" if fast_synch else "0"
 
     logger.info(f"Fast synch flag: {os.environ['MLX_METAL_FAST_SYNCH']}")
 
@@ -338,6 +381,10 @@ def entrypoint(
                 cancel_receiver=cancel_receiver,
             )
         runner = Runner(bound_instance, builder, event_sender_downcast, task_receiver)
+        if shutdown_signal is not None:
+            # §G3: hand the runner the signal state; with it set (park armed) the
+            # idle wait is bounded and main() runs the shutdown sequence.
+            runner._shutdown_state = shutdown_signal
         runner.main()
 
     except ClosedResourceError:

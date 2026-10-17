@@ -48,7 +48,7 @@ diff --git a/cmake/extension.cmake b/cmake/extension.cmake
 index 13db804..4dc117f 100644
 --- a/cmake/extension.cmake
 +++ b/cmake/extension.cmake
-@@ -36,7 +36,7 @@ macro(mlx_build_metallib)
+@@ -37,7 +37,7 @@ macro(mlx_build_metallib)
    add_custom_command(
      OUTPUT ${MTLLIB_BUILD_TARGET}
      COMMAND
@@ -61,7 +61,7 @@ diff --git a/mlx/backend/metal/kernels/CMakeLists.txt b/mlx/backend/metal/kernel
 index 30729c0..3991ee5 100644
 --- a/mlx/backend/metal/kernels/CMakeLists.txt
 +++ b/mlx/backend/metal/kernels/CMakeLists.txt
-@@ -29,7 +29,7 @@ function(build_kernel_base TARGET SRCFILE DEPS)
+@@ -30,7 +30,7 @@ function(build_kernel_base TARGET SRCFILE DEPS)
                      "-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
    endif()
    add_custom_command(

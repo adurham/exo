@@ -38,6 +38,7 @@ import contextlib
 
 import mlx.core as mx
 import mlx.nn as nn
+from mlx_lm.generate import generation_stream
 from mlx_lm.utils import load_model
 from pydantic import RootModel
 
@@ -2578,6 +2579,81 @@ def prewarm_coord_group(group: mx.distributed.Group | None) -> None:
     coord = get_coord_group(group)
     # Verification probe — single-byte all_sum on the coord subgroup.
     _ = mx_any(False, coord)
+
+
+#: Largest value representable as a signed int32.
+_INT32_MAX = (1 << 31) - 1
+
+
+def _sanitize_int32(value: Any) -> int:
+    """Coerce one collective-payload int into the non-negative int32 range.
+
+    Any value outside ``[0, 2**31-1]`` (a corrupt/absurd generation number, a
+    negative sentinel, a non-integer) is mapped to ``0`` -- a safe sentinel the
+    park/restore codecs interpret as "nothing"/COLD, never as a raise. See
+    :func:`mx_all_gather_ints` for why a raise before the collective is the
+    hazard this closes.
+    """
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return v if 0 <= v <= _INT32_MAX else 0
+
+
+def mx_all_gather_ints(
+    values: list[int], group: mx.distributed.Group | None
+) -> list[list[int]]:
+    """All-gather a FIXED-WIDTH int32 row from every rank in ``group``.
+
+    Returns one row per rank, in rank order. Every rank must call this at the
+    same program point with a row of the same length (the DSv4.1 park/restore
+    coordinator, ``dsv41/coord.py``, uses constant widths, so no count
+    agreement round is needed). ``group=None`` -> ``[values]`` (local-only;
+    ``all_gather(group=None)`` would silently use the DEFAULT group).
+
+    Same discipline as ``mx_any``/``mx_all_gather_tasks``: CPU stream + an
+    immediate ``mx.eval`` (one collective, eval'd in program order on every
+    rank, never aliasing a GPU decode buffer). Call it on the coord subgroup
+    (``get_coord_group``), never the model TP group.
+
+    Every value is coerced into the non-negative int32 range BEFORE
+    ``mx.array`` is built: a value >= 2**31 makes ``mx.array(..., int32)``
+    raise, and because that construction happens BEFORE the collective is
+    issued, only the offending rank raises -- its peer then blocks until the
+    coord deadline and the shared coord group's call_id counters desync
+    permanently. The park/restore codecs only ever emit non-negative 30/31-bit
+    values, so anything else is corrupt; it is mapped to 0 (a safe sentinel that
+    can only force a COLD / no-prune decision, never a raise).
+    """
+    row = [_sanitize_int32(v) for v in values]
+    if group is None:
+        return [row]
+    _cpu = mx.default_stream(mx.Device(mx.cpu))
+    gathered = mx.distributed.all_gather(
+        mx.array(row, dtype=mx.int32), group=group, stream=_cpu
+    )
+    mx.eval(gathered)
+    flat = cast(list[int], gathered.tolist())
+    width = len(row)
+    world = group.size()
+    if width == 0 or len(flat) != world * width:
+        return [[] for _ in range(world)]
+    return [flat[r * width:(r + 1) * width] for r in range(world)]
+
+
+def use_generation_stream_by_default() -> None:
+    """Make mlx-lm's generation stream this thread's default GPU stream, so every GPU op the runner
+    makes, mlx-lm's and exo's, runs on that one stream.
+
+    With MLX_METAL_FAST_SYNCH, a GPU op that needs the result of one on another GPU stream spins on
+    the GPU until it is there. In a tensor-parallel eval, whose GPU work also spins waiting on the
+    communication stream, two GPU streams waiting on each other like this deadlock. exo's own ops
+    (prefix cache copies, snapshots, trims) ran on the default stream while mlx-lm runs the model on
+    its generation stream, so both streams met in the model's evals."""
+    with mx.stream(generation_stream):
+        stream = mx.default_stream(mx.default_device())
+    mx.set_default_stream(stream)
 
 
 def mx_barrier(group: mx.distributed.Group | None):

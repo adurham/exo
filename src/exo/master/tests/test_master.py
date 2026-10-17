@@ -23,6 +23,7 @@ from exo.shared.types.events import (
     InstanceCreated,
     LocalForwarderEvent,
     NodeGatheredInfo,
+    StateSnapshot,
     TaskCreated,
 )
 from exo.shared.types.memory import Memory
@@ -55,6 +56,7 @@ async def test_master():
     command_sender, co_receiver = channel[ForwarderCommand]()
     local_event_sender, le_receiver = channel[LocalForwarderEvent]()
     fcds, _fcdr = channel[ForwarderDownloadCommand]()
+    snapshot_sender, _snapshot_receiver = channel[StateSnapshot]()
 
     all_events: list[IndexedEvent] = []
 
@@ -73,6 +75,7 @@ async def test_master():
         node_id,
         session_id,
         global_event_sender=ge_sender,
+        snapshot_sender=snapshot_sender,
         local_event_receiver=le_receiver,
         command_receiver=co_receiver,
         download_command_sender=fcds,

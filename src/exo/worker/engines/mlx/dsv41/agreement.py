@@ -45,14 +45,22 @@ class RankAgreement:
         self.all_tasks[task.task_id] = task
         self.maybe_queue.append(task)
 
-    def agree_on_tasks(self) -> None:
+    def agree_on_tasks(self) -> bool:
+        """Agree on newly submitted tasks; returns whether ANY rank had one.
+
+        The return value is the result of the ``mx_any`` collective, so it is
+        identical on every rank. ``step()`` ignores it; the §G1 idle tick uses
+        it to stand down (a peer with a pending task is inside ``step()``, not
+        in an idle tick, so no further idle collective may be issued).
+        """
         if not mx_any(len(self.maybe_queue) > 0, self.group):
-            return
+            return False
         agreed, different = mx_all_gather_tasks(self.maybe_queue, self.group)
         # Extend from ``agreed`` (sorted by task_id on all ranks): preserves the
         # cross-rank ordering invariant, exactly as SequentialGenerator does.
         self.queue.extend(agreed)
         self.maybe_queue = list(different)
+        return True
 
     def agree_on_cancellations(self, cancel_ids: list[TaskId]) -> None:
         self._collect(cancel_ids)

@@ -84,12 +84,11 @@ let
                 nanobind = pkgs.fetchFromGitHub {
                   owner = "wjakob";
                   repo = "nanobind";
-                  # Must match the GIT_TAG in mlx's CMakeLists.txt (mlx commit
-                  # 5abdd04bc, "Update nanobind to 2.13.0"). mlx's array.cpp now
-                  # uses nb::pooled and the public ndarray data_handle()/
-                  # byte_offset accessors, which do not exist before 2.13.0.
-                  rev = "v2.13.0";
-                  hash = "sha256-YAqjcVBkuNsXvrAaVmDRLQ1F38UBqdnIf8+OseNBzG4=";
+                  # Our mlx fork (adurham/mlx main @603f16eb) declares nanobind
+                  # GIT_TAG v3.0.1 (mlx ab552d211). The previous v2.13.0 pin was
+                  # stale; take upstream's v3.1.0 (same 3.x API line).
+                  rev = "v3.1.0";
+                  hash = "sha256-k7TIsx+BcOaZKC01cMs4ZqCWG2uWbx1TkilbMq1qkdI=";
                   fetchSubmodules = true;
                 };
               in
@@ -120,6 +119,11 @@ let
                   (lib.cmakeBool "MLX_BUILD_METAL" true)
                   (lib.cmakeOptionType "string" "CMAKE_INSTALL_LIBDIR" "lib")
                   (lib.cmakeOptionType "filepath" "FETCHCONTENT_SOURCE_DIR_METAL_CPP" "${metal_cpp}")
+                  # metal-cpp calls Objective-C methods through pointers that may be nil (e.g.
+                  # ~SharedPtr releases a moved-from null), relying on messages to nil being
+                  # no-ops. Clang 21 treats such a call as undefined and turns the path into a
+                  # trap, so MLX built here can crash (SIGTRAP) where Apple's build does not.
+                  (lib.cmakeOptionType "string" "CMAKE_CXX_FLAGS" "-fno-delete-null-pointer-checks")
                   (lib.cmakeOptionType "string" "CMAKE_OSX_DEPLOYMENT_TARGET" "${pkgs.apple-sdk_26.version}")
                   (lib.cmakeOptionType "filepath" "CMAKE_OSX_SYSROOT" "${pkgs.apple-sdk_26.passthru.sdkroot}")
                 ] ++ lib.optionals (isDarwin && isx86_64) [

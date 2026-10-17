@@ -113,7 +113,7 @@ for i in range(STEPS):
     if ROWS > 1:
         from mlx_lm.models.deepseek_v41 import spec as SP
         pos = cache.offset
-        sn = SP.snap(cache, pos)
+        sn = SP.snap(cache, pos, ROWS)       # the chunk forward writes ROWS rows
         chunk = [feed[(i + j) % len(feed)] for j in range(ROWS)]
         lg = model(mx.array([chunk]), cache)
         mx.eval(lg)

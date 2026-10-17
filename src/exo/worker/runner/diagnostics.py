@@ -4,7 +4,7 @@ import errno
 import os
 import re
 from collections import deque
-from typing import final
+from typing import Annotated, final
 
 from pydantic import Field
 
@@ -34,8 +34,9 @@ class BaseRunnerDiagnostic(TaggedModel):
     # payload in Python mode, where a strict tuple field rejects the JSON
     # array (now a list). Lax mode restores list -> tuple coercion; without
     # it, any event carrying a diagnostic kills every receiving node's
-    # router (unhandled ValidationError in _networking_recv).
-    evidence: tuple[str, ...] = Field(default=(), strict=False)
+    # router (unhandled ValidationError in _networking_recv). Same fix as
+    # upstream #2366, upstream's Annotated spelling.
+    evidence: Annotated[tuple[str, ...], Field(strict=False)] = ()
 
 
 class RunnerMetalGpuTimeout(BaseRunnerDiagnostic):

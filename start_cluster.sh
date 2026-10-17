@@ -47,6 +47,20 @@
 # block size; 64 measured best. To disable: set EXO_DSV4_QUERY_TILED_SDPA=0.
 : "${EXO_DSV4_QUERY_TILED_SDPA:=1}"
 : "${EXO_DSV4_QUERY_TILED_B:=64}"
+# ── ROUND-Q1B-FIX: dense re-quant default (next19-dense production) ────────
+# DSv4.1 dense re-quant (native affine q6g64 on the dense slice) with the
+# SHARED-EXPERT linears at q8g64. Pure q6 g64 (affine6) regressed the t2
+# tool-format battery (the model leaked the tool call as XML inside
+# reasoning_content; ROUND-Q1B-STALL §9). shared-experts@q8g64 restores the
+# full R8a battery to CLEAN at ~zero perf cost vs pure q6 (ROUND-Q1B-FIX).
+# This is NOW THE PRODUCTION DEFAULT on the next19-dense ship (dense affine6
+# q6g64 + shared-experts q8g64 policy). Override by exporting
+# DSV41_DENSE / DSV41_DENSE_POLICY; DSV41_DENSE=exl3 (the non-dense build)
+# leaves the policy unset. The policy is read at mlx-lm import (exl3_build.py).
+: "${DSV41_DENSE:=affine6}"
+if [ "${DSV41_DENSE}" != "exl3" ]; then
+  : "${DSV41_DENSE_POLICY:=layers.*.ffn.shared_experts.*=q8g64}"
+fi
 # 2026-06-04: libp2p -> zenoh migration (exo #2132) renamed this env var.
 # main.py hard-errors if the old EXO_LIBP2P_NAMESPACE is even present.
 : "${EXO_ZENOH_NAMESPACE:=MAC_STUDIO_CLUSTER}"
@@ -1008,9 +1022,9 @@ export PYTHONUNBUFFERED=1
 EXO_ZENOH_PORT="${EXO_ZENOH_PORT:-52414}"
 # UDP port the discovery beacon binds (exo --discovery-port default).
 EXO_DISCOVERY_PORT="${EXO_DISCOVERY_PORT:-52413}"
-M4_1_IP="192.168.86.201"
+M4_1_IP="192.168.86.48"
 M4_1_PEER_ID="12D3KooWDGQKAJUYpqTHzBhVpGzYxQagWRwFqJPzkEYzHxt3SSUg"
-M4_2_IP="192.168.86.202"
+M4_2_IP="192.168.86.47"
 M4_2_PEER_ID="12D3KooWQDzFqvjsgFRfheeV7uvtVUP1gruphpgoVELP9pkHBses"
 
 # --- Tailscale addresses used for peer DISCOVERY only -------------------------
@@ -2687,6 +2701,89 @@ for NODE in "${NODES[@]}"; do
   # default ON, bit-exact: block maxima provably identical; local function
   # 2.3x @131K / 3.7x @262K). =0 restores the full-width coarse pass for A/B.
   [ -n "${DSV41_INDEXER_CONSUMER_SKIP:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_CONSUMER_SKIP=$DSV41_INDEXER_CONSUMER_SKIP"
+  # DSV41_INDEXER_L2_FULL / DSV41_INDEXER_SMALLN_ROW_BF16: the lever-2 ship design
+  # and its mechanism control (mlx_lm deepseek_v41/indexer.py, read at import).
+  # L2_FULL default ON = the small-n fallback stores its score row in fp32 so it
+  # is bitwise-identical to the hierarchical exact re-score; SMALLN_ROW_BF16=1 is
+  # the diagnostic that re-creates the bf16-row ties. Forwarded so a promotion A/B
+  # can flip the control from the launcher (same allow-list foot-gun as above).
+  # Audited: no stale values.
+  [ -n "${DSV41_INDEXER_L2_FULL:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_L2_FULL=$DSV41_INDEXER_L2_FULL"
+  [ -n "${DSV41_INDEXER_SMALLN_ROW_BF16:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_ROW_BF16=$DSV41_INDEXER_SMALLN_ROW_BF16"
+  # DSV41_INDEXER_SMALLN_WIDE_TILE: the small-n wide-tile fix for the 128MiB
+  # route cliff (mlx_lm deepseek_v41/indexer.py, read at import; idxprof5/6).
+  # Verify rounds at L>254.2K ran fence-bound: 628 ms/round at 300K live vs
+  # 103.5 ms below the crossing; the fix (aligned budget-cap width at
+  # n_full<=16) measures 17-23x on the affected calls. Default ON in the
+  # engine; =0 restores the old min(512,cap) rule byte-for-byte (67/67),
+  # so a rollback is an env flip at relaunch.
+  [ -n "${DSV41_INDEXER_SMALLN_WIDE_TILE:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_SMALLN_WIDE_TILE=$DSV41_INDEXER_SMALLN_WIDE_TILE"
+  # EXO_LOOP_DETECT*: the degeneration loop-guard ported into the dsv41 engine
+  # (batch_generate.py detectors imported verbatim; knobs read at import).
+  # Context: a turn that falls into an exact token-cycle repeats forever under
+  # greedy decode -- no sampling randomness, no penalty, and (before this port)
+  # no detector in the dsv41 path at all (2026-10-13 live incident: 3m41s of
+  # unbroken repetition, killed only by the client). ACTION is the rollout
+  # knob: "warn" logs + dumps WITHOUT terminating, "error" (engine default)
+  # terminates the turn, "stop" ends it cleanly. Forwarded as a FAMILY so the
+  # staged flip (warn -> error) and any post-observation tuning are env flips
+  # at relaunch, not rebuilds. Verify live via 'ps eww' + the runner's
+  # startup guard-env banner.
+  [ -n "${EXO_LOOP_DETECT:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT=$EXO_LOOP_DETECT"
+  [ -n "${EXO_LOOP_DETECT_WINDOW:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_WINDOW=$EXO_LOOP_DETECT_WINDOW"
+  [ -n "${EXO_LOOP_DETECT_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_MAX_PERIOD=$EXO_LOOP_DETECT_MAX_PERIOD"
+  [ -n "${EXO_LOOP_DETECT_MIN_REPEATS:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_MIN_REPEATS=$EXO_LOOP_DETECT_MIN_REPEATS"
+  [ -n "${EXO_LOOP_DETECT_ACTION:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_ACTION=$EXO_LOOP_DETECT_ACTION"
+  [ -n "${EXO_LOOP_DETECT_LONG:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG=$EXO_LOOP_DETECT_LONG"
+  [ -n "${EXO_LOOP_DETECT_LONG_BLOCK:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_BLOCK=$EXO_LOOP_DETECT_LONG_BLOCK"
+  [ -n "${EXO_LOOP_DETECT_LONG_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MAX_PERIOD=$EXO_LOOP_DETECT_LONG_MAX_PERIOD"
+  [ -n "${EXO_LOOP_DETECT_LONG_MIN_REPEATS:-}" ] && EXO_ENV="$EXO_ENV EXO_LOOP_DETECT_LONG_MIN_REPEATS=$EXO_LOOP_DETECT_LONG_MIN_REPEATS"
+  # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
+  # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
+  # 2026-10-13.md). Once a still-open reasoning block has run
+  # fraction x max_tokens (capped at the max), the round after the cut is
+  # forced to the think-END delimiter, so a self-doubt/paraphrase-drift loop
+  # cannot consume the whole generation and leave the answer channel empty.
+  # Knobs are read at import; a fraction <= 0 (or cap <= 0) disables the
+  # limiter. Forwarded as a FAMILY so tuning/disable stay env flips at
+  # relaunch, not rebuilds (the runner env is an allow-list — unforwarded
+  # knobs are silently absent).
+  [ -n "${EXO_REASONING_BUDGET_FRACTION:-}" ] && EXO_ENV="$EXO_ENV EXO_REASONING_BUDGET_FRACTION=$EXO_REASONING_BUDGET_FRACTION"
+  [ -n "${EXO_REASONING_BUDGET_MAX_TOKENS:-}" ] && EXO_ENV="$EXO_ENV EXO_REASONING_BUDGET_MAX_TOKENS=$EXO_REASONING_BUDGET_MAX_TOKENS"
+  # DSV41_INDEXER_QSPLIT: split the indexer's QUERY side across the 2 TP ranks
+  # (mlx_lm deepseek_v41/indexer.py + attention.py, default OFF in the engine).
+  # Each rank scores / top-ks / emits half the chunk's query rows; the KEY side
+  # (index_k + compressor/wkv/wq_a) stays FULL on every rank and a small
+  # cidx [b,n,index_topk] int32 all_sum reconstructs the full selection, so
+  # sparse_attn and the candidate-mask consumer are unchanged. Prefill-only
+  # (decode/verify, n <= FENCE_MIN_ROWS, stay replicated). Forwarded because the
+  # runner env is an ALLOW-LIST: an unlisted knob is silently dropped, which
+  # would make both A/B arms run the default. Audited: no stale value in
+  # repo/shell.
+  [ -n "${DSV41_INDEXER_QSPLIT:-}" ] && EXO_ENV="$EXO_ENV DSV41_INDEXER_QSPLIT=$DSV41_INDEXER_QSPLIT"
+  # DSV41_NEXT18_CAPTURE*: the next18 real-tensor capture hook (R1 ship precondition
+  # A2 / R2 hard gate). bench/next18_capture.py auto-installs its Indexer.__call__
+  # wrapper only when DSV41_NEXT18_CAPTURE names an output path; the three vars are
+  # the harness contract (path / row-counts to record / ring size). Forwarded here as
+  # documented. The auto-install itself is wired by the env-gated import in the
+  # dsv41 engine module (exo.worker.engines.mlx.dsv41.engine), which imports the
+  # operator-staged 'next18_capture' module IFF the env names a path. With the env
+  # unset that import never runs, so the production path is byte-for-byte unchanged.
+  #
+  # ONE-VAR OPERATION. If the hook module path is staged NEXT TO the capture output
+  # (the documented R1 staging: copy bench/next18_capture.py to the same dir as the
+  # npz), the launcher derives PYTHONPATH from DSV41_NEXT18_CAPTURE so a single
+  # `DSV41_NEXT18_CAPTURE=... ./start_cluster.sh` is enough. An explicit
+  # EXO_PYTHONPATH_DIAG (above) is respected and used when already set.
+  if [ -n "${DSV41_NEXT18_CAPTURE:-}" ]; then
+    EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE=$DSV41_NEXT18_CAPTURE"
+    if [ -z "${EXO_PYTHONPATH_DIAG:-}" ]; then
+      _next18_hook_dir="$(dirname "$DSV41_NEXT18_CAPTURE")"
+      EXO_ENV="$EXO_ENV PYTHONPATH=$_next18_hook_dir"
+    fi
+  fi
+  [ -n "${DSV41_NEXT18_CAPTURE_NS:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_NS=$DSV41_NEXT18_CAPTURE_NS"
+  [ -n "${DSV41_NEXT18_CAPTURE_MAX:-}" ] && EXO_ENV="$EXO_ENV DSV41_NEXT18_CAPTURE_MAX=$DSV41_NEXT18_CAPTURE_MAX"
   [ -n "${DSV41_SPARSE_FENCE_MIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV DSV41_SPARSE_FENCE_MIN_ROWS=$DSV41_SPARSE_FENCE_MIN_ROWS"
   # DSV41_MOE_ALLSUM_BF16: MoE-tail collective payload dtype (mlx_lm
   # deepseek_v41/moe.py, read at import; default 0 = fp32 exact). Halves the
@@ -2711,6 +2808,20 @@ for NODE in "${NODES[@]}"; do
   # (read at import; default 1). Forwarded for the prefill-bubble A/B.
   # Audited: no stale value.
   [ -n "${DSV41_ASYNC_EVAL:-}" ] && EXO_ENV="$EXO_ENV DSV41_ASYNC_EVAL=$DSV41_ASYNC_EVAL"
+  # DSV41_DENSE: DSv4.1 dense re-quant format toggle exl3 | affine6 | affine5 |
+  # affine8 (mlx_lm .../exl3_build.py, read at import); unset = exl3 default.
+  # affineN re-encodes the dense groups (attn wq_b/wo_b, shared experts) as MLX
+  # affine and TP-shards them exactly like exl3. DSV41_DENSE_TP=0 forces the
+  # affine modes back to the replicated (unsharded) path so the A/B can measure
+  # sharded vs replicated vs exl3.
+  [ -n "${DSV41_DENSE:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE=$DSV41_DENSE"
+  [ -n "${DSV41_DENSE_TP:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_TP=$DSV41_DENSE_TP"
+  # DSV41_DENSE_POLICY: per-tensor dense-quant override on top of DSV41_DENSE
+  # (mlx_lm .../exl3_build.py, read at import). Either an inline
+  # "selector=mode,..." spec or a path to a JSON file; selectors are globs on the
+  # full tensor name, last match wins, unset = the DSV41_DENSE behavior. Only the
+  # quant FORMAT changes, never the sharding (needs DSV41_DENSE_TP=1, the default).
+  [ -n "${DSV41_DENSE_POLICY:-}" ] && EXO_ENV="$EXO_ENV DSV41_DENSE_POLICY=$DSV41_DENSE_POLICY"
   # DSv4.1 engine prefill transient controls (mlx-lm session.py reads both; the
   # launcher previously forwarded NEITHER, so any value set in the shell was
   # silently dropped -- the read-at-code/dead-in-deployment bug class). Budget
@@ -2728,6 +2839,37 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_CHECKPOINT_SPACING_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_SPACING_ROWS=$EXO_DSV41_CHECKPOINT_SPACING_ROWS"
   [ -n "${EXO_DSV41_CHECKPOINT_MARGIN_ROWS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_MARGIN_ROWS=$EXO_DSV41_CHECKPOINT_MARGIN_ROWS"
   [ -n "${EXO_DSV41_CHECKPOINT_KEEP:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CHECKPOINT_KEEP=$EXO_DSV41_CHECKPOINT_KEEP"
+  # Restart-survival next21 (G1 after-turn idle checkpoint / G3 park-on-shutdown).
+  # CKPT=1 arms the core treatment; SHUTDOWN_PARK=1 arms the graceful-shutdown
+  # fast path (both default OFF in code). The rest size their windows; unset =>
+  # code defaults (MIN_DELTA 2048 / IDLE_S 20 / DRAIN_S 10 / PARK_S ~ GRACE-drain).
+  # Forwarded here so a value set in the shell is not silently dropped by the
+  # allow-list (the read-at-code/dead-in-deployment bug class).
+  [ -n "${EXO_DSV41_CKPT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT=$EXO_DSV41_CKPT"
+  [ -n "${EXO_DSV41_CKPT_MIN_DELTA:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_MIN_DELTA=$EXO_DSV41_CKPT_MIN_DELTA"
+  [ -n "${EXO_DSV41_CKPT_IDLE_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_IDLE_S=$EXO_DSV41_CKPT_IDLE_S"
+  [ -n "${EXO_DSV41_CKPT_TICK_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_TICK_S=$EXO_DSV41_CKPT_TICK_S"
+  [ -n "${EXO_DSV41_CKPT_RETRY_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CKPT_RETRY_S=$EXO_DSV41_CKPT_RETRY_S"
+  [ -n "${EXO_DSV41_SHUTDOWN_PARK:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_PARK=$EXO_DSV41_SHUTDOWN_PARK"
+  [ -n "${EXO_DSV41_SHUTDOWN_DRAIN_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_DRAIN_S=$EXO_DSV41_SHUTDOWN_DRAIN_S"
+  [ -n "${EXO_DSV41_SHUTDOWN_PARK_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_PARK_S=$EXO_DSV41_SHUTDOWN_PARK_S"
+  [ -n "${EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S=$EXO_DSV41_SHUTDOWN_EXIT_MARGIN_S"
+  # next27-ringfix GATE knobs. BOTH default OFF: with neither set, a launch is
+  # byte-identical to next26. They are forwarded so the deploy gate procedures
+  # are EXECUTABLE on the deployed tip -- the runner env is an allow-list, so a
+  # var not added here never reaches the runner (the read-at-code /
+  # dead-in-deployment bug class this launcher repeatedly warns about).
+  #   EXO_DSV41_SPECULATIVE   -- the DSv4.1 engine's OWN spec master switch
+  #       (builder._SPEC_ENV). The generic EXO_SPECULATIVE above is IGNORED by
+  #       this engine; setting EXO_SPECULATIVE=0 alone does NOT make DSv4.1
+  #       greedy. =0 skips the DSpark draft head and serves plain greedy decode
+  #       (the Gate-2 spec-OFF arm). Read at engine build, so it needs a
+  #       relaunch to change.
+  #   EXO_DSV41_SPEC_ROLLBACK_HASH / _TURN -- arm the mlx-lm TP=2 rank-
+  #       consistency hash on the rollback path (Gate 1).
+  [ -n "${EXO_DSV41_SPECULATIVE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SPECULATIVE=$EXO_DSV41_SPECULATIVE"
+  [ -n "${EXO_DSV41_SPEC_ROLLBACK_HASH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SPEC_ROLLBACK_HASH=$EXO_DSV41_SPEC_ROLLBACK_HASH"
+  [ -n "${EXO_DSV41_SPEC_ROLLBACK_TURN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_SPEC_ROLLBACK_TURN=$EXO_DSV41_SPEC_ROLLBACK_TURN"
   # MLX SDPA 2-pass blocks-heuristic override (Phase 2 exp 2 sweep).
   [ -n "$MLX_SDPA_BLOCKS" ] && EXO_ENV="$EXO_ENV MLX_SDPA_BLOCKS=$MLX_SDPA_BLOCKS"
   # mlx-lm B>1/L>1 SDPA row-split kill switch (c=2 deep-degen A/B).

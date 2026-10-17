@@ -145,7 +145,7 @@ def phase_b(ids, gamma):
     while len(out) < N + 1:
         d = draft(nxt, dsc, gamma)
         vin = mx.concatenate([nxt.reshape(1, 1), d], axis=1)
-        sn = SP.snap(cache, pos)
+        sn = SP.snap(cache, pos, vin.shape[1])   # the verify forward writes 1 + gamma rows
         logits, taps = model(vin, cache, return_taps=True)
         targ = bcast(mx.argmax(logits[0], axis=-1).astype(mx.int32))
         mx.eval(targ)
@@ -181,7 +181,7 @@ def vcost(ids):
         ts = []
         for i in range(12):
             vin = mx.array([[int(nxt.item())] * R], dtype=mx.int32)
-            sn = SP.snap(cache, pos)
+            sn = SP.snap(cache, pos, R)              # the forward writes R rows
             s0 = time.perf_counter()
             lg = model(vin, cache)
             mx.eval(lg)

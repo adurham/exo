@@ -89,6 +89,51 @@ def _park_enabled() -> bool:
 #: bit-identical), which releases a chunk's O(context) indexer/compressor
 #: transients as it progresses instead of holding them until the final
 #: ``mx.eval``. ``0`` disables.
+#: Plan §G1: after-turn idle checkpointing (keep-resident park). Default OFF:
+#: with it unset nothing below runs and the runner's blocking idle wait is
+#: unchanged.
+CKPT_ENV = "EXO_DSV41_CKPT"
+#: Re-checkpoint once this many rows were added since the last generation.
+CKPT_MIN_DELTA_ENV = "EXO_DSV41_CKPT_MIN_DELTA"
+DEFAULT_CKPT_MIN_DELTA = 2048
+#: ...and only after the conversation has been idle this long (seconds).
+CKPT_IDLE_S_ENV = "EXO_DSV41_CKPT_IDLE_S"
+DEFAULT_CKPT_IDLE_S = 20.0
+#: Runner idle-tick cadence (seconds) while EXO_DSV41_CKPT is on.
+CKPT_TICK_S_ENV = "EXO_DSV41_CKPT_TICK_S"
+DEFAULT_CKPT_TICK_S = 2.0
+#: Back-off (seconds) after a checkpoint that FAILED (write error / ENOSPC /
+#: not acked by every rank) before that conversation is tried again.
+CKPT_RETRY_S_ENV = "EXO_DSV41_CKPT_RETRY_S"
+DEFAULT_CKPT_RETRY_S = 120.0
+
+
+def ckpt_enabled() -> bool:
+    """Whether §G1 idle checkpointing is on (``EXO_DSV41_CKPT``, default OFF)."""
+    raw = os.environ.get(CKPT_ENV)
+    if raw is None:
+        return False
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _read_float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(f"[DSV41] ignoring non-float {name}={raw!r}; using {default}")
+        return float(default)
+
+
+def ckpt_tick_seconds() -> float | None:
+    """The runner idle-tick interval, or ``None`` when checkpointing is off."""
+    if not ckpt_enabled():
+        return None
+    return max(0.05, _read_float_env(CKPT_TICK_S_ENV, DEFAULT_CKPT_TICK_S))
+
+
 PREFILL_FENCE_EVERY_ENV = "EXO_PREFILL_FENCE_EVERY"
 DEFAULT_PREFILL_FENCE_EVERY = 2
 
@@ -584,6 +629,53 @@ class Conversation:
         self._base = 0
         self.n_turns = 0
         self._inflight = False
+        #: §G1 dirty tracking. ``ckpt_offset`` is the cache offset of the newest
+        #: generation known to be on disk on EVERY rank (-1 = never), so
+        #: ``dirty_tokens`` is the delta a checkpoint would add. ``ckpt_hash`` is
+        #: the ``prefix_hash`` of the checkpointed token stream: an offset-only
+        #: test misses a rewind+refeed to the SAME offset on a different branch
+        #: (MED-1), so ``stream_changed`` compares against it.
+        #: ``last_turn_end_ts`` (monotonic) is set at the turn-commit point.
+        self.ckpt_offset = -1
+        self.ckpt_hash = ""
+        self.last_turn_end_ts = 0.0
+
+    # -- §G1 dirty tracking ---------------------------------------------
+    @property
+    def dirty_tokens(self) -> int:
+        """Rows added since the last committed disk generation (all rows if never)."""
+        return self.offset - max(self.ckpt_offset, 0)
+
+    @property
+    def stream_changed(self) -> bool:
+        """Whether the LIVE token stream differs from the checkpointed one.
+
+        ``dirty_tokens`` is offset-only, so a turn that rewinds to a lower row
+        and refeeds back to the SAME offset on a different branch reads as clean
+        (``dirty_tokens == 0``) and its stale generation would be believed
+        current (MED-1). Comparing the checkpointed stream's hash catches it.
+
+        ``True`` when never checkpointed. When ``ckpt_offset`` is set but no
+        stream hash was ever recorded (a manual/legacy state, or a hashing
+        failure), this is ``False``: with no recorded identity there is nothing
+        to differ FROM, so the caller falls back to the offset-only test --
+        exactly the pre-MED-1 behaviour.
+        """
+        if self.ckpt_offset < 0:
+            return True
+        if not self.ckpt_hash:
+            return False
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        try:
+            live = _sc.prefix_hash(np.asarray(self.tokens, dtype=np.int64))
+        except Exception:  # noqa: BLE001 - unhashable stream -> conservatively dirty
+            return True
+        return self.ckpt_hash != live
+
+    @property
+    def ever_checkpointed(self) -> bool:
+        return self.ckpt_offset >= 0
 
     # -- introspection ----------------------------------------------------
     @property
@@ -797,6 +889,10 @@ class Conversation:
         if checkpoint:
             self._checkpoint()
             self._inflight = False
+            # §G1: the turn-commit point (``draft n_ctx == offset`` holds here).
+            # ``dirty_tokens`` is derived from ``offset - ckpt_offset``; the
+            # idle clock starts now.
+            self.last_turn_end_ts = time.monotonic()
         self.n_turns += 1
 
     def _checkpoint(self) -> None:
@@ -932,6 +1028,9 @@ class Dsv41Sessions:
         progress: Callable[[int, int, float], None] | None = None,
         fence_heartbeat: Callable[[], None] | None = None,
         park_store: Any = None,
+        fingerprint: Any = None,
+        coordinator: Any = None,
+        rank: int | None = None,
     ) -> None:
         self.model = model
         self.head = head if use_draft else None
@@ -964,8 +1063,32 @@ class Dsv41Sessions:
         #: An injected park store (the tests pass one rooted at ``tmp_path``);
         #: ``None`` builds the default store lazily on the first eviction.
         self._park: "ParkedStore | None" = park_store
+        #: The engine's build fingerprint (plan §G2), computed once by the
+        #: engine and forwarded to the lazily-built park store so every manifest
+        #: it writes is tagged and every restore is gated. ``None`` (tests, a
+        #: fingerprintless engine) makes the store degrade gracefully.
+        self._fingerprint = fingerprint
         #: Latched once a park-store build fails, so it is not retried per eviction.
         self._park_failed = False
+        #: Plan §G4: the cross-rank park/restore coordinator (a
+        #: ``coord.ParkCoordinator`` over the engine's coord subgroup), or
+        #: ``None`` for a single rank / PP mode (local-only, pre-G4 behaviour).
+        #: When set, EVERY park and restore call site takes part in the
+        #: cross-rank exchange unconditionally -- even when parking is disabled
+        #: or the store failed to build on this rank -- so a peer can never
+        #: block on a missing counterpart.
+        self._coordinator = coordinator
+        #: This rank (tags park dir names + manifests); ``None`` = unknown.
+        self._rank = rank
+        #: §G1 checkpoint policy (read once; identical on every rank because
+        #: the env is). ``_ckpt_backoff`` maps a conversation's prefix hash to
+        #: the monotonic time it may be retried after an AGREED failure;
+        #: ``_ckpt_cooldown_until`` is the global back-off after an agreed no-go.
+        self.ckpt_min_delta = max(0, _read_int_env(CKPT_MIN_DELTA_ENV, DEFAULT_CKPT_MIN_DELTA))
+        self.ckpt_idle_s = max(0.0, _read_float_env(CKPT_IDLE_S_ENV, DEFAULT_CKPT_IDLE_S))
+        self.ckpt_retry_s = max(0.0, _read_float_env(CKPT_RETRY_S_ENV, DEFAULT_CKPT_RETRY_S))
+        self._ckpt_backoff: dict[str, float] = {}
+        self._ckpt_cooldown_until = 0.0
 
     # -- key resolution ---------------------------------------------------
     @staticmethod
@@ -976,10 +1099,30 @@ class Dsv41Sessions:
             return f"id:{key}"
         return "p:" + _sc.prefix_hash(_ids_of(prompt_ids))
 
-    def get(self, prompt_ids: Any, key: str | None = None) -> Conversation:
+    def get(
+        self, prompt_ids: Any, key: str | None = None, *, reuse: bool = True
+    ) -> Conversation:
+        """The conversation this request belongs to.
+
+        ``reuse=False`` (set by the engine for an image-carrying request) skips
+        BOTH the resident prefix match AND the parked-store restore and opens a
+        cold conversation. An image span is only valid inside the forward whose
+        cache offset is 0, so a request whose prefill carries image spans must
+        not join a conversation whose cache is already advanced: reuse would
+        delta-prefill from a nonzero offset, which the vision splice refuses
+        (that RuntimeError used to escape step() and kill the runner). The
+        caller drops the conversation when the request finishes.
+        """
         from mlx_lm.models.deepseek_v41 import session_cache as _sc
 
         ids = _ids_of(prompt_ids)
+        if not reuse:
+            self.stats["cold"] += 1
+            logger.info(
+                f"[DSV41] session forced cold: image-carrying request must not "
+                f"reuse a resident conversation (this {len(ids)}-token prompt)."
+            )
+            return self._open("cold:" + _sc.prefix_hash(ids))
         if key:
             entry = self._entries.get(f"id:{key}")
             if entry is not None:
@@ -1039,6 +1182,12 @@ class Dsv41Sessions:
                 # (which is the bare construction-scalar dict).
                 conv_kw=dict(self.kw, fence_hook=self._fence_heartbeat),
                 progress=self._progress,
+                # The engine's build fingerprint (plan §G2): forwarded so the
+                # store stamps it into every manifest and gates every restore.
+                fingerprint=self._fingerprint,
+                # Plan §G4: cross-rank coordination + the rank tag.
+                coordinator=self._coordinator,
+                rank=self._rank,
             )
             return self._park
         except Exception as exc:  # noqa: BLE001 - parking is best-effort
@@ -1050,23 +1199,47 @@ class Dsv41Sessions:
             return None
 
     def _restore_parked(self, ids: Any, *, key: str | None) -> Conversation | None:
-        """Try to restore a parked session for ``ids``; ``None`` on any miss."""
-        if not _park_enabled():
-            return None
-        store = self._park_store()
-        if store is None:
-            return None
-        try:
-            conv = store.try_restore(ids, key=key)
-        except Exception as exc:  # noqa: BLE001 - restore never breaks a request
-            logger.warning(
-                f"[DSV41] parked restore failed ({type(exc).__name__}: {exc}); "
-                "falling back to a cold open")
-            self.stats["park_failed"] += 1
-            return None
+        """Try to restore a parked session for ``ids``; ``None`` on any miss.
+
+        With a §G4 coordinator the restore is a cluster decision: every rank
+        restores the same generation or every rank goes cold. This rank takes
+        part even when parking is disabled or its store is unavailable (it
+        then contributes "no candidates", forcing COLD everywhere) -- skipping
+        the exchange would leave the peer blocked in it. Local errors degrade
+        inside the driver; only a transport failure of the collective itself
+        propagates (a real fault, as for ``RankAgreement``).
+        """
+        if self._coordinator is not None:
+            from exo.worker.engines.mlx.dsv41.park import coordinated_restore
+
+            store = self._park_store() if _park_enabled() else None
+            conv = coordinated_restore(self._coordinator, store, ids, key=key)
+        else:
+            if not _park_enabled():
+                return None
+            store = self._park_store()
+            if store is None:
+                return None
+            try:
+                conv = store.try_restore(ids, key=key)
+            except Exception as exc:  # noqa: BLE001 - restore never breaks a request
+                logger.warning(
+                    f"[DSV41] parked restore failed ({type(exc).__name__}: {exc}); "
+                    "falling back to a cold open")
+                self.stats["park_failed"] += 1
+                return None
         if conv is None:
             return None
         store_key = self.key_for(ids, key)
+        # §G1: the restored generation is on disk on every rank (the restore
+        # was agreed / is local-only), so it is clean at its offset AND at its
+        # token stream identity.
+        conv.ckpt_offset = int(conv.offset)
+        try:
+            conv.ckpt_hash = self._ckpt_hash(conv)
+        except Exception:  # noqa: BLE001 - unhashable stream stays conservatively dirty
+            conv.ckpt_hash = ""
+        conv.last_turn_end_ts = time.monotonic()
         self._entries[store_key] = _Entry(conv)
         self.stats["restored"] += 1
         logger.info(
@@ -1103,7 +1276,43 @@ class Dsv41Sessions:
         discards stay hard.
         """
         parked = False
-        if _park_enabled():
+        # §G1: a conversation whose newest generation is already on disk on
+        # EVERY rank (agreed checkpoint, nothing added since) need not be
+        # rewritten on eviction. ``clean`` is derived from agreed bookkeeping
+        # only, so it is identical on every rank; with a coordinator the
+        # exchanges still run (store=None -> nothing written, nothing pruned).
+        clean = bool(
+            ckpt_enabled()
+            and getattr(session, "ever_checkpointed", False)
+            and getattr(session, "dirty_tokens", 1) == 0
+            # A same-offset branch change is NOT clean: the on-disk generation is
+            # the pre-rewind branch and must be rewritten on eviction (MED-1).
+            and not getattr(session, "stream_changed", True)
+        )
+        if self._coordinator is not None:
+            # §G4: always take part in the cross-rank park exchange (agree N,
+            # ack, ack-gated prune), even when this rank cannot park.
+            from exo.worker.engines.mlx.dsv41.park import coordinated_park
+
+            store = self._park_store() if (_park_enabled() and not clean) else None
+            try:
+                parked = coordinated_park(self._coordinator, store, session, key=key)
+            except Exception as exc:  # noqa: BLE001 - session.close() must run
+                # Defense-in-depth: ``coordinated_park`` is documented never to
+                # raise, but if it somehow does, a propagating exception here
+                # would skip ``session.close()`` below (leaking this evicted
+                # session's KV) and, under TP, strand the peer mid-forward.
+                # Degrade to a plain discard instead.
+                logger.warning(
+                    f"[DSV41] coordinated park failed "
+                    f"({type(exc).__name__}: {exc}); discarding"
+                )
+                self.stats["park_failed"] += 1
+                parked = False
+            parked = parked or clean
+        elif clean and _park_enabled():
+            parked = True  # newest generation already on disk (§G1)
+        elif _park_enabled():
             store = self._park_store()
             if store is not None:
                 try:
@@ -1126,6 +1335,169 @@ class Dsv41Sessions:
         session.close()
         self.stats["evicted"] += 1
 
+    # -- §G1: after-turn idle checkpoint ----------------------------------
+
+    def _ckpt_min_tokens(self) -> int:
+        """PARK_MIN_TOKENS for the checkpoint gate.
+
+        From an INJECTED store when there is one (tests), else straight from the
+        env -- deliberately NOT from a lazily-built store, whose construction can
+        fail on one rank only: the gate must be a function of state every rank
+        shares (conversation state + env), or one rank would enter the idle
+        collective alone.
+        """
+        if self._park is not None:
+            return int(self._park.min_tokens)
+        from exo.worker.engines.mlx.dsv41.park import DEFAULT_MIN_TOKENS, ENV_MIN_TOKENS
+
+        return _read_int_env(ENV_MIN_TOKENS, DEFAULT_MIN_TOKENS)
+
+    def checkpoint_candidate(
+        self,
+        now: float | None = None,
+        *,
+        force: bool = False,
+        exclude: set[str] | None = None,
+    ) -> tuple[str, Any] | None:
+        """The ONE conversation an idle tick should checkpoint, or ``None``.
+
+        PURE LOCAL gate (no collectives, no disk): a resident conversation
+        qualifies when it is between turns, ``offset >= PARK_MIN_TOKENS``, it is
+        dirty (``dirty_tokens >= EXO_DSV41_CKPT_MIN_DELTA``) or was never
+        checkpointed, it has been idle ``>= EXO_DSV41_CKPT_IDLE_S`` since its
+        turn committed, and it is not in an agreed retry back-off. Most recently
+        used first. Inputs are conversation state (identical on every rank: same
+        request stream, same deterministic LRU) + env + the monotonic clock.
+
+        ``force`` (§G3 step 4) relaxes only the TIME gates — the idle-since-turn
+        wait, the global no-go cooldown and the per-conversation back-off — so a
+        shutdown can park the remaining dirty conversations now. The
+        between-turns invariant is NOT relaxed: an in-flight conversation is
+        still skipped, and so is one below ``PARK_MIN_TOKENS`` or with no
+        committed turn. ``exclude`` skips entry keys already attempted this
+        shutdown (so the force loop tries each conversation at most once).
+        """
+        if not ckpt_enabled() or not _park_enabled():
+            return None
+        now = time.monotonic() if now is None else float(now)
+        if not force and now < self._ckpt_cooldown_until:
+            return None
+        min_tokens = self._ckpt_min_tokens()
+        best: tuple[float, str, Any] | None = None
+        for k, entry in self._entries.items():
+            if exclude and k in exclude:
+                continue
+            conv = entry.session
+            try:
+                if conv._inflight or conv.cache is None or conv.cache.cache is None:
+                    continue
+                if conv.last_turn_end_ts <= 0.0:
+                    continue  # no committed turn yet
+                if conv.offset < min_tokens:
+                    continue
+                if (conv.ever_checkpointed and not conv.stream_changed
+                        and conv.dirty_tokens < max(self.ckpt_min_delta, 1)):
+                    # Clean: the generation on disk still matches both the offset
+                    # AND the token stream. A same-offset branch change bypasses
+                    # this (MED-1).
+                    continue
+                if not force and now - conv.last_turn_end_ts < self.ckpt_idle_s:
+                    continue
+                if not force and now < self._ckpt_backoff.get(self._ckpt_hash(conv), 0.0):
+                    continue
+            except Exception:  # noqa: BLE001 - a broken conversation is skipped
+                continue
+            if best is None or conv.last_turn_end_ts > best[0]:
+                best = (conv.last_turn_end_ts, k, conv)
+        return None if best is None else (best[1], best[2])
+
+    @staticmethod
+    def _ckpt_hash(conv: Any) -> str:
+        from mlx_lm.models.deepseek_v41 import session_cache as _sc
+
+        return _sc.prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+
+    def maybe_checkpoint(
+        self,
+        *,
+        request_pending: Callable[[], bool] | None = None,
+        candidate: tuple[str, Any] | None = None,
+        now: float | None = None,
+        on_unit: Callable[[Any], None] | None = None,
+    ) -> Any:
+        """Disk-checkpoint at most ONE idle conversation; it STAYS RESIDENT.
+
+        NOT ``Conversation.maybe_checkpoint`` (the in-memory DSpark ladder
+        rung): this is the manager-level §G1 entry point, called by the engine's
+        idle tick on the ENGINE THREAD while no request is active. Writes a new
+        generation through :func:`park.checkpoint_conversation` (G4 agreed N +
+        ack-gated prune, G5 atomic commit), one unit at a time, polling
+        ``request_pending`` between units (any rank pending -> every rank aborts,
+        previous generation kept).
+
+        Returns the :class:`coord.CheckpointOutcome`, or ``None`` when no
+        conversation qualifies (nothing exchanged, nothing written). Never
+        raises on local errors.
+
+        Bookkeeping follows the AGREED result only, so it stays symmetric
+        across ranks: every rank acked -> ``ckpt_offset = offset`` (clean);
+        agreed failure -> per-conversation back-off; agreed no-go (ranks not
+        ready / different candidates) -> short global cooldown; abort for a
+        pending request -> no back-off (the next idle period retries).
+
+        ``candidate`` lets the engine pass the one it already selected in its
+        local gate (so the gate and the checkpoint cannot disagree).
+        """
+        from exo.worker.engines.mlx.dsv41.park import checkpoint_conversation
+
+        now_v = time.monotonic() if now is None else float(now)
+        cand = candidate if candidate is not None else self.checkpoint_candidate(now_v)
+        if cand is None:
+            return None
+        store_key, conv = cand
+        ckey = store_key[3:] if store_key.startswith("id:") else None
+        store = None
+        try:
+            store = self._park_store()
+        except Exception:  # noqa: BLE001 - this rank reports ok=0
+            store = None
+        try:
+            khash = self._ckpt_hash(conv)
+        except Exception:  # noqa: BLE001
+            khash = ""
+        t0 = time.monotonic()
+        out = checkpoint_conversation(
+            self._coordinator, store, conv, key=ckey,
+            request_pending=request_pending, on_unit=on_unit,
+        )
+        self.stats["ckpt_attempt"] += 1
+        if not out.go:
+            self.stats["ckpt_nogo"] += 1
+            self._ckpt_cooldown_until = time.monotonic() + max(self.ckpt_retry_s / 4.0, 1.0)
+        elif out.all_committed:
+            conv.ckpt_offset = int(conv.offset)
+            # Record the checkpointed stream's identity so a later same-offset
+            # branch change is seen as dirty (MED-1).
+            conv.ckpt_hash = khash
+            self._ckpt_backoff.pop(khash, None)
+            self.stats["ckpt_committed"] += 1
+            logger.info(
+                f"[DSV41] checkpointed an idle conversation to SSD, kept resident "
+                f"({conv.offset} rows, gen={out.generation}, "
+                f"{time.monotonic() - t0:.2f}s)"
+            )
+        elif out.pending_abort:
+            self.stats["ckpt_aborted"] += 1
+        else:
+            self.stats["ckpt_failed"] += 1
+            if khash:
+                self._ckpt_backoff[khash] = time.monotonic() + self.ckpt_retry_s
+            logger.warning(
+                f"[DSV41] idle checkpoint failed ({out.reason}); previous "
+                "generation kept, conversation stays resident"
+            )
+        return out
+
     def drop(self, session: Any) -> None:
         """Forget + close a conversation (a one-off request has finished).
 
@@ -1146,6 +1518,99 @@ class Dsv41Sessions:
         for entry in self._entries.values():
             dropped += int(entry.session.cancel())
         return dropped
+
+    # -- §G3: park-on-shutdown -------------------------------------------
+
+    def abort_inflight(self) -> list[str]:
+        """ABORT every in-flight turn and DROP it from residency (§G3 step 3).
+
+        Called only after the shutdown drain timed out. The turn is NOT parked —
+        the between-turns-only parking invariant is absolute, so a conversation
+        whose cache holds a partial turn is discarded, not serialized. Its last
+        committed §G1 generation stays on disk untouched and remains the restore
+        point; only the aborted turn's delta is lost. Returns the dropped entry
+        keys.
+        """
+        dropped: list[str] = []
+        for k, entry in list(self._entries.items()):
+            conv = entry.session
+            if not getattr(conv, "_inflight", False):
+                continue
+            dropped.append(k)
+            del self._entries[k]
+            try:
+                conv.close()
+            except Exception as exc:  # noqa: BLE001 - a leak must not stop exit
+                logger.warning(
+                    f"[DSV41] §G3 abort: closing in-flight session {k} failed "
+                    f"({type(exc).__name__}: {exc}); dropping anyway."
+                )
+            self.stats["shutdown_aborted"] += 1
+        if dropped:
+            logger.info(
+                f"[DSV41] §G3 abort: dropped {len(dropped)} in-flight "
+                "conversation(s) from residency (last generation kept on disk)."
+            )
+        return dropped
+
+    def force_checkpoint_all(
+        self,
+        *,
+        deadline: float,
+        now: Callable[[], float] = time.monotonic,
+        exclude: set[str] | None = None,
+        precheck: Callable[[], bool] | None = None,
+        request_pending: Callable[[], bool] | None = None,
+    ) -> tuple[list[tuple[str, Any]], bool]:
+        """Force-checkpoint remaining dirty BETWEEN-TURNS conversations (§G3 (4)).
+
+        Most-recently-used first, at most one attempt per conversation, through
+        the existing §G1/§G4 ``maybe_checkpoint`` path (G4 agreed N + per-unit
+        CKPT_POLL + ack-gated prune) so it stays rank-invariant and COLD-safe.
+        Stops at ``deadline`` (or sooner): ``precheck()`` (the engine's
+        agree_on_tasks pairing) is consulted before EVERY attempt and a False
+        stands the whole loop down — a peer mid-``step()`` must not have this
+        rank's checkpoint collective mispair. Returns ``(results, deadline_hit)``
+        where each result is ``(key, CheckpointOutcome)``.
+        """
+        attempted = set() if exclude is None else set(exclude)
+        results: list[tuple[str, Any]] = []
+        deadline_hit = False
+        while True:
+            if now() >= deadline:
+                deadline_hit = True
+                logger.info(
+                    "[DSV41] §G3 force-checkpoint: shutdown park deadline reached; "
+                    f"stopping after {len(results)} attempt(s)."
+                )
+                break
+            if precheck is not None and not precheck():
+                logger.info(
+                    "[DSV41] §G3 force-checkpoint: peer is not at the shutdown "
+                    "point; standing down (previous generation kept)."
+                )
+                break
+            cand = self.checkpoint_candidate(force=True, now=now(), exclude=attempted)
+            if cand is None:
+                break
+            key, _conv = cand
+            attempted.add(key)
+            out = self.maybe_checkpoint(
+                candidate=cand, now=now(), request_pending=request_pending
+            )
+            results.append((key, out))
+            if out is None or not out.all_committed:
+                # A no-go / failure means the ranks are not in lockstep this
+                # shutdown (candidate mismatch, a peer mid-request, a write
+                # failure): STOP rather than issue another collective at a
+                # possibly divergent program point. COLD-safe — every prior
+                # generation stays on disk.
+                logger.info(
+                    "[DSV41] §G3 force-checkpoint: attempt not committed "
+                    f"({getattr(out, 'reason', 'none')}); stopping the loop."
+                )
+                break
+        return results, deadline_hit
 
     def close(self) -> None:
         for entry in self._entries.values():

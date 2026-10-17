@@ -22,15 +22,19 @@ What is overridden is only what is genuinely different:
 
 from __future__ import annotations
 
+import inspect
 import os
-from collections.abc import Generator
+import time
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from typing import Any
 
 import mlx.core as mx
 
+from exo.shared.types.events import RunnerStatusUpdated
 from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runner_response import ModelLoadingResponse
+from exo.shared.types.worker.runners import RunnerLoading
 from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.builder import MlxBuilder
 from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
@@ -41,6 +45,10 @@ from exo.worker.runner.bootstrap import logger
 #: DSpark draft head (useful for A/B runs; the head is an accelerator, never a
 #: correctness requirement).
 _SPEC_ENV = "EXO_DSV41_SPECULATIVE"
+
+#: Minimum spacing of the load-warmup liveness beats (same 15 s throttle as
+#: ``Engine.prefill_heartbeat``; well inside the 45 s supervisor window).
+_LOAD_HEARTBEAT_SECONDS = 15.0
 
 
 def speculation_enabled() -> bool:
@@ -75,7 +83,10 @@ class Dsv41Builder(MlxBuilder):
         # Compile every serving kernel shape now, with host-synced collectives,
         # before any real forward: without it the first forward's ~47 s compile
         # storm skews the ranks and trips the Metal watchdog (p114/p115).
-        load_warmup(loaded)
+        # The warmup emits fence-backed liveness beats (ROUND-Q1B): it is the
+        # longest event-free stretch of the load and the supervisor's silence
+        # watchdog otherwise kills it once it outlasts ~66 s.
+        load_warmup(loaded, heartbeat=self._load_heartbeat(bound_instance, loaded))
         self.loaded_dsv41 = loaded
         self.vision = _load_vision(loaded)
         # ``MlxBuilder``'s fields are unused for this engine: there is no
@@ -85,6 +96,42 @@ class Dsv41Builder(MlxBuilder):
         self.engine_kwargs = _engine_kwargs_from_instance(bound_instance)
         if self.vision is not None:
             self.engine_kwargs["vision_processor"] = self.vision
+
+    def _load_heartbeat(
+        self, bound_instance: BoundInstance, loaded: Dsv41Loaded
+    ) -> Callable[[], None]:
+        """Throttled liveness beat for the load-time warmup.
+
+        Re-sends the runner's current status (``RunnerLoading``, all layers
+        loaded: the load generator's last yield) so the supervisor's
+        silence clock resets. Any event resets it (supervisor
+        ``_forward_events``). Called from the warmup's per-``fence_every``-layer
+        fence, i.e. only after layers of committed compute; a wedged
+        collective blocks that fence and therefore still goes silent and is
+        still killed. Throttled like ``Engine.prefill_heartbeat``.
+        """
+        total = len(getattr(loaded.model, "layers", []))
+        status = RunnerLoading(layers_loaded=total, total_layers=total)
+        runner_id = bound_instance.bound_runner_id
+        # last=0.0: the FIRST fence beats unthrottled, so the clock is reset
+        # as soon as the warmup has committed its first layers.
+        state = {"last": 0.0, "beats": 0, "t0": time.monotonic()}
+
+        def beat() -> None:
+            state["beats"] += 1
+            now = time.monotonic()
+            if now - state["last"] < _LOAD_HEARTBEAT_SECONDS:
+                return
+            state["last"] = now
+            logger.info(
+                f"[DSV41] load warmup liveness: fence {state['beats']} at "
+                f"{now - state['t0']:.1f}s (rank {loaded.rank}/{loaded.world})"
+            )
+            self.event_sender.send(
+                RunnerStatusUpdated(runner_id=runner_id, runner_status=status)
+            )
+
+        return beat
 
     def build(self) -> Engine:
         loaded = self.loaded_dsv41
@@ -129,11 +176,29 @@ def _load_vision(loaded: Dsv41Loaded) -> Any | None:
     return vision
 
 
-def load_warmup(loaded: Dsv41Loaded) -> None:
-    """Compile every serving kernel shape (body + draft head) before serving."""
+def load_warmup(
+    loaded: Dsv41Loaded, heartbeat: Callable[[], None] | None = None
+) -> None:
+    """Compile every serving kernel shape (body + draft head) before serving.
+
+    ``heartbeat`` is forwarded as the mlx-lm warmup's ``fence_hook`` when the
+    installed mlx-lm accepts it. An older mlx-lm without the parameter gets
+    the old call (no beats) and a loud warning, since its warmup then has no
+    liveness signal against the supervisor's silence watchdog.
+    """
     from mlx_lm.models.deepseek_v41 import prefill as _prefill
 
-    times = _prefill.load_warmup(loaded.model, loaded.head)
+    kwargs: dict[str, Any] = {}
+    if heartbeat is not None:
+        if "fence_hook" in inspect.signature(_prefill.load_warmup).parameters:
+            kwargs["fence_hook"] = heartbeat
+        else:
+            logger.warning(
+                "[DSV41] installed mlx-lm load_warmup has no fence_hook: the "
+                "load warmup runs WITHOUT liveness beats (a warmup longer "
+                "than the supervisor's silence window will be SIGKILLed)"
+            )
+    times = _prefill.load_warmup(loaded.model, loaded.head, **kwargs)
     logger.info(f"[DSV41] load warmup (kernel compile): {times}")
 
 

@@ -49,19 +49,51 @@ FAILURES NEVER RAISE. ``park_conversation`` returns ``False`` and removes its
 temporary directory on any error; ``restore_conversation`` returns ``None`` on
 any manifest/geometry/data mismatch, and the store moves the bad directory to
 ``<dir>.bad`` so the caller falls back to a cold prefill instead of mis-restoring.
+
+BUILD FINGERPRINT (plan §G2). Every manifest written by a store carries the
+store's build :class:`~exo.worker.engines.mlx.dsv41.fingerprint.BuildFingerprint`
+(model / tokenizer / KV-code / MLX / layout). ``find`` / ``try_restore`` refuse
+any candidate that does not match the current build (``park.skip reason=...``)
+WITHOUT quarantining it -- the dir is valid, just foreign or old, so the LRU
+reclaims it. Legacy manifests (no fingerprint, or a pre-v2 format) are refused
+the same way. The fingerprint is computed ONCE, at store construction.
+
+DURABILITY + GENERATIONS (plan §G5). Every file is fsynced; the manifest is
+committed as ``manifest.json.tmp`` -> fsync -> rename -> fsync dir; the whole
+generation is built under ``<name>.tmp/`` and renamed into place (fsync root),
+so a crash leaves only a ``.tmp`` that the next store construction sweeps.
+A generation dir is ``<prefix_hash>.gen<N>.<uuid8>`` with ``N`` starting at 1 and
+the newest TWO generations retained per conversation (older ones pruned only
+after the new generation commits). Restore is NON-CONSUMING: a restored
+generation stays on disk, marked the ACTIVE BASE with an empty ``.active`` file,
+so the conversation survives the NEXT restart too.
+
+MULTI-RANK (plan §G4). Under tensor parallelism each rank parks its shard to a
+node-local store. A store built with a :class:`~exo.worker.engines.mlx.dsv41.
+coord.ParkCoordinator` (the engine's coord subgroup) makes every park and every
+restore a CLUSTER decision: all ranks write the SAME generation number for the
+same turn, prune a generation only once every rank has committed ``keep`` newer
+ones, and restore exactly the same ``(conversation, generation)`` -- or all go
+cold. Dirs written by a rank-aware store are named
+``<prefix_hash>.gen<N>.r<rank>.<uuid8>`` (the ``r<rank>.`` group is optional on
+parse, so pre-G4 names still read) and the manifest records ``rank``. Without a
+coordinator (single rank / PP mode) behaviour is exactly the pre-G4 local one.
 """
 
 from __future__ import annotations
 
 import collections
+import contextlib
 import json
 import os
+import re
 import shutil
+import socket
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import mlx.core as mx
 import numpy as np
@@ -77,16 +109,41 @@ from exo.worker.engines.mlx.disaggregated.adapter import (
     bytes_to_array,
     mx_dtype_to_str,
 )
+from exo.worker.engines.mlx.dsv41.coord import (
+    MAX_CANDIDATES,
+    Candidate,
+    CheckpointOutcome,
+    ParkCoordinator,
+    RestoreDecision,
+    build_identity_digest,
+    key_int,
+    run_checkpoint,
+    run_park,
+    run_restore,
+    site_tag,
+)
+from exo.worker.engines.mlx.dsv41.fingerprint import (
+    FINGERPRINT_FIELD,
+    BuildFingerprint,
+    allow_mlx_drift,
+    allow_stale,
+    check_manifest,
+    compute_fingerprint,
+)
 from exo.worker.engines.mlx.dsv41.session import MIN_REUSE_TOKENS
 from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids the import cycle)
     from exo.worker.engines.mlx.dsv41.session import Conversation
 
+#: Refusal reason for a pre-v2 manifest or one without a usable fingerprint.
+_REASON_LEGACY = "legacy"
+
 __all__ = [
     "PARK_MAGIC",
     "PARK_VERSION",
     "ParkedStore",
+    "checkpoint_conversation",
     "park_conversation",
     "park_safe",
     "restore_conversation",
@@ -94,14 +151,42 @@ __all__ = [
 
 #: Manifest magic + version. A mismatch refuses the restore (never guesses).
 PARK_MAGIC = "DSV41-PARK"
-PARK_VERSION = 1
+#: Format version. v2 adds the build-fingerprint manifest field (§G2); a v1
+#: manifest is refused as legacy (not restored, not quarantined).
+PARK_VERSION = 2
 MANIFEST = "manifest.json"
+#: Empty marker file written into a generation dir after a successful restore
+#: (the non-consuming ACTIVE BASE, §G5.5). Reclaimed later by LRU / generations.
+ACTIVE_MARKER = ".active"
+#: Suffix a corrupt generation is renamed to, so it is never retried.
+_QUARANTINE_SUFFIX = ".bad"
+#: Generations of one conversation retained on disk (the newest N, §G5.6).
+_KEEP_GENERATIONS = 2
+
+#: A generation directory: ``<prefix_hash>.gen<N>[.r<rank>].<8 hex uuid>``
+#: (§G5.6; the optional ``r<rank>`` group is §G4 -- pre-G4 names still parse).
+_GEN_DIR_RE = re.compile(
+    r"^(?P<prefix>[0-9a-f]+)\.gen(?P<gen>\d+)(?:\.r(?P<rank>\d+))?"
+    r"\.(?P<uuid>[0-9a-f]{8})$"
+)
+
+#: Sanity bound on a parsed generation number (signed int32 max). Real
+#: generations start at 1 and grow by one per park; a parsed ``N`` above this is
+#: a corrupt/absurd dir name (e.g. ``gen2147483648``), never a real generation,
+#: and is IGNORED. Such a name would otherwise flow into the int32 park payload
+#: (``run_park`` writes ``1 + max``), where ``mx.array(..., int32)`` raises
+#: BEFORE the all_gather -- on that rank only -- desyncing the coord group.
+_MAX_GENERATION = (1 << 31) - 1
 
 ENV_ENABLE = "EXO_DSV41_PARK"
 ENV_DIR = "EXO_DSV41_PARK_DIR"
 ENV_MAX_GB = "EXO_DSV41_PARK_MAX_GB"
 ENV_MIN_TOKENS = "EXO_DSV41_PARK_MIN_TOKENS"
 ENV_MAX_COUNT = "EXO_DSV41_PARK_MAX_COUNT"
+#: Stable SITE identity of this node (rank-continuity). A logical node label
+#: that survives a relaunch which PERMUTES the two nodes' TP device ranks;
+#: falls back to the hostname. See :func:`site_identity`.
+ENV_SITE = "EXO_DSV41_SITE_ID"
 
 DEFAULT_PARK_DIR = "~/.exo/dsv41_park"
 DEFAULT_MAX_GB = 12.0
@@ -148,6 +233,37 @@ def _env_flag(name: str, default: bool) -> bool:
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
+def site_identity() -> "str | None":
+    """This node's stable SITE identity, or ``None`` when unknown.
+
+    The launch-order-INDEPENDENT name of a node, as opposed to its TP device
+    ``rank`` -- which the scheduler assigns by launch order and can PERMUTE
+    across a graceful relaunch (swapping the two nodes' ranks), which is what
+    made a swapped restore refuse every dir. Resolution order:
+
+    1. ``EXO_DSV41_SITE_ID`` (:data:`ENV_SITE`) -- the stripped value when it is
+       a non-empty string;
+    2. ``socket.gethostname()`` -- the stripped value when it is non-empty;
+    3. ``None``.
+
+    The RAW (stripped) string is stored -- case and internal spacing are NOT
+    rewritten -- and only hashed (``coord.site_tag``) for the wire. A ``None``
+    here is a hard fail-safe: a store with no identity refuses every dir that
+    carries a ``site`` (see :meth:`ParkedStore._identity_matches`), going COLD
+    rather than risk a rank-mismatched restore.
+    """
+    raw = os.environ.get(ENV_SITE)
+    if raw is not None:
+        value = raw.strip()
+        if value:
+            return value
+    try:
+        host = socket.gethostname().strip()
+    except Exception:  # noqa: BLE001 - a broken hostname lookup means "unknown"
+        return None
+    return host or None
+
+
 def _numel(shape: "list[int] | tuple[int, ...]") -> int:
     n = 1
     for s in shape:
@@ -167,6 +283,74 @@ def park_dir_size(d: Path) -> int:
     return total
 
 
+def _is_tmp_name(name: str) -> bool:
+    """Whether ``name`` is a park temp artifact (``*.tmp`` / ``*.tmp.*``)."""
+    return name.endswith(".tmp") or ".tmp." in name
+
+
+def _write_bytes_synced(path: Path, data: bytes) -> None:
+    """Write ``data`` then fsync the fd: a crash must not leave a short file."""
+    with open(path, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _fsync_dir(d: Path) -> None:
+    """fsync a directory fd so a create/rename inside it is durable.
+
+    Best-effort: a platform or filesystem that refuses fsync on a directory must
+    not break a park, so failures are swallowed (the data fsync on each file is
+    the durability guarantee; this orders the directory entries).
+    """
+    try:
+        fd = os.open(d, os.O_RDONLY)
+    except OSError:  # pragma: no cover - dir vanished
+        return
+    with contextlib.suppress(OSError):  # pragma: no cover - fs may not fsync a dir
+        os.fsync(fd)
+    os.close(fd)
+
+
+def _gen_from_name(name: str) -> "tuple[str, int] | None":
+    """Parse ``<prefix_hash>.gen<N>[.r<rank>].<uuid8>`` into ``(prefix_hash, N)``.
+
+    An absurd ``N`` (> :data:`_MAX_GENERATION`) is refused (``None``) so a
+    corrupt dir name cannot poison the int32 park payload; a pre-G4 (rank-less)
+    name still parses.
+    """
+    m = _GEN_DIR_RE.match(name)
+    if m is None:
+        return None
+    gen = int(m.group("gen"))
+    if not 0 <= gen <= _MAX_GENERATION:
+        return None
+    return m.group("prefix"), gen
+
+
+def _rank_from_name(name: str) -> "int | None":
+    """The ``r<rank>`` of a G4 generation dir name; ``None`` for a pre-G4 name."""
+    m = _GEN_DIR_RE.match(name)
+    if m is None or m.group("rank") is None:
+        return None
+    return int(m.group("rank"))
+
+
+def _gen_dir_name(prefix: str, gen: int, rank: "int | None") -> str:
+    """A fresh generation dir name (rank-tagged when the store knows its rank)."""
+    tag = f".r{int(rank)}" if rank is not None else ""
+    return f"{prefix}.gen{int(gen)}{tag}.{uuid.uuid4().hex[:8]}"
+
+
+def _generation_of(d: Path, man: "dict[str, Any]") -> int:
+    """The generation number of a parked dir: manifest field, else name, else 0."""
+    gen = man.get("generation")
+    if isinstance(gen, int):
+        return gen
+    parsed = _gen_from_name(d.name)
+    return parsed[1] if parsed is not None else 0
+
+
 # ---------------------------------------------------------------------------
 # byte plumbing (adapter codec + the CPU-copy idiom)
 # ---------------------------------------------------------------------------
@@ -180,9 +364,9 @@ def _to_cpu(a: mx.array) -> mx.array:
 
 
 def _write_blob(d: Path, name: str, arr: mx.array) -> dict[str, Any]:
-    """Write one array and return its manifest descriptor (file/dtype/shape)."""
+    """Write one array (fsynced) and return its manifest descriptor."""
     cpu = _to_cpu(arr)
-    (d / name).write_bytes(array_to_bytes(cpu))
+    _write_bytes_synced(d / name, array_to_bytes(cpu))
     return {
         "file": name,
         "dtype": mx_dtype_to_str(cpu.dtype),
@@ -204,9 +388,9 @@ def _read_blob(d: Path, desc: dict[str, Any]) -> mx.array:
 
 
 def _write_framed(d: Path, name: str, a: mx.array, b: mx.array) -> dict[str, Any]:
-    """Write two same-dtype arrays back-to-back; descriptors live in manifest."""
+    """Write two same-dtype arrays back-to-back (fsynced); descriptors in manifest."""
     a_cpu, b_cpu = _to_cpu(a), _to_cpu(b)
-    (d / name).write_bytes(array_to_bytes(a_cpu) + array_to_bytes(b_cpu))
+    _write_bytes_synced(d / name, array_to_bytes(a_cpu) + array_to_bytes(b_cpu))
     return {
         "file": name,
         "a": {"dtype": mx_dtype_to_str(a_cpu.dtype),
@@ -261,42 +445,102 @@ def park_safe(conv: "Conversation") -> bool:
 # serialize
 # ---------------------------------------------------------------------------
 
-def park_conversation(
-    conv: "Conversation", dir: "str | Path", *, key: str | None = None  # noqa: A002
-) -> bool:
-    """Serialize ``conv``'s full cache state into session directory ``dir``.
+class _GenerationWriter:
+    """Unit-by-unit serializer for ONE generation directory (§G1 split).
 
-    Returns ``True`` on a committed park (manifest written, directory renamed
-    into place) and ``False`` on any failure -- never raises. The directory is
-    built under a temporary name and atomically renamed, so a crash leaves no
-    half-valid session behind.
+    ``park_conversation`` (eviction) and the §G1 keep-resident checkpoint share
+    this writer, so the on-disk format is byte-for-byte the same either way.
+    The work is split into small UNITS (``ids`` + manifest skeleton at
+    :meth:`begin`; then one unit per cache layer -- its window ring, live
+    compressed-KV / index-key rows and compressor carry -- then engram ids, the
+    draft windows, each ladder snapshot, each draft snapshot, each anchor), so a
+    caller can stop between units: the §G1 checkpoint polls for a pending
+    request between every unit and aborts within one unit.
+
+    MLX BUFFER DONATION. A unit looks its arrays up on the LIVE cache when it
+    runs (never at construction), copies them to the host, writes, and drops
+    every reference before returning; the writer itself holds only Python ints,
+    file descriptors and the manifest dict. No cache array is referenced across
+    a unit boundary, so nothing pins a buffer across the next forward pass and
+    the in-place decode writes keep donating (T9).
+
+    CONSISTENCY. Every unit first asserts that the conversation is still at the
+    offset it was at in :meth:`begin` and is not mid-turn; a mismatch raises, and
+    the caller aborts (no partial generation is ever committed: the manifest is
+    the commit record and is written only by :meth:`commit`).
     """
-    d = Path(dir)
-    tmp = d.with_name(f"{d.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
-    try:
+
+    def __init__(
+        self,
+        conv: "Conversation",
+        d: Path,
+        *,
+        key: str | None,
+        fingerprint: "BuildFingerprint | None",
+        rank: int | None,
+        site: str | None = None,
+    ) -> None:
+        self.conv = conv
+        self.dir = d
+        self.tmp = d.with_name(f"{d.name}.tmp")
+        self.key = key
+        self.fingerprint = fingerprint
+        self.rank = rank
+        #: Stable SITE identity written into the manifest (rank-continuity); the
+        #: store's ``site``, or ``None`` for a store that knows none / a direct
+        #: :func:`park_conversation` call (legacy rank-rule dirs).
+        self.site = site
+        self.man: dict[str, Any] = {}
+        self.offset = -1
+        self._units: list[Any] = []
+        self._next = 0
+        self._began = False
+        self._cache_id = 0
+
+    # -- lifecycle --------------------------------------------------------
+
+    def begin(self) -> bool:
+        """Create ``<dir>.tmp/``, write ``ids.bin`` and plan the units.
+
+        ``False`` (nothing created) when the conversation is not park-safe or
+        the target exists. Raises on an I/O error (the caller cleans up).
+        """
+        conv = self.conv
         if not park_safe(conv):
             return False
-        if d.exists():  # never clobber an existing session
+        if self.dir.exists():  # never clobber an existing session
             return False
         mc = conv.cache.cache
-        layers = list(mc.layers)
+        self._cache_id = id(mc)
+        n_layers = len(mc.layers)
         offset = int(mc.offset)
         capacity = int(mc.capacity)
-        tmp.mkdir(parents=True, exist_ok=False)
+        self.offset = offset
+        self.tmp.mkdir(parents=True, exist_ok=False)
+        self._began = True
 
         ids = np.ascontiguousarray(
             np.asarray(conv.cache.tokens, dtype=np.int64).astype("<i4"))
-        (tmp / "ids.bin").write_bytes(ids.tobytes())
+        _write_bytes_synced(self.tmp / "ids.bin", ids.tobytes())
 
-        man: dict[str, Any] = {
+        gen_parsed = _gen_from_name(self.dir.name)
+        fp = self.fingerprint
+        self.man = {
             "magic": PARK_MAGIC,
             "version": PARK_VERSION,
             "created": time.time(),
-            "key": key,
+            "key": self.key,
+            # The build fingerprint (plan §G2): computed once by the store and
+            # passed in; never computed here. None makes the dir "legacy".
+            FINGERPRINT_FIELD: (fp.as_dict() if fp is not None else None),
+            "generation": gen_parsed[1] if gen_parsed is not None else 0,
+            # The TP rank that wrote this shard (plan §G4); None = unknown /
+            # single-rank store. Informational: admission is the fingerprint.
+            "rank": None if self.rank is None else int(self.rank),
             "offset": offset,
             "capacity": capacity,
             "max_seq_len": int(mc.max_seq_len),
-            "n_layers": len(layers),
+            "n_layers": n_layers,
             "window": int(getattr(mc.args, "window_size", 0)),
             "bsz": int(mc.bsz),
             "token_count": int(ids.shape[0]),
@@ -306,112 +550,228 @@ def park_conversation(
             "cache_turns": int(conv.cache.n_turns),
             "base": int(conv._base),
             "gen": [int(t) for t in conv._gen],
-            "win_kv": [],
-            "comp_kv": [],
-            "index_k": [],
-            "carry": [],
+            "win_kv": [None] * n_layers,
+            "comp_kv": [None] * n_layers,
+            "index_k": [None] * n_layers,
+            "carry": [None] * n_layers,
             "engram": None,
             "draft": [],
             "has_draft": conv.draft_state is not None,
             "snapshots": [],
             "draft_snaps": [],
+            "anchors": [],
+        }
+        # Stable SITE identity (rank-continuity): written ONLY when this store
+        # knows one. A dir that CARRIES a ``site`` is admitted by SITE (rank-
+        # independent), so a graceful relaunch that permutes the two nodes' TP
+        # device ranks still restores it; a dir WITHOUT one keeps the legacy
+        # rank rule (documented cold-accept, see ``_identity_matches``).
+        if isinstance(self.site, str) and self.site:
+            self.man["site"] = self.site
+        # Plan the units over INDICES / POSITIONS only (no array references).
+        units: list[Any] = [
+            (lambda i=i: self._layer_unit(i)) for i in range(n_layers)
+        ]
+        if mc.engram_ids is not None:
+            units.append(self._engram_unit)
+        if conv.draft_state is not None:
+            units.append(self._draft_unit)
+        for pos in list(conv.cache._snaps.keys()):
+            units.append(lambda pos=pos: self._snapshot_unit(pos))
+        for pos in list(conv._draft_snaps.keys()):
+            units.append(lambda pos=pos: self._draft_snap_unit(pos))
+        for pos in list(conv._anchor_at.keys()):
+            units.append(lambda pos=pos: self._anchor_unit(pos))
+        self._units = units
+        return True
+
+    @property
+    def total_units(self) -> int:
+        return len(self._units)
+
+    @property
+    def units_written(self) -> int:
+        return self._next
+
+    def has_more(self) -> bool:
+        return self._began and self._next < len(self._units)
+
+    def write_next(self) -> bool:
+        """Write ONE unit; returns whether more remain. Raises on any error."""
+        if not self.has_more():
+            return False
+        self._check_unchanged()
+        unit = self._units[self._next]
+        unit()
+        self._next += 1
+        return self.has_more()
+
+    def commit(self) -> bool:
+        """Write the manifest (the commit record) and rename into place.
+
+        ``manifest.json.tmp`` -> fsync -> rename -> fsync the dir, then the
+        whole generation directory is renamed into place atomically and the
+        containing (root) directory fsynced (plan §G5.2/§G5.3). A crash at any
+        point leaves either a ``.tmp`` (swept at startup) or a fully committed
+        generation -- never a half-valid one. Raises on error.
+        """
+        if not self._began or self.has_more():
+            raise RuntimeError("park commit before every unit was written")
+        self._check_unchanged()
+        tmp_man = self.tmp / f"{MANIFEST}.tmp"
+        _write_bytes_synced(tmp_man, json.dumps(self.man, indent=1).encode("utf-8"))
+        os.replace(tmp_man, self.tmp / MANIFEST)
+        _fsync_dir(self.tmp)
+        os.replace(self.tmp, self.dir)
+        _fsync_dir(self.dir.parent)
+        self._release()
+        return True
+
+    def abort(self) -> None:
+        """Remove the temp dir; a committed generation is never touched."""
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        self._release()
+
+    def _release(self) -> None:
+        self._units = []
+        self._next = 0
+        self._began = False
+
+    def _check_unchanged(self) -> None:
+        conv = self.conv
+        mc = conv.cache.cache
+        if mc is None or id(mc) != self._cache_id:
+            raise RuntimeError("conversation cache replaced mid-park")
+        if int(mc.offset) != self.offset or conv._inflight:
+            raise RuntimeError(
+                f"conversation advanced mid-park ({self.offset} -> {int(mc.offset)})")
+
+    # -- units (each looks its arrays up live and releases them) ----------
+
+    def _layer_unit(self, i: int) -> None:
+        mc = self.conv.cache.cache
+        lc = mc.layers[i]
+        offset, capacity = self.offset, int(mc.capacity)
+        man, tmp = self.man, self.tmp
+        man["win_kv"][i] = _write_blob(tmp, f"win_kv.{i}.bin", lc.win_kv)
+        ratio = max(int(lc.ratio or 0), 1)
+        used = -(-min(offset, capacity) // ratio)
+        if lc.comp_kv is not None:
+            rows = min(used, int(lc.comp_kv.shape[1]))
+            desc = _write_blob(tmp, f"comp_kv.{i}.bin", lc.comp_kv[:, :rows])
+            desc["used_rows"] = rows
+            desc["ratio"] = ratio
+            man["comp_kv"][i] = desc
+        if lc.index_k is not None:
+            rows = min(used, int(lc.index_k.shape[1]))
+            desc = _write_blob(tmp, f"index_k.{i}.bin", lc.index_k[:, :rows])
+            desc["used_rows"] = rows
+            man["index_k"][i] = desc
+        cs = lc.comp_state
+        if cs is not None:
+            desc = _write_framed(tmp, f"carry.{i}.bin", cs.kv_state, cs.score_state)
+            desc["m"] = int(offset % ratio)
+            desc["ratio"] = ratio
+            man["carry"][i] = desc
+
+    def _engram_unit(self) -> None:
+        mc = self.conv.cache.cache
+        used = min(self.offset, int(mc.engram_ids.shape[1]))
+        arr = np.ascontiguousarray(mc.engram_ids[:, :used], dtype=np.int64)
+        _write_bytes_synced(self.tmp / "engram_ids.bin", arr.tobytes())
+        self.man["engram"] = {
+            "file": "engram_ids.bin",
+            "dtype": "int64",
+            "shape": [int(s) for s in mc.engram_ids.shape],
+            "used_rows": used,
         }
 
-        for i, lc in enumerate(layers):
-            man["win_kv"].append(_write_blob(tmp, f"win_kv.{i}.bin", lc.win_kv))
+    def _draft_unit(self) -> None:
+        draft = self.conv.draft_state
+        if draft is None:
+            raise RuntimeError("draft window vanished mid-park")
+        out = []
+        for stage, w in enumerate(draft):
+            desc = _write_blob(self.tmp, f"draft.{stage}.bin", w.win_kv)
+            desc["n_ctx"] = int(w.n_ctx)
+            out.append(desc)
+        self.man["draft"] = out
 
-        for i, lc in enumerate(layers):
-            ratio = max(int(lc.ratio or 0), 1)
-            used = -(-min(offset, capacity) // ratio)
-            if lc.comp_kv is not None:
-                rows = min(used, int(lc.comp_kv.shape[1]))
-                desc = _write_blob(tmp, f"comp_kv.{i}.bin", lc.comp_kv[:, :rows])
-                desc["used_rows"] = rows
-                desc["ratio"] = ratio
-                man["comp_kv"].append(desc)
+    def _snapshot_unit(self, pos: int) -> None:
+        snap = self.conv.cache._snaps[pos]
+        tmp = self.tmp
+        entry: dict[str, Any] = {"pos": int(pos), "rings": [], "carries": []}
+        for j, ring in enumerate(snap.rings):
+            entry["rings"].append(
+                None if ring is None
+                else _write_blob(tmp, f"snapshot.{pos}.ring.{j}.bin", ring))
+        for j, carry in enumerate(snap.carries):
+            if carry is None:
+                entry["carries"].append(None)
+            elif carry[0] is None:  # spec.snap's m==0 sentinel: (None, None, 0)
+                entry["carries"].append({"empty": True, "m": int(carry[2])})
             else:
-                man["comp_kv"].append(None)
-            if lc.index_k is not None:
-                rows = min(used, int(lc.index_k.shape[1]))
-                desc = _write_blob(tmp, f"index_k.{i}.bin", lc.index_k[:, :rows])
-                desc["used_rows"] = rows
-                man["index_k"].append(desc)
-            else:
-                man["index_k"].append(None)
-            cs = lc.comp_state
-            if cs is not None:
-                desc = _write_framed(tmp, f"carry.{i}.bin", cs.kv_state, cs.score_state)
-                desc["m"] = int(offset % ratio)
-                desc["ratio"] = ratio
-                man["carry"].append(desc)
-            else:
-                man["carry"].append(None)
+                kv_rows, sc_rows, m = carry
+                desc = _write_framed(
+                    tmp, f"snapshot.{pos}.carry.{j}.bin", kv_rows, sc_rows)
+                desc["m"] = int(m)
+                entry["carries"].append(desc)
+        self.man["snapshots"].append(entry)
 
-        if mc.engram_ids is not None:
-            used = min(offset, int(mc.engram_ids.shape[1]))
-            arr = np.ascontiguousarray(mc.engram_ids[:, :used], dtype=np.int64)
-            (tmp / "engram_ids.bin").write_bytes(arr.tobytes())
-            man["engram"] = {
-                "file": "engram_ids.bin",
-                "dtype": "int64",
-                "shape": [int(s) for s in mc.engram_ids.shape],
-                "used_rows": used,
-            }
+    def _draft_snap_unit(self, pos: int) -> None:
+        saved = self.conv._draft_snaps[pos]
+        entry: dict[str, Any] = {"pos": int(pos), "windows": None}
+        if saved is not None:
+            entry["windows"] = [
+                dict(_write_blob(self.tmp, f"draftsnap.{pos}.{stage}.bin", kv),
+                     n_ctx=int(n_ctx))
+                for stage, (kv, n_ctx) in enumerate(saved)
+            ]
+        self.man["draft_snaps"].append(entry)
 
-        draft = conv.draft_state
-        if draft is not None:
-            for stage, w in enumerate(draft):
-                desc = _write_blob(tmp, f"draft.{stage}.bin", w.win_kv)
-                desc["n_ctx"] = int(w.n_ctx)
-                man["draft"].append(desc)
-
-        for pos, snap in conv.cache._snaps.items():
-            entry: dict[str, Any] = {"pos": int(pos), "rings": [], "carries": []}
-            for j, ring in enumerate(snap.rings):
-                entry["rings"].append(
-                    None if ring is None
-                    else _write_blob(tmp, f"snapshot.{pos}.ring.{j}.bin", ring))
-            for j, carry in enumerate(snap.carries):
-                if carry is None:
-                    entry["carries"].append(None)
-                elif carry[0] is None:  # spec.snap's m==0 sentinel: (None, None, 0)
-                    entry["carries"].append({"empty": True, "m": int(carry[2])})
-                else:
-                    kv_rows, sc_rows, m = carry
-                    desc = _write_framed(
-                        tmp, f"snapshot.{pos}.carry.{j}.bin", kv_rows, sc_rows)
-                    desc["m"] = int(m)
-                    entry["carries"].append(desc)
-            man["snapshots"].append(entry)
-
-        for pos, saved in conv._draft_snaps.items():
-            entry = {"pos": int(pos), "windows": None}
-            if saved is not None:
-                entry["windows"] = [
-                    dict(_write_blob(tmp, f"draftsnap.{pos}.{stage}.bin", kv),
-                         n_ctx=int(n_ctx))
-                    for stage, (kv, n_ctx) in enumerate(saved)
-                ]
-            man["draft_snaps"].append(entry)
-
+    def _anchor_unit(self, pos: int) -> None:
         # Persist the prompt-end anchor logits: without them an exact resubmit
         # (zero new rows) would hard-refuse after a restore, whereas before
-        # parking it fell back to a cold prefill. Small if unused, correct when
-        # the client re-sends an identical prompt or re-requests after eviction.
-        anchors: list[dict[str, Any]] = []
-        for pos, logits in conv._anchor_at.items():
-            anchors.append(dict(
-                _write_blob(tmp, f"anchor.{pos}.bin", logits), pos=int(pos)))
-        man["anchors"] = anchors
+        # parking it fell back to a cold prefill.
+        logits = self.conv._anchor_at[pos]
+        self.man["anchors"].append(dict(
+            _write_blob(self.tmp, f"anchor.{pos}.bin", logits), pos=int(pos)))
 
-        # The manifest is the commit record: written LAST, then the directory
-        # is renamed into place atomically.
-        (tmp / MANIFEST).write_text(json.dumps(man, indent=1))
-        os.replace(tmp, d)
-        return True
+
+def park_conversation(
+    conv: "Conversation",
+    dir: "str | Path",  # noqa: A002
+    *,
+    key: str | None = None,
+    fingerprint: "BuildFingerprint | None" = None,
+    rank: int | None = None,
+    site: str | None = None,
+) -> bool:
+    """Serialize ``conv``'s full cache state into session directory ``dir``.
+
+    Returns ``True`` on a committed park (manifest written, directory renamed
+    into place) and ``False`` on any failure -- never raises. The directory is
+    built under ``<name>.tmp/`` (each file fsynced) and atomically renamed, so a
+    crash leaves only a ``.tmp`` the next store construction sweeps.
+
+    ``fingerprint`` -- the store's build fingerprint (computed once at store
+    construction, never here) -- is written into the manifest under
+    :data:`FINGERPRINT_FIELD` so a later build can refuse a foreign park.
+
+    One-shot driver over :class:`_GenerationWriter` (the same unit sequence the
+    §G1 checkpoint writes with polls in between).
+    """
+    w = _GenerationWriter(
+        conv, Path(dir), key=key, fingerprint=fingerprint, rank=rank, site=site)
+    try:
+        if not w.begin():
+            return False
+        while w.has_more():
+            w.write_next()
+        return w.commit()
     except Exception as exc:  # noqa: BLE001 - a park must never break a turn
         logger.warning(f"[DSV41] park failed ({type(exc).__name__}: {exc}); discarding")
-        shutil.rmtree(tmp, ignore_errors=True)
+        w.abort()
         return False
 
 
@@ -619,6 +979,18 @@ def _restore_engram(d: Path, mc: Any, desc: Any) -> bool:
 # the store: index, LCP match, LRU budget
 # ---------------------------------------------------------------------------
 
+class _Usage(NamedTuple):
+    """One parked generation's size + restore eligibility (for eviction order)."""
+
+    created: float
+    dir: Path
+    size: int
+    foreign: bool
+    #: The dir's manifest, kept so headroom eviction can tell whether a dir is a
+    #: generation of the conversation being re-parked (HIGH-1).
+    man: dict[str, Any]
+
+
 class ParkedStore:
     """The on-disk set of parked sessions + the policy around it.
 
@@ -628,6 +1000,13 @@ class ParkedStore:
     (``EXO_DSV41_PARK_MAX_GB`` by summed file size + a count cap). Holds the
     model/head/construction kwargs so it can rebuild a ``Conversation`` on
     restore.
+
+    Also owns (plan §G2) the build fingerprint -- computed ONCE at construction
+    and stamped into every manifest this store writes, and used to refuse any
+    foreign/legacy candidate on restore -- and (plan §G5) the durability
+    protocol: startup ``.tmp`` sweep, per-generation atomic commit with fsync,
+    two-generation retention, and a non-consuming restore that leaves the
+    restored generation on disk as the ACTIVE BASE.
     """
 
     def __init__(
@@ -642,8 +1021,23 @@ class ParkedStore:
         max_gb: float | None = None,
         min_tokens: int | None = None,
         max_count: int | None = None,
+        fingerprint: "BuildFingerprint | None" = None,
+        coordinator: "ParkCoordinator | None" = None,
+        rank: int | None = None,
+        site: str | None = None,
     ) -> None:
         self.model = model
+        #: §G4 cross-rank coordinator (``None`` = single rank / local-only).
+        self.coordinator: ParkCoordinator | None = coordinator
+        #: This store's TP rank, used to tag dir names + manifests (§G4).
+        self.rank: int | None = (
+            int(rank) if rank is not None
+            else (coordinator.rank if coordinator is not None else None)
+        )
+        #: Stable SITE identity (rank-continuity): the store's logical node
+        #: label, used to ADMIT dirs independently of the (permutable) TP rank.
+        #: ``None`` when this store was given none and the host is unknown.
+        self.site: str | None = site if site is not None else site_identity()
         self.head = head
         self.conv_kw = dict(conv_kw or {})
         self.progress = progress
@@ -653,6 +1047,18 @@ class ParkedStore:
         ).expanduser()
         self.enabled = (
             _env_flag(ENV_ENABLE, True) if enabled is None else bool(enabled)
+        )
+        # §G5.4: sweep stale temp artifacts BEFORE any scan, so a crash mid-park
+        # cannot leave a partial generation for this run to pick up.
+        self._sweep_tmp()
+        # §G2: the build fingerprint, computed ONCE here and reused for every
+        # manifest write and every refusal. Never recomputed per-park. When the
+        # caller provides none it degrades from whatever the store has (its
+        # model); ``compute_fingerprint`` never raises.
+        self._fingerprint: BuildFingerprint = (
+            fingerprint
+            if fingerprint is not None
+            else compute_fingerprint(model=model)
         )
         gb = max_gb if max_gb is not None else _env_float(ENV_MAX_GB, DEFAULT_MAX_GB)
         self.max_bytes = int(max(0.0, gb) * 1_000_000_000)
@@ -667,19 +1073,64 @@ class ParkedStore:
 
     # -- internals --------------------------------------------------------
 
+    def _sweep_tmp(self) -> None:
+        """Delete stale ``*.tmp`` / ``*.tmp.*`` dirs and stray ``*.tmp`` files.
+
+        The crash-atomicity backstop (plan §G5.4): a SIGKILL mid-park leaves
+        ``<name>.tmp/`` (and possibly ``manifest.json.tmp`` inside a committed
+        dir); none of those is a valid generation, so they are removed before
+        the first scan.
+        """
+        if not self.root.is_dir():
+            return
+        for child in sorted(self.root.iterdir()):
+            if not _is_tmp_name(child.name):
+                continue
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                with contextlib.suppress(OSError):  # pragma: no cover - racing removal
+                    child.unlink()
+
     def _candidates(self) -> Iterator[tuple[Path, dict[str, Any]]]:
-        """Every directory under the root that holds a valid-magic manifest."""
+        """Every directory under the root that holds a valid-magic manifest.
+
+        A quarantined dir (``*.bad``) is never a candidate -- quarantine
+        renames, it does not delete, so without this it would be re-scanned and
+        re-quarantined forever. A directory whose manifest is unreadable or not
+        a JSON object is corrupt and quarantined here. A dir with no manifest at
+        all (or a non-park magic) is ignored.
+        """
         if not self.root.is_dir():
             return
         for child in sorted(self.root.iterdir()):
             if not child.is_dir():
                 continue
+            if child.name.endswith(_QUARANTINE_SUFFIX):
+                continue
             mpath = child / MANIFEST
             if not mpath.is_file():
                 continue
             try:
-                man = json.loads(mpath.read_text())
-            except (OSError, ValueError):
+                raw = mpath.read_text()
+            except OSError:  # pragma: no cover - racing removal
+                continue
+            except UnicodeDecodeError:
+                # A non-UTF-8 manifest is CORRUPT, not merely unreadable.
+                # Quarantine it (as for a garbage JSON manifest) so it is never
+                # re-scanned -- and, crucially, never raises out of a scan on
+                # the eviction hot path (``enforce_budget`` -> ``_usage_entries``
+                # runs after the park exchanges, so a rank-local raise there
+                # would strand the peer).
+                self._quarantine(child)
+                continue
+            try:
+                man = json.loads(raw)
+            except ValueError:
+                self._quarantine(child)  # garbage manifest: never retried
+                continue
+            if not isinstance(man, dict):
+                self._quarantine(child)
                 continue
             if man.get("magic") != PARK_MAGIC:
                 continue
@@ -713,17 +1164,257 @@ class ParkedStore:
         except Exception:  # pragma: no cover - broken conversation
             return False
 
+    # -- fingerprint / version admission (plan §G2) -----------------------
+
+    def _admit(self, man: dict[str, Any]) -> tuple[bool, str | None]:
+        """Whether a manifest may be restored: version gate + fingerprint gate.
+
+        A pre-v2 (or unparseable-version) manifest is refused as ``legacy``
+        UNCONDITIONALLY -- it has no fingerprint the policy can trust, and
+        ``restore_conversation`` refuses it too, so admitting it would only
+        quarantine a valid-by-format-but-old dir (the audit's 44 ``key:null``
+        dirs). Otherwise the fingerprint policy applies via ``check_manifest``
+        (honouring the env escape hatches). Pure: it never logs or mutates, and
+        never raises.
+        """
+        try:
+            if int(man.get("version", -1)) != PARK_VERSION:
+                return False, _REASON_LEGACY
+            return check_manifest(
+                man,
+                self._fingerprint,
+                allow_stale=allow_stale(),
+                allow_mlx_drift=allow_mlx_drift(),
+            )
+        except Exception:  # noqa: BLE001 - a refusal must never raise
+            return False, _REASON_LEGACY
+
+    # -- generation bookkeeping (plan §G5.6) ------------------------------
+
+    def _generation_dirs(self, prefix_hash: str) -> list[tuple[int, Path]]:
+        """``(generation, dir)`` for every valid generation of one conversation."""
+        out: list[tuple[int, Path]] = []
+        for d, _man in self._candidates():
+            parsed = _gen_from_name(d.name)
+            if parsed is None or parsed[0] != prefix_hash:
+                continue
+            out.append((parsed[1], d))
+        return out
+
+    def _next_generation(self, key_hash: str) -> int:
+        """The next generation number: max existing for ``key_hash`` + 1 (or 1)."""
+        gens = [g for g, _d in self._generation_dirs(key_hash)]
+        return (max(gens) + 1) if gens else 1
+
+    def _prune_generations(
+        self, prefix_hash: str, *, keep: int, keep_dir: Path | None = None
+    ) -> None:
+        """Delete all but the newest ``keep`` generations of one conversation.
+
+        Called only AFTER a new generation has committed (plan §G5.6), so the
+        conversation is never left without a valid generation on disk.
+        ``keep_dir`` (the just-written generation) is never deleted.
+        """
+        gens = sorted(self._generation_dirs(prefix_hash), key=lambda t: t[0])
+        doomed = gens[:-keep] if keep > 0 else gens
+        for _gen, d in doomed:
+            if keep_dir is not None and d == keep_dir:
+                continue
+            self.remove(d)
+
+    # -- LRU / budget (plan §G5.7, §G5.8) ---------------------------------
+
+    @staticmethod
+    def _created_of(man: dict[str, Any]) -> float:
+        """``created`` as a float; a non-numeric value is treated as OLDEST."""
+        try:
+            return float(man.get("created", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _usage_entries(self) -> list[_Usage]:
+        """Size + restore eligibility of every parked generation."""
+        out: list[_Usage] = []
+        for d, man in self._candidates():
+            ok, _reason = self._admit(man)
+            try:
+                created = float(man.get("created", 0.0))
+            except (TypeError, ValueError):
+                # A non-numeric ``created`` (a corrupt or hand-edited manifest)
+                # must not raise: ``enforce_budget`` runs on the eviction hot
+                # path AFTER the park exchanges, so an exception here would
+                # strand the peer. Treat it as the OLDEST entry (evicted first)
+                # so the dir is still size-accounted and reclaimable.
+                logger.warning(
+                    f"[DSV41] park manifest {d.name} has non-numeric "
+                    f"created={man.get('created')!r}; treating as oldest"
+                )
+                created = 0.0
+            out.append(_Usage(
+                created=created,
+                dir=d,
+                size=park_dir_size(d),
+                foreign=not ok,
+                man=man,
+            ))
+        return out
+
+    @staticmethod
+    def _evict_key(entry: _Usage) -> tuple[int, float]:
+        """Sort key: foreign/legacy dirs FIRST, then oldest-first (LRU)."""
+        return (0 if entry.foreign else 1, entry.created)
+
+    def _reserve_headroom(
+        self,
+        *,
+        protect_prefix: str,
+        protect: Callable[[Path, dict[str, Any]], bool] | None = None,
+    ) -> None:
+        """Evict until free space can hold a new generation beside its old one.
+
+        Headroom = 2 x (largest parked generation), so the new generation can be
+        written BEFORE the one it supersedes is deleted (plan §G5.7). Eviction
+        order is foreign/legacy first, then oldest. A generation belonging to
+        ``protect_prefix`` (the conversation being re-parked) is never evicted
+        here -- its old generations are pruned only after the new one commits.
+
+        ``protect`` is an extra ``(dir, manifest) -> bool`` predicate marking the
+        conversation's OWN earlier generations. A grown conversation's previous
+        generation lives under an EARLIER (shorter) stream's prefix hash, which
+        ``protect_prefix`` alone misses: without ``protect`` the headroom pass
+        can delete the conversation's ONLY generation before its replacement is
+        committed, and an aborted checkpoint then leaves zero (HIGH-1).
+        """
+        entries = self._usage_entries()
+        if not entries:
+            return
+        reserve = 2 * max(e.size for e in entries)
+        total = sum(e.size for e in entries)
+        for entry in sorted(entries, key=self._evict_key):
+            if total + reserve <= self.max_bytes:
+                break
+            parsed = _gen_from_name(entry.dir.name)
+            if parsed is not None and parsed[0] == protect_prefix:
+                continue
+            if protect is not None and protect(entry.dir, entry.man):
+                continue
+            self.remove(entry.dir)
+            total -= entry.size
+
+    def _protect_own(
+        self, conv: "Conversation", key: str | None
+    ) -> Callable[[Path, dict[str, Any]], bool]:
+        """A predicate matching EVERY on-disk generation of ``conv``.
+
+        The identity rules are the ones :meth:`find` /
+        :meth:`local_restore_candidates` already use: a client ``key`` match, or
+        the stored ids being a strict PREFIX (an ancestor) of the live stream.
+        ``prefix_hash`` of the CURRENT stream alone is not enough -- a grown
+        conversation's newest generation is written under a SHORTER earlier
+        stream's hash (HIGH-1).
+        """
+        ids_arr = np.asarray(conv.tokens, dtype=np.int64)
+        live_len = int(ids_arr.shape[0])
+
+        def protects(d: Path, man: dict[str, Any]) -> bool:
+            if key is not None and man.get("key") == key:
+                return True
+            try:
+                stored = self._load_ids(d, man)
+            except (OSError, KeyError, ValueError):
+                return False
+            n = int(stored.shape[0])
+            if n == 0 or n > live_len:
+                return False
+            return int(common_prefix_len(ids_arr, stored)) == n
+
+        return protects
+
+    def retain_keyed(
+        self, key: str | None, *, keep: int = _KEEP_GENERATIONS,
+        keep_dir: Path | None = None,
+    ) -> None:
+        """Delete all but the newest ``keep`` generations of a KEYED conversation.
+
+        A keyed conversation's generations do NOT share a ``prefix_hash``: each
+        turn grows the stream, so every checkpoint / park lands under a fresh
+        prefix and the prefix-keyed ``_prune_generations`` / ``prune_acked``
+        never fire -- one dir accumulates per turn up to ``max_count`` (MED-2).
+        Retention here groups by the manifest's stable client ``key`` instead.
+        Newest is by ``(created, generation, name)``; ``keep_dir`` (the
+        just-committed generation) is never deleted. A no-op without a key.
+        """
+        if not key:
+            return
+        entries: list[tuple[float, int, str, Path]] = []
+        for d, man in self._candidates():
+            if man.get("key") == key:
+                entries.append(
+                    (self._created_of(man), _generation_of(d, man), d.name, d))
+        keep_n = max(int(keep), 0)
+        if len(entries) <= keep_n:
+            return
+        entries.sort()
+        doomed = entries[:-keep_n] if keep_n > 0 else entries
+        for _c, _g, _n, d in doomed:
+            if keep_dir is not None and d == keep_dir:
+                continue
+            self.remove(d)
+
+    def enforce_budget(self, *, keep: Path | None = None) -> None:
+        """Evict until under the byte and count caps (plan §G5.8).
+
+        Foreign-fingerprint and legacy dirs go FIRST (this build can never
+        restore them), then plain LRU (oldest first). ``keep`` -- the just
+        written generation -- is never evicted.
+        """
+        entries = self._usage_entries()
+        total = sum(e.size for e in entries)
+        count = len(entries)
+        for entry in sorted(entries, key=self._evict_key):
+            if total <= self.max_bytes and count <= self.max_count:
+                break
+            if keep is not None and entry.dir == keep:
+                continue
+            self.remove(entry.dir)
+            total -= entry.size
+            count -= 1
+
+    # -- park / find / restore --------------------------------------------
+
     def park(self, conv: "Conversation", *, key: str | None = None) -> bool:
-        """Serialize ``conv`` and enforce the disk budget; never raises."""
+        """Serialize ``conv`` as a new generation and enforce the disk budget.
+
+        Named ``<prefix_hash>.gen<N>.<uuid8>`` with ``N`` = max existing + 1
+        (plan §G5.6). Headroom is reserved before the write (§G5.7); older
+        generations are pruned, and the budget enforced, only after the new
+        generation has committed. Never raises.
+        """
+        if self.coordinator is not None:
+            return coordinated_park(self.coordinator, self, conv, key=key)
         try:
             if not self.should_park(conv):
                 return False
             self.root.mkdir(parents=True, exist_ok=True)
             key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
-            d = self.root / f"{key_hash}__{uuid.uuid4().hex[:8]}"
-            if not park_conversation(conv, d, key=key):
+            gen = self._next_generation(key_hash)
+            d = self.root / _gen_dir_name(key_hash, gen, self.rank)
+            # Reserve room for the new generation BEFORE writing it, so the old
+            # one is never deleted to make space for a write that could fail.
+            self._reserve_headroom(
+                protect_prefix=key_hash, protect=self._protect_own(conv, key))
+            if not park_conversation(
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank,
+                site=self.site,
+            ):
                 return False
-            self.enforce_budget()
+            # New generation is on disk: now it is safe to prune the older ones.
+            self._prune_generations(
+                key_hash, keep=_KEEP_GENERATIONS, keep_dir=d)
+            # A grown keyed conversation's older generations live under earlier
+            # prefixes, so the prefix-keyed prune above misses them (MED-2).
+            self.retain_keyed(key, keep_dir=d)
+            self.enforce_budget(keep=d)
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[DSV41] park store error: {type(exc).__name__}: {exc}")
@@ -732,33 +1423,78 @@ class ParkedStore:
     def find(
         self, ids: Any, *, key: str | None = None
     ) -> tuple[Path, int] | None:
-        """Best parked session for ``ids``.
+        """Best RESTORABLE parked session for ``ids``.
 
         With ``key`` (a client conversation id), the manifest key must match
-        exactly and no prefix threshold applies. Without it, the longest common
-        token prefix wins, and it must reach :data:`MIN_REUSE_TOKENS`.
+        exactly and no prefix threshold applies; the NEWEST generation wins
+        (longest stored stream, then highest generation). Without it, the
+        longest common token prefix wins, and it must reach
+        :data:`MIN_REUSE_TOKENS`. Ties on the same conversation are broken by
+        the HIGHEST generation.
+
+        A candidate the current build may not restore (foreign fingerprint or a
+        legacy/pre-v2 manifest) is SKIPPED -- logged ``park.skip reason=<reason>``
+        and left on disk for the LRU to reclaim, never quarantined (the dir is
+        valid, just foreign/old).
         """
         ids_arr = np.asarray(ids, dtype=np.int64)
-        best_dir, best_lcp = None, 0
+        best_dir, best_lcp, best_gen = None, 0, -1
+        best_key: tuple[int, float, int] | None = None
         for d, man in self._candidates():
+            ok, reason = self._admit(man)
+            if not ok:
+                logger.info(f"park.skip reason={reason}")
+                continue
+            gen = _generation_of(d, man)
             if key is not None:
                 if man.get("key") == key:
-                    return d, int(ids_arr.shape[0])
+                    # Newest wins: the LONGEST stored stream (its token count),
+                    # then the newest ``created`` (a rewind+refeed can return to
+                    # the SAME offset -- MED-1), then the highest generation. Key
+                    # mode has no LCP to compare, and a grown conversation's
+                    # generations share neither a prefix nor a generation number.
+                    cnt = int(man.get("token_count") or man.get("offset") or 0)
+                    rank = (cnt, self._created_of(man), gen)
+                    if best_key is None or rank > best_key:
+                        best_dir, best_lcp, best_gen = d, cnt, gen
+                        best_key = rank
                 continue
             try:
                 lcp = common_prefix_len(ids_arr, self._load_ids(d, man))
             except (OSError, KeyError, ValueError):
                 continue
-            if lcp > best_lcp:
-                best_dir, best_lcp = d, lcp
-        if best_dir is None or best_lcp < MIN_REUSE_TOKENS:
+            if lcp > best_lcp or (lcp == best_lcp and gen > best_gen):
+                best_dir, best_lcp, best_gen = d, lcp, gen
+        if best_dir is None or (key is None and best_lcp < MIN_REUSE_TOKENS):
             return None
         return best_dir, best_lcp
+
+    def _mark_active(self, d: Path) -> None:
+        """Mark a restored generation as the ACTIVE BASE (plan §G5.5).
+
+        The non-consuming restore leaves the generation on disk; this empty,
+        fsynced marker records that it is the live base so the LRU / generation
+        policy can reclaim it later and an observer can see which generation a
+        conversation is currently riding.
+        """
+        try:
+            _write_bytes_synced(d / ACTIVE_MARKER, b"")
+            _fsync_dir(d)
+        except OSError:  # pragma: no cover - best-effort marker
+            pass
 
     def try_restore(
         self, ids: Any, *, key: str | None = None
     ) -> "Conversation | None":
-        """Find, restore, and consume a parked session; ``None`` on any miss."""
+        """Find and restore a parked session; ``None`` on any miss.
+
+        NON-CONSUMING (plan §G5.5): a successful restore leaves the generation
+        on disk (marked active), so the conversation also survives the NEXT
+        restart; the LRU / generation policy reclaims it. Only a CORRUPT dir is
+        quarantined to ``<dir>.bad``.
+        """
+        if self.coordinator is not None:
+            return coordinated_restore(self.coordinator, self, ids, key=key)
         if not self.enabled:
             return None
         try:
@@ -773,19 +1509,537 @@ class ParkedStore:
         if conv is None:
             self._quarantine(d)
             return None
-        self.remove(d)
+        self._mark_active(d)
         return conv
 
-    def enforce_budget(self) -> None:
-        """Evict oldest parked sessions until under the byte and count caps."""
-        entries: list[tuple[float, Path, int]] = []
-        total = 0
+    # -- §G4: the rank-local halves of the coordinated park / restore --------
+    #
+    # Each helper below is LOCAL (no collective) and is called by the drivers
+    # in ``coord.py`` between the exchanges. Their outputs only ever feed a
+    # pure, rank-invariant decision; they never decide on their own.
+
+    def _rank_matches(self, d: Path, man: dict[str, Any]) -> bool:
+        """Whether a parked dir belongs to THIS store's rank (§G4 isolation).
+
+        Cross-rank build digests deliberately DROP ``layout_fp`` (it embeds the
+        rank), so the fingerprint gate alone cannot tell two ranks' shards
+        apart. A dir whose name carries ``r<rank>`` or whose manifest records a
+        ``rank`` is therefore ALSO checked: a KNOWN foreign rank is refused, so
+        a re-placed / swapped node (with ``EXO_DSV41_PARK_ALLOW_STALE``
+        bypassing ``_admit``) cannot silently restore its peer's shard.
+
+        PERMISSIVE when the tag is absent: a ``None`` ``self.rank``
+        (single-rank / tests) or a pre-G4 dir with no ``r<rank>`` group and no
+        manifest ``rank`` is admitted exactly as before.
+        """
+        if self.rank is None:
+            return True
+        found = _rank_from_name(d.name)
+        if found is None:
+            recorded = man.get("rank")
+            if not isinstance(recorded, int) or isinstance(recorded, bool):
+                return True  # no usable tag -> permissive
+            found = recorded
+        return int(found) == int(self.rank)
+
+    def _identity_matches(self, d: Path, man: dict[str, Any]) -> bool:
+        """Whether a parked dir belongs to THIS store's SITE / rank (§G4 fix).
+
+        Admission is by SITE first: a manifest that CARRIES a non-empty ``site``
+        is admitted IFF this store also knows a site and they are EQUAL. The
+        site is a logical node label (see :func:`site_identity`) that survives a
+        graceful relaunch which PERMUTES the two nodes' TP device ranks --
+        exactly the case the old rank gate refused, turning every dir foreign.
+        The parked KV content is rank-INDEPENDENT (DeepSeek MLA keeps a single
+        shared latent per token), so a swapped-rank restore is content-safe.
+
+        FAIL-SAFE is ABSOLUTE: a dir with a ``site`` is refused COLD when this
+        store's site is unknown (``None``) or different -- never admitted by
+        guessing.
+
+        LEGACY: a dir with NO ``site`` field (written before this build, or by a
+        bare :func:`park_conversation` with no site) falls back to the
+        pre-existing :meth:`_rank_matches` rule. Such dirs are deliberately NOT
+        migrated (a cold-accept: they may be refused after a rank swap, exactly
+        as today) -- rewriting them in place would be a destructive migration on
+        a path that must never corrupt a parked shard.
+        """
+        msite = man.get("site")
+        if isinstance(msite, str) and msite:
+            return (
+                isinstance(self.site, str) and bool(self.site) and msite == self.site
+            )
+        return self._rank_matches(d, man)
+
+    def local_restore_candidates(
+        self, ids: Any, *, key: str | None = None
+    ) -> list[Candidate]:
+        """This rank's admissible restore candidates for ``ids`` (§G4).
+
+        Same admission + matching rules as :meth:`find` (fingerprint/version
+        gate, ``key`` match or LCP >= :data:`MIN_REUSE_TOKENS`), but returns
+        EVERY admissible generation -- the cluster then picks the highest one
+        present on all ranks. ``pref`` is the LCP (prefix mode) or the stored
+        stream length (key mode, so the NEWEST generation wins); the wire key
+        is the manifest's ``prefix_key`` (a function of the token stream, so
+        identical on every rank). Bounded to :data:`MAX_CANDIDATES`, best
+        first. A disabled store reports none.
+        """
+        if not self.enabled:
+            return []
+        ids_arr = np.asarray(ids, dtype=np.int64)
+        out: list[Candidate] = []
         for d, man in self._candidates():
-            size = park_dir_size(d)
-            entries.append((float(man.get("created", 0.0)), d, size))
-            total += size
-        entries.sort(key=lambda e: e[0])
-        while entries and (total > self.max_bytes or len(entries) > self.max_count):
-            _, d, size = entries.pop(0)
-            self.remove(d)
-            total -= size
+            if not self._identity_matches(d, man):
+                # A dir that carries a site but is not THIS site is foreign-site;
+                # a dir with no site falls back to the legacy rank rule.
+                msite = man.get("site")
+                if isinstance(msite, str) and msite:
+                    logger.info("park.skip reason=foreign-site")
+                else:
+                    logger.info("park.skip reason=foreign-rank")
+                continue
+            ok, reason = self._admit(man)
+            if not ok:
+                logger.info(f"park.skip reason={reason}")
+                continue
+            gen = _generation_of(d, man)
+            if gen <= 0:
+                continue  # not a generation dir: cannot be agreed on
+            ck = self._conv_key_of(d, man)
+            if ck is None:
+                continue
+            if key is not None:
+                if man.get("key") != key:
+                    continue
+                # Key mode has no LCP to compare; rank generations by the stored
+                # stream LENGTH so the NEWEST / longest generation wins, not an
+                # arbitrary one (MED-2). (Matches ``find``.)
+                pref = int(man.get("token_count") or man.get("offset") or 0)
+            else:
+                try:
+                    pref = int(common_prefix_len(ids_arr, self._load_ids(d, man)))
+                except (OSError, KeyError, ValueError):
+                    continue
+                if pref < MIN_REUSE_TOKENS:
+                    continue
+            out.append(Candidate(
+                key=key_int(ck), gen=gen, pref=pref,
+                digest=build_identity_digest(man.get(FINGERPRINT_FIELD)),
+            ))
+        out.sort(key=lambda c: (c.pref, c.gen, c.key), reverse=True)
+        return out[:MAX_CANDIDATES]
+
+    @staticmethod
+    def _conv_key_of(d: Path, man: dict[str, Any]) -> str | None:
+        """The conversation key (prefix hash) of a generation dir."""
+        pk_ = man.get("prefix_key")
+        if isinstance(pk_, str) and pk_:
+            return pk_
+        parsed = _gen_from_name(d.name)
+        return parsed[0] if parsed is not None else None
+
+    def find_generation(self, wire_key: int, gen: int) -> Path | None:
+        """The admissible local dir holding EXACTLY ``(wire_key, gen)``."""
+        for d, man in self._candidates():
+            if not self._identity_matches(d, man):
+                continue
+            if _generation_of(d, man) != int(gen):
+                continue
+            ck = self._conv_key_of(d, man)
+            if ck is None or key_int(ck) != int(wire_key):
+                continue
+            ok, _reason = self._admit(man)
+            if ok:
+                return d
+        return None
+
+    def restore_generation(self, decision: RestoreDecision) -> "Conversation | None":
+        """Restore exactly the decided generation; ``None`` on any failure.
+
+        Does NOT mark the dir active (that happens only after every rank acks).
+        A corrupt dir is quarantined exactly as in :meth:`try_restore`.
+        """
+        if decision.key is None or decision.gen is None:
+            return None
+        d = self.find_generation(decision.key, decision.gen)
+        if d is None:
+            return None
+        conv = restore_conversation(
+            d, self.model, self.head, progress=self.progress, **self.conv_kw)
+        if conv is None:
+            self._quarantine(d)
+            return None
+        return conv
+
+    def max_generation(self, key_hash: str) -> int:
+        """Highest generation of ``key_hash`` on disk (any admission), or 0."""
+        gens = [g for g, _d in self._generation_dirs(key_hash)]
+        return max(gens) if gens else 0
+
+    def has_committed(self, key_hash: str, gen: int) -> bool:
+        """Whether an ADMISSIBLE (restorable here) ``key_hash`` gen ``gen`` exists.
+
+        The PARK_ACK predicate: re-scans the root, so it confirms the commit
+        record (manifest) actually landed, not just that the writer said so.
+        """
+        for d, man in self._candidates():
+            if not self._identity_matches(d, man):
+                continue
+            parsed = _gen_from_name(d.name)
+            if parsed is None or parsed != (key_hash, int(gen)):
+                continue
+            if self._admit(man)[0]:
+                return True
+        return False
+
+    def write_generation(
+        self, conv: "Conversation", gen: int, *, key: str | None = None
+    ) -> Path | None:
+        """Write ``conv`` as generation ``gen`` (the cluster-agreed N).
+
+        Headroom reservation + atomic commit exactly as :meth:`park`, but NO
+        pruning (the caller prunes only after the cross-rank ack). Returns the
+        committed dir, or ``None`` (policy refused / write failed). Never raises.
+        """
+        try:
+            if not self.should_park(conv):
+                return None
+            self.root.mkdir(parents=True, exist_ok=True)
+            key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+            d = self.root / _gen_dir_name(key_hash, gen, self.rank)
+            self._reserve_headroom(
+                protect_prefix=key_hash, protect=self._protect_own(conv, key))
+            if not park_conversation(
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank,
+                site=self.site,
+            ):
+                return None
+            return d
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[DSV41] park store error: {type(exc).__name__}: {exc}")
+            return None
+
+    def open_generation(
+        self, conv: "Conversation", gen: int, *, key: str | None = None,
+        site: str | None = None,
+    ) -> "_GenerationWriter | None":
+        """Start writing ``conv`` as generation ``gen`` WITHOUT closing it (§G1).
+
+        The keep-resident half of the split serialize/evict: headroom is
+        reserved exactly as in :meth:`write_generation`, the temp dir is created
+        and ``ids.bin`` written, and the caller then drives the writer one unit
+        at a time (``write_next``) and finally ``commit``/``abort``. ``None`` when
+        the policy refuses (disabled, too short, not park-safe) or the dir could
+        not be opened. Never raises; never touches an existing generation.
+
+        ``site`` overrides the store's own :attr:`site` for this write (the
+        default, ``None``, uses it); the §G1 driver threads the store's site
+        explicitly so the manifest always carries the same identity a park does.
+        """
+        w: _GenerationWriter | None = None
+        try:
+            if not self.should_park(conv):
+                return None
+            self.root.mkdir(parents=True, exist_ok=True)
+            key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+            d = self.root / _gen_dir_name(key_hash, gen, self.rank)
+            self._reserve_headroom(
+                protect_prefix=key_hash, protect=self._protect_own(conv, key))
+            w = _GenerationWriter(
+                conv, d, key=key, fingerprint=self._fingerprint, rank=self.rank,
+                site=(self.site if site is None else site),
+            )
+            if not w.begin():
+                w.abort()
+                return None
+            return w
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"[DSV41] checkpoint open failed: {type(exc).__name__}: {exc}")
+            if w is not None:
+                w.abort()
+            return None
+
+    def prune_acked(
+        self, key_hash: str, floor: int, *, keep: int = _KEEP_GENERATIONS,
+        keep_dir: Path | None = None,
+    ) -> None:
+        """Ack-gated prune (§G4): delete generations ``G <= floor - keep``.
+
+        ``floor`` is the generation EVERY rank just acked committing (see
+        ``coord.prune_floor``), so after the prune gen ``floor`` (and the
+        ``keep - 1`` below it) still exist on every rank: a common restorable
+        generation always survives. ``keep_dir`` is never deleted.
+        """
+        limit = int(floor) - int(keep)
+        for gen, d in self._generation_dirs(key_hash):
+            if gen <= limit and d != keep_dir:
+                self.remove(d)
+
+
+# ---------------------------------------------------------------------------
+# §G4 drivers: the coordinated park / restore (callable with store=None so a
+# rank whose store is missing/disabled STILL takes part in every exchange)
+# ---------------------------------------------------------------------------
+
+def coordinated_restore(
+    coord: ParkCoordinator,
+    store: "ParkedStore | None",
+    ids: Any,
+    *,
+    key: str | None = None,
+) -> "Conversation | None":
+    """All-or-nothing restore across ranks; ``None`` = COLD on EVERY rank.
+
+    Runs ONE identity-agreement exchange FIRST (``coord.MAGIC_IDENTITY``): every
+    rank must share a KNOWN, matching SITE before the RESTORE exchange is even
+    attempted, so a relaunch that permutes the nodes' TP device ranks (but keeps
+    their sites) proceeds, while a genuinely foreign/unknown identity goes COLD
+    on every rank identically (``decide_identity`` is pure/rank-invariant, so the
+    exchange count stays rank-invariant too). Then exactly two exchanges when the
+    cluster decides RESTORE, one when it decides COLD (a rank-invariant function
+    of the gathered rows). A rank with no store or a disabled store contributes
+    ``site_tag=None -> 0``, forcing COLD, and reports "no candidates" too.
+    """
+    usable = store if (store is not None and store.enabled) else None
+    # Startup identity agreement: ONE exchange, cached on the coordinator, at a
+    # program point EVERY rank reaches (both call sites tolerate store=None).
+    tag = site_tag(store.site if (store is not None and store.enabled) else None)
+    if not coord.identity_confirmed(tag, coord.rank, coord.world):
+        logger.info(
+            f"park.restore cold reason=identity-unconfirmed rank={coord.rank}")
+        return None
+
+    def local() -> list[Candidate]:
+        return [] if usable is None else usable.local_restore_candidates(ids, key=key)
+
+    def restore(decision: RestoreDecision) -> "Conversation | None":
+        return None if usable is None else usable.restore_generation(decision)
+
+    def discard(conv: "Conversation") -> None:
+        conv.close()
+
+    out = run_restore(coord, local, restore, discard)
+    if out.decision.cold:
+        if out.decision.reason:
+            logger.info(f"park.restore cold reason={out.decision.reason} rank={coord.rank}")
+        return None
+    assert usable is not None and out.value is not None
+    with contextlib.suppress(Exception):  # the marker is best-effort bookkeeping
+        d = usable.find_generation(out.decision.key or 0, out.decision.gen or 0)
+        if d is not None:
+            usable._mark_active(d)
+    logger.info(f"park.restore gen={out.decision.gen} rank={coord.rank} (all ranks)")
+    return out.value
+
+
+def coordinated_park(
+    coord: ParkCoordinator,
+    store: "ParkedStore | None",
+    conv: "Conversation",
+    *,
+    key: str | None = None,
+) -> bool:
+    """Park ``conv`` as the cluster-agreed generation N; ack-gated prune.
+
+    Always exactly two exchanges (PARK_GEN, PARK_ACK), whatever this rank's
+    store state: a rank that cannot or may not park still reports, so a peer
+    never blocks waiting for it. Returns whether THIS rank committed gen N.
+    """
+    usable = store if (store is not None and store.enabled) else None
+    try:
+        key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+    except Exception:  # noqa: BLE001 - must still take part in the exchanges
+        key_hash = ""
+    try:
+        wire = key_int(key_hash) if key_hash else 0
+    except Exception:  # noqa: BLE001 - an unkeyable conversation -> no prune
+        wire = 0
+    written: dict[str, Path] = {}
+
+    def local_max() -> int:
+        if usable is None or not key_hash:
+            return 0
+        return usable.max_generation(key_hash)
+
+    def write(gen: int) -> bool:
+        if usable is None or not key_hash:
+            return False
+        d = usable.write_generation(conv, gen, key=key)
+        if d is None:
+            return False
+        written["dir"] = d
+        return True
+
+    def committed(gen: int) -> bool:
+        if usable is None or not key_hash:
+            return False
+        return usable.has_committed(key_hash, gen)
+
+    def prune(floor: int) -> None:
+        if usable is None or not key_hash:
+            return
+        usable.prune_acked(key_hash, floor, keep_dir=written.get("dir"))
+        usable.retain_keyed(key, keep_dir=written.get("dir"))
+
+    out = run_park(coord, wire, local_max, write, committed, prune)
+    # Everything past the two exchanges is best-effort LOCAL work. ``run_park``
+    # keeps the exchanges alive even when a local callback fails, but this tail
+    # runs AFTER them: an unexpected error here (e.g. a corrupt manifest making
+    # ``enforce_budget`` raise inside ``_usage_entries``) would otherwise escape
+    # ``coordinated_park``, skip ``session.close()`` on THIS rank, and leave the
+    # peer blocked mid-forward pass -- a rank-local hang. Catch it and return
+    # the local commit status; the peer's decision is unaffected (the exchanges
+    # already completed).
+    try:
+        if usable is not None and "dir" in written:
+            usable.enforce_budget(keep=written["dir"])
+    except Exception as exc:  # noqa: BLE001 - a park must never raise
+        logger.warning(
+            f"park.budget rank={coord.rank} enforce_budget failed "
+            f"({type(exc).__name__}: {exc}); keeping the committed generation"
+        )
+    with contextlib.suppress(Exception):  # logging must never break a park
+        logger.info(
+            f"park.commit gen={out.generation} written={out.written} "
+            f"prune_floor={out.floor} rank={coord.rank}"
+        )
+    return out.written
+
+
+# ---------------------------------------------------------------------------
+# §G1 driver: the cancellable keep-resident checkpoint
+# ---------------------------------------------------------------------------
+
+#: A world-of-one coordinator for the single-rank (no coord group) case, so the
+#: single-rank and TP paths run the SAME exchange sequence and pure decisions.
+def _local_coordinator() -> ParkCoordinator:
+    return ParkCoordinator(lambda row: [list(row)], rank=0, world=1)
+
+
+def checkpoint_conversation(
+    coord: "ParkCoordinator | None",
+    store: "ParkedStore | None",
+    conv: "Conversation | None",
+    *,
+    key: str | None = None,
+    request_pending: Any = None,
+    on_unit: Any = None,
+    site: str | None = None,
+) -> CheckpointOutcome:
+    """Write ``conv`` as a NEW generation while it STAYS RESIDENT (plan §G1).
+
+    Reuses the §G4 generation protocol (agreed ``N``, ack-gated prune) and the
+    §G5 durability protocol (``.tmp`` + fsync + atomic rename) via
+    :meth:`ParkedStore.open_generation`. The write is split into units (one per
+    layer, then the small tail units); ``request_pending()`` is polled -- on
+    EVERY rank, through a ``CKPT_POLL`` exchange -- before each unit, and any
+    rank seeing a request makes EVERY rank abort: the temp dir is removed, the
+    previous generation is untouched, and the caller serves the request after
+    at most one unit's write.
+
+    ``coord=None`` = single rank (a world-of-one coordinator is used so the
+    sequence is identical). ``store``/``conv`` may be ``None`` (this rank cannot
+    checkpoint); the rank still takes part in every exchange and reports
+    ``ok=0``, which turns the decision into a rank-invariant no-go. Never raises
+    on local errors; a transport failure of a collective propagates (as for
+    every other coord exchange).
+
+    ``on_unit`` (tests / instrumentation) is called after each unit is written.
+    """
+    c = coord if coord is not None else _local_coordinator()
+    usable = store if (store is not None and store.enabled) else None
+    pending = request_pending if request_pending is not None else (lambda: False)
+    key_hash = ""
+    offset = 0
+    if conv is not None:
+        try:
+            key_hash = prefix_hash(np.asarray(conv.tokens, dtype=np.int64))
+            offset = int(conv.offset)
+        except Exception:  # noqa: BLE001 - unkeyable -> ok=0 (no-go)
+            key_hash, offset = "", 0
+    try:
+        wire = key_int(key_hash) if key_hash else 0
+    except Exception:  # noqa: BLE001
+        wire = 0
+    state: dict[str, Any] = {}
+
+    def ready() -> bool:
+        return (usable is not None and conv is not None and bool(key_hash)
+                and usable.should_park(conv))
+
+    def local_max() -> int:
+        if usable is None or not key_hash:
+            return 0
+        return usable.max_generation(key_hash)
+
+    def begin(gen: int) -> bool:
+        if usable is None or conv is None or not key_hash:
+            return False
+        w = usable.open_generation(conv, gen, key=key, site=site)
+        if w is None:
+            return False
+        state["w"] = w
+        return True
+
+    def has_more() -> bool:
+        w = state.get("w")
+        return bool(w is not None and w.has_more())
+
+    def write_next() -> bool:
+        more = bool(state["w"].write_next())
+        if on_unit is not None:
+            on_unit(state["w"])
+        return more
+
+    def commit() -> bool:
+        w = state.get("w")
+        if w is None:
+            return False
+        ok = bool(w.commit())
+        if ok:
+            state["dir"] = w.dir
+        return ok
+
+    def committed(gen: int) -> bool:
+        if usable is None or not key_hash:
+            return False
+        return usable.has_committed(key_hash, gen)
+
+    def prune(floor: int) -> None:
+        if usable is None or not key_hash:
+            return
+        usable.prune_acked(key_hash, floor, keep_dir=state.get("dir"))
+        # Bind a grown keyed conversation's generations to their stable client
+        # key for retention: the prefix-keyed prune above cannot see them (MED-2).
+        usable.retain_keyed(key, keep_dir=state.get("dir"))
+
+    def abort() -> None:
+        w = state.pop("w", None)
+        if w is not None:
+            w.abort()
+
+    t0 = time.perf_counter()
+    out = run_checkpoint(
+        c, wire, offset,
+        ready=ready, pending=pending, local_max=local_max, begin=begin,
+        write_next=write_next, has_more=has_more, commit=commit,
+        committed=committed, prune=prune, abort=abort,
+    )
+    state.pop("w", None)  # drop the writer (it holds no arrays; belt+braces)
+    try:
+        if usable is not None and "dir" in state:
+            usable.enforce_budget(keep=state["dir"])
+    except Exception as exc:  # noqa: BLE001 - a checkpoint must never raise
+        logger.warning(
+            f"park.ckpt budget enforce failed ({type(exc).__name__}: {exc})")
+    with contextlib.suppress(Exception):
+        if out.go:
+            logger.info(
+                f"park.ckpt {out.reason} gen={out.generation} rows={offset} "
+                f"units={out.units} polls={out.polls} written={out.written} "
+                f"all_ranks={out.all_committed} rank={c.rank} "
+                f"secs={time.perf_counter() - t0:.3f}"
+            )
+    return out

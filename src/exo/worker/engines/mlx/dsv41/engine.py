@@ -80,6 +80,7 @@ from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
+from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
     DEGENERATION_ERROR_TEXT,
     REPETITION_LOOP_ERROR_CODE,
@@ -97,6 +98,7 @@ from exo.worker.engines.mlx.dsv41.errors import (
     Dsv41UnsupportedFeature,
     reclassify_input_error,
 )
+from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
 from exo.worker.engines.mlx.dsv41.output import _starts_in_thinking, dsv41_output_parser
 from exo.worker.engines.mlx.dsv41.reasoning_budget import (
@@ -116,7 +118,11 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _stop_index,
     _stop_sequences,
 )
-from exo.worker.engines.mlx.dsv41.session import Dsv41Sessions, TurnOutcome
+from exo.worker.engines.mlx.dsv41.session import (
+    Dsv41Sessions,
+    TurnOutcome,
+    ckpt_tick_seconds,
+)
 from exo.worker.engines.mlx.dsv41.vision import (
     Dsv41Vision,
     build_embeddings,
@@ -132,6 +138,59 @@ from exo.worker.engines.mlx.generator.generate import (
 from exo.worker.engines.mlx.utils_mlx import apply_chat_template, get_coord_group
 from exo.worker.runner.bootstrap import logger
 
+
+def _maybe_install_next18_capture() -> None:
+    """Install the next18 real-tensor capture hook when the operator opted in.
+
+    The R1 ship precondition A2 / R2 hard gate needs the DSv4.1 indexer's REAL
+    decode/verify tensors recorded *inside the model-server process*, which the
+    offline synthetic suite cannot give. ``bench/next18_capture.py`` provides the
+    hook, but nothing in the stock server imports it, so a capture path exported
+    in the operator's shell is (correctly) inert.
+
+    This is the ONE bootstrap point: the DSv4.1 engine is constructed on every
+    rank of every node exactly once, before any request is served, and only for
+    this model. The hook is installed here IFF both hold:
+
+      * ``DSV41_NEXT18_CAPTURE`` is set to a non-empty output path (the operator
+        opted in), AND
+      * the ``next18_capture`` module is importable (the harness file is staged on
+        ``sys.path`` by the operator's ``PYTHONPATH`` -- e.g. the R1 capture run
+        copies ``bench/next18_capture.py`` to each node's ``/tmp`` and exports
+        ``PYTHONPATH`` accordingly, mirroring the existing ``EXO_PYTHONPATH_DIAG``
+        mechanism in ``start_cluster.sh``).
+
+    WHY IT NEVER FIRES IN PRODUCTION. With ``DSV41_NEXT18_CAPTURE`` unset this
+    function returns immediately -- no import, no monkeypatch, no cost -- so the
+    production path is byte-for-byte unchanged. The capture path is a separate
+    process concern (its own module on ``PYTHONPATH``), never linked into exo or
+    mlx-lm, so nothing about a production boot can reach it.
+
+    ``next18_capture`` auto-installs on import when the env names a path; we log
+    the confirmed install so the runner log is the on-node evidence the capture
+    is live (``grep '[next18_capture]'``).
+    """
+    import os
+
+    path = os.environ.get("DSV41_NEXT18_CAPTURE")
+    if not path:
+        return                                    # production: inert, zero cost
+    try:
+        import next18_capture as cap              # operator-staged on PYTHONPATH
+    except Exception as e:  # noqa: BLE001 - capture must never break serving
+        logger.warning(
+            f"[DSV41] DSV41_NEXT18_CAPTURE={path} set but next18_capture is not "
+            f"importable ({e!r}); capture DISABLED. Stage bench/next18_capture.py "
+            f"on PYTHONPATH (see start_cluster.sh DSV41_NEXT18_CAPTURE* forwards)."
+        )
+        return
+    try:
+        if getattr(cap, "_CAP", None) is None:
+            cap.install(path)                     # idempotent; env default path
+        logger.info(f"[DSV41] next18 capture hook ACTIVE -> {path}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[DSV41] next18 capture auto-install failed: {e!r}")
+
 #: Chunk size for the chunked prefill loop. PREFILL IS THE KNOWN BLOCKER for
 #: this model (74 tok/s at 8K, Metal GPU-timeout above 16K -- exo phase 19), and
 #: workstream C owns the fix. Until then the engine keeps chunks small so a long
@@ -144,6 +203,34 @@ DEFAULT_PREFILL_CHUNK = 512
 #: kernels, not to measure anything (the first forward is the expensive one --
 #: exo phase 19 measured 206 s for a 2K first chunk).
 DEFAULT_WARMUP_TOKENS = 8
+
+
+def _dtype_of(loaded: Any, model: Any) -> str:
+    """Best-effort KV storage dtype for the park build fingerprint (plan §G2).
+
+    Source, in order: an explicit ``dtype`` on the loaded record, then on the
+    model args, then on the first built layer/cache the model exposes. When none
+    is reachable the stable string ``"unknown"`` is used -- deterministic across
+    restarts of the same build, so the layout fingerprint still gates a real
+    layout change; a change to the KV storage dtype is already caught by
+    ``kv_code_fp`` (the fork's ``cache`` module, which fixes the grid dtype, is
+    allowlisted).
+    """
+    for obj in (
+        loaded,
+        getattr(loaded, "args", None),
+        getattr(model, "args", None),
+    ):
+        dt = getattr(obj, "dtype", None)
+        if dt is not None:
+            return str(dt)
+    layers = getattr(model, "layers", None)
+    if isinstance(layers, (list, tuple)) and layers:
+        dt = getattr(layers[0], "dtype", None)
+        if dt is not None:
+            return str(dt)
+    return "unknown"
+
 
 #: Prompt used for warmup; deliberately a plain chat turn.
 _WARMUP_PROMPT = "Reply with the single word: ready"
@@ -340,6 +427,10 @@ class Dsv41Engine(Engine):
     #: draft windows) and serves the turns of one conversation, which is what
     #: makes turn N+1's prefill only the delta. Created in ``__post_init__``.
     _sessions: Dsv41Sessions = field(init=False)
+    #: Build fingerprint (plan §G2), computed ONCE in ``__post_init__`` from the
+    #: checkpoint identity (model path/tokenizer/tensor-parallel layout). Tags
+    #: every parked manifest this engine writes and gates every restore.
+    _fingerprint: Any = field(init=False)
     #: Cumulative speculative counters since process start (rounds started,
     #: draft tokens accepted, draft tokens attempted). Deltas across
     #: successive requests give the live acceptance rate -- the decode-depth
@@ -351,10 +442,22 @@ class Dsv41Engine(Engine):
     #: for the >30 s spacing watchdog. ``0.0`` (never called) is treated as
     #: "first call" and never warns.
     _last_fence_heartbeat_monotonic: float = field(default=0.0, init=False)
+    #: Monotonic time of the last ``step()`` entry. The §G1 idle tick waits
+    #: ``EXO_DSV41_CKPT_IDLE_S`` past it, so a peer still finishing the same
+    #: request (identical stream, deterministic finish) is long out of
+    #: ``step()`` before this rank issues any idle-tick collective.
+    _last_step_monotonic: float = field(default=0.0, init=False)
+    #: §G3: set once a shutdown is armed. ``_activate_next`` refuses to start a
+    #: queued request while this is True, so "stop admitting new requests" holds
+    #: even while the runner is still draining an in-flight turn.
+    _shutting_down: bool = field(default=False, init=False)
 
     # ---------------------------------------------------------------- lifecycle
 
     def __post_init__(self) -> None:
+        # Real-tensor capture (R1 ship precondition A2): install the next18 hook
+        # when the operator opted in. No-op with DSV41_NEXT18_CAPTURE unset.
+        _maybe_install_next18_capture()
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
             logger.warning(
@@ -365,6 +468,32 @@ class Dsv41Engine(Engine):
         # chunk (see DEFAULT_PREFILL_CHUNK) unless the instance says otherwise.
         self._chunk = self.prefill_chunk_size or DEFAULT_PREFILL_CHUNK
         long_chunk = self.long_chunk or self._chunk
+        # Plan §G2: compute the build fingerprint ONCE here -- at startup, never
+        # lazily at shutdown and never per-park. It identifies the checkpoint
+        # (model/tokenizer), the KV/forward code and the MLX build, and the TP
+        # layout (world size, built layer range, dtype), so a parked cache
+        # written by a different build is refused instead of silently served.
+        #
+        # The park layout DELIBERATELY OMITS ``rank``. The DeepSeek MLA cache
+        # stores a SINGLE shared latent per token (``win_kv``/``comp_kv`` are
+        # ``(bsz, ..., head_dim)``, NOT ``n_heads*head_dim``; ``attn.wkv`` is
+        # built full on both ranks), so rank is NOT a cache-CONTENT axis. The two
+        # nodes' TP device ranks are assigned by launch order and SWAP across a
+        # graceful relaunch, so gating a park on rank made every parked dir
+        # foreign after a swap (``park.skip reason=foreign-rank`` -> cold on both
+        # nodes). Excluding rank makes the park fingerprint rank-INVARIANT and a
+        # swapped-rank restore content-safe. (``fingerprint.layout_fingerprint``
+        # itself stays rank-sensitive; only this park layout drops the axis.)
+        self._fingerprint = compute_fingerprint(
+            model_path=self.loaded.model_path,
+            tokenizer=self.loaded.tokenizer,
+            model=self.loaded.model,
+            layout={
+                "world_size": self.loaded.world,
+                "layers": self.loaded.built_layers,
+                "dtype": _dtype_of(self.loaded, self.loaded.model),
+            },
+        )
         self._sessions = Dsv41Sessions(
             self.loaded.model,
             self.loaded.head,
@@ -386,6 +515,14 @@ class Dsv41Engine(Engine):
             # is reached for minutes. Forwarded Dsv41Sessions -> Conversation ->
             # (the prefill_fn partial) -> engine_prefill; active on ALL ranks.
             fence_heartbeat=self._session_fence_heartbeat,
+            # The build fingerprint, forwarded to the lazily-built park store.
+            fingerprint=self._fingerprint,
+            # Plan §G4: park/restore become CLUSTER decisions over the same
+            # QP-less TCP coord subgroup RankAgreement uses (never the model TP
+            # group). ``None`` (single rank / PP mode) keeps local-only parking.
+            coordinator=ParkCoordinator.from_group(
+                get_coord_group(self.group), rank=self.loaded.rank),
+            rank=self.loaded.rank,
         )
         # Degeneration-guard configuration, logged ONCE per rank at startup: the
         # guard's verdict is a pure function of the committed token ids (which are
@@ -434,6 +571,66 @@ class Dsv41Engine(Engine):
         assert isinstance(task, TextGeneration)
         self._agreement.submit(task)
 
+    # ------------------------------------------------------- §G1 idle checkpoint
+
+    def idle_tick_seconds(self) -> float | None:
+        """Runner idle-tick cadence; ``None`` unless ``EXO_DSV41_CKPT=1``."""
+        return ckpt_tick_seconds()
+
+    def idle_tick(self, request_pending: Any = None) -> Any:
+        """One between-requests tick: maybe disk-checkpoint ONE idle conversation.
+
+        Runs on the runner/engine thread (the runner calls it from its idle wait),
+        so every MLX call stays on the thread that owns the streams. Sequence:
+
+        1. LOCAL gate, no collectives: no request active/queued on this rank and
+           ``Dsv41Sessions.checkpoint_candidate`` names a conversation (between
+           turns, ``>= PARK_MIN_TOKENS``, dirty ``>= CKPT_MIN_DELTA`` or never on
+           disk, idle ``>= CKPT_IDLE_S``). Nothing qualifies -> return; the
+           common idle tick costs nothing and issues NO collective.
+        2. ``agree_on_tasks()`` -- the SAME collective prefix ``step()`` issues
+           with no active request. If ANY rank has a pending task (the peer is in
+           ``step()``), the exchange pairs with the peer's own
+           ``agree_on_tasks`` (this rank contributes no task, so nothing is
+           agreed) and the tick stands down; the runner then picks up the task
+           and both ranks meet in ``step()``.
+        3. Only when every rank is task-free (so the peer is in its own idle
+           tick at the same program point) does the coordinated checkpoint run
+           (``Dsv41Sessions.maybe_checkpoint`` -> IDLE agreement, G4 agreed N,
+           per-unit cancellation polls, PARK_ACK).
+
+        ``request_pending`` (from the runner: its work queue is non-empty) is
+        polled between units; any rank seeing a request makes every rank abort
+        within one unit. Never raises on LOCAL errors; a coord transport fault
+        propagates exactly as it does from ``step()``.
+        """
+        if self._active is not None or self._agreement.queue or self._agreement.maybe_queue:
+            return None  # not idle on this rank: never enter a collective here
+        if time.monotonic() - self._last_step_monotonic < self._sessions.ckpt_idle_s:
+            return None  # this rank served a request too recently
+        try:
+            cand = self._sessions.checkpoint_candidate()
+        except Exception as exc:  # noqa: BLE001 - the gate must never raise
+            logger.warning(f"[DSV41] checkpoint gate failed ({type(exc).__name__}: {exc})")
+            return None
+        if cand is None:
+            return None
+        if self._agreement.agree_on_tasks() or self._agreement.queue:
+            # A peer has a task (it is in step()); this rank contributed none, so
+            # nothing was agreed. Stand down and let the runner fetch the task.
+            return None
+        local_pending = request_pending if request_pending is not None else (lambda: False)
+
+        def pending() -> bool:
+            return bool(local_pending()) or bool(self._agreement.maybe_queue)
+
+        try:
+            return self._sessions.maybe_checkpoint(request_pending=pending, candidate=cand)
+        finally:
+            # Return the freed CPU staging copies to the OS between requests, as
+            # the runner's own idle reclaim does; never inside the decode loop.
+            mx.clear_cache()
+
     def step(
         self,
     ) -> Iterator[
@@ -442,6 +639,7 @@ class Dsv41Engine(Engine):
         output: list[
             tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
         ] = []
+        self._last_step_monotonic = time.monotonic()
         if self._active is None:
             self._agreement.agree_on_tasks()
             self._activate_next(output)
@@ -535,6 +733,9 @@ class Dsv41Engine(Engine):
         step must not raise on the first.
         """
         while self._agreement.queue:
+            if self._shutting_down:
+                # §G3 step 1: a shutdown is armed; do not start a new turn.
+                return
             task = self._agreement.queue.popleft()
             try:
                 self._active = self._start(task)
@@ -580,6 +781,62 @@ class Dsv41Engine(Engine):
         # next request sees the pre-turn state instead of a half-fed cache.
         self._sessions.cancel_all()
         return dropped
+
+    # ------------------------------------------------- §G3 park-on-shutdown
+
+    def begin_shutdown(self) -> None:
+        """§G3 step 1: stop admitting new requests.
+
+        After this, ``_activate_next`` will not start a queued request, so the
+        only turn that can still run is the one already in flight (drained by
+        the runner). Idempotent.
+        """
+        self._shutting_down = True
+
+    def shutdown_park(
+        self,
+        *,
+        signal_time: float,
+        budget: Any = None,
+        now: Any = time.monotonic,
+    ) -> Any:
+        """§G3 steps (3)+(4) on the engine/runner thread: abort, then park.
+
+        Called from the runner's ``main()`` finally while the model is still
+        resident. Uses the EXISTING §G1/§G4 coordinated checkpoint path
+        (``sessions.maybe_checkpoint`` -> ``coord.run_checkpoint``) so the final
+        force checkpoint stays rank-invariant and COLD-safe on any disagreement —
+        no new collective protocol.
+
+        Releases every in-flight reference BEFORE the checkpoints (drop the
+        ``_active`` request and its session from residency; clear the draft
+        windows) so no MLX array is held across the next forward — the §G1
+        donation trap does not apply to the coordination, but the abort itself
+        must not pin the graph either.
+        """
+        from exo.worker.engines.mlx.dsv41 import shutdown as _sh
+
+        self._shutting_down = True
+        b = budget if budget is not None else _sh.shutdown_budget()
+        # (3) release the active request; abort_inflight drops its conversation.
+        self._active = None
+        self._draft_windows.clear()
+
+        def precheck() -> bool:
+            # Mirror the §G1 idle tick: pair an agree_on_tasks with a peer that
+            # may be inside step(), and stand down if either side holds a task.
+            # (agree_on_tasks is ALWAYS issued — its collective must run.)
+            return not (
+                self._agreement.agree_on_tasks() or self._agreement.queue
+            )
+
+        return _sh.run_shutdown_park(
+            self._sessions,
+            signal_time=signal_time,
+            budget=b,
+            now=now,
+            precheck=precheck,
+        )
 
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
         raise Dsv41UnsupportedFeature(
@@ -802,7 +1059,19 @@ class Dsv41Engine(Engine):
         # The per-request draft-window slot is only for engines with no session
         # (``rounds._one_round``'s fallback); a conversation owns its own.
         self._draft_windows.clear()
-        session = self._sessions.get(tokens_list, self._conversation_key(params))
+        # An image-carrying request must NOT reuse a resident conversation.
+        # ``embeddings is not None`` is exactly the signal that this prompt's
+        # prefill carries image spans -- it is what logs "prompt expanded with
+        # N image(s)" just above. Reuse would delta-prefill from a nonzero cache
+        # offset, but the vision splice requires the whole image span inside the
+        # forward whose offset is 0, so it raises and (before this) killed the
+        # runner: the warm-session image crash. Force a cold one-off session;
+        # ``keep`` is already False for these requests, so it is dropped at end.
+        session = self._sessions.get(
+            tokens_list,
+            self._conversation_key(params),
+            reuse=embeddings is None,
+        )
         if self._active is not None:
             self._active.prefill_total = prompt_len
         try:
