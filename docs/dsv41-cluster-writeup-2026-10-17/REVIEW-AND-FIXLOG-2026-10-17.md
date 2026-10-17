@@ -182,3 +182,69 @@ kept alongside); "127 GB of 128 GiB" → "~127 GB of the 137 GB (128 GiB)".
 
 **Refuted/kept, with sources (no change):** `maxPrefixSessions`/`maxPrefixBytes` ARE in /state
 (a first regex missed them); the `cache.py:29` comment exists and does say ~3.2 GiB; `32168` stays.
+
+
+---
+
+# Round 3 — Fable tail review (2026-10-17, same day; sections 5.4–12)
+
+Fable's back-half review arrived as six complete-coverage chunks (the consult backend truncates long
+contexts, so the document was delivered piecewise). Its verdict: no sign-off, with a specific list.
+Every item was verified against the repo/config/live state, then fixed or resolved. ~45 edits.
+
+**Corrections with sources.** §6.2: regime confusion fixed (62% is a *prefill* share at 12K/38K; the
+2.9-5.3% correction is *decode*-side; the 265-vs-178 ms/call figure is `docs/moe-allsum-sharedscale-
+CORRECTED-final-2026-08-19.md`'s real-prefill measurement, a different regime from the 36 us decode
+calls; the quant lever is closed as an engineering dead end, not a math impossibility). §6.1: the
+10.13 GB DSpark-head / 99.4 GB residency figures labeled as the 2026-08-27 V4-Flash+DSpark build
+(era mismatch vs §5.4 resolved by labeling, not by mixing). §9.2: the 1K row and its client/server
+divergence footnoted; "doubling-and-a-half" corrected (the falloff is from 160K to 300K); the
+"not gradually" claim narrowed to what five ~110-119K points can support; the 300K row's ~33.5 s
+client wall vs server elapsed (1600.8 vs 1567.3 s) explained; the per-round mechanism restated as
+origin-unidentified with the non-linearity argument (5.3x cost for 1.9x context; 1M decode only 2x
+slower still). §9.3: attempt-1 band rate labeled a progress-position figure with its own ~98K
+partial cache; cross-attempt comparison caveated; "irreducibly" scoped to this implementation; band
+table's 299,008/303,104 offset explained (one 4,096-row chunk). §9.4: 111.8 tok/s labeled progress-
+based vs attempt 2's uncached-based 104.2; the 299,008-of-802,816 reuse bound marked not
+established; 2.9 h -> 2.8 h (recomputed). §9.5: the +36.71% statistic named as unnameable from the
+sources (paired; the medians give +34.9%); CI brackets fixed; the ~16% gap vs the §9.2 100K row
+explained (different instrument, different boot; the repo's own cross-boot swings are 6+ tok/s);
+"gamma=3 signature" softened to consistent-with (~2/3 acceptance). §10.x: "reproducible" -> two
+context sizes; refault-confirmed vs refault-as-cause separated; k_eff glossed as bounded-2-5 in the
+corpus's note; the 8-32 s stall labeled the June V4-Flash-era observation + absence-under-
+mitigation; the §10.3 probe-vs-36.1-us instrument distinction; the 500K 81% figure named; the 9.5%
+slice labeled prefill-side; the 34x bullet reconciled with §6.2's forced-sync artifact and the
+36.1-vs-120 us harness difference; the 1.7% straggler bound marked pre-correction instrument; the
+43/token count glossed; c=2 notation unified; the DSpark frame picked (not reproduced per the
+source correction; the p4-scoping entry stale); hc_expand conflict dissolved to the real open item;
+"cached rows" -> tokens.
+
+**§11 (repro section).** Attempt-1 2 h cap vs attempt 2's 6,760.5 s reconciled; the `-w CURLMETA`
+line now explicitly *not* the timing harness (the epoch stamps come from a line-stamping filter);
+"or later" dropped from the tested macOS build; checkpoint size convention stated (du-allocated
+210.68 GB vs `storageSize=210713013432` B ~= 210.71 GB SI); wired-limit reapply noted; Tailscale/
+MagicDNS + node discovery added to requirements; exo-row SHA clarified as *post*-fold (contains
+the §12 fix); `EXO_TARGET_BRANCH` explained and shown inline; mlx branch-column caveat; wheels
+wording fixed; "all changes go through git" corrected to the rsync-of-working-tree truth (commit
+and push first -- the push-check enforces it); placement step added to §11.4 (automatic at launch,
+~2-3 min/node); storageSize separators dropped; prompt generator/scratch provenance stated;
+~600 KB body-size note; which-node log note; API-on-every-node note; cable count clarified; banana
+repro's expected outcome + designed-false-positive shape stated; limiter needs enable_thinking.
+
+**§12.** Intro re-garbled sentence fixed (the *fix* is why the on-cluster session could write the
+lead sections); 22-vs-25 count reconciled (extra cycles dropped); 210 GB reload corrected to
+~109 GB/rank; the kill-cluster arithmetic now closes (45-67 s ~= 1,500-2,000 tokens at ~30 tok/s);
+guard-silence reconciled with the preamble loop (line-level near-repeat, below the exact-cycle
+trigger); 2,048-id suffix glossed; DECODE claim narrowed to *independent of `step()` returning*;
+Fix-B/10-05 references dated; the decode beat's relation to the hang probe stated; cap resolver
+precedence stated (client > default > clamped by ceiling) and the caps labeled a blast-radius
+bound, not the root-cause fix; 11,608-token validation reconciled with the 8192 default (harness
+sent its own max_tokens); step-2's ~19 tok/s labeled a server-side window; step-3 window cross-ref;
+the detector sweep's W/M/J defined and the negatives' tripping stated; 4.2 KiB -> ~4.1 KiB
+(4,229 B; the earlier figure had used the 1,000,003-token denominator); breaker counts stated;
+"damage" sentence re-scoped; extra_body audit moved to §12.6; escape-ladder n defined and its
+scope distinguished from the declined detector; "when a CONFIRMED loop does fire" reworded.
+
+**Verified no-change (logged).** 32168 is correct (engine MAX_TOKENS constant, per the code
+comment -- the 32768 two words later is the ceiling); `32168` vs `32768` confusion is Fable's,
+not the document's.

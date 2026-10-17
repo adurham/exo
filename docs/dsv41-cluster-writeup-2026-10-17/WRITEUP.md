@@ -618,7 +618,8 @@ generated, verbatim:
 BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective in the MoE forward pass, investigated in at least 20 distinct docs spanning 2026-05-14 through 2026-08-21. The document that quantifies it is `docs/moe-all-sum-dominant-cost-2026-08-19.md`, which used a NOP-ablation to measure a 2.63x speedup (62.0% share) at 12K tokens and 2.57x (61.1% share) at 38K tokens when all_sum was bypassed. Later work in `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md` and `docs/allsum-sync-span-artifact-arithmetic-check-2026-08-22.md` corrected those percentages downward to a real ~2.9- [...]
 ```
 
-The same effect is not free at every depth. At 352.6K the 2026-08-27 run found a memory
+The same effect is not free at every depth. At 352.6K the 2026-08-27 run -- on the
+V4-Flash+DSpark build of that month, so its absolute sizes are that era's -- found a memory
 regression -- the ~10.13 GB DSpark head loaded replicated per node, pushing spec-ON residency
 to ~99.4 GB/node -- and 4 of 16 ON runs collapsed to ~1 tok/s via mmap clean-page eviction
 thrash. TP-sharding the head's MoE FFN (fix 2d85ccd, ~3-3.5 GB/node back) restored residency
@@ -634,7 +635,8 @@ collective" comment.
 The headline, originally: a NOP-ablation on the live cluster measured the per-layer TP
 `moe.all_sum` at 2.63x and 2.57x speedups at 12K and 38K tokens -- a **62.0% / 61.1% share of
 prefill wall time** (`docs/moe-all-sum-dominant-cost-2026-08-19.md:18-19`). That number is
-wrong, and the correction is the point.
+wrong, and the correction is the point. Mind the regimes: 62% is a *prefill* share at 12K/38K;
+the corrections below are *decode*-side measurements. Each applies to its own regime.
 
 Correction, step one: jaccl-internal timing -- timestamps inside the C++ transport call
 itself, immune to Python/MLX graph laziness -- measured the real decode-time collective at
@@ -656,12 +658,14 @@ wall" figure from `docs/moe-allsum-collective-cost-confirmed-2026-08-21.md` is t
 artifact. The correction happened, and the corrected share is 2.9-5.3%, not 62%.
 
 The lever that followed the 62% headline was quantizing the collective's wire payload. It is
-closed as mathematically infeasible, not merely buggy. `moe.all_sum` is a true elementwise
+closed: naive int8 summation is infeasible elementwise, and the all_gather workaround dies on
+transport reliability -- an engineering dead end, not a tuning miss. `moe.all_sum` is a true elementwise
 partial-sum reduction -- both ranks contribute to every output element (`deepseek_v4.py:~2834`)
 -- so the zero-padded int8 trick that works for gather-semantics collectives does not apply,
 and naive int8-code summation overflows and cannot recover per-rank scales. The live test
-confirmed the failure mode: the quantized path hung the collective, and the corrected
-measurement was 265 vs 178 ms/call, i.e. 1.49x SLOWER, not faster. The investigation's root
+confirmed the failure mode: the quantized path hung the collective on one run, and the
+corrected measurement was 265 vs 178 ms/call during real prefill (a different regime from the
+36 us decode calls above), i.e. 1.49x SLOWER, not faster. The investigation's root
 cause: replacing one reliable `all_sum` with two `all_gather`s moved required traffic onto
 jaccl's `all_gather` path, which has no reliability layer at all (raw UC posts, a `StallWatch`
 that throws on any stall, no retransmit) versus `all_sum`'s soft-RC path
@@ -717,7 +721,7 @@ The runner's own line for the same turn names the mechanism:
 Period=1, a single token id 51406 that detokenizes to `" banana"`, repeated six or more times,
 killed at 268 emitted tokens. `guard_env_digest=633711af` matches the boot line's digest, so
 the knobs that fired are the knobs that shipped. The guard's job is to stop the tail, not
-retract it: the 268 degenerate tokens were already streamed. A negative control (a 12-section
+retract it: the degenerate tail had already streamed within the 268 emitted tokens. A negative control (a 12-section
 essay, `max_tokens=1200`) generated all 1,200 tokens with `finish_reason=length` and did not
 fire.
 
@@ -769,15 +773,16 @@ commit `70e0423`), not on the two evidence packs.
 Both Studios run the `smctl` daemon with a custom curve for the `exo`
 profile, deployed 2026-10-11. It was calibrated from a controlled load test -- a 12-core CPU
 burn on one Studio, 34.5 W package, with the hottest Tp* sensor climbing 40C -> 58C under
-Apple's auto curve while it still held the ~1000 RPM floor. The curve is
+Apple's auto curve while it still held the ~1000 RPM floor (the curve's first point sits at
+that test's ceiling -- above 58C it is extrapolated). The curve is
 `points = [[58, 1000], [65, 1500], [72, 2100], [78, 2700], [85, 3200], [92, "max"]]`,
 `hysteresis = 4`, `slew_rate = 500`, `fall_slew_rate = 150`, with an 11-sensor list and a
 `safety.temp_ceiling = 100.0` guard (read live from `/etc/smctl/config.toml` on the serving
-node, not from the evidence pack). The framing we keep: the one throttle event we actually
+node). The framing we keep: the one throttle event we actually
 chased was a **GPU power-governor** issue, not thermal (`pmset -g therm` clean on both nodes
 during it, hang-watchdog incident 2026-09-21), so the fan curve is defense-in-depth against a
-thermal throttle we have not measured, not the fix for a measured one. [UNVERIFIED] on that
-causal claim.
+thermal throttle we have not measured, not the fix for a measured one (that causal framing
+remains unverified).
 
 ### 8.2 FileVault-safe reboot
 
@@ -785,7 +790,7 @@ Because §3.2 means reboots are routine, `reboot-node.sh` automates
 them. A plain reboot would halt at the FileVault pre-boot unlock screen and never come back on
 the network, so the script drives `fdesetup authrestart`: it pulls the FileVault password from
 1Password **on the controller**, pipes the authrestart plist over ssh stdin straight into
-`fdesetup`, and never lands the password on disk or on the node (`reboot-node.sh:2-6,42-76`).
+`fdesetup`, and never writes the password to disk on either machine (`reboot-node.sh:2-6,42-76`).
 Sudo is scoped with `NOPASSWD` to exactly `/usr/bin/fdesetup authrestart*`, and a `--check`
 dry run verifies credentials and the sudoers rule without rebooting. The cluster returns
 SSH-able and unlocked in ~2-3 min.
@@ -801,10 +806,10 @@ nodes, ports `PORT_ACTIVE`, 0% TB link loss.
 ### 8.4 Rust toolchain incident
 
 When Xcode.app was removed from both Studios, the
-launcher's hardcoded `DEVELOPER_DIR=/Applications/Xcode.app/...` made the isolated maturin
-build of the `exo_rs` PyO3 bindings die at `xcrun` and aborted the whole deploy before exo ran
-a line, fixed by commit `70e0423` resolving `DEVELOPER_DIR` to Command Line Tools when Xcode
-is absent (`docs/xcode-removal-launcher-clt-fallback-2026-08-25.md`).
+launcher's hardcoded `DEVELOPER_DIR=/Applications/Xcode.app/...` made the maturin build of the
+`exo_rs` PyO3 bindings die at `xcrun` -- aborting the whole deploy before exo ran a line.
+Commit `70e0423` fixes it: `DEVELOPER_DIR` now resolves to Command Line Tools when Xcode is
+absent (`docs/xcode-removal-launcher-clt-fallback-2026-08-25.md`).
 
 ---
 
@@ -837,9 +842,14 @@ prefix-cache hit is not prefilled compute. Without that correction the raw colum
 rise with depth purely because deeper rows got partial cache hits.
 
 **Contention was checked per run.** exo serves one prefill in flight at a time; each run's
-measured decode window was verified to contain no other request's `obs first-token`. For the
-300K row that check is shown explicitly. Rates are as observed on a busy-but-serialized
-instance.
+measured decode window was verified to contain no other request's `obs first-token` (the check
+catches requests that begin inside the window; a session already decoding would not appear
+this way -- a bounded gap, stated rather than hidden). For the 300K row that check is shown
+explicitly. Rates are as observed on a busy-but-serialized instance.
+
+**The one non-streamed row.** The 160K attempt used `stream: false`, so no per-frame client
+timing exists for it; its decode is server-side only, and is labeled as such wherever it
+appears (§0.1, §9.2).
 
 **The runs are needle-style questions over the repo's own docs**, and the answers are correct
 against the context each run received. Several are reproduced verbatim in §5.4 and §6.1,
@@ -849,26 +859,34 @@ so the throughput figures can be read against real output rather than a token co
 
 | depth | prompt_tokens | cached | completion | finish | server prefill s | prefill tok/s (uncached) | client decode s | client decode tok/s | server decode tok/s | wall s |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1K | 1,003 | 0 | 82 | `stop` | 3.93 | 255.2 | 2.35 | 34.5 | 29.2 | 6.95 |
+| 1K | 1,003 | 0 | 82 | `stop` | 3.93 | 255.2 | 2.35 | 34.5 | 29.2 [n1] | 6.95 |
 | 10K | 10,004 | 0 | 152 | `stop` | 36.37 | 275.1 | 4.80 | 31.4 | 31.3 | 41.34 |
 | 50K | 50,004 | 8,192 | 163 | `stop` | 162.27 | 257.7 | 5.51 | 29.4 | 29.3 | 167.94 |
 | 100K | 100,003 | 49,152 | 200 | `length` | 207.50 | 245.1 | 6.49 | 30.7 | 30.6 | 214.27 |
-| 160K | 160,004 | 0 | 200 | `length` | 661.18 | 242.0 | n/a | n/a | 30.4 (server decode window 6.54 s, server-side only) | 668.15 |
+| 160K | 160,004 | 0 | 200 | `length` | 661.18 | 242.0 | n/a [n2] | n/a [n2] | 30.4 [n2] | 668.15 |
 | 300K | 300,003 | 0 | 189 | `stop` | 1535.25 | 195.4 | 31.67 | 5.9 | 6.0 | 1600.82 |
 
+[n1] the 1K row's 82-token window is dominated by first-token handling, so the client/server
+channels diverge here; it is excluded from the deep-row agreement claim in §9.1.
+[n2] the 160K run used `stream: false`; its 6.54 s decode window (30.4 tok/s) is server-measured
+only.
+
 Five further points at ~110-119K were harvested from another client's traffic on the same
-build and instance -- independent corroboration, not repeats: 26.7 / 32.2 / 32.2 / 37.6 /
+build and instance -- consistent with the plateau, not repeats: 26.7 / 32.2 / 32.2 / 37.6 /
 30.3 tok/s server decode at 110,780 / 113,424 / 115,457 / 116,680 / 118,665 tokens.
 
 **Two regimes, not one.** Decode is a smooth ~30 tok/s plateau to 160K, then 6.0 tok/s at
-300K -- a 5x falloff inside one doubling-and-a-half. The five independent points sit on the
-flat part and confirm the cliff starts between ~160K and 300K, not gradually. There is no
-second slow mode hiding in the 1K-160K range.
+300K -- a 5x falloff from the 160K plateau point to 300K. The five independent points sit on the
+flat part and put the cliff somewhere in 160K-300K; its shape inside that interval is
+unmeasured (two points). There is no second slow mode hiding in the 1K-160K range.
 
-**The 300K cliff is not an artifact.** No contention (the turn's first-token is 02:31:59.523,
-turn-end 02:32:31.188, next request's first-token 02:32:38.018 -- after it ended). The burst
+**The 300K cliff is not an artifact.** No request begins inside the window (the turn's
+first-token is 02:31:59.523, turn-end 02:32:31.188, next request's first-token 02:32:38.018 --
+after it ended; see the §9.1 caveat), and the 300K row's client wall carries ~33.5 s outside
+the server's own turn (1600.8 s client wall vs 1567.3 s server elapsed -- pre-turn handling the
+server does not count; prefill and decode rates are unaffected). The burst
 structure explains the mechanism: decode arrives in speculative rounds of ~3 tokens at every
-depth (2.8-3.0 measured, constant), and what changes is the cost of a round:
+streamed depth (2.8-3.0 measured, constant), and what changes is the cost of a round:
 
 | depth | tokens/round | median inter-round gap | implied tok/s |
 |---|---|---|---|
@@ -878,9 +896,10 @@ depth (2.8-3.0 measured, constant), and what changes is the cost of a round:
 | 100K | 3.0 | 0.092 s | 32.6 |
 | 300K | 2.9 | 0.486 s | 6.0 |
 
-A constant round size with the round cost rising 5.3x is a per-round memory-side cost (KV
-read / residency), not a sampling or parser artifact. Offered as the mechanism the numbers
-point at, not as a proven cause.
+A constant round size with the round cost rising 5.3x for 1.9x the context -- and with 1M
+decode (2.92 tok/s, §9.4) only 2x slower still -- is not a linear KV-read story; it is a
+per-round cost of unidentified origin (residency / spill is a named candidate, not proven),
+not a sampling or parser artifact.
 
 ### 9.3 Prefill degrades with position
 
@@ -899,35 +918,46 @@ confound):
 | ~804,864 - 905,216 | 69.2 |
 | ~905,216 - 1,000,003 | 64.9 |
 
-Monotonic within the request. Prefill cost is a function of POSITION in the context, not of how many tokens have
-been done: the same request prefilled its first 100K rows at 216.8 tok/s in attempt 1
-(cold, starting near position 4K) and at 182.2 tok/s in attempt 2 (starting at position
-~300K). The deepest stretches are irreducibly the slowest, which is why a 1M prefill cannot
-be front-loaded or parallelized away.
+(Bands begin one 4,096-row chunk past the 299,008-row reuse boundary.)
+
+Monotonic within the request. Prefill cost is primarily a function of POSITION in the
+context: the same request prefilled its first 100K rows at 216.8 tok/s in attempt 1 (starting
+near position 4K) and its ~300K-position rows at 182.2 tok/s in attempt 2. Two caveats keep
+this indicative rather than exact: attempt 1's band rate is a progress-position figure, and
+that run carried a partial cache of its own (~98K, §9.4); and the attempts' same-position
+bands differ (~68 tok/s vs 98.1 at the deepest, a cross-attempt swing of the size the repo's
+own boot-variance notes describe). The deepest stretches are the slowest with this attention
+implementation, which is why a 1M prefill cannot be front-loaded or parallelized away here.
 
 ### 9.4 The 1M run
 
 Attempt 1 (2 h cap) was PARTIAL: prefill reached 802,816 / 1,000,003 tokens (80.3%) in
-7,181 s (111.8 tok/s) before `curl: (28)` killed it; no first token was ever emitted.
+7,181 s (111.8 tok/s -- a progress-position rate; attempt 2's 104.2 is uncached-row-based, so
+the two are not like-for-like) before `curl: (28)` killed it; no first token was ever emitted.
 Attempt 2 (4 h cap) COMPLETED: HTTP 200, `prompt_tokens=1,000,003`, `completion_tokens=100`,
 `finish_reason=length`, wall 6,760.5 s, 104.2 tok/s prefill over 700,995 uncached rows,
 2.92 tok/s decode (client and server agree). `curl_exit=0`, no timeout.
 
 The cache caveat, stated plainly: `cached_tokens=299,008`, server `prefix_cache_hit=partial`,
 `reuse=299008` -- those rows are attempt 1's partial prefill of the same prompt, left resident
-and reused. Generated text is in §5.4. This is *1M prompt served end to end, partial prefix cache* -- NOT a cold 1M
+and reused. (What bounded the reuse at 299,008 of attempt 1's 802,816 rows is not
+established.) Generated text is in §5.4. This is *1M prompt served end to end, partial prefix cache* -- NOT a cold 1M
 prefill. The `prefill_progress` counter tracks uncached tokens only, which is why its last
 frame reads 700,995 while `total_tokens` reads 1,000,003; the turn reached 100% of the work
 it had to do. Attempt 1 (~98K cached) is the closer cold proxy; extrapolating its last band
-(~68 tok/s) over its remaining ~197K tokens puts a cold 1M prefill at roughly 2.9 h.
+(~68 tok/s) over its remaining ~197K tokens puts a cold 1M prefill at roughly 2.8 h.
 
 ### 9.5 Speculative decode
 
 Production default; the full measurement, mechanism and commits are in §6.1. In one line: 24
 paired runs, same 100K prompt, temp=0, 256-token fixed window, **spec-ON median 36.63 tok/s
-vs spec-OFF 27.15** (+36.71% as the baseline doc states it; the two quoted medians give
-+34.9%), 95% bootstrap CI [+28.26%, +51.02]%, 12/12 pairs. The live
-plateau above is a spec-ON figure -- the ~3 tokens/round signature is gamma=3.
+vs spec-OFF 27.15** (+36.71% as the baseline doc states it -- a paired statistic the sources
+do not name; the two quoted medians give +34.9%), 95% bootstrap CI [+28.26%, +51.02%], 12/12
+pairs. Two cross-checks with their caveats: this fixed-window median sits ~16% above the
+§9.2 depth-run 100K row (30.6 tok/s) -- a different instrument on a different boot, and the
+repo's own notes put cross-boot decode swings at 6+ tok/s; and the live plateau's ~3
+tokens/round is consistent with gamma=3 at roughly two-of-three draft acceptance, not proof of
+gamma=3.
 
 ---
 
@@ -939,23 +969,27 @@ could not close.
 
 ### 10.1 The two cliffs (mechanisms unproven)
 
-**Decode cliff between 160K and 300K.** Measured, reproducible, mechanism not proven. The
-round-cost table in §9.2 points at a per-round memory-side cost (KV read / residency) and is
-consistent with the repo's own `deep-context-refault-mechanism` note, but that is an
-inference from burst structure, not a captured trace. The refault mechanism itself is
-CONFIRMED (page-ins measured, swap/compressor ruled out) while the fix is explicitly NOT
-attempted (`docs/deep-context-refault-mechanism-confirmed-2026-09-22.md:95-98`).
+**Decode degradation between 160K and 300K.** Measured at two context sizes; onset and shape
+inside that interval are not resolved, and the mechanism is not proven. The round-cost table in
+§9.2 points at a per-round cost of unidentified origin (KV read / residency is a candidate, not
+a finding) and is consistent with the repo's own refault note, but that is an inference from
+burst structure, not a captured trace. Keep two claims apart: refault as *a phenomenon* is
+CONFIRMED (page-ins measured, swap/compressor ruled out), while refault as *the cause of this
+degradation* is unproven -- and its fix explicitly not attempted
+(`docs/deep-context-refault-mechanism-confirmed-2026-09-22.md:95-98`).
 
-**Prefill cliff at ~340K.** The gc_limit-threshold model (§5.3) is the best standing
-explanation but is not live-confirmed; `k_eff` is unmeasured (bounded 2-5); the bimodal 8-32 s
-stall amplitude at Studio scale is UNREPRODUCED (`PERFORMANCE_HISTORY.md:2943-2953`,
-`docs/prefill-cliff-mechanism-2026-08-24.md:48,877`). The mitigation is in and measured (§5.3); the mechanism
-underneath is not live-confirmed.
+**Prefill cliff at ~340K.** The gc_limit-threshold model stated in §5.3 is the best standing
+explanation but is not live-confirmed; `k_eff` (the model's effective read multiple) is
+unmeasured, bounded 2-5 in the corpus's own note; and the bimodal 8-32 s stall amplitude -- the
+June handoff's V4-Flash-era observation -- is UNREPRODUCED at Studio scale
+(`PERFORMANCE_HISTORY.md:2943-2953`, `docs/prefill-cliff-mechanism-2026-08-24.md:48,877`). The
+mitigation is in and measured (§5.3), so this is absence-under-mitigation, not a clean test.
 
 ### 10.2 The memory budget does not close
 
-The arithmetic and the ESTIMATE caveat are in §5.4. The prescribed remedy -- streaming the
-coldest 9.0-15.1% of expert bytes -- is not implemented
+The arithmetic and the ESTIMATE caveat are in §5.4. The prescribed remedy -- the correction
+doc's own table asks for streaming ~9.0-15.1% of expert bytes against its 8.8-14.8 GB gap
+column -- is not implemented
 (`docs/deepseek-v41-memory-budget-correction-2026-09-27.md:88-99`).
 
 ### 10.3 Measurement holes
@@ -963,15 +997,17 @@ coldest 9.0-15.1% of expert bytes -- is not implemented
 - **Collective-wait honesty hole.** A wait hidden inside a command buffer reads as busy. A
   clean closer exists (`EXO_DSV4_ALLSUM_PROBE`, a direct CPU-side collective timer) but it
   forces a blocking eval in place of the production async fence, perturbing what it measures,
-  and was never run (`PERFORMANCE_HISTORY.md:3633-3640`).
+  and was never run (`PERFORMANCE_HISTORY.md:3633-3640`). (The §6.2 36.1 us correction came from
+  a different instrument -- the jaccl-internal C++ timestamps -- not from this probe.)
 - **Per-kernel GPU attribution structurally unavailable.** xctrace/Metal System Trace yields
   only generic "Compute" channel names; `mx.metal.start_capture` / Xcode GPU Frame Capture
   stayed unreachable in an SSH-only environment (`PERFORMANCE_HISTORY.md:2344-2352,3745`).
 - **Decode roofline floor excludes KV-cache/attention read cost** -- a methodology gap, so
-  the 500K attribution figure is likely overstated once KV-read cost is counted
-  (`PERFORMANCE_HISTORY.md:2309-2318`).
+  the 500K-context ~81% GPU-busy attribution is likely overstated once KV-read cost is counted
+  (short-context/100K figures are less affected; `PERFORMANCE_HISTORY.md:2309-2318`).
 - **Prefill FLOPs roofline ~1.40x headroom tail not decomposed**; the 28.8% non-GEMM
-  remainder minus the 9.5% all_sum slice was never decomposed with decode-style rigor, and
+  remainder minus the 9.5% all_sum slice (prefill-side, a different measurement from §6.2's
+  decode share) was never decomposed with decode-style rigor, and
   the sdpa ceiling denominators were never audited for masking/MLA-absorption FLOP inflation
   (`PERFORMANCE_HISTORY.md:2446-2457`).
 - **~11 ms/round unaccounted** in the DSv4.1 adaptive-gamma accounting, explicitly not the
@@ -980,18 +1016,22 @@ coldest 9.0-15.1% of expert bytes -- is not implemented
 ### 10.4 Unattributed residuals
 
 - **+1.67..+2.52 ms/tok decode depth residual**, all of it on-GPU busy work, collective ruled
-  out on both axes; the leading candidate (inter-layer pipelining bias) is unproven
+  out on both axes -- with the §10.3 honesty hole noted; the leading candidate (inter-layer
+  pipelining bias) is unproven
   (`PERFORMANCE_HISTORY.md:3619-3626`).
-- **Which sub-cause dominates the 34x all_sum span-vs-transport gap** (34x = the ~4094 us
-  sync-span average vs the ~120 us isolated-microbenchmark floor; eval-fence vs dispatch
-  vs Python scheduling) -- attributed jointly, "not yet further decomposed, now the correct
-  next target" (`PERFORMANCE_HISTORY.md:3015-3017`).
+- **Which sub-cause dominates the 34x in-model vs isolated-floor gap** (34x = the ~4094 us
+  in-model sync-span average vs the ~120 us isolated 8KB microbenchmark floor; the in-situ
+  jaccl timing is 36.1 us -- *below* that floor, from a different harness, so the two are not
+  directly comparable). The sync-span figure carries the §6.2 forced-synchronization artifact,
+  so what remains to decompose is the split between forced-sync drain and genuine in-model
+  overhead -- eval-fence, dispatch, or Python scheduling; attributed jointly, "not yet further
+  decomposed, now the correct next target" (`PERFORMANCE_HISTORY.md:3015-3017`).
 - **Cross-rank all_sum straggler tail asymmetry** (4.2x rank0-leaning in rare severe calls),
-  root cause not investigated, ~1.7% of decode wall upper bound, "not conclusively
-  ignorable" (`PERFORMANCE_HISTORY.md:2472-2493`).
+  root cause not investigated, ~1.7% of decode wall as an upper bound computed on the
+  pre-§6.2 instrument, "not conclusively ignorable" (`PERFORMANCE_HISTORY.md:2472-2493`).
 - **Do 0.5-20 ms decode gaps align with per-layer collective/fence boundaries?** A
-  ~20-22 gaps/token check did not cleanly confirm the expected 43/token -- inconclusive
-  rather than refuted (`PERFORMANCE_HISTORY.md:2793-2799`).
+  ~20-22 gaps/token check did not cleanly confirm the expected 43/token (the era's per-token
+  all_sum count, §6.2) -- inconclusive rather than refuted (`PERFORMANCE_HISTORY.md:2793-2799`).
 - **MoE-at-depth interplay vs allocator/memory-pressure as the depth-residual owner**:
   candidate-1 verdict INCONCLUSIVE (`docs/p02c-moe-allocator-depth-residual-2026-08-29.md:176,380`).
 
@@ -1001,7 +1041,7 @@ coldest 9.0-15.1% of expert bytes -- is not implemented
   loss on 16380-byte UC chunks) and the `p2p_retry_exchange` stall. A poison-WR probe is
   armed but never fired; the stall is explicitly "still open and genuinely separate"
   (`docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md:4444-4446,8233-8241`).
-- **N=2 concurrent-admission transport crashes, root cause unidentified**; two different
+- **c=2 (two concurrent requests) admission transport crashes, root cause unidentified**; two different
   crash signatures (parse error vs ECONNRESET) not yet distinguished
   (`docs/batched-decode-n2-admission-handoff-2026-08-05.md:1091-1109`).
 - **c=2 speculative decode is not production-ready**: BS>1 batched verify is the Phase-5
@@ -1016,13 +1056,14 @@ coldest 9.0-15.1% of expert bytes -- is not implemented
 
 - **DSpark FULLBLOCK depth collapse** is carried as an unresolved pre-condition for enabling
   DSpark: "15.9x collapse, worse than no speculation at depth. Unresolved"
-  (`docs/p4-scoping-mtp-for-tp-2026-08-24.md:1074`). Note the corpus holds three discordant
-  verdicts on it (§10.7).
+  (`docs/p4-scoping-mtp-for-tp-2026-08-24.md:1074`). Note the corpus holds discordant entries on
+  it (§10.7, where this writeup picks its frame).
 - **V4.1 full-body runtime unknowns**: prefetch overlap must be engineered (60-80% assumed),
-  full-model routing concentration unverified, real end-to-end numbers including acceptance
-  need the runtime (`benchmarks/phase8-fork-verification-2026-09-28/README.md:80-88`).
-- **Token-63 propagation**: whether the L2-full lever's bf16 tie-break propagates to the
-  token-63 output change is not pinned; no output-affecting change ships on this evidence
+  full-model routing concentration unverified, and real end-to-end numbers -- MTP acceptance
+  included -- need the full body running (`benchmarks/phase8-fork-verification-2026-09-28/README.md:80-88`).
+- **Token-63 propagation**: whether the 'L2-full' attention lever's bf16 tie-break reaches the
+  token-63 output change is not pinned (terms as used in the cited ledger entry); no
+  output-affecting change ships on this evidence
   (`PERFORMANCE_HISTORY.md:11649,11658`).
 - **MoE expert-GEMM prefill kernel headroom is real but not priced or harvested**: loop-2
   verdict INCONCLUSIVE at 51-60% of calibrated ceiling; the prescribed per-segment M/N/K
@@ -1033,13 +1074,15 @@ coldest 9.0-15.1% of expert bytes -- is not implemented
 - **MoE gate+up fusion sign**: -3.8% at c=2 (2026-06-26) vs +3.01% at c=1 short-ctx
   (2026-08-21); `PERFORMANCE_HISTORY.md:1234-1237` records it as unresolved.
 - **DSpark FULLBLOCK 15.9x collapse**: the source doc major-corrects it as not reproduced,
-  while the p4-scoping doc still lists it unresolved. Any writeup must pick a frame.
-- **hc_expand**: rejection upheld on 2026-08-22 vs a fused kernel shipped 2026-08-24; two
-  different levers, and the shipped kernel's own 300K/500K depth A/B was INCONCLUSIVE.
+  while the p4-scoping doc still lists it unresolved. **This writeup's frame:** not reproduced,
+  per the source-doc correction; the p4-scoping entry is stale.
+- **hc_expand**: the 2026-08-22 rejection and the 2026-08-24 fused-kernel ship turn out to be
+  two different levers, so the 'conflict' dissolves; what remains open is the shipped kernel's
+  own 300K/500K depth A/B, which was INCONCLUSIVE.
 
 ### 10.8 What the live session could not close
 
-- A **fully cold 1M prefill** was never measured (attempt 2 had 299,008 cached rows); the
+- A **fully cold 1M prefill** was never measured (attempt 2 had 299,008 cached tokens); the
   ~2.9 h figure is an extrapolation from attempt 1's last band.
 - The guard's `action` knob (`warn` vs `error`) was not toggled -- it needs a relaunch.
 - 1M decode is 2.92 tok/s; whether that is the same mechanism as the 300K cliff or a
@@ -1051,13 +1094,18 @@ coldest 9.0-15.1% of expert bytes -- is not implemented
 
 ### 11.1 What you need
 
-- Two Apple Mac Studio M4 Max, 128 GB unified memory each, macOS 27.0 (26A428) or later.
-- One Thunderbolt 5 cable pair between them, both ends enumerated as RDMA devices
+- Two Apple Mac Studio M4 Max, 128 GB unified memory each, macOS 27.0 (26A428).
+- One Thunderbolt 5 cable pair between them (two cables: one carries the RDMA data QP, the
+  second jaccl's TCP coordination -- §1.2, §3.1), both ends enumerated as RDMA devices
   (`rdma_en3` / `rdma_en4`, `status: active`). Verify with `ibv_devinfo -v`; expect
   `max_qp:3, max_cq:6, max_pd:6` per device.
-- `sysctl iogpu.wired_limit_mb = 120000` on both nodes.
-- A controller machine (a laptop is what we use) with ssh to both nodes.
-- The checkpoint `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (210.68 GB, 40
+- `sysctl iogpu.wired_limit_mb = 120000` on both nodes -- reapplied by `start_cluster.sh` on
+  every launch, since it does not survive a reboot by itself.
+- A controller machine (a laptop is what we use) with ssh to both nodes by name -- here over
+  Tailscale MagicDNS (node0/node1); the launcher discovers the nodes over the tailnet and
+  ssh's in.
+- The checkpoint `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (210.68 GB by
+  allocation (`du`); the server reports `storageSize = 210713013432` B ~= 210.71 GB SI; 40
   safetensors shards) present at `~/.exo/models/` on both nodes, identical.
 
 ### 11.2 The code
@@ -1071,29 +1119,36 @@ Three forks, all under `~/repos/` on the controller:
 | mlx-lm | `github.com/<user>/mlx-lm` | `main` | `676f803ed28f2703adb7a16f74a407baccf05066` |
 
 The mlx row's `main` is the branch the `uv.lock` pin references; the local checkout at capture
-was on `integrate/upstream-20261016` at the same SHA. The exo row is the deployed lineage:
-later on 2026-10-17 `main` was folded to a superset of `deploy/next28` plus the §12
-liveness fix, and that is what `start_cluster.sh` last synced to the nodes.
+was on `integrate/upstream-20261016` at the same SHA (for the submodule rows the gitlink SHA is
+what matters; the checked-out branch name can vary). The exo row is the deployed lineage: on
+2026-10-17 `main` was folded to a superset of `deploy/next28` **including** the §12 liveness
+fix, so the SHA shown already contains everything this document describes -- it is what
+`start_cluster.sh` last synced to the nodes.
 
 Check out the branch and the submodules ON THE CONTROLLER first. `EXO_TARGET_BRANCH` is only
-a push-check, not a checkout -- setting it without checking out is a silent no-op.
+a push-check, not a checkout -- setting it without checking out is a silent no-op; it is set
+inline at launch (§11.3), naming the branch the checkout is on.
 
 The mlx and mlx-lm SHAs must match both the submodule gitlinks and the `uv.lock` pins
 (`uv.lock:1382-1384` for mlx, `:1499-1501` for mlx-lm). CI enforces this
 (`src/exo/shared/tests/test_submodule_lock_pin_alignment.py`); a mismatch will fail the
 deploy. On darwin, mlx resolves from the fork via `pyproject.toml:90`; on Linux it comes
-from third-party wheels on `rltakashige/mlx-jaccl-fix-small-recv`.
+from prebuilt wheels published from `rltakashige/mlx-jaccl-fix-small-recv` (not this repro's
+path).
 
 ### 11.3 Launch
 
-Deploy is `start_cluster.sh` run from the controller. It rsyncs `~/repos/exo` to both nodes
-and starts the cluster; the API then listens on port 52415. Do not edit files on the nodes
--- all changes go through git to the fork.
+Deploy is `start_cluster.sh` run from the controller. It rsyncs `~/repos/exo` **verbatim** to
+both nodes and starts the cluster; every node then serves an API on port 52415 (the tailnet
+name below resolves to node0, where placement decisions are made). The rsync ships the working
+tree -- uncommitted edits included -- so commit and push first; the launch's push-check
+verifies the checkout's HEAD is on the pushed branch. Do not edit files on the nodes: durable
+changes go through git to the fork.
 
 ```
 cd ~/repos/exo
 git checkout main && git submodule update --init --recursive
-./start_cluster.sh
+EXO_TARGET_BRANCH=main ./start_cluster.sh   # names the branch the checkout is on; only a push-check
 ```
 
 Shutdown is SIGTERM-only via `scripts/exo_graceful_shutdown.sh`; SIGKILL leaks RDMA queue
@@ -1107,14 +1162,16 @@ pairs and can wedge the Thunderbolt link. If a node does need a reboot, use
 curl -s http://node0.tailnet.ts.net:52415/state
 ```
 
-Read the placed instance's model id from the response. Expect `contextLength=1048576`,
-`maxKvTokens=1048576`, `worldSize=2`, `maxPrefixSessions=4`, `maxPrefixBytes=12884901888`,
-`storageSize=210,713,013,432`.
+Placement is automatic at launch: `start_cluster.sh` creates the DSv4 instance once the
+cluster is healthy and waits for both runners (the load is ~2-3 min per node; the script
+prints READY). Then read the placed instance's model id from the response. Expect
+`contextLength=1048576`, `maxKvTokens=1048576`, `worldSize=2`, `maxPrefixSessions=4`,
+`maxPrefixBytes=12884901888`, `storageSize=210713013432`.
 
 ### 11.5 Test
 
 Write prompt bodies to files and pass them with `--data-binary @file` -- never inline a
-160K prompt in a shell argument. All runs use `"stream": true` so per-token timing exists;
+160K-token (~600 KB) prompt in a shell argument. All runs use `"stream": true` so per-token timing exists;
 `"stream": false` collapses `time_starttransfer` onto `time_total` and leaves decode
 unmeasurable.
 
@@ -1129,9 +1186,13 @@ curl -sS -N --max-time 3600 -X POST \
   -w 'CURLMETA http=%{http_code} starttransfer=%{time_starttransfer} total=%{time_total}'
 ```
 
+The per-frame epoch timestamps that §9.1's client channel is built on come from a line-stamping
+filter on the SSE stream, not from `-w`; the `CURLMETA` line is a wall-clock sanity check.
+
 Body shape (the corpus is the repo's own `docs/**.md` plus the repo's top-level handoff docs,
-concatenated in sorted order,
-truncated at the target depth, then the question appended):
+concatenated in sorted order, truncated at the target token depth with the checkpoint's own
+tokenizer, then the question appended; the prompt files and their generator lived in the
+capture session's scratch directory, not in this repo):
 
 ```json
 {
@@ -1144,45 +1205,49 @@ truncated at the target depth, then the question appended):
 }
 ```
 
-The 1M run needs a 4-hour window: `--max-time 14400`. A 2-hour cap reaches only ~80% of the
-prefill and is cancelled by the client.
+The 1M run needs a 4-hour window: `--max-time 14400`. A 2-hour cap dies at ~80% of the
+prefill (attempt 1); the completed attempt ran 6,760.5 s, so four hours has margin.
 
 ### 11.6 Reading the result
 
 The measurement rules are §9.1. Two repro-specific notes: cross-check against the runner's
-own `[DSV41] obs first-token` / `obs turn-end` lines in `~/.exo/exo_log/exo.log`, correlated
-by response `id` == `command_id` -> `task_id`; and over non-interactive ssh `zstdcat` is not
+own `[DSV41] obs first-token` / `obs turn-end` lines in `~/.exo/exo_log/exo.log` on either
+serving node (both ranks emit them), correlated by response `id` == `command_id` -> `task_id`; and over non-interactive ssh `zstdcat` is not
 on PATH -- use the absolute path `/opt/homebrew/bin/zstdcat` when reading rotated archives,
 or an empty grep result will look like a real negative.
 
 ### 11.7 Guard and limiter
 
 Both are armed in the running process and read at engine construction, so toggling them needs
-a relaunch. The guard's knobs and the limiter's behavior are in §7; the classic guard repro
-is "output the word banana exactly 40 times", and the limiter honors a per-request
+a relaunch. The guard's knobs and the limiter's behavior are in §7. The classic guard repro is
+"output the word banana exactly 40 times": expect the stream to end with the `repetition_loop`
+error event and a runner line naming the cycle (§7.1) -- the request itself is legitimate, so
+this is the guard's designed false-positive shape, fired deliberately to prove the detector.
+The limiter needs `enable_thinking: true` to engage; it honors a per-request
 `reasoning_budget_tokens` field over its `0.75 x max_tokens` default (capped at 16384).
 
 ---
 
 ## 12. The night the cluster killed itself (and the fix)
 
-Everything above describes a cluster that works. This section is the night it did not, and it
-is the reason the lead sections of this writeup could be written by a session running *on*
-the cluster, and it draws on the incident captures behind the 2026-10-17 PERFORMANCE_HISTORY
-entry -- the supervisor log and the detector report -- plus the deploy's own validation logs,
-with commits cited inline.
+Everything above describes a cluster that works. This section is the night it did not; the
+§12.3 fix is why a session running *on* the cluster could later write this document's lead
+sections. It draws on the incident captures behind the 2026-10-17 PERFORMANCE_HISTORY entry --
+the supervisor log and the detector report -- plus the deploy's own validation logs, with
+commits cited inline.
 
 ### 12.1 The incident
 
 Overnight 2026-10-16 -> 17, a session on the cluster model was killed repeatedly.
 From 04:41 to 07:54 the supervisor SIGKILLed **live, actively-decoding runners roughly every
 8.8 minutes -- 22 kills over that 193-minute window, 12 on rank0 and 10 on rank1**. Each kill cost
-a re-placement plus a full 210 GB reload (~164 s) on **both** nodes, ~25 kill/re-place
-cycles total.
+a re-placement plus a ~109 GB-per-rank reload (~164 s; 210 GB across the pair).
 
 Every kill hit a runner whose own log showed committed tokens advancing at ~30 tok/s within
-5-18 s of the kill. Zero guard fires all night. The deaths clustered at ~2,700-2,800
-committed tokens because that is where 45-67 s of supervisor silence had elapsed.
+5-18 s of the kill. Zero guard fires all night (the "Let me write." preamble loop in the streams is a line-level
+near-repeat, below the guard's exact-cycle trigger -- §12.5). The deaths clustered at
+~2,700-2,800 committed tokens: at the observed ~30 tok/s, 45-67 s of silence is ~1,500-2,000
+tokens, so the last supervisor-counted event sat that far behind the kill.
 
 ### 12.2 Root cause
 
@@ -1191,15 +1256,15 @@ block until it closes, so `step()` never returns a result and the runner-loop de
 heartbeat in `handle_generation_tasks` cannot fire. Meanwhile the decode phase emitted
 nothing the supervisor counts: LOAD and PREFILL re-emit runner status every <=15 s (the
 load warmup beat, the fence hook, the prefill heartbeat -- all from the 10-05 fix), but
-DECODE emitted no liveness event at all.
+DECODE emitted no liveness event *independent of `step()` returning*.
 
 The hang probe then fired on flat footprint + `spin=True` -- both entirely normal during deep
-decode, where the RDMA poll threads burn ~1.3 cores. The stack-class classifier (Fix B,
-running in shadow) would have killed these too, because `spin=True` is not discriminative for
+decode, where the RDMA poll threads burn ~1.3 cores. The stack-class classifier (Fix B, the 2026-10-05 watchdog class, running in
+shadow) would have killed these too, because `spin=True` is not discriminative for
 decode; it was deliberately not armed as the remedy.
 
-Post-mortem decode of the killed streams (server degeneration dumps, 2,048 committed ids
-each) shows real draft prose behind a short "Let me write." preamble loop. The kills destroyed
+Post-mortem decode of the killed streams (server degeneration dumps, a 2,048-id suffix of each
+stream) shows real draft prose behind a short "Let me write." preamble loop. The kills destroyed
 live work.
 
 ### 12.3 The fix
@@ -1209,12 +1274,17 @@ Commit `991cf11` on branch `fix/dsv41-decode-liveness`, off `deploy/next28`:
 1. **Per-round decode liveness beat** in `Dsv41Engine._rounds`: `self.prefill_heartbeat()` on
    every COMPLETED round with a non-empty committed batch, on both TP ranks, every beat
    backed by a finished collective plus committed tokens. A genuinely wedged round still goes
-   silent -- that is the control.
+   silent -- that is the control. The beat rides the same status channel prefill uses
+   (`prefill_heartbeat` by name), and the hang probe arms only after 45 s without a status
+   event -- so these beats are exactly what keeps it quiet during a healthy long generation.
 2. **Bounded output**: `resolve_max_output_tokens()` with `EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS`
    (8192; 0 = the old 32168 default) and `EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING` (32768; 0 =
-   off), plus launcher allow-list entries. These are *output* caps; the limiter's 16384 (§7.2)
-   is a separate *reasoning*-budget cap, and the controller's client-side `max_tokens=8192`
-   (§12.5) is a third, independent bound.
+   off), plus launcher allow-list entries. Resolution order: a positive client `max_tokens` wins;
+   otherwise the 8192 default; the result is then clamped to the 32768 ceiling. These are
+   *output* caps -- a blast-radius bound, not part of the root-cause fix (the withheld call
+   died at ~2.7K tokens, far below all of them); the limiter's 16384 (§7.2) is a separate
+   *reasoning*-budget cap, and the controller's client-side `max_tokens=8192` (§12.5) is a
+   third, independent bound.
 
 Tests: 60 pass, 20 of them new (fake-clock cadence, wedge and empty-batch controls, resolver
 matrix).
@@ -1225,12 +1295,15 @@ Deployed ~10:05-10:12 from the laptop (`EXO_TARGET_BRANCH=fix/dsv41-decode-liven
 nodes at `991cf11`; pre-deploy runner-env snapshots taken and matched post-launch; both
 ranks log the same `resolved=8192` on the first request, 23 ms apart.
 
-1. **6-minute streaming generation**: 11,608 tokens, `reason=stop`, ZERO watchdog lines.
-2. **Killer-case reproduction**: a 190+ s window with zero client output in which committed
-   advanced 2,263 -> 5,863 (~19 tok/s) -- the exact state that killed 22 times. Zero silence
+1. **6-minute streaming generation**: 11,608 tokens, `reason=stop`, ZERO watchdog lines
+   (the harness sent its own `max_tokens` above the 8192 default -- §12.3's resolver -- so the
+   cap is not contradicted by the count).
+2. **Killer-case reproduction**: a 190+ s server-side window with zero client output in
+   which committed advanced 2,263 -> 5,863 (~19 tok/s; a server-measured window, not a
+   §9.2-style client decode window) -- the exact state that killed 22 times. Zero silence
    lines, runner alive.
-3. **Negative control**: SIGSTOP rank-1 mid-generation -> SIGKILL at 61 s (inside the 45+20 s
-   window), both ranks re-placed, health gate passed. The guard was not disabled.
+3. **Negative control**: SIGSTOP rank-1 mid-generation -> SIGKILL at 61 s (inside the 45 s silence + 20 s
+   growth-check window, §12.3), both ranks re-placed, health gate passed. The guard was not disabled.
 4. **Re-validation**: a cluster-hosted Hermes session (provider exo) wrote this writeup's
    lead sections (§0, 1, 2, 9, 10, 11) to `scratch/writeup/lead/`:
    22 API calls, 30 minutes, **0 kills**. Self-referential by construction -- the session
@@ -1241,40 +1314,51 @@ ranks log the same `resolved=8192` on the first request, 23 ms apart.
 
 Same day: a hermes-agent crash-loop circuit breaker (`e69abff` + `6bb4366`;
 `agent.auto_recovery_identical_failure_limit` default 2, where progress means strictly more
-streamed than the previous attempt, so a deterministic mid-stream kill still counts), and a
+streamed than the previous attempt, so a deterministic mid-stream kill still counts as an identical failure toward that
+limit), and a
 controller-side per-model client cap (`providers.exo.models.<id>.max_tokens=8192`, verified on the
 wire; the providers-map `extra_body` does not reach the main request path -- open audit for
-`use_prefix_cache` / `service_tier`).
+`use_prefix_cache` / `service_tier`, §12.6).
 
 A text-level "varied repetition" detector was the obvious next idea, so it was measured
 before shipping. Decoding the four real incident streams (last 2,048 committed ids each)
 showed the tails are **coherent draft work** -- the writeup's own section prose and
 performance tables -- with only a 4-line planning-phrase cycle. A line-level near-duplicate
-sweep (W in {10,16,24} x M in {5,6,7} x J in {0.75,0.8,0.9}) tripped **0/4 positives at every
-parameter combo**, while real negatives (session transcripts, the evidence packs, five exo
-docs) reached 5-17 matched lines from markdown tables, code fences and headings alone. The
+sweep (W in {10,16,24} = window lines, M in {5,6,7} = minimum matching lines, J in
+{0.75,0.8,0.9} = similarity) tripped **0 of the 4 incident streams at every parameter
+combo**, while real negatives (session transcripts, the evidence packs, five exo docs) reached
+5-17 matched lines from markdown tables, code fences and headings alone -- i.e. they trip it. The
 signal is inverted relative to the class: table-heavy real output scores as "more repetitive"
 than the incident streams, and a trip would abort a turn that was writing real content.
 Verdict: **do not ship a text-level detector for this class**; the existing exact-cycle guards
-behaved correctly (they did not fire, because there was no exact cycle). The damage is
-addressed by the shipped changes instead.
+behaved correctly (they did not fire: the tails'
+repetition is line-level near-duplication, not an exact >=6-repeat token cycle -- the guard's
+actual trigger, §7.1). The incident class is
+addressed by the shipped changes instead -- false kills by the liveness fix, unbounded output
+by the caps (§12.3).
 
-KV headroom sanity for the caps: DSv4.1 MLA KV at 1M is 4.13 GiB (§5.2) => ~4.2 KiB per
-generated token; the new caps add at most ~35-140 MB against ~12.6 GB of headroom (125.83 GB wired
+KV headroom sanity for the caps: DSv4.1 MLA KV at 1M is 4.13 GiB (§5.2) => 4,229 B, ~4.1 KiB, per
+generated token (4.13 GiB / 1,048,576); the new caps add at most ~35-140 MB against ~12.6 GB of headroom (125.83 GB wired
 limit - 108.76 GB weights - 4.13 GiB 1M KV = ~12.6 GB). Memory is not the constraint.
 
 ### 12.6 Still open
 
 (These are specific to this fix; §10 holds the cluster's wider open set.)
 
+- **Controller request-path audit**: whether `use_prefix_cache` / `service_tier` reach the
+  main request path (§12.5) -- open.
+
 Built, default OFF: `fix/dsv41-no-repeat-ngram` (`31b5367` + hardening `755000e`), a
 deterministic greedy loop escape -- no-repeat n-gram ban before the round argmax, masked-argmax
 accept path, control-token exemption, per-turn telemetry. The enable ladder (off-equivalence
-replay -> escape replay n=5/6 -> quality A/B -> perf -> soak) is not yet run; the knob is OFF
-everywhere.
+replay -> escape replay at n=5/6, n = n-gram length -> quality A/B -> perf -> soak) is not yet
+run; the knob is OFF everywhere. The escape targets the *confirmed exact-loop* case, not
+§12.2's withheld-output class -- it is not the text-level detector §12.5 declined to ship.
 
-Also open by decision: when a CONFIRMED loop does fire, the guard's `action="error"` fails the
-turn, the client retries an identical request, and greedy decode reproduces the loop. A
+Also open by decision: when the guard fires on a confirmed loop, its `action="error"` fails
+the turn, the client retries an identical request, and greedy decode reproduces the loop --
+the hermes-agent breaker (§12.5) caps that at two wasted attempts, so the open item is the
+remaining cost, not an infinite loop. A
 cleaner termination (return partial content as `finish_reason="length"` plus a marker) would
 let the agent move on. Left unchanged deliberately -- it alters a shipped guard's semantics
 and deserves its own review.
