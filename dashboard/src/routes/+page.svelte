@@ -2063,6 +2063,7 @@
     | "Downloading"
     | "Starting"
     | "Ready"
+    | "Running"
     | "Error"
     | "Stopping";
 
@@ -2072,8 +2073,9 @@
         return "Downloading";
       case "READY":
       case "LOADED":
-      case "RUNNING":
         return "Ready";
+      case "RUNNING":
+        return "Running";
       case "FAILED":
         return "Error";
       case "SHUTDOWN":
@@ -6443,7 +6445,13 @@
                               >
                                 Warming up...
                               </p>
-                            {:else if isReady || isRunning}
+                            {:else if isRunning}
+                              <p
+                                class="text-[11px] text-teal-400/70 leading-relaxed"
+                              >
+                                Generating...
+                              </p>
+                            {:else if isReady}
                               <p
                                 class="text-[11px] text-green-400/70 leading-relaxed"
                               >
@@ -7680,7 +7688,13 @@
                                 >
                                   Warming up...
                                 </p>
-                              {:else if isReady || isRunning}
+                              {:else if isRunning}
+                                <p
+                                  class="text-[11px] text-teal-400/70 leading-relaxed"
+                                >
+                                  Generating...
+                                </p>
+                              {:else if isReady}
                                 <p
                                   class="text-[11px] text-green-400/70 leading-relaxed"
                                 >
