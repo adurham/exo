@@ -47,6 +47,19 @@
 # block size; 64 measured best. To disable: set EXO_DSV4_QUERY_TILED_SDPA=0.
 : "${EXO_DSV4_QUERY_TILED_SDPA:=1}"
 : "${EXO_DSV4_QUERY_TILED_B:=64}"
+# ── CONTIGUOUS-PERIOD loop escape (SHIPPED 2026-10-17) ────────────────────
+# The dsv41 engine is greedy-only (no sampling path), so an argmax attractor like
+# the observed "Let me write." family is an ABSORBING state; cloud stacks escape
+# it by sampling. This masks, right before each round's argmax, the token that
+# would extend a block the model is repeating BACK-TO-BACK (>= MIN_BLOCKS
+# identical blocks of period p <= MAX_PERIOD at the history tail). It never fires
+# on a phrase reused elsewhere in the window, so legitimate repetition (paths,
+# identifiers, JSON keys, boilerplate) is untouched -- the global no-repeat-n-gram
+# rule that would have caught those too was rejected on the quality gate
+# (multilingual prose went DIRTY; this rule is CLEAN 20/20 + needles 6/6 +
+# tools 10/10 + park, and a real Hermes document-write session completes).
+: "${EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD:=64}"
+: "${EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS:=3}"
 # ── ROUND-Q1B-FIX: dense re-quant default (next19-dense production) ────────
 # DSv4.1 dense re-quant (native affine q6g64 on the dense slice) with the
 # SHARED-EXPERT linears at q8g64. Pure q6 g64 (affine6) regressed the t2
