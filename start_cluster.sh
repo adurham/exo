@@ -2751,6 +2751,20 @@ for NODE in "${NODES[@]}"; do
   # absent (the read-at-code/dead-in-deployment bug class).
   [ -n "${EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS=$EXO_DSV41_DEFAULT_MAX_OUTPUT_TOKENS"
   [ -n "${EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING=$EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING"
+  # EXO_DSV41_NO_REPEAT_NGRAM / _WINDOW: the no-repeat n-gram ban for the dsv41
+  # engine (no_repeat.py, read per turn). Greedy-only engine, no sampler and no
+  # repetition-penalty pipeline, so an argmax attractor ("Let me write." family)
+  # is an ABSORBING state -- cloud stacks escape it by sampling, and this masks
+  # (-inf) the token that would close a repeated n-gram right before each
+  # round's argmax. NGRAM is the n-gram length: unset/0 = DISABLED = byte-
+  # identical behaviour, only n >= 3 has any effect, n=5 is the suggested value
+  # when enabled. WINDOW (2048) bounds how far back an earlier occurrence may
+  # sit, in produced tokens. Forwarded as a FAMILY because the runner env is an
+  # allow-list: an unlisted var is silently absent (the read-at-code /
+  # dead-in-deployment bug class). DEFAULT OFF -- do not enable without a live
+  # A/B; this block only makes the flip possible at relaunch.
+  [ -n "${EXO_DSV41_NO_REPEAT_NGRAM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM=$EXO_DSV41_NO_REPEAT_NGRAM"
+  [ -n "${EXO_DSV41_NO_REPEAT_NGRAM_WINDOW:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_NO_REPEAT_NGRAM_WINDOW=$EXO_DSV41_NO_REPEAT_NGRAM_WINDOW"
   # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
   # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
   # 2026-10-13.md). Once a still-open reasoning block has run

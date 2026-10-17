@@ -101,6 +101,7 @@ from exo.worker.engines.mlx.dsv41.errors import (
 )
 from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
+from exo.worker.engines.mlx.dsv41.no_repeat import NoRepeatNgram
 from exo.worker.engines.mlx.dsv41.output import _starts_in_thinking, dsv41_output_parser
 from exo.worker.engines.mlx.dsv41.reasoning_budget import (
     ReasoningBudgetLimiter,
@@ -318,6 +319,41 @@ def resolve_max_output_tokens(requested: int | None) -> int:
     if ceiling > 0:
         resolved = min(resolved, ceiling)
     return resolved
+
+
+# ---------------------------------------------------------------------------
+# no-repeat n-gram ban (greedy-only engine: the deterministic loop ESCAPE)
+# ---------------------------------------------------------------------------
+# See ``dsv41/no_repeat.py`` for the WHY. This engine refuses temperature > 0 and
+# has no repetition-penalty pipeline, so an argmax attractor like the observed
+# "Let me write." family is an ABSORBING state -- cloud stacks escape such states
+# by sampling, and a no-repeat n-gram ban is the cheapest deterministic escape
+# that keeps the engine greedy. EXO_DSV41_NO_REPEAT_NGRAM is the n-gram length:
+# 0 or unset (the DEFAULT) = DISABLED = byte-identical behaviour, and only
+# n >= no_repeat.MIN_NGRAM (3) has any effect; n=5 is the suggested value when
+# enabled. EXO_DSV41_NO_REPEAT_NGRAM_WINDOW bounds how far back an earlier
+# occurrence may sit, in PRODUCED tokens. Both are read at RESOLVE time, like
+# this package's other knobs, so a test can monkeypatch.setenv.
+NO_REPEAT_NGRAM_ENV = "EXO_DSV41_NO_REPEAT_NGRAM"
+NO_REPEAT_NGRAM_DEFAULT = 0
+NO_REPEAT_NGRAM_WINDOW_ENV = "EXO_DSV41_NO_REPEAT_NGRAM_WINDOW"
+NO_REPEAT_NGRAM_WINDOW_DEFAULT = 2048
+
+
+def resolve_no_repeat_ngram() -> NoRepeatNgram:
+    """Resolve the no-repeat n-gram ban from the environment (pure).
+
+    No engine state is touched: the result is a deterministic function of the two
+    env knobs alone, exactly like ``resolve_max_output_tokens``. An unset or
+    malformed knob resolves to the disabled default (``n=0``), so a launcher typo
+    cannot turn the ban on by accident -- and a knob that turns it on is still
+    inert below ``no_repeat.MIN_NGRAM``.
+    """
+    n = _read_int_env(NO_REPEAT_NGRAM_ENV, NO_REPEAT_NGRAM_DEFAULT)
+    window = _read_int_env(
+        NO_REPEAT_NGRAM_WINDOW_ENV, NO_REPEAT_NGRAM_WINDOW_DEFAULT
+    )
+    return NoRepeatNgram(n=n, window=window)
 
 
 class Dsv41ContextLengthExceeded(Dsv41UnsupportedFeature):  # noqa: N818 - name
@@ -1654,6 +1690,13 @@ class Dsv41Engine(Engine):
         steps plainly and emits the forced ``think_end`` (the cold start the cut
         requires). Both ranks compute the same latch from byte-identical committed
         ids, so the two stay in step with no collective.
+
+        The no-repeat n-gram ban (``dsv41/no_repeat.py``) is threaded here too:
+        resolved once per turn from the env knobs (DEFAULT OFF) and passed to every
+        ``_one_round`` together with the produced-token ``history`` this loop keeps
+        in lockstep with the cache. It is a pure function of that history, so both
+        ranks build the identical ban and stay in step with no collective, exactly
+        like the limiter above.
         """
         head = self.loaded.head if self.speculative else None
         policy = (
@@ -1663,6 +1706,13 @@ class Dsv41Engine(Engine):
         )
         n = 0
         token = anchor
+        # The no-repeat n-gram ban (dsv41/no_repeat.py). DISABLED unless
+        # EXO_DSV41_NO_REPEAT_NGRAM >= 3, so the default path is untouched. The
+        # produced-token history it reads is built here, one round at a time, in
+        # lockstep with the cache: it ENDS with ``token`` (the row the next round
+        # feeds), which is exactly the sequence position the round predicts from.
+        ban = resolve_no_repeat_ngram()
+        history: list[int] = [int(anchor)]
         # The anchor is fed to the limiter by the caller (_generate) before the
         # first round, so it can ALREADY have latched a force (a budget small enough
         # to be spent by the anchor itself): honour it on the very first round.
@@ -1683,6 +1733,8 @@ class Dsv41Engine(Engine):
                 lp_out=lps if logprobs else None,
                 limiter=limiter,
                 force_think_end=force,
+                ban=ban,
+                history=history,
             )
             # Cumulative spec counters (deltas across requests = live
             # acceptance rate; _accepted == _gamma means a fully-accepted round).
@@ -1701,6 +1753,16 @@ class Dsv41Engine(Engine):
                 )
             n += len(batch)
             token = batch[-1]
+            # Keep the ban's history in step with the cache: this round committed
+            # every id in ``batch`` (its rows are in the cache), so the NEXT round
+            # predicts from a sequence ending in ``batch[-1]``. Trim to the scan
+            # window -- older ids can never be reached by the ban -- so the list
+            # does not grow with the whole turn.
+            history.extend(batch)
+            if ban.enabled:
+                keep = int(ban.window) + int(ban.n)
+                if keep > 0 and len(history) > 2 * keep:
+                    del history[:-keep]
             # ── DECODE-PHASE LIVENESS BEAT ──────────────────────────────────
             # Re-emit the runner status once per COMPLETED round, below the
             # empty-batch guard, so every beat is backed by a finished
