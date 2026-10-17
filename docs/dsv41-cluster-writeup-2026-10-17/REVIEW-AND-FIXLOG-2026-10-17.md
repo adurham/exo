@@ -248,3 +248,46 @@ scope distinguished from the declined detector; "when a CONFIRMED loop does fire
 **Verified no-change (logged).** 32168 is correct (engine MAX_TOKENS constant, per the code
 comment -- the 32768 two words later is the ceiling); `32168` vs `32768` confusion is Fable's,
 not the document's.
+
+
+---
+
+# Round 4 — final pre-publication verification (Fable, chunked re-read of the finished text)
+
+An 11-chunk verification pass over the final document (chunks of ~9 KB; the backend truncates
+longer contexts). Verdict per chunk: mostly clean with a final set of precision items, all
+applied. ~30 edits.
+
+**Applied:** "108.76 GB measured" -> "computed from shard headers" (the basis was always stated;
+the verb was wrong); the §2 opening narrowed to the supportable claim (upstream MLX ships jaccl
+-- the fork follows its `lib/jaccl` layout -- but as best-effort UC; what is fork-local is the
+*reliability* layer; the old "no jaccl upstream" wording is gone); §3.2's mechanism sentence
+softened to "the only mechanism on record" + the broader-teardown note; §3.3/§3.4 SIGKILL
+"ban" scoped to the deploy path (the watchdog's own kill is separate); §3.4's ~65 s vs ~90 s
+reconciled as kill latency vs detect-and-re-place; §4 intro rewritten to match what §4.1-4.3
+actually claim (recoverable vs re-place split, leaks fixed to a plateau, ring fixed); §4.1
+"confirmed" softened (the precursor evidence does not separate the two SIGABRT sources); §5.2
+adds the per-source-layer cache rule (four kv-source layers, consumers reference) and fixes
+"top of the range" to the full-count wording; §5.1's ratio direction fixed (kernels faster than
+production MXFP4; 1.909x decode R=1 / 1.979x verify R=4); the §9.3 band note now says the band
+times sum to attempt 2's prefill (the earlier question resolved: the first ~299K rows were
+cache); §5.4's dichotomy replaced with a three-branch reading (conservative estimate / pages
+outside the wired cap / allocator reuse); §6.2's closing line no longer presents a decode
+measurement as the correction of a prefill share (62% rests on the disowned instrument; the
+decode-side share is 2.9-5.3%); §9.5's "~16%" corrected to "~20% above (that row ~16% below)";
+§8.1's governor claim attributed, not asserted; §7.2's token/character comparison anchored
+(96 tokens = the 322 characters quoted; the default is 600 tokens = 1,996 chars); §9.2's
+"5.3x for 1.9x" fixed to "5.3x from 100K to 300K while the context triples"; §10.8's ~2.9 h ->
+~2.8 h (matches §9.4); §9.4 gains the counter-mismatch caveat (attempt 1's 802,816 vs ~98K
+cached; the ~197K remainder is an upper bound); §9.3's "position 4K" -> "near the prompt's
+start"; §9.1's 0.3% claim qualified as unrounded-values; §9.2's heading softened ("not a
+simple artifact"); §9 intro's "first 160K attempt" -> "the 160K attempt"; §11.5's 1M-window
+paragraph now explains why attempt 2 finished where attempt 1 hit the cap (cache reuse left
+~701K rows) and the stream:true sentence qualified (client-side vs server-side); §11.2's
+b88d65dd marked explicitly post-capture; §12.5's ~12.6 GB labelled pre-activation with §5.4's
+net figure cited; §12.1's "1,500-2,000" -> "1,350-2,000"; §12.2's draft-prose claim scoped to
+the four decoded streams; §12.4 step 3 cites §3.4 for the probe timing.
+
+**Refuted, logged:** 32168 is correct (the engine's MAX_TOKENS constant; 32768 is the ceiling);
+the chunk-5 band/wall "arithmetic failure" dissolves once the 299,008-row reuse is applied (the
+bands cover exactly the rows attempt 2 had to prefill).
