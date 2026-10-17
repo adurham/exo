@@ -277,11 +277,23 @@ _JIT_PLACEMENT_POLL_SECONDS = 2.0
 # path (TaskCancelled -> planner's next ~100ms tick -> synthesized
 # CancelTask -> runner.cancel_task() -> ExoBatchGenerator.cancel(), which
 # fixes the request's batched-decode session and lets the token stream end
-# NATURALLY) before falling back to a force-close of the stream. Generous
-# relative to the worker planner's own ~100ms poll interval so this isn't a
-# second, narrower version of the same race -- a genuinely hung/crashed
-# runner is the only case expected to ever hit this fallback.
-CANCEL_ACK_TIMEOUT_SECONDS = 5.0
+# NATURALLY) before falling back to a force-close of the stream.
+#
+# 2026-10-16: re-calibrated 5.0 -> 15.0 (Fable-reviewed). The legitimate
+# termination path costs planner tick (~0.1s) + a drain of up to
+# check_for_cancel_every decode tokens (calibrated <= 100; at the slowest
+# supported per-request decode rates that is 5-14s) + teardown/round-trips
+# (~0.5-1s), so 5.0s sat BELOW the worst-case legitimate latency and the
+# fallback fired on NORMAL cancels (live hardware: deterministic 504 at
+# 5.03/5.06s while the cancel itself completed correctly seconds later).
+# 15.0 covers >= 7 t/s per request; a genuinely hung/crashed runner remains
+# the only case expected to hit the fallback. KNOWN BOUND: very low
+# per-request rates (heavy concurrency / very deep context) can still
+# exceed this; the durable fix is making the runner's cancel check
+# wall-clock-bounded (>= 250-500ms) instead of every-N-tokens, after which
+# this deadline is pure headroom. See also
+# bench/section98_prefill_cancel_definition_of_done.py.
+CANCEL_ACK_TIMEOUT_SECONDS = 15.0
 
 
 class JitPlacementUnavailableError(Exception):
