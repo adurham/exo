@@ -128,3 +128,57 @@ Applied 2026-10-17 to `the writeup working copy` (pre-edit 1,247 lines -> 1,263;
 3. A8: the source's own "~every 7.5 min" contradicts its own 04:41-07:54 window (193/22 = 8.8 min); the measured average now stands in the text.
 4. A9: source's "(~28 tok/s)" is neither labeled as a logged rate nor the delta/window; corrected to ~19 tok/s with the window explicit.
 5. The pack round-cost table and PERFORMANCE_HISTORY 2026-10-17 entry are untouched (repo/pack files read-only, as required).
+
+---
+
+# Round 2 — post-Fable review (2026-10-17, same day)
+
+Fable (claude-fable-5) reviewed the document; its back-half context was truncated by the consult
+backend at ~§5.4, so this round resolves its front-half findings and a second pass covers §5.4–§12
+separately. Items below were each verified against the repo/config/live state before fixing.
+
+**R2-1 — wired-limit units; headroom recomputed (§0, §0.1, §1.1, §5.4, §12.5).** The evidence pack's
+D4.4 formula reads `iogpu.wired_limit_mb=120000` as 120.0 GB; the corpus's own convention is
+120000 MiB = 125.83 GB = 117.19 GiB (`docs/PERFORMANCE_HISTORY.md:11924,11979` — "W = 125.829 GB
+(120000 MiB)"). FIXED: §1.1 now states the unit; headroom recomputed 125.83 − 108.76 − [3.4..4.5] −
+[16..22] = **-2.3 to -9.4 GB** (was -8.2/-15.3); §12.5's cap-headroom ~6.8 → ~12.6 GB; §5.4's
+"reproduces the gap column" reworded to the correction doc's actual 8.8-14.8 GB gap column
+(`docs/deepseek-v41-memory-budget-correction-2026-09-27.md:88-95`).
+
+**R2-2 — `maxPrefixSessions` vs the 4→1 leak fix (§4.2).** Verified live: /state reports
+`maxPrefixSessions=4`; git history: `9182190` set 4→1, then `4d09fcd` restored 1→4 ("live-session
+eviction"), current launcher default 4 with the ~12 GB 100K worst case re-documented. FIXED: the
+row now carries the restore.
+
+**R2-3 — 44 vs 43 layer counts (§4.2 cell, §3.1, §6.2).** Resolved by era, from the live configs:
+June leak doc = V4-Flash era (43 hidden layers; 44 cache entries); the Aug arithmetic-check's 43
+`moe.all_sum` calls/token is that same engine; this writeup's V4.1 checkpoint = 40 hidden layers
+(`num_hidden_layers = 40`, read from the node's config; /state `nLayers: 40`). The in-table
+editorial parenthetical was removed; one explanatory note now sits after the §4.2 table and short
+tags at §3.1/§6.2.
+
+**R2-4 — watchdog timing (§3.4).** Replaced "(45 s probe + 20 s grace)"/"45-180 s" with the code
+truth: `HANG_TIMEOUT_SECONDS=45`, then `HANG_PROBE_INTERVAL_SECONDS=20` growth checks — a genuinely
+wedged round dies at ~65 s (`src/exo/worker/runner/supervisor.py`).
+
+**R2-5 — §5.3 corrections.** `device.cpp` is mlx — the citation now reads "read in mlx
+`device.cpp:768-773`; landed by exo `463ac5d`" (exo commit touches only start_cluster.sh, verified);
+the June fix vs the August mechanism-explanation timeline is now stated; "already gone" is scoped
+to the **340K** cliff (1M deep-context degradation is a separate regime, §9.3); the 340K overlap in
+the ledge sentence fixed; §5.3's cross-ref trimmed to §5.4/§6.1.
+
+**R2-6 — §5.1 wording.** four pieces (kernels, loader, checkpoint reader, layer builder); "nothing
+**upstream** understood the format"; "agreeing to cos 0.9999999"; the 1.909x/1.979x baseline stated
+(EXL3 vs production MXFP4 kernels).
+
+**R2-7 — §1.3/§5.2.** "no `kv_lora_rank` key in the config" (matches the pack's own wording); bf16
+rationale corrected from "products" to "values" (the code comment's own claim, cache.py:26-29); the
+comment's ~3.2 GiB noted as a rounding of the 3.31 GiB component sum.
+
+**R2-8 — copy items.** §4 intro "two"→"three" failure modes; §4.3 retitled to the spec-rollback fix;
+§3.2's TODO marker converted to prose; "(3.3, 3.4)"/"Section 8"/"Section 4" normalized to §-style;
+port 52416 glossed (the file server); §0 leads with the medians' +34.9% (baseline doc's +36.71%
+kept alongside); "127 GB of 128 GiB" → "~127 GB of the 137 GB (128 GiB)".
+
+**Refuted/kept, with sources (no change):** `maxPrefixSessions`/`maxPrefixBytes` ARE in /state
+(a first regex missed them); the `cache.py:29` comment exists and does say ~3.2 GiB; `32168` stays.
