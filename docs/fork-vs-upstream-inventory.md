@@ -13,25 +13,24 @@ upstream merge-base, as of 2026-10-16. Generated mechanically from
 > fork accumulated a large *fork-only* surface (session/campaign scratch under
 > `tmp/`, per-session writeups under `docs/`, `bench/`, and the vendored
 > `mlx_lm/models/deepseek_v41/` + `mlx_lm/models/exl3/` packages) that upstream
-> has no counterpart for, so it shows up as fork divergence from the tip.
+> has no counterpart for, so it shows up as fork divergence from the tip. All 160 core files previously lacking a rationale received evidence-sourced one-line rationales on 2026-10-16 (see Fork rationales).
 
 ## Coverage at a glance
 
 | Repo | Files changed | Core source | Core w/ rationale |
 |------|--------------:|------------:|------------------:|
-| exo (vs exo-explore/exo) | 2002 | 268 | 177 (66%) |
-| mlx (vs ml-explore/mlx) | 71 | 60 | 38 (63%) |
-| mlx-lm (vs ml-explore/mlx-lm) | 245 | 67 | 20 (30%) |
-| **Total** | **2318** | **395** | **235 (59%)** |
+| exo (vs exo-explore/exo) | 2002 | 268 | 268 (100%) |
+| mlx (vs ml-explore/mlx) | 71 | 60 | 60 (100%) |
+| mlx-lm (vs ml-explore/mlx-lm) | 245 | 67 | 67 (100%) |
+| **Total** | **2318** | **395** | **395 (100%)** |
 
 Every **core source file** (`src/exo/`, `rust/`, `mlx/`, `mlx_lm/`) maps either to a
 thematic doc in this directory or to a one-line rationale in the
 [Appendix](#appendix-core-changes-not-covered-by-a-thematic-doc). The remaining 1923 files
 are benchmarks, model cards, ops scripts, campaign scratch (`tmp/`), the dashboard,
 build/meta, the docs themselves, and `.hermes/plans/` session scratch - self-describing
-by filename + commit message, not requiring prose. Core files whose change cannot be
-traced to a thematic doc or to the sync resolution notes are listed under
-[Needs rationale](#needs-rationale-core-files-with-no-sourced-rationale).
+by filename + commit message, not requiring prose. Core files whose change could not previously be traced to a thematic doc or to the sync resolution notes are listed under
+[Fork rationales](#fork-rationales-previously-unsourced-core-files).
 
 **Reading the tables:** `S`=status (A added / M modified / D deleted), `#c`=number of
 non-merge commits touching the file in `<merge-base>..main`, `Rationale / Doc`=where the
@@ -303,24 +302,24 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | S | File | #c | Rationale / Doc |
 |---|------|----|-----------------|
 | M | `rust/networking/src/discovery.rs` | 1 | sync-notes-exo: combined - kept our v4 socket/static unicast peers; adopted #2346 StallGuard, #2320 single-attempt reply, #2419, #2327 |
-| M | `rust/networking/src/lib.rs` | 1 | NEEDS RATIONALE |
+| M | `rust/networking/src/lib.rs` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/api/adapters/chat_completions.py` | 9 | mentioned in: docs/DSV4_VISION_PORT_PHASE5_PROCEDURE.md, docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-reasoning-budget-limiter-2026-10-13.md |
 | M | `src/exo/api/main.py` | 17 | sync-notes-exo: combined - kept our metrics/JIT/phase-marks; adopted #2322/#2369, #2330/#2356, #2362, #2415  (prior: api.md) |
-| A | `src/exo/api/phase_marks.py` | 1 | NEEDS RATIONALE |
-| M | `src/exo/api/tests/test_api_error_handling.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/api/phase_marks.py` | 1 | rationale documented in the Fork-rationales section |
+| M | `src/exo/api/tests/test_api_error_handling.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/api/tests/test_cancel_command.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/api/tests/test_chat_completions_image_blocks.py` | 1 | mentioned in: docs/PERFORMANCE_HISTORY.md |
-| M | `src/exo/api/tests/test_chat_completions_stream.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/api/tests/test_correlation_id.py` | 1 | NEEDS RATIONALE |
-| M | `src/exo/api/tests/test_image_error_chunk_routing.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/api/tests/test_interrupted_generation_streams.py` | 0 | NEEDS RATIONALE |
+| M | `src/exo/api/tests/test_chat_completions_stream.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/api/tests/test_correlation_id.py` | 1 | rationale documented in the Fork-rationales section |
+| M | `src/exo/api/tests/test_image_error_chunk_routing.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/api/tests/test_interrupted_generation_streams.py` | 0 | rationale documented in the Fork-rationales section |
 | A | `src/exo/api/tests/test_jit_request_path.py` | 3 | mentioned in: docs/jit-model-lifecycle-handoff-2026-06-30.md |
-| A | `src/exo/api/tests/test_reasoning_effort_clamp.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/api/tests/test_seed_resolution.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/api/tests/test_reasoning_effort_clamp.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/api/tests/test_seed_resolution.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/api/tests/test_task_failed_stream_error.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | M | `src/exo/api/types/__init__.py` | 3 | api.md |
 | M | `src/exo/api/types/api.py` | 12 | api.md |
-| M | `src/exo/api/types/openai_responses.py` | 1 | NEEDS RATIONALE |
+| M | `src/exo/api/types/openai_responses.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/download/coordinator.py` | 5 | sync-notes-exo: combined - our repo_url passthrough + upstream #2349 ValueError guard  (prior: skill:2026-06-04-stale-uvlock-and-upstream-merge.md (zenoh) / commit history (P2P)) |
 | M | `src/exo/download/download_utils.py` | 8 | skill:2026-06-04-stale-uvlock-and-upstream-merge.md (zenoh) / commit history (P2P) |
 | A | `src/exo/download/file_server.py` | 5 | skill:2026-06-04-stale-uvlock-and-upstream-merge.md (zenoh) / commit history (P2P) |
@@ -328,32 +327,32 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | M | `src/exo/download/shard_downloader.py` | 2 | skill:2026-06-04-stale-uvlock-and-upstream-merge.md (zenoh) / commit history (P2P) |
 | M | `src/exo/download/tests/test_cancel_download.py` | 1 | skill:2026-06-04-stale-uvlock-and-upstream-merge.md (zenoh) / commit history (P2P) |
 | M | `src/exo/download/tests/test_re_download.py` | 1 | skill:2026-06-04-stale-uvlock-and-upstream-merge.md (zenoh) / commit history (P2P) |
-| M | `src/exo/download/tests/test_rescan_announcements.py` | 0 | NEEDS RATIONALE |
+| M | `src/exo/download/tests/test_rescan_announcements.py` | 0 | rationale documented in the Fork-rationales section |
 | M | `src/exo/main.py` | 3 | mentioned in: upstream-prs.md, skill:upstream-integration-and-deploy.md |
 | M | `src/exo/master/main.py` | 8 | sync-notes-exo: combined - kept _index_apply_broadcast + _state_lock + JIT reaper; adopted #2322/#2369/#2361/#2362/#2363/#2405; NODE_SILENCE_TIMEOUT kept 30s REVIEW  (prior: mentioned in: upstream-prs.md, skill:upstream-integration-and-deploy.md) |
 | M | `src/exo/master/placement.py` | 3 | sync-notes-exo: combined - InsufficientMemoryError (ours, JIT) carrying upstream _not_enough_memory message  (prior: mentioned in: api.md, fork-notes.md) |
 | M | `src/exo/master/placement_utils.py` | 10 | _feat: add EXO_PP_LAYER_SPLIT for pipeline stage rebalancing_ |
-| M | `src/exo/master/tests/test_event_log_requests.py` | 0 | NEEDS RATIONALE |
+| M | `src/exo/master/tests/test_event_log_requests.py` | 0 | rationale documented in the Fork-rationales section |
 | A | `src/exo/master/tests/test_jit_lifecycle.py` | 3 | mentioned in: docs/jit-model-lifecycle-handoff-2026-06-30.md |
 | M | `src/exo/master/tests/test_master.py` | 1 | sync-notes-exo: upstream snapshot_sender; dropped ev_send mock router (no event_sender in our Master)  (prior: _fix: index master events synchronously to enable multi-instance load balancing_) |
-| M | `src/exo/master/tests/test_master_change_tasks.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/master/tests/test_master_takeover.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/master/tests/test_placement_utils.py` | 4 | NEEDS RATIONALE |
+| M | `src/exo/master/tests/test_master_change_tasks.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/master/tests/test_master_takeover.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/master/tests/test_placement_utils.py` | 4 | rationale documented in the Fork-rationales section |
 | A | `src/exo/master/tests/test_routing_concurrency.py` | 3 | _test: add concurrent routing test + bench harness for sibling contention_ |
-| M | `src/exo/master/tests/test_silent_nodes.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/master/tests/test_unplaceable_requests.py` | 0 | NEEDS RATIONALE |
+| M | `src/exo/master/tests/test_silent_nodes.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/master/tests/test_unplaceable_requests.py` | 0 | rationale documented in the Fork-rationales section |
 | A | `src/exo/metrics/__init__.py` | 3 | metrics.md |
 | A | `src/exo/metrics/metrics.py` | 5 | metrics.md |
 | A | `src/exo/metrics/tests/__init__.py` | 1 | metrics.md |
 | A | `src/exo/metrics/tests/test_metrics.py` | 1 | metrics.md |
-| M | `src/exo/shared/apply.py` | 1 | NEEDS RATIONALE |
+| M | `src/exo/shared/apply.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/shared/constants.py` | 7 | mentioned in: fork-notes.md, minimax-rdma-moe-validation-2026-04-24.md |
 | M | `src/exo/shared/models/model_cards.py` | 4 | mentioned in: docs/DSV4_VISION_PORT_PHASE5_PROCEDURE.md, docs/DSV4_VISION_PORT_PLAN_PHASE34.md, docs/PERFORMANCE_HISTORY.md |
-| A | `src/exo/shared/tests/test_apply/test_apply_task_created_terminal_guard.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/shared/tests/test_clamp_reasoning_effort.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/shared/tests/test_event_serialization.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/shared/tests/test_apply/test_apply_task_created_terminal_guard.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/shared/tests/test_clamp_reasoning_effort.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/shared/tests/test_event_serialization.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/shared/tests/test_submodule_lock_pin_alignment.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/dsv41-indexer-qsplit-buildnote-2026-10-11.md, docs/dsv41-next27-ringfix-construct-2026-10-14.md |
-| M | `src/exo/shared/types/chunks.py` | 2 | NEEDS RATIONALE |
+| M | `src/exo/shared/types/chunks.py` | 2 | rationale documented in the Fork-rationales section |
 | M | `src/exo/shared/types/commands.py` | 2 | mentioned in: skill:session-workflow-rules.md, skill:notifying-user-via-discord-gateway-cron.md |
 | M | `src/exo/shared/types/tasks.py` | 1 | mentioned in: upstream-prs.md, deepseek-v4-mtp-performance.md |
 | M | `src/exo/shared/types/text_generation.py` | 8 | _feat(sampling): card tier between instance and cluster-env defaults_ |
@@ -362,30 +361,30 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | M | `src/exo/shared/types/worker/instances.py` | 7 | mentioned in: api.md, fork-notes.md |
 | M | `src/exo/shared/types/worker/runner_response.py` | 3 | mentioned in: docs/dsv41-reasoning-budget-limiter-2026-10-13.md |
 | M | `src/exo/utils/info_gatherer/info_gatherer.py` | 2 | mentioned in: docs/p2-xctrace-prefill-collective-wedge-2026-08-23.md |
-| M | `src/exo/utils/info_gatherer/tests/test_tb_parsing.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/utils/log_format.py` | 1 | NEEDS RATIONALE |
-| M | `src/exo/worker/engines/base.py` | 3 | NEEDS RATIONALE |
+| M | `src/exo/utils/info_gatherer/tests/test_tb_parsing.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/utils/log_format.py` | 1 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/engines/base.py` | 3 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/engines/mlx/auto_parallel.py` | 53 | mentioned in: fork-notes.md, minimax-fused-attention-prompt.md |
 | M | `src/exo/worker/engines/mlx/builder.py` | 5 | sync-notes-exo: EXO_SINGLE_GPU_STREAM=0 kill switch around use_generation_stream_by_default  (prior: mentioned in: skill:2026-05-19-tree-drafting-forensics.md, skill:2026-05-25-pool-defer-and-compressor-attribution.md) |
 | M | `src/exo/worker/engines/mlx/cache.py` | 48 | sync-notes-exo: ours (radix trie). #2368 SKIPPED-covered (trie has max_sessions/max_bytes caps via builder.py:158)  (prior: kv-cache-architecture.md) |
 | M | `src/exo/worker/engines/mlx/constants.py` | 11 | mentioned in: fork-notes.md, minimax-rdma-moe-validation-2026-04-24.md |
 | A | `src/exo/worker/engines/mlx/deepseek_v4_vision.py` | 1 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/deepseek-v41-exl3-plan.md, docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md |
 | M | `src/exo/worker/engines/mlx/disaggregated/adapter.py` | 4 | mentioned in: minimax-quantized-sdpa-design.md, skill:session-workflow-rules.md |
-| M | `src/exo/worker/engines/mlx/disaggregated/client.py` | 1 | NEEDS RATIONALE |
+| M | `src/exo/worker/engines/mlx/disaggregated/client.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/engines/mlx/disaggregated/serve.py` | 2 | mentioned in: docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-spec-rollback-ring-fix-2026-10-14.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/disaggregated/tests/test_composite_cache_wire.py` | 3 | NEEDS RATIONALE |
-| M | `src/exo/worker/engines/mlx/disaggregated/tests/test_mlx_adapter.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/__init__.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/disaggregated/tests/test_composite_cache_wire.py` | 3 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/engines/mlx/disaggregated/tests/test_mlx_adapter.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/__init__.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/agreement.py` | 2 | mentioned in: docs/dsv41-restart-g1-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md |
-| A | `src/exo/worker/engines/mlx/dsv41/builder.py` | 5 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/builder.py` | 5 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/coord.py` | 4 | mentioned in: docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-native-experts-fit-scope-2026-10-11.md, docs/dsv41-restart-g1-buildnote-2026-10-10.md |
 | A | `src/exo/worker/engines/mlx/dsv41/degeneration.py` | 6 | mentioned in: docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-reasoning-budget-limiter-2026-10-13.md |
 | A | `src/exo/worker/engines/mlx/dsv41/dispatch.py` | 1 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md |
-| A | `src/exo/worker/engines/mlx/dsv41/dsml.py` | 4 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/dsml.py` | 4 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/engine.py` | 34 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/dsv41-big-append-census-2026-10-13.md, docs/dsv41-degeneration-guards-2026-10-13.md |
 | A | `src/exo/worker/engines/mlx/dsv41/engram.py` | 2 | mentioned in: docs/deepseek-v41-exl3-plan.md |
-| A | `src/exo/worker/engines/mlx/dsv41/errors.py` | 3 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/fingerprint.py` | 8 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/errors.py` | 3 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/fingerprint.py` | 8 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/load.py` | 3 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/benchmarks/phase3-mtp-dspark-port-2026-09-27/README.md, docs/dsv41-scaling-alternatives-brief-2026-10-15.md |
 | A | `src/exo/worker/engines/mlx/dsv41/output.py` | 4 | mentioned in: docs/dsv41-reasoning-budget-limiter-2026-10-13.md |
 | A | `src/exo/worker/engines/mlx/dsv41/park.py` | 7 | mentioned in: docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-next25-guards-construct-2026-10-13.md, docs/dsv41-restart-g1-buildnote-2026-10-10.md |
@@ -393,30 +392,30 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | A | `src/exo/worker/engines/mlx/dsv41/rounds.py` | 13 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-reasoning-budget-limiter-2026-10-13.md |
 | A | `src/exo/worker/engines/mlx/dsv41/session.py` | 22 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/benchmarks/phase22-dsv41-prefill-speed-2026-10-01/README.md, docs/dsv41-big-append-census-2026-10-13.md |
 | A | `src/exo/worker/engines/mlx/dsv41/shutdown.py` | 2 | mentioned in: docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-restart-g3-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/__init__.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/_stub_harness.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/checkpoint_sentinels.json` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/conftest.py` | 6 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/__init__.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/_stub_harness.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/checkpoint_sentinels.json` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/conftest.py` | 6 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_degeneration.py` | 4 | mentioned in: docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-spec-rollback-ring-fix-2026-10-14.md |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_dispatch.py` | 6 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_dsml.py` | 2 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_dispatch.py` | 6 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_dsml.py` | 2 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_engine.py` | 18 | mentioned in: docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-reasoning-budget-limiter-2026-10-13.md, docs/dsv41-restart-deploy-construct-2026-10-11.md |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_fingerprint.py` | 1 | mentioned in: docs/dsv41-restart-deploy-construct-2026-10-11.md, docs/dsv41-restart-g2g5-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_load_warmup_liveness.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_output.py` | 3 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_load_warmup_liveness.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_output.py` | 3 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park.py` | 2 | mentioned in: docs/dsv41-restart-g2g5-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g1.py` | 2 | mentioned in: docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-restart-deploy-construct-2026-10-11.md, docs/dsv41-restart-g1-buildnote-2026-10-10.md |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g2g5.py` | 1 | mentioned in: docs/dsv41-restart-g2g5-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g3.py` | 2 | mentioned in: docs/dsv41-restart-g3-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_park_g4.py` | 3 | mentioned in: docs/dsv41-restart-g4-buildnote-2026-10-10.md, docs/dsv41-restart-prelive-review-2026-10-11.md, docs/dsv41-restart-rankfix-buildnote-2026-10-11.md |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_prefill_liveness.py` | 2 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_prefill_liveness.py` | 2 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_reasoning_budget.py` | 2 | mentioned in: docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-reasoning-budget-limiter-2026-10-13.md, docs/dsv41-spec-rollback-ring-fix-2026-10-14.md |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_reuse_ladder.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_sentinels.py` | 2 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_reuse_ladder.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_sentinels.py` | 2 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_session.py` | 12 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/dsv41-next27-ringfix-construct-2026-10-14.md, docs/dsv41-spec-rollback-ring-fix-2026-10-14.md |
-| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_thinking_load.py` | 2 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/thinking.py` | 3 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/dsv41/vision.py` | 6 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/dsv41/tests/test_dsv41_thinking_load.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/thinking.py` | 3 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/dsv41/vision.py` | 6 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/engines/mlx/generator/batch_generate.py` | 159 | sync-notes-exo: ours. #2365 finish-via-max_tokens cancel DEFERRED (MTP generator subclasses; max_tokens=0 unverified)  (prior: mentioned in: skill:mtp-bistability-2026-05-17-investigation.md, skill:2026-05-21-c2-100k-mtp-recipe.md) |
 | M | `src/exo/worker/engines/mlx/generator/generate.py` | 93 | sync-notes-exo: ours + adopted #2393 mx.synchronize(generation_stream) before prefill barrier; local generation_stream alias covers #2391  (prior: mentioned in: upstream-prs.md, api.md) |
 | M | `src/exo/worker/engines/mlx/generator/remote_prefill.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
@@ -447,7 +446,7 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | A | `src/exo/worker/engines/mlx/patches/qwen3_5_moe/kernels/fused_qk_rmsnorm.py` | 3 | mentioned in: minimax-fused-attention-prompt.md, minimax-decode-optimization.md |
 | A | `src/exo/worker/engines/mlx/patches/qwen3_5_moe/kernels/fused_rms_norm_gated.py` | 3 | _perf: switch compute dtype from bf16 to fp16 for ~7% faster quantized_matmul_ |
 | A | `src/exo/worker/engines/mlx/patches/qwen3_5_moe/kernels/gdn_step_precomputed.py` | 1 | _feat: MTP speculative decoding + kernel patches for Qwen3.5_ |
-| A | `src/exo/worker/engines/mlx/phase_marks.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/phase_marks.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/pp_batched_cache_router.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/pp_batched_correctness.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/pp_batched_decode_adapter.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
@@ -463,7 +462,7 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | A | `src/exo/worker/engines/mlx/pp_scheduler_wire.py` | 7 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/handoff-2026-08-08-section22.md, docs/handoff-2026-08-09-section39.md |
 | A | `src/exo/worker/engines/mlx/pp_speculation.py` | 94 | deepseek-v4-mtp-performance.md / mtp-tiebreak-losslessness-fix.md / fork-notes.md |
 | A | `src/exo/worker/engines/mlx/pp_speculation_spec_tag.py` | 2 | mentioned in: docs/dspark-mtp-ab-preregister-2026-08-25.md |
-| A | `src/exo/worker/engines/mlx/prefill_chunking.py` | 2 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/prefill_chunking.py` | 2 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/sampling.py` | 5 | mentioned in: upstream-prs.md, api.md |
 | A | `src/exo/worker/engines/mlx/speculative/__init__.py` | 1 | deepseek-v4-mtp-performance.md / mtp-tiebreak-losslessness-fix.md / fork-notes.md |
 | A | `src/exo/worker/engines/mlx/speculative/dsv4_mtp.py` | 191 | deepseek-v4-mtp-performance.md / mtp-tiebreak-losslessness-fix.md / fork-notes.md |
@@ -473,56 +472,56 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | A | `src/exo/worker/engines/mlx/speculative/speculative_gdn_kernel.py` | 3 | deepseek-v4-mtp-performance.md / mtp-tiebreak-losslessness-fix.md / fork-notes.md |
 | A | `src/exo/worker/engines/mlx/tests/_pp_admission_race_subprocess_worker.py` | 6 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md |
 | A | `src/exo/worker/engines/mlx/tests/_pp_chunk_drive_subprocess_worker.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/_pp_exchange_prefill_peer_layer_count_subprocess_worker.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/_pp_exchange_prefill_peer_layer_count_subprocess_worker.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/_pp_glue_subprocess_worker.py` | 5 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md |
 | A | `src/exo/worker/engines/mlx/tests/_pp_subprocess_worker.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_batch_generate_batched_decode_flag_off_smoke.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_batch_generate_chunked_prefill_live_wiring.py` | 3 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_batch_generate_rank1_batched_decode_dispatch.py` | 2 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md |
 | A | `src/exo/worker/engines/mlx/tests/test_batch_pooling_cache_overlap.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md |
-| A | `src/exo/worker/engines/mlx/tests/test_batched_decode_external_cancel.py` | 2 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/tests/test_dspark_load_guard_quant_keys.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/tests/test_dspark_tp_shard_gate.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_batched_decode_external_cancel.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/tests/test_dspark_load_guard_quant_keys.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/tests/test_dspark_tp_shard_gate.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_dsv4_mtp_phase_timer_unit_metadata.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md |
-| A | `src/exo/worker/engines/mlx/tests/test_dsv4_vision_end_to_end_offline.py` | 3 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/tests/test_generation_tps_baseline.py` | 3 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_dsv4_vision_end_to_end_offline.py` | 3 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/tests/test_generation_tps_baseline.py` | 3 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_has_pipeline_communication_layer.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_hc_expand_kernel.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md |
-| A | `src/exo/worker/engines/mlx/tests/test_patch_embed_tokens_bounds_check.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/tests/test_pipeline_prefix_hit_agreement.py` | 2 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_patch_embed_tokens_bounds_check.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/tests/test_pipeline_prefix_hit_agreement.py` | 2 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_admission_race_subprocess.py` | 1 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_cache_router.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_correctness_harness.py` | 1 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_adapter.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_adapter.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_correctness.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_driver.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_driver.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_driver_full_stack.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_eligibility.py` | 3 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_glue_chunk_drive.py` | 6 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_glue_subprocess.py` | 2 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_layers_install.py` | 4 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_layers_install.py` | 4 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_over_real_wire.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_runtime.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_batched_decode_subprocess.py` | 1 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_chunk_drive_subprocess.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_exchange_prefill_peer_layer_count_subprocess.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_metaframe.py` | 7 | mentioned in: docs/batched-decode-n2-admission-handoff-2026-08-05.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_metaframe_batch_axis.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_metaframe_batch_axis.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_pipeline_parallel_prefill_session_integration.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_prefill_advance_budget_parity.py` | 1 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_prefill_session.py` | 2 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_prefill_session.py` | 2 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_scheduler_protocol.py` | 3 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_scheduler_wire.py` | 4 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_scheduler_wire.py` | 4 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_spec_gen_by_uid.py` | 3 | mentioned in: docs/dspark-draft-epilogue-fusion-2026-08-27.md |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_speculation_cache_snapshot.py` | 5 | mentioned in: docs/dspark-draft-epilogue-fusion-2026-08-27.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_pp_speculation_layer_reset.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_pp_speculation_layer_reset.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_pp_speculation_spec_tag.py` | 2 | mentioned in: docs/dspark-mtp-ab-preregister-2026-08-25.md |
 | A | `src/exo/worker/engines/mlx/tests/test_prefill_batched.py` | 2 | prefill-optimization.md |
-| A | `src/exo/worker/engines/mlx/tests/test_prefill_chunking_cache_offset_wiring.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/tests/test_prefill_chunking_image_spans.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_prefill_chunking_cache_offset_wiring.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/tests/test_prefill_chunking_image_spans.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_prefill_interruptible_start_gate_safety.py` | 3 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
-| A | `src/exo/worker/engines/mlx/tests/test_prefill_residual_gap_wiring.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/tests/test_prefix_cache_image_poisoning.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/tests/test_prefill_residual_gap_wiring.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/tests/test_prefix_cache_image_poisoning.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/engines/mlx/tests/test_reasoning_budget_limiter.py` | 4 | mentioned in: docs/dsv41-next26-limiter-construct-2026-10-14.md, docs/dsv41-reasoning-budget-limiter-2026-10-13.md |
 | A | `src/exo/worker/engines/mlx/tests/test_reset_after_reconnect_recreates_glue.py` | 2 | mentioned in: docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | A | `src/exo/worker/engines/mlx/tests/test_strict_false_load_guard.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/benchmarks/phase6-strict-false-guard-2026-09-28/README.md |
@@ -532,43 +531,43 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | M | `src/exo/worker/engines/mlx/types.py` | 2 | mentioned in: api.md, kv-cache-architecture.md |
 | M | `src/exo/worker/engines/mlx/utils_mlx.py` | 52 | sync-notes-exo: ours + upstream use_generation_stream_by_default() (#2391)  (prior: mentioned in: skill:upstream-sync-triage.md) |
 | M | `src/exo/worker/engines/mlx/vendor/deepseek_v4_encoding.py` | 5 | mentioned in: docs/DSV4_VISION_PORT_PHASE5_PROCEDURE.md, docs/DSV4_VISION_PORT_PLAN_PHASE34.md, docs/PERFORMANCE_HISTORY.md |
-| A | `src/exo/worker/engines/mlx/vendor/deepseek_v4_image_processor.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/vendor/deepseek_v4_image_processor.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/engines/mlx/vendor/dsml_encoding.py` | 5 | mentioned in: docs/PERFORMANCE_HISTORY.md |
-| A | `src/exo/worker/engines/mlx/vendor/tests/test_deepseek_v4_image_processor.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/engines/mlx/vendor/tests/test_sentinelless_recovery.py` | 2 | NEEDS RATIONALE |
-| M | `src/exo/worker/engines/mlx/vision.py` | 3 | NEEDS RATIONALE |
+| A | `src/exo/worker/engines/mlx/vendor/tests/test_deepseek_v4_image_processor.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/engines/mlx/vendor/tests/test_sentinelless_recovery.py` | 2 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/engines/mlx/vision.py` | 3 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/main.py` | 10 | sync-notes-exo: combined - our I16 event-wake + phase marks kept; adopted #2369/#2322 (_gathered, StateSnapshot), #2336, #2389, #2358  (prior: mentioned in: upstream-prs.md, skill:upstream-integration-and-deploy.md) |
-| A | `src/exo/worker/phase_marks.py` | 3 | NEEDS RATIONALE |
+| A | `src/exo/worker/phase_marks.py` | 3 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/plan.py` | 6 | sync-notes-exo: combined imports (ours EXO_FILE_SERVER_PORT/NodeNetworkInfo; dropped now-unused InputImageChunk/CommandId after #2358)  (prior: _fix: thread node_network through plan() to _model_needs_download()_) |
 | M | `src/exo/worker/runner/bootstrap.py` | 14 | sync-notes-exo: combined - our QoS/coredump/profiler/release kept; adopted #2377 use_fast_synch (accepts "1"/"0")  (prior: mentioned in: upstream-prs.md, skill:2026-05-22-bootstrap-barrier-and-ce5c64fd-wedge.md) |
 | M | `src/exo/worker/runner/diagnostics.py` | 2 | sync-notes-exo: same fix both sides (#2366) -> upstream Annotated form + our comment; removed duplicate pydantic import |
 | M | `src/exo/worker/runner/llm_inference/batch_generator.py` | 43 | sync-notes-exo: auto-merged #2365 part 2 (drop cancelled queued tasks) - kept  (prior: mentioned in: upstream-prs.md, skill:mlx-upstream-port-validation.md) |
 | M | `src/exo/worker/runner/llm_inference/model_output_parsers.py` | 30 | sync-notes-exo: ours (typed clean-fail error w/ tool_call_parse_failure_kind). #2394 SKIPPED (behavioral conflict) REVIEW  (prior: thinking-parser-fused-delimiter-fix.md) |
-| A | `src/exo/worker/runner/llm_inference/tests/test_batch_generator_step_cancellation_latency.py` | 4 | NEEDS RATIONALE |
-| A | `src/exo/worker/runner/llm_inference/tests/test_step_prefill_cancelled_guard.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/runner/llm_inference/tests/test_batch_generator_step_cancellation_latency.py` | 4 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/runner/llm_inference/tests/test_step_prefill_cancelled_guard.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/runner/runner.py` | 22 | mentioned in: upstream-prs.md, thinking-parser-fused-delimiter-fix.md |
 | M | `src/exo/worker/runner/supervisor.py` | 18 | sync-notes-exo: combined - our hang watchdog/_check_hang/_check_stuck_init kept; adopted #2367 _lost_its_peers + #2370 _stuck (gated to HANG_TIMEOUT_SECONDS<=0, REVIEW) + _last_heard; #2380 in_progress skip |
-| A | `src/exo/worker/runner/tests/__init__.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/runner/tests/fixtures/synthetic_spin.txt` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/runner/tests/__init__.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/runner/tests/fixtures/synthetic_spin.txt` | 1 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/runner/tests/test_supervisor_hang_liveness_probe.py` | 1 | mentioned in: docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md |
-| A | `src/exo/worker/runner/tests/test_supervisor_hang_stack_guard.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/runner/tests/test_supervisor_hang_tracing.py` | 2 | NEEDS RATIONALE |
-| M | `src/exo/worker/tests/unittests/test_fast_synch.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/worker/tests/unittests/test_mlx/conftest.py` | 1 | NEEDS RATIONALE |
+| A | `src/exo/worker/runner/tests/test_supervisor_hang_stack_guard.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/runner/tests/test_supervisor_hang_tracing.py` | 2 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/tests/unittests/test_fast_synch.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/tests/unittests/test_mlx/conftest.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/tests/unittests/test_mlx/test_kv_prefix_cache.py` | 16 | kv-cache-architecture.md |
-| M | `src/exo/worker/tests/unittests/test_mlx/test_prefix_cache_limits.py` | 0 | NEEDS RATIONALE |
-| A | `src/exo/worker/tests/unittests/test_plan/test_plan_step_event_wake.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/tests/unittests/test_plan/test_plan_step_lifecycle_dispatch.py` | 1 | NEEDS RATIONALE |
-| A | `src/exo/worker/tests/unittests/test_plan/test_plan_step_lost_wakeup_fuzz.py` | 1 | NEEDS RATIONALE |
-| M | `src/exo/worker/tests/unittests/test_plan/test_worker_task_announcements.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/worker/tests/unittests/test_runner/test_batch_cancellation.py` | 0 | NEEDS RATIONALE |
-| A | `src/exo/worker/tests/unittests/test_runner/test_concurrency_admission_gate.py` | 3 | NEEDS RATIONALE |
-| M | `src/exo/worker/tests/unittests/test_runner/test_dsml_e2e.py` | 19 | NEEDS RATIONALE |
+| M | `src/exo/worker/tests/unittests/test_mlx/test_prefix_cache_limits.py` | 0 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/tests/unittests/test_plan/test_plan_step_event_wake.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/tests/unittests/test_plan/test_plan_step_lifecycle_dispatch.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/tests/unittests/test_plan/test_plan_step_lost_wakeup_fuzz.py` | 1 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/tests/unittests/test_plan/test_worker_task_announcements.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/tests/unittests/test_runner/test_batch_cancellation.py` | 0 | rationale documented in the Fork-rationales section |
+| A | `src/exo/worker/tests/unittests/test_runner/test_concurrency_admission_gate.py` | 3 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/tests/unittests/test_runner/test_dsml_e2e.py` | 19 | rationale documented in the Fork-rationales section |
 | M | `src/exo/worker/tests/unittests/test_runner/test_event_ordering.py` | 2 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md |
 | M | `src/exo/worker/tests/unittests/test_runner/test_finish_reason_sse.py` | 2 | mentioned in: thinking-parser-fused-delimiter-fix.md, skill:2026-06-03-fused-think-delimiter-parser-bug.md |
 | A | `src/exo/worker/tests/unittests/test_runner/test_loop_detection.py` | 7 | mentioned in: docs/PERFORMANCE_HISTORY.md, docs/dsv41-degeneration-guards-2026-10-13.md, docs/dsv41-next25-guards-construct-2026-10-13.md |
-| M | `src/exo/worker/tests/unittests/test_runner/test_parse_tool_calls.py` | 0 | NEEDS RATIONALE |
-| M | `src/exo/worker/tests/unittests/test_runner/test_runner_supervisor.py` | 0 | NEEDS RATIONALE |
+| M | `src/exo/worker/tests/unittests/test_runner/test_parse_tool_calls.py` | 0 | rationale documented in the Fork-rationales section |
+| M | `src/exo/worker/tests/unittests/test_runner/test_runner_supervisor.py` | 0 | rationale documented in the Fork-rationales section |
 | A | `src/exo/worker/tests/unittests/test_runner/test_runner_supervisor_hang_probe.py` | 3 | mentioned in: docs/incidents/hang-watchdog-false-positive-and-vision-regression-2026-09-21.md |
 
 ### Dashboard (UI)  (2 files)
@@ -2126,14 +2125,14 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | M | `mlx/backend/metal/eval.cpp` | 5 | mentioned in: skill:mlx-source-read-falsification-pattern.md, skill:session-discipline-pitfalls.md |
 | M | `mlx/backend/metal/event.cpp` | 11 | mentioned in: upstream-prs.md, api.md |
 | M | `mlx/backend/metal/fence.cpp` | 4 | sync-notes-mlx: upstream base (#4552 value-based API, #4689 end_encoding spin isolation) + our DSB SY read/write barriers on fast CPU path  (prior: fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md) |
-| M | `mlx/backend/metal/jit_kernels.cpp` | 1 | NEEDS RATIONALE |
-| M | `mlx/backend/metal/kernels.h` | 1 | NEEDS RATIONALE |
+| M | `mlx/backend/metal/jit_kernels.cpp` | 1 | rationale documented in the Fork-rationales section |
+| M | `mlx/backend/metal/kernels.h` | 1 | rationale documented in the Fork-rationales section |
 | M | `mlx/backend/metal/kernels/CMakeLists.txt` | 2 | sync-notes-mlx: combined - upstream sdpa_blocked/vjp/gated_delta kernels + our sdpa_chunked_reduce  (prior: mentioned in: skill:2026-05-26-mlx-upstream-sync-port.md, skill:upstream-sync-triage.md) |
 | M | `mlx/backend/metal/kernels/fence.metal` | 5 | fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md |
-| M | `mlx/backend/metal/kernels/fp_quantized.h` | 6 | NEEDS RATIONALE |
-| M | `mlx/backend/metal/kernels/fp_quantized.metal` | 4 | NEEDS RATIONALE |
-| M | `mlx/backend/metal/kernels/quantized.h` | 3 | NEEDS RATIONALE |
-| M | `mlx/backend/metal/kernels/quantized.metal` | 1 | NEEDS RATIONALE |
+| M | `mlx/backend/metal/kernels/fp_quantized.h` | 6 | rationale documented in the Fork-rationales section |
+| M | `mlx/backend/metal/kernels/fp_quantized.metal` | 4 | rationale documented in the Fork-rationales section |
+| M | `mlx/backend/metal/kernels/quantized.h` | 3 | rationale documented in the Fork-rationales section |
+| M | `mlx/backend/metal/kernels/quantized.metal` | 1 | rationale documented in the Fork-rationales section |
 | M | `mlx/backend/metal/kernels/scaled_dot_product_attention.metal` | 3 | sync-notes-mlx: combined - our quant 2pass instantiations + upstream tk1 instantiations  (prior: minimax-fused-attention-design.md / upstream-pr-drafts/02,04) |
 | A | `mlx/backend/metal/kernels/sdpa_vector_quant.h` | 5 | minimax-fused-attention-design.md / upstream-pr-drafts/02,04 |
 | A | `mlx/backend/metal/kernels/steel/attn/kernels/sdpa_chunked_reduce.h` | 2 | minimax-fused-attention-design.md / upstream-pr-drafts/02,04 |
@@ -2143,32 +2142,32 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | M | `mlx/backend/metal/matmul.cpp` | 3 | sync-notes-mlx: upstream thin-GEMM Case 2 + NAX split-K Case 3; our steel_batch_invariant_enabled() pin applied to both |
 | M | `mlx/backend/metal/metal.h` | 3 | mentioned in: upstream-prs.md, fork-notes.md |
 | M | `mlx/backend/metal/no_metal.cpp` | 2 | _metal: gpu_time_ns() — accumulate GPU-busy time from MTLCommandBuffer timestamps_ |
-| M | `mlx/backend/metal/nojit_kernels.cpp` | 1 | NEEDS RATIONALE |
-| M | `mlx/backend/metal/quantized.cpp` | 15 | NEEDS RATIONALE |
+| M | `mlx/backend/metal/nojit_kernels.cpp` | 1 | rationale documented in the Fork-rationales section |
+| M | `mlx/backend/metal/quantized.cpp` | 15 | rationale documented in the Fork-rationales section |
 | M | `mlx/backend/metal/resident.cpp` | 2 | iogpu-residency-set-abort.md |
 | M | `mlx/backend/metal/scaled_dot_product_attention.cpp` | 16 | sync-notes-mlx: combined (9 hunks) - our chunk config + upstream blocked D512; chunked dispatch ported to fc303/_bv/tile table  (prior: minimax-fused-attention-design.md / upstream-pr-drafts/02,04) |
-| M | `mlx/backend/metal/utils.h` | 1 | NEEDS RATIONALE |
-| M | `mlx/distributed/distributed.cpp` | 2 | NEEDS RATIONALE |
-| M | `mlx/distributed/distributed.h` | 2 | NEEDS RATIONALE |
-| M | `mlx/distributed/distributed_impl.h` | 2 | NEEDS RATIONALE |
+| M | `mlx/backend/metal/utils.h` | 1 | rationale documented in the Fork-rationales section |
+| M | `mlx/distributed/distributed.cpp` | 2 | rationale documented in the Fork-rationales section |
+| M | `mlx/distributed/distributed.h` | 2 | rationale documented in the Fork-rationales section |
+| M | `mlx/distributed/distributed_impl.h` | 2 | rationale documented in the Fork-rationales section |
 | M | `mlx/distributed/jaccl/jaccl.cpp` | 5 | sync-notes-mlx: took upstream get_mesh_connectivity() (vector-per-wire), pass mesh.at(0) into our MeshGroup ctor = pre-#4607 single-cable behaviour  (prior: fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md) |
-| M | `mlx/distributed/jaccl/lib/examples/CMakeLists.txt` | 4 | NEEDS RATIONALE |
-| A | `mlx/distributed/jaccl/lib/examples/coord_group_loopback_test.cpp` | 1 | NEEDS RATIONALE |
-| A | `mlx/distributed/jaccl/lib/examples/hopid_budget_probe.cpp` | 1 | NEEDS RATIONALE |
-| A | `mlx/distributed/jaccl/lib/examples/uc_rdma_write_probe.cpp` | 1 | NEEDS RATIONALE |
-| A | `mlx/distributed/jaccl/lib/jaccl/coord_group.h` | 1 | NEEDS RATIONALE |
+| M | `mlx/distributed/jaccl/lib/examples/CMakeLists.txt` | 4 | rationale documented in the Fork-rationales section |
+| A | `mlx/distributed/jaccl/lib/examples/coord_group_loopback_test.cpp` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx/distributed/jaccl/lib/examples/hopid_budget_probe.cpp` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx/distributed/jaccl/lib/examples/uc_rdma_write_probe.cpp` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx/distributed/jaccl/lib/jaccl/coord_group.h` | 1 | rationale documented in the Fork-rationales section |
 | M | `mlx/distributed/jaccl/lib/jaccl/group.h` | 4 | fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md |
-| M | `mlx/distributed/jaccl/lib/jaccl/jaccl.cpp` | 2 | NEEDS RATIONALE |
+| M | `mlx/distributed/jaccl/lib/jaccl/jaccl.cpp` | 2 | rationale documented in the Fork-rationales section |
 | M | `mlx/distributed/jaccl/lib/jaccl/mesh.cpp` | 28 | sync-notes-mlx: keep-ours (fork MeshGroup is ~6k lines reliable/ACK/pool/p2p-retry QP machinery; #4607 multi-wire restructure not mechanically portable) DEFERRED  (prior: fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md) |
 | M | `mlx/distributed/jaccl/lib/jaccl/mesh.h` | 13 | sync-notes-mlx: keep-ours (fork MeshGroup; #4607 multi-wire not portable) DEFERRED  (prior: fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md) |
 | M | `mlx/distributed/jaccl/lib/jaccl/mesh_impl.h` | 68 | sync-notes-mlx: keep-ours (fork MeshGroup; #4607 multi-wire not portable) DEFERRED  (prior: fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md) |
 | M | `mlx/distributed/jaccl/lib/jaccl/rdma.cpp` | 4 | fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md |
 | M | `mlx/distributed/jaccl/lib/jaccl/rdma.h` | 14 | fork-notes.md (JACCL/RDMA) / iogpu-residency-set-abort.md |
-| M | `mlx/distributed/jaccl/lib/jaccl/ring.cpp` | 1 | NEEDS RATIONALE |
-| M | `mlx/distributed/jaccl/lib/jaccl/ring.h` | 1 | NEEDS RATIONALE |
+| M | `mlx/distributed/jaccl/lib/jaccl/ring.cpp` | 1 | rationale documented in the Fork-rationales section |
+| M | `mlx/distributed/jaccl/lib/jaccl/ring.h` | 1 | rationale documented in the Fork-rationales section |
 | M | `mlx/distributed/jaccl/lib/jaccl/ring_impl.h` | 3 | sync-notes-mlx: auto-merged - #4443 mirroring fix once; our p2p send/recv buffer class (4KB cap) is distinct code; #4607 dispatch_wires->threadpool.h moved cleanly |
-| M | `mlx/distributed/jaccl/lib/jaccl/tcp.cpp` | 8 | NEEDS RATIONALE |
-| M | `mlx/distributed/jaccl/lib/jaccl/tcp.h` | 4 | NEEDS RATIONALE |
+| M | `mlx/distributed/jaccl/lib/jaccl/tcp.cpp` | 8 | rationale documented in the Fork-rationales section |
+| M | `mlx/distributed/jaccl/lib/jaccl/tcp.h` | 4 | rationale documented in the Fork-rationales section |
 | M | `mlx/fast.cpp` | 2 | mentioned in: minimax-quantized-sdpa-design.md, minimax-fused-attention-design.md |
 | M | `mlx/fast.h` | 1 | sync-notes-mlx: combined - keep sdpa_quant decl + upstream gated_delta_update decl  (prior: mentioned in: minimax-quantized-sdpa-design.md, minimax-fused-attention-design.md) |
 | M | `mlx/fast_primitives.h` | 1 | mentioned in: minimax-quantized-sdpa-design.md, minimax-fused-attention-design.md |
@@ -2214,58 +2213,58 @@ Rows annotated `sync-notes-*` are sourced from the 2026-10-16 sync resolution no
 | M | `mlx_lm/models/cache.py` | 69 | sync-notes-mlxml: upstream ArraysCache.make_mask change present (line ~1028)  (prior: kv-cache-architecture.md) |
 | A | `mlx_lm/models/deepseek_v4.py` | 270 | sync-notes-mlxml: fork module; deepseek_v4 dispatch unaffected  (prior: deepseek-v4-mtp-performance.md / mtp-tiebreak-losslessness-fix.md / fork-notes.md) |
 | D | `mlx_lm/models/deepseek_v41.py` | 0 | sync-notes-mlxml: COLLISION - upstream single-module deepseek_v41 vs fork PACKAGE (model_type deepseek_v41); FileFinder confirms PACKAGE WINS -> git rm upstream .py |
-| A | `mlx_lm/models/deepseek_v41/LICENSE` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/README.md` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/__init__.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/_gates.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/attention.py` | 12 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/cache.py` | 4 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/collective.py` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/compressor.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/config.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/dequant.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/engram.py` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/exl3_build.py` | 13 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/fakequant.py` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/hc_fused.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/hyper_connections.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/image_processor.py` | 1 | NEEDS RATIONALE |
+| A | `mlx_lm/models/deepseek_v41/LICENSE` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/README.md` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/__init__.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/_gates.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/attention.py` | 12 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/cache.py` | 4 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/collective.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/compressor.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/config.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/dequant.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/engram.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/exl3_build.py` | 13 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/fakequant.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/hc_fused.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/hyper_connections.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/image_processor.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `mlx_lm/models/deepseek_v41/indexer.py` | 21 | mentioned in: docs/dsv41-hierarchical-indexer-design-2026-10-04.md |
 | A | `mlx_lm/models/deepseek_v41/indexer_hierarchical.py` | 4 | mentioned in: docs/dsv41-hierarchical-indexer-design-2026-10-04.md |
-| A | `mlx_lm/models/deepseek_v41/layers.py` | 3 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/logprobs.py` | 1 | NEEDS RATIONALE |
+| A | `mlx_lm/models/deepseek_v41/layers.py` | 3 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/logprobs.py` | 1 | rationale documented in the Fork-rationales section |
 | A | `mlx_lm/models/deepseek_v41/model.py` | 11 | mentioned in: docs/benchmarks/wsC-prefill-2026-09-28/README.md |
-| A | `mlx_lm/models/deepseek_v41/moe.py` | 8 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/mtp.py` | 6 | NEEDS RATIONALE |
+| A | `mlx_lm/models/deepseek_v41/moe.py` | 8 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/mtp.py` | 6 | rationale documented in the Fork-rationales section |
 | A | `mlx_lm/models/deepseek_v41/prefill.py` | 8 | mentioned in: docs/benchmarks/wsC-prefill-2026-09-28/README.md |
-| A | `mlx_lm/models/deepseek_v41/sampling.py` | 3 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/serve.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/session_cache.py` | 5 | NEEDS RATIONALE |
-| A | `mlx_lm/models/deepseek_v41/sparse_attention.py` | 10 | NEEDS RATIONALE |
+| A | `mlx_lm/models/deepseek_v41/sampling.py` | 3 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/serve.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/session_cache.py` | 5 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/deepseek_v41/sparse_attention.py` | 10 | rationale documented in the Fork-rationales section |
 | A | `mlx_lm/models/deepseek_v41/spec.py` | 8 | mentioned in: docs/benchmarks/wsC-prefill-2026-09-28/README.md |
-| A | `mlx_lm/models/deepseek_v41/vision.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/LICENSE` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/NOTICE` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/README.md` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/__init__.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/decode.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/exl3_linear.py` | 3 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/exl3_moe.py` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/gemv_metal.py` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/hadamard.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/layer_state.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/loader.py` | 2 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/metal_kernels.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/ops.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/perm.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/reconstruct.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/ref/__init__.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/ref/codebook.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/ref/layer.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/ref/perm.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/ref/signs.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/signs.py` | 1 | NEEDS RATIONALE |
-| A | `mlx_lm/models/exl3/stripe.py` | 1 | NEEDS RATIONALE |
+| A | `mlx_lm/models/deepseek_v41/vision.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/LICENSE` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/NOTICE` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/README.md` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/__init__.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/decode.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/exl3_linear.py` | 3 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/exl3_moe.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/gemv_metal.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/hadamard.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/layer_state.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/loader.py` | 2 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/metal_kernels.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/ops.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/perm.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/reconstruct.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/ref/__init__.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/ref/codebook.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/ref/layer.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/ref/perm.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/ref/signs.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/signs.py` | 1 | rationale documented in the Fork-rationales section |
+| A | `mlx_lm/models/exl3/stripe.py` | 1 | rationale documented in the Fork-rationales section |
 | M | `mlx_lm/models/gated_delta.py` | 13 | sync-notes-mlxml: COMBINE - keep fork f32 beta (mx.sigmoid(b.astype(f32))) + add upstream `if allow_neg_eigval: beta *= 2.0`  (prior: mentioned in: prefill-optimization.md) |
 | A | `mlx_lm/models/hyper_connection.py` | 5 | mentioned in: skill:mx-compile-patterns.md, skill:2026-05-18-compile-boundary-regressions.md |
 | M | `mlx_lm/models/minimax.py` | 4 | minimax-*.md (fused-attention/quantized-sdpa/decode) |
@@ -2540,288 +2539,284 @@ sync-notes-exo entry above.
 
 ---
 
-## Needs rationale (core files with no sourced rationale)
+## Fork rationales (previously-unsourced core files)
 
-Core files (`src/exo/`, `rust/`, `mlx/`, `mlx_lm/`) that are divergent at the
-2026-10-16 merge-base but carry no rationale traceable to a thematic doc or to the
-sync resolution notes (`notes-exo.md` / `notes-mlx.md` / `notes-mlxml.md`). These
-are exactly the rows flagged `NEEDS RATIONALE` in the per-repo tables above; they
-are listed here for human review and **no rationale is invented for them**.
+All 160 core files previously flagged with no sourced rationale (exo 91, mlx 22,
+mlx-lm 47) received evidence-sourced one-line rationales on 2026-10-16 via a
+commit-history pass: introducing/representative commits verified, cited docs verified
+to exist, zero entries left unsourced. Sources are the introducing commit, in-code
+fork comments, and the fork docs/ tree.
 
 ### exo (91 files)
 
 **`rust/networking/src/`**
 
-- `lib.rs` (M, #c=1)
+- `lib.rs` — zenoh static-peering escape hatch (EXO_ZENOH_CONNECT) + native-v4 locator for the macOS TCC LocalNetwork discovery failure (source: ea8456265 fix(discovery): route peer discovery over Tailscale to survive macOS 27 TCC LocalNetwork restriction)
 
 **`src/exo/api/`**
 
-- `phase_marks.py` (A, #c=1)
+- `phase_marks.py` — API-process request-path phase marks (a1-a7) behind the EXO_PHASE_MARKS gate (source: docs/PERFORMANCE_HISTORY.md)
 
 **`src/exo/api/tests/`**
 
-- `test_api_error_handling.py` (M, #c=1)
-- `test_chat_completions_stream.py` (M, #c=1)
-- `test_correlation_id.py` (A, #c=1)
-- `test_image_error_chunk_routing.py` (M, #c=0)
-- `test_interrupted_generation_streams.py` (M, #c=0)
-- `test_reasoning_effort_clamp.py` (A, #c=1)
-- `test_seed_resolution.py` (A, #c=1)
+- `test_api_error_handling.py` — regression: non-streaming chat completions must return a real 500, not an empty 200, on an ErrorChunk (source: 89543e7bd fix(api): non-streaming chat completions returned empty 200 on error)
+- `test_chat_completions_stream.py` — error-stream shape: structured error_code on a context-length refusal vs 500 fallback for plain errors (source: b8b3d77b2 fix(dsv41): make the cache-capacity refusal client-classifiable)
+- `test_correlation_id.py` — client-supplied correlation_id identifies in-flight commands before the first chunk (source: b511427c8 feat(api): client-supplied correlation_id to identify in-flight commands pre-first-chunk)
+- `test_image_error_chunk_routing.py` — fixture seeds fork-only API fields (_master_node_id, node_id, _jit_inflight_loads) for image-error routing (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_interrupted_generation_streams.py` — fixture seeds fork-only API fields (_master_node_id, _jit_inflight_loads) for interrupted-stream errors (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_reasoning_effort_clamp.py` — over-ceiling reasoning_effort is clamped to the wire ceiling instead of 422 (source: 1a54be214 fix(api): clamp over-ceiling reasoning_effort to the wire ceiling instead of 422)
+- `test_seed_resolution.py` — seedless requests get a random seed resolved at API admission (they were fully deterministic) (source: 66506259e fix(sampling): seedless requests were fully deterministic - resolve a random seed at API admission)
 
 **`src/exo/api/types/`**
 
-- `openai_responses.py` (M, #c=1)
+- `openai_responses.py` — Responses-API types carry the clamped reasoning_effort wire value (source: 1a54be214 fix(api): clamp over-ceiling reasoning_effort to the wire ceiling instead of 422)
 
 **`src/exo/download/tests/`**
 
-- `test_rescan_announcements.py` (M, #c=0)
+- `test_rescan_announcements.py` — three zero-byte-catalog announcement tests skipped: fork 375a456a6 suppresses inert DownloadPending entries (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
 
 **`src/exo/master/tests/`**
 
-- `test_event_log_requests.py` (M, #c=0)
-- `test_master_change_tasks.py` (M, #c=0)
-- `test_master_takeover.py` (M, #c=0)
-- `test_placement_utils.py` (M, #c=4)
-- `test_silent_nodes.py` (M, #c=0)
-- `test_unplaceable_requests.py` (M, #c=0)
+- `test_event_log_requests.py` — Master fixture drops event_sender: the fork master commits its own events via _index_apply_broadcast (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_master_change_tasks.py` — master-sent events are read off the global stream (fork master has no event_sender channel) (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_master_takeover.py` — Master constructed without event_sender; fork master applies/broadcasts its own events (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_placement_utils.py` — jaccl TCP placement: same physical cable on both ends, non-RDMA cable preference, link-local demotion (source: 792138e15 fix(placement): demote link-local IPs below any routable path for jaccl TCP)
+- `test_silent_nodes.py` — captures master events by stubbing _index_apply_broadcast (fork master has no event_sender) (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_unplaceable_requests.py` — unplaceable request's ErrorChunk read from the global event stream (fork master self-commits events) (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
 
 **`src/exo/shared/`**
 
-- `apply.py` (M, #c=1)
+- `apply.py` — apply_task_created refuses to resurrect an already-terminal task (I16 defense in depth) (source: de6d5369b fix(state): apply_task_created must not resurrect a terminal task)
 
 **`src/exo/shared/tests/`**
 
-- `test_clamp_reasoning_effort.py` (A, #c=1)
-- `test_event_serialization.py` (A, #c=1)
+- `test_clamp_reasoning_effort.py` — shared clamp_reasoning_effort unit tests behind the API wire-ceiling clamp (source: 1a54be214 fix(api): clamp over-ceiling reasoning_effort to the wire ceiling instead of 422)
+- `test_event_serialization.py` — diagnostics evidence tuple: lax-field event round-trip that killed receiving nodes (source: c0dc84561 fix(events): diagnostics evidence tuple killed receiving nodes (lax field))
 
 **`src/exo/shared/tests/test_apply/`**
 
-- `test_apply_task_created_terminal_guard.py` (A, #c=1)
+- `test_apply_task_created_terminal_guard.py` — guards apply_task_created against resurrecting a terminal task (I16 follow-up) (source: de6d5369b fix(state): apply_task_created must not resurrect a terminal task)
 
 **`src/exo/shared/types/`**
 
-- `chunks.py` (M, #c=2)
+- `chunks.py` — ErrorChunk gains error_code + tool_call_parse_failure_kind so failures are client-classifiable and counted by kind (source: b8b3d77b2 fix(dsv41): make the cache-capacity refusal client-classifiable)
 
 **`src/exo/utils/`**
 
-- `log_format.py` (A, #c=1)
+- `log_format.py` — truncate_for_log: caps huge reprs (tool-schema payloads) so INFO logs stay readable (source: 7b941f4f4 fix(observability): surface runner crash cause + stop log flooding)
 
 **`src/exo/utils/info_gatherer/tests/`**
 
-- `test_tb_parsing.py` (M, #c=1)
+- `test_tb_parsing.py` — Thunderbolt ident() hardening regression tests from the 2026-08-22 incident (empty/partial iface maps) (source: fc9542938 fix: harden TB monitor + tracing-aware runner hang watchdog (2026-08-22 incident))
 
 **`src/exo/worker/`**
 
-- `phase_marks.py` (A, #c=3)
+- `phase_marks.py` — worker-process mark stream (mark_state_applied / mark_plan_step_observed) for I16 Gate A, EXO_PHASE_MARKS-gated (source: docs/PERFORMANCE_HISTORY.md)
 
 **`src/exo/worker/engines/`**
 
-- `base.py` (M, #c=3)
+- `base.py` — Engine park hooks (idle_tick/idle_tick_seconds, begin_shutdown/shutdown_park) with no-op defaults (source: docs/dsv41-restart-g1-buildnote-2026-10-10.md)
 
 **`src/exo/worker/engines/mlx/`**
 
-- `phase_marks.py` (A, #c=1)
-- `prefill_chunking.py` (A, #c=2)
-- `vision.py` (M, #c=3)
+- `phase_marks.py` — runner-subprocess phase marks (b1-b11) over the batch_generate/runner request lifecycle (source: docs/PERFORMANCE_HISTORY.md)
+- `prefill_chunking.py` — image-span-aware prefill chunk planner (Phase 4d), spans re-based into the local prefill frame (source: 01b66315e fix(dsv4-vision): re-base image spans into the local prefill frame (4d))
+- `vision.py` — DSv4-native branch in exo's vision layer (Phase 4b) + fail-closed on unidentified cached image regions (source: docs/DSV4_VISION_PORT_PLAN_PHASE34.md)
 
 **`src/exo/worker/engines/mlx/disaggregated/`**
 
-- `client.py` (M, #c=1)
+- `client.py` — CacheList/PoolingCache composites ingested over the KV-cache wire, offset from the restored cache (source: e3b6a0bed feat(disaggregated): CacheList + PoolingCache over the KV-cache wire)
 
 **`src/exo/worker/engines/mlx/disaggregated/tests/`**
 
-- `test_composite_cache_wire.py` (A, #c=3)
-- `test_mlx_adapter.py` (M, #c=1)
+- `test_composite_cache_wire.py` — wire round-trip for DSv4-Flash composite caches (CacheList/PoolingCache): tensor + meta_state equality (source: e3b6a0bed feat(disaggregated): CacheList + PoolingCache over the KV-cache wire)
+- `test_mlx_adapter.py` — adapter tests migrated to mlx-lm's .cache (was .state) semantic change (upstream ee19be4) (source: 9b3a03611 fix(mlx-lm-sync): adapt exo to mlx-lm .state semantic change (upstream ee19be4))
 
 **`src/exo/worker/engines/mlx/dsv41/`**
 
-- `__init__.py` (A, #c=1)
-- `builder.py` (A, #c=5)
-- `dsml.py` (A, #c=4)
-- `errors.py` (A, #c=3)
-- `fingerprint.py` (A, #c=8)
-- `thinking.py` (A, #c=3)
-- `vision.py` (A, #c=6)
+- `__init__.py` — DSv4.1 engine package docstring/__all__; mlx_lm.models.deepseek_v41 only imported lazily (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `builder.py` — DSv4.1 Builder: engine dispatch, vision-tower load, load-warmup liveness, 1M-context memory bound (source: a62a001c6 fix(dsv41): load warmup emits fence-backed liveness beats (ROUND-Q1B))
+- `dsml.py` — DSv4.1 DSML dialect (calls/invoke/parameter sentinels) on exo's DSML machinery, no MLX import at runtime (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `errors.py` — DSv4.1 engine error types; invalid request input fails alone instead of crashing the runner (source: 5a3bbe74a fix(dsv41): invalid request input fails alone instead of crashing the runner)
+- `fingerprint.py` — park/guard build fingerprint tables (KV allow/neutral): rank-invariant layout, limiter and guard entries (source: docs/dsv41-restart-deploy-construct-2026-10-11.md)
+- `thinking.py` — DSv4.1 thinking-marker resolution for this tokenizer (single added tokens) (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `vision.py` — DSv4.1 vision path: image-row mask for image prefill, v4 image render, per-request isolation (source: 9bd473798 fix(dsv41): install the image-row mask for the image prefill (VL routing + engram masks))
 
 **`src/exo/worker/engines/mlx/dsv41/tests/`**
 
-- `__init__.py` (A, #c=1)
-- `_stub_harness.py` (A, #c=1)
-- `checkpoint_sentinels.json` (A, #c=1)
-- `conftest.py` (A, #c=6)
-- `test_dsv41_dispatch.py` (A, #c=6)
-- `test_dsv41_dsml.py` (A, #c=2)
-- `test_dsv41_load_warmup_liveness.py` (A, #c=1)
-- `test_dsv41_output.py` (A, #c=3)
-- `test_dsv41_prefill_liveness.py` (A, #c=2)
-- `test_dsv41_reuse_ladder.py` (A, #c=1)
-- `test_dsv41_sentinels.py` (A, #c=2)
-- `test_dsv41_thinking_load.py` (A, #c=2)
+- `__init__.py` — package docstring for the DSv4.1 text-plumbing test package (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `_stub_harness.py` — stub harness for the park-idle-sessions-to-SSD tests (Option E) (source: 0626478d2 feat(dsv41): park idle sessions to SSD (Option E))
+- `checkpoint_sentinels.json` — checkpoint-derived sentinel table (DSML + thinking marker strings/ids) with provenance (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `conftest.py` — DSv4.1 test fixtures: FakeTokenizer wrapper parity + degeneration-guard/limiter harness (source: docs/dsv41-reasoning-budget-limiter-2026-10-13.md)
+- `test_dsv41_dispatch.py` — engine dispatch + model-card tests for the DSv4.1 engine (ROUND-Q1B warmup liveness) (source: a62a001c6 fix(dsv41): load warmup emits fence-backed liveness beats (ROUND-Q1B))
+- `test_dsv41_dsml.py` — DSv4.1 DSML dialect parsing tests (text plumbing, CPU-pinned) (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `test_dsv41_load_warmup_liveness.py` — load warmup must emit fence-backed liveness beats (ROUND-Q1B) (source: a62a001c6 fix(dsv41): load warmup emits fence-backed liveness beats (ROUND-Q1B))
+- `test_dsv41_output.py` — output pipeline: EOS turn no longer hangs, parser drained at end of turn (source: 24eab0fc9 fix(dsv41): engine EOS turn no longer hangs; mock answers from a real position table; drain parser at end of turn)
+- `test_dsv41_prefill_liveness.py` — prefill liveness: fence-hook wiring plus checkpoint-ladder rungs (source: 614a40bbe DSv4.1: periodic checkpoint ladder + end-anchored margin rung for reuse)
+- `test_dsv41_reuse_ladder.py` — checkpoint-ladder reuse tests (periodic rungs + end-anchored margin) (source: 614a40bbe DSv4.1: periodic checkpoint ladder + end-anchored margin rung for reuse)
+- `test_dsv41_sentinels.py` — sentinel-string tests against the checkpoint sentinel table (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
+- `test_dsv41_thinking_load.py` — thinking-marker load tests for the DSv4.1 tokenizer (source: e1695d803 feat(dsv41): DSv4.1 text plumbing -- DSML dialect, thinking markers, model card, engine dispatch, round helpers, tests)
 
 **`src/exo/worker/engines/mlx/tests/`**
 
-- `_pp_exchange_prefill_peer_layer_count_subprocess_worker.py` (A, #c=1)
-- `test_batched_decode_external_cancel.py` (A, #c=2)
-- `test_dspark_load_guard_quant_keys.py` (A, #c=1)
-- `test_dspark_tp_shard_gate.py` (A, #c=1)
-- `test_dsv4_vision_end_to_end_offline.py` (A, #c=3)
-- `test_generation_tps_baseline.py` (A, #c=3)
-- `test_patch_embed_tokens_bounds_check.py` (A, #c=1)
-- `test_pipeline_prefix_hit_agreement.py` (A, #c=2)
-- `test_pp_batched_decode_adapter.py` (A, #c=1)
-- `test_pp_batched_decode_driver.py` (A, #c=1)
-- `test_pp_batched_decode_layers_install.py` (A, #c=4)
-- `test_pp_metaframe_batch_axis.py` (A, #c=1)
-- `test_pp_prefill_session.py` (A, #c=2)
-- `test_pp_scheduler_wire.py` (A, #c=4)
-- `test_pp_speculation_layer_reset.py` (A, #c=1)
-- `test_prefill_chunking_cache_offset_wiring.py` (A, #c=1)
-- `test_prefill_chunking_image_spans.py` (A, #c=1)
-- `test_prefill_residual_gap_wiring.py` (A, #c=1)
-- `test_prefix_cache_image_poisoning.py` (A, #c=1)
+- `_pp_exchange_prefill_peer_layer_count_subprocess_worker.py` — subprocess worker reproducing the exchange_prefill_peer_layer_count send/send deadlock (source: c7766f0ab fix(pp-batched-decode): exchange_prefill_peer_layer_count send/send deadlock -- real production incident)
+- `test_batched_decode_external_cancel.py` — external cancellation routed through the real eviction protocol (source: 717523cb6 fix(pp-batched-decode): route external cancellation through the real eviction protocol)
+- `test_dspark_load_guard_quant_keys.py` — DSpark load guard must not false-FAIL on quantized heads (source: 72c678eee fix(mlx): stop the DSpark load guard reporting a false FAIL on quantized heads)
+- `test_dspark_tp_shard_gate.py` — env-gated TP sharding for the DSpark draft-head FFN (source: 2d85ccdcb perf(dspark): env-gated TP sharding for DSpark draft-head FFN)
+- `test_dsv4_vision_end_to_end_offline.py` — offline end-to-end vision pipeline acceptance (Phase 4), multi-image + image_token_id guard (source: 82a448d55 test(dsv4-vision): offline end-to-end vision pipeline (Phase 4 acceptance))
+- `test_generation_tps_baseline.py` — generation_tps metric + model-id baseline (uptime was being reported as generation time) (source: b843ca300 fix(metrics+deploy): generation_tps reported machine uptime as generation time; DSV4_MODEL_ID defaulted to the stale preview checkpoint)
+- `test_patch_embed_tokens_bounds_check.py` — patch_embed_tokens bounds hardening for out-of-range token ids (source: dab4a432a fix(dsv4-vision): patch_embed_tokens bounds hardening + test-infra guard)
+- `test_pipeline_prefix_hit_agreement.py` — PP KV-prefix-cache reuse via cross-rank hit-length agreement (source: 5e496ddb4 Re-enable PP KV-prefix-cache reuse via cross-rank hit-length agreement)
+- `test_pp_batched_decode_adapter.py` — thin Response-classification adapter for the batched-decode session (source: ced9db437 feat(pp-batched): thin Response-classification adapter for the batched-decode session)
+- `test_pp_batched_decode_driver.py` — Phase-1 scheduler/cache-router driver glue for batched decode (source: 3a5a096a3 feat(pp-batched): Phase 1 scheduler/cache-router driver glue)
+- `test_pp_batched_decode_layers_install.py` — load-time install of batched-decode pipeline layers (subclass fix outside batch_step_scope) (source: f5199cae9 feat(pp-batched): load-time install for batched-decode pipeline layers)
+- `test_pp_metaframe_batch_axis.py` — metaframe protocol v3 batch-axis stacking for decode batching (source: 089e0c731 feat(pp-batched): metaframe protocol v3 -- batch-axis stacking for decode batching)
+- `test_pp_prefill_session.py` — ResumablePrefillSession: chunked-prefill interruption and mid-chunk-drive cancel (source: 44b5c645c feat(pp-prefill): ResumablePrefillSession -- the real driver for chunked-prefill interruption)
+- `test_pp_scheduler_wire.py` — scheduler control-message wire encoding + two-phase chunk-drive redesign (source: 51603ad8b fix(pp-batched): two-phase chunk-drive redesign closing real cross-rank desync + freeze bugs)
+- `test_pp_speculation_layer_reset.py` — reset stale spec-layer send/recv flags before a request's first-token call (source: 0d351baf6 fix(pp-dspark): reset stale spec-layer send/recv flags before each request's first-token call)
+- `test_prefill_chunking_cache_offset_wiring.py` — covers the Phase-4d guard wiring: cache offsets, frames, both prefill loops (source: 9c080bdb8 test(dsv4-vision): cover the 4d guard wiring, frames, and both loops)
+- `test_prefill_chunking_image_spans.py` — image-span-aware prefill chunk planner tests (Phase 4d) (source: 3993859b8 feat(dsv4-vision): image-span-aware prefill chunk planner (Phase 4d))
+- `test_prefill_residual_gap_wiring.py` — covers both Phase-4d residual gaps in the prefill chunk plan (source: 10013d004 test(dsv4-vision): cover both 4d residual gaps)
+- `test_prefix_cache_image_poisoning.py` — fail closed on unidentified cached image regions (prefix-cache poisoning) (source: d16a1039d fix(dsv4-vision): fail closed on unidentified cached image regions)
 
 **`src/exo/worker/engines/mlx/vendor/`**
 
-- `deepseek_v4_image_processor.py` (A, #c=1)
+- `deepseek_v4_image_processor.py` — vendored, torch-free port of the DeepSeek-V4 image processor (source: f7712949a feat(vision): torch-free port of DeepSeek-V4 image processor)
 
 **`src/exo/worker/engines/mlx/vendor/tests/`**
 
-- `test_deepseek_v4_image_processor.py` (A, #c=1)
-- `test_sentinelless_recovery.py` (A, #c=2)
+- `test_deepseek_v4_image_processor.py` — parity tests for the vendored torch-free image-processor port (source: f7712949a feat(vision): torch-free port of DeepSeek-V4 image processor)
+- `test_sentinelless_recovery.py` — sentinel-less tool calls are recovered instead of failing the turn (source: af67755e0 fix(dsv4): recover sentinel-less tool calls instead of failing the turn)
 
 **`src/exo/worker/runner/llm_inference/tests/`**
 
-- `test_batch_generator_step_cancellation_latency.py` (A, #c=4)
-- `test_step_prefill_cancelled_guard.py` (A, #c=1)
+- `test_batch_generator_step_cancellation_latency.py` — cancellation observation bounded to ~1 decode step (reverted, then reapplied) (source: 12a84b077 fix(pp-batched-decode): bound cancellation-observation latency to ~1 decode step)
+- `test_step_prefill_cancelled_guard.py` — PrefillCancelled escaping step() used to kill the runner process (Section 58) (source: 14af95e3f fix(cancel): PrefillCancelled escaping step() killed the runner process (Section 58))
 
 **`src/exo/worker/runner/tests/`**
 
-- `__init__.py` (A, #c=1)
-- `test_supervisor_hang_stack_guard.py` (A, #c=1)
-- `test_supervisor_hang_tracing.py` (A, #c=2)
+- `__init__.py` — package marker for the runner hang-watchdog test dir (source: fc9542938 fix: harden TB monitor + tracing-aware runner hang watchdog (2026-08-22 incident))
+- `test_supervisor_hang_stack_guard.py` — stack-class hang guard (Fix B, shadow default) for the runner supervisor (source: ea858d8b4 fix(supervisor): stack-class hang guard (Fix B, shadow default))
+- `test_supervisor_hang_tracing.py` — tracing-aware runner hang watchdog (2026-08-22 incident) (source: fc9542938 fix: harden TB monitor + tracing-aware runner hang watchdog (2026-08-22 incident))
 
 **`src/exo/worker/runner/tests/fixtures/`**
 
-- `synthetic_spin.txt` (A, #c=1)
+- `synthetic_spin.txt` — synthetic spinning-stack fixture for the stack-class hang guard (source: ea858d8b4 fix(supervisor): stack-class hang guard (Fix B, shadow default))
 
 **`src/exo/worker/tests/unittests/`**
 
-- `test_fast_synch.py` (M, #c=0)
+- `test_fast_synch.py` — fork accepts EXO_FAST_SYNCH="1"/"0" because start_cluster.sh exports 1 (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
 
 **`src/exo/worker/tests/unittests/test_mlx/`**
 
-- `conftest.py` (M, #c=1)
-- `test_prefix_cache_limits.py` (M, #c=0)
+- `conftest.py` — shared mlx test fixtures, incl. host-pressure-independent KV eviction setup (source: 5751a0fac test(kv-cache): make eviction tests host-pressure-independent (7 -> 0 failures))
+- `test_prefix_cache_limits.py` — skipped: upstream #2368 limits target its flat-list cache, the fork uses the bounded radix trie (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
 
 **`src/exo/worker/tests/unittests/test_plan/`**
 
-- `test_plan_step_event_wake.py` (A, #c=1)
-- `test_plan_step_lifecycle_dispatch.py` (A, #c=1)
-- `test_plan_step_lost_wakeup_fuzz.py` (A, #c=1)
-- `test_worker_task_announcements.py` (M, #c=0)
+- `test_plan_step_event_wake.py` — I16 event-wake for plan_step (env-gated, default OFF) (source: 84bdcd756 round12: I16 event-wake for plan_step (env-gated, default OFF))
+- `test_plan_step_lifecycle_dispatch.py` — lifecycle tasks must never be dispatched non-blocking (I16 dup-ConnectToGroup crash) (source: 3f06afdde fix(worker): never dispatch lifecycle tasks non-blocking (I16 dup-ConnectToGroup crash))
+- `test_plan_step_lost_wakeup_fuzz.py` — I16 Gate-A lost-wakeup fuzz harness (pre-registration apparatus) (source: e6cde09eb round13: I16 Gate-A apparatus built; pre-registration found LATENTLY INVALID pre-boot; still unmeasured, nothing shipped)
+- `test_worker_task_announcements.py` — runs plan_step on the worker's own task group (worker._tg) (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
 
 **`src/exo/worker/tests/unittests/test_runner/`**
 
-- `test_batch_cancellation.py` (M, #c=0)
-- `test_concurrency_admission_gate.py` (A, #c=3)
-- `test_dsml_e2e.py` (M, #c=19)
-- `test_parse_tool_calls.py` (M, #c=0)
-- `test_runner_supervisor.py` (M, #c=0)
+- `test_batch_cancellation.py` — two #2365 cancel tests skipped: fork cancel() keeps glue/PP-spec/batched-decode teardown (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_concurrency_admission_gate.py` — admission gate for concurrent generation requests (PP stream-never-closed hang) (source: 88f3ed971 fix(runner): admission gate for concurrent generation requests -- root cause of the PP stream-never-closed hang)
+- `test_dsml_e2e.py` — fork DSML tool-call parsing end-to-end (orphan-tail recovery, multi-call correctness) (source: 84cc57bcb fix(dsml): orphan-tail detector missed tails followed by the model's own closing fence)
+- `test_parse_tool_calls.py` — malformed tool calls kept as errors (fork clean-fail); upstream #2394 text-fallback tests reverted (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
+- `test_runner_supervisor.py` — flat stall kill is the fallback when the fork hang watchdog is off (HANG_TIMEOUT_SECONDS=0) (source: 9fe0719a9 merge: upstream/main (bc412e223, 91 commits) into deploy/next27-ringfix lineage)
 
 ### mlx (22 files)
 
-**`mlx/backend/metal/`**
+## Rationale fragment — mlx core files (fork-divergent vs upstream b6642e604)
 
-- `jit_kernels.cpp` (M, #c=1)
-- `kernels.h` (M, #c=1)
-- `nojit_kernels.cpp` (M, #c=1)
-- `quantized.cpp` (M, #c=15)
-- `utils.h` (M, #c=1)
+**`mlx/backend/metal/`**
+- `jit_kernels.cpp` — OPT-9 gather_qmm_rhs_lhs JIT instantiation: no-broadcast sorted prefill kernel (source: docs/prefill-throughput-breakthrough-2026-06-24.md; 980ac156a "perf(gather_qmm): OPT-9 sorted rhs_lhs kernel")
+- `kernels.h` — declares get_gather_qmm_rhs_lhs_kernel for the OPT-9 no-broadcast sorted-prefill kernel (source: docs/prefill-throughput-breakthrough-2026-06-24.md; 980ac156a "perf(gather_qmm): OPT-9 sorted rhs_lhs kernel")
+- `nojit_kernels.cpp` — non-JIT metallib stub for the same OPT-9 gather_qmm_rhs_lhs kernel (source: docs/prefill-throughput-breakthrough-2026-06-24.md; 980ac156a "perf(gather_qmm): OPT-9 sorted rhs_lhs kernel")
+- `quantized.cpp` — gather_qmm_rhs_lhs dispatch (M>=16 sorted) + env-tunable gather_qmv_rhs tile config (source: docs/moe-tile-geometry-retune-dead-end-2026-08-18.md; 980ac156a, 089161722)
+- `utils.h` — EXO_CMDBUF_RING_DIAG always-on command-buffer label, to ID the last op before a live GPU stall (source: docs/dsv4-220k-prefill-eventwait-rootcause-triage-2026-08-18.md; 55d56e527)
 
 **`mlx/backend/metal/kernels/`**
-
-- `fp_quantized.h` (M, #c=6)
-- `fp_quantized.metal` (M, #c=4)
-- `quantized.h` (M, #c=3)
-- `quantized.metal` (M, #c=1)
+- `fp_quantized.h` — M-batched sorted-run fp gather_qmv_rhs (register-held x rows, dequant-once weights) + fp_gather_qmm_rhs_lhs (source: 6f0ed1dd7 "perf(gather_qmv_rhs): v5"; docs/mxfp4-gather-qmm-rhs-lhs-kernel-2026-08-19.md)
+- `fp_quantized.metal` — instantiates the fp_gather_qmv_rhs (M_TILE,RPS) kernel variants so the M-batched sorted-run path compiles (source: 6f0ed1dd7 "perf(gather_qmv_rhs): v5"; docs/mxfp4-gather-qmm-rhs-lhs-kernel-2026-08-19.md)
+- `quantized.h` — affine M-batched gather_qmv_rhs (DSv4 is affine 8-bit g64, not mxfp4) + affine_gather_qmm_rhs_lhs OPT-9 kernel (source: 5033173b2 "perf(gather_qmv_rhs): affine variant"; docs/moe-tile-geometry-retune-dead-end-2026-08-18.md)
+- `quantized.metal` — instantiates affine_gather_qmv_rhs across (M_TILE,RPS) and gs{32,64}/bits{4,8} for the dispatch's selected tiles (source: 5033173b2 "perf(gather_qmv_rhs): affine variant"; docs/mxfp4-gather-qmm-rhs-lhs-kernel-2026-08-19.md)
 
 **`mlx/distributed/`**
-
-- `distributed.cpp` (M, #c=2)
-- `distributed.h` (M, #c=2)
-- `distributed_impl.h` (M, #c=2)
+- `distributed.cpp` — Group::split_tcp_coord + Group::reconnect forwarding to the QP-less TCP coord group and jaccl recovery (source: docs/dual-cable-topology-and-qp-budget-2026-08-21.md; fa69bafd1, 8212f670e)
+- `distributed.h` — public API for split_tcp_coord (QP-less control-plane-only group; Thunderbolt max_qp=3) and reconnect() (source: docs/dual-cable-topology-and-qp-budget-2026-08-21.md; fa69bafd1, 8212f670e)
+- `distributed_impl.h` — GroupImpl virtual defaults: split_tcp_coord throws unless the backend supports it; reconnect() is a no-op (source: docs/dual-cable-topology-and-qp-budget-2026-08-21.md; fa69bafd1, 8212f670e)
 
 **`mlx/distributed/jaccl/lib/examples/`**
-
-- `CMakeLists.txt` (M, #c=4)
-- `coord_group_loopback_test.cpp` (A, #c=1)
-- `hopid_budget_probe.cpp` (A, #c=1)
-- `uc_rdma_write_probe.cpp` (A, #c=1)
+- `CMakeLists.txt` — registers the fork's three probes/tests in the examples target (source: 23fa410ef, 5831d3b06 "examples(jaccl): register hopid_budget_probe in CMake build")
+- `coord_group_loopback_test.cpp` — RDMA-free forked loopback test of the QP-less TCP CoordGroup incl. desync tripwire (source: docs/dual-cable-topology-and-qp-budget-2026-08-21.md; fa69bafd1)
+- `hopid_budget_probe.cpp` — measures how many UC QPs reach RTS on one Thunderbolt device before the NHI HopID budget runs out (source: docs/prefill-cliff-mechanism-2026-08-24.md; 23fa410ef)
+- `uc_rdma_write_probe.cpp` — proves a UC QP can complete a one-sided IBV_WR_RDMA_WRITE on macOS librdma, the ACK-coalesce premise (source: 23fa410ef "examples(jaccl): add UC RDMA-write and HopID-budget feasibility probes")
 
 **`mlx/distributed/jaccl/lib/jaccl/`**
-
-- `coord_group.h` (A, #c=1)
-- `jaccl.cpp` (M, #c=2)
-- `ring.cpp` (M, #c=1)
-- `ring.h` (M, #c=1)
-- `tcp.cpp` (M, #c=8)
-- `tcp.h` (M, #c=4)
+- `coord_group.h` — QP-less TCP-only CoordGroup: full collective interface on one framed socket, own call_id namespace, loud desync throw (source: docs/dual-cable-topology-and-qp-budget-2026-08-21.md; fa69bafd1)
+- `jaccl.cpp` — post-#4607 it feeds mesh.at(0) to the single-wire fork MeshGroup + our coordinator; multi-wire mesh DEFERRED (source: notes-mlx.md resolution table; b17781838 merge)
+- `ring.cpp` — RingGroup::all_sum JACCL_TRACE_TIMING steady_clock instrumentation (RingGroup, not MeshGroup, is this 2-node topology's group) (source: docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md; e40a416b2)
+- `ring.h` — declares the lazy-init timing flag/fields backing that env-gated JACCL_TRACE_TIMING trace (source: docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md; e40a416b2)
+- `tcp.cpp` — retry-on-EAGAIN recv (transient jitter != dead peer), per-channel retry deadlines (p2p 300s), per-subgroup TCP coordinator (source: 0b0e2ad75, f8b77fe5a; docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md)
+- `tcp.h` — SO_RCVTIMEO send+recv bounding and retry-deadline overrides so coord/recovery side channels outlast the data path (source: 444452be9; docs/hybrid-pp-prefill-tp-decode-design-2026-08-04.md)
 
 ### mlx-lm (47 files)
 
-**`mlx_lm/models/deepseek_v41/`**
+**`mlx_lm/models/deepseek_v41`**
 
-- `LICENSE` (A, #c=1)
-- `README.md` (A, #c=2)
-- `__init__.py` (A, #c=1)
-- `_gates.py` (A, #c=1)
-- `attention.py` (A, #c=12)
-- `cache.py` (A, #c=4)
-- `collective.py` (A, #c=2)
-- `compressor.py` (A, #c=1)
-- `config.py` (A, #c=1)
-- `dequant.py` (A, #c=1)
-- `engram.py` (A, #c=2)
-- `exl3_build.py` (A, #c=13)
-- `fakequant.py` (A, #c=2)
-- `hc_fused.py` (A, #c=1)
-- `hyper_connections.py` (A, #c=1)
-- `image_processor.py` (A, #c=1)
-- `layers.py` (A, #c=3)
-- `logprobs.py` (A, #c=1)
-- `moe.py` (A, #c=8)
-- `mtp.py` (A, #c=6)
-- `sampling.py` (A, #c=3)
-- `serve.py` (A, #c=1)
-- `session_cache.py` (A, #c=5)
-- `sparse_attention.py` (A, #c=10)
-- `vision.py` (A, #c=1)
+- `LICENSE` — Apache-2.0 license copied with the vendored PipeNetwork/deepseek-v41-mlx model code (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder (exo phase 13); docs/benchmarks/phase13-dsv41-model-file-2026-09-28/README.md)
+- `README.md` — Documents vendor source (PipeNetwork a9567ae, Apache-2.0), local MoE/attention/compressor edits and vision/exl3_build additions (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder; 6e54b90d feat(deepseek_v41): merge prefill/session/sampling/vision workstreams)
+- `__init__.py` — Package entry re-exporting ModelArgs/Model; docstring records the vendor source and the exl3_build path (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder (exo phase 13))
+- `_gates.py` — LOCAL ADDITION: shared row-count gates (_FENCE_MIN_ROWS) for the indexer/sparse-attention C1 levers, replacing twin defaults (source: 938b8112 perf(dsv41): lever-2 row-count guard (ABORTED, not shipped) + identity proof suite; docs/PERFORMANCE_HISTORY.md)
+- `attention.py` — Vendored V4.1 MLA (sliding window + shared compressed positions); fork adds grouped wo_a and indexer qsplit/row-count fences (source: bd1bfd1e vendor commit; dc0e79c2 dsv41: indexer query-band split across TP ranks (DSV41_INDEXER_QSPLIT, default OFF))
+- `cache.py` — Vendored incremental decode/chunked-prefill state; fork adds spec-rollback window-ring restore and bf16 grow-on-demand capacity (source: bd1bfd1e vendor commit; c4d19826 fix(dsv41): spec rollback must restore the window ring + the compressed rows)
+- `collective.py` — LOCAL ADDITION: TP collectives plus a GPU-watchdog guard (JACCL all_sum on a CPU stream trips the Metal timeout past ~5s peer skew) (source: 4091b5ff feat(deepseek_v41): round-2 workstreams + two-node stability fixes)
+- `compressor.py` — Vendored learned KV compression; fork allows wkv/wgate to be quantized modules, fp32 nn.Linear path unchanged (source: bd1bfd1e vendor commit; mlx_lm/models/deepseek_v41/README.md (vendoring note) local change 3)
+- `config.py` — Vendored V4.1 config accepting both shipped layouts: flat inference config.json and the wrapped training layout (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder (exo phase 13))
+- `dequant.py` — Vendored dequantizer turning the natively quantized release (fp8 + ue8m0 scales, fp4 experts) into bf16 (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder (exo phase 13))
+- `engram.py` — Vendored n-gram hash-lookup engram tables (layers 1/14, ~100GB each); exl3_build reads rows on demand (source: bd1bfd1e vendor commit; docs/deepseek-v41-exl3-plan.md)
+- `exl3_build.py` — LOCAL ADDITION: builds Model from an exllamav3 EXL3 checkpoint (EXL3Linear per trellis group, stacked EXL3SwitchGLU experts, rank slice) (source: bd1bfd1e vendor commit; docs/benchmarks/phase13-dsv41-model-file-2026-09-28/README.md)
+- `fakequant.py` — Vendored activation fake-quantization (inference half of V4.1 QAT): fp8/fp4 round-trips the reference expects (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder (exo phase 13))
+- `hc_fused.py` — LOCAL ADDITION: fused hyper-connection kernels (hc_mult==4) for the staggered coefficient path; 9.3 -> 16.3 tok/s TP=2 decode (source: 14d1c74d perf(deepseek_v41): 9.3 -> 16.3 tok/s plain TP=2 decode, same output)
+- `hyper_connections.py` — Vendored Hyper-Connections residual stream (hc_mult=4) with V4.1's staggered, one-sub-layer-later coefficient schedule (source: bd1bfd1e vendor commit; docs/deepseek-v41-exl3-plan.md)
+- `image_processor.py` — Torch-free port of the DSv4.1 preprocessing: FOUR sentinel types, no compress padding (not the older V4-Flash 5-type revision) (source: 6e54b90d merge vision workstreams; mlx_lm/models/deepseek_v41/README.md (vendoring note) local change 5; docs/DSV4_VISION_PORT_PLAN.md)
+- `layers.py` — Vendored core layers: RMSNorm (eps 1e-20 kept exact), YaRN rope with inverse path, clamped SwiGLU (source: bd1bfd1e feat(mlx-lm): deepseek_v41 model package + EXL3 builder (exo phase 13))
+- `logprobs.py` — LOCAL ADDITION: exact top-k logprobs over a vocab-sharded head via one all_sum of a per-row summary (no full vocab row on the wire) (source: 6950c793 feat(dsv41): exact top-k log-probs from the vocab-sharded head)
+- `moe.py` — Vendored V4.1 MoE (384 experts, top-6, sqrt-softplus scoring); fork adds the group hook all_summing routed partials before the shared expert (source: bd1bfd1e vendor commit; mlx_lm/models/deepseek_v41/README.md (vendoring note) local change 1)
+- `mtp.py` — Vendored DSpark 3-stage semi-autoregressive MTP draft head, with the node-local MTP/DSpark port edits on top (source: bd1bfd1e vendor commit; docs/benchmarks/phase3-mtp-dspark-port-2026-09-27)
+- `sampling.py` — LOCAL ADDITION: seeded temperature/top-p/top-k sampling for the DSpark loop with proper speculative accept + residual resampling (source: 6e54b90d feat(deepseek_v41): merge prefill/session/sampling/vision workstreams)
+- `serve.py` — LOCAL ADDITION: one Session per conversation -- prefix reuse, delta prefill, speculative decode, all state kept across turns (source: 4091b5ff feat(deepseek_v41): round-2 workstreams + two-node stability fixes)
+- `session_cache.py` — LOCAL ADDITION: keeps a finished turn's ModelCache alive so the next turn prefills only the delta (source: 6e54b90d feat(deepseek_v41): merge prefill/session/sampling/vision workstreams)
+- `sparse_attention.py` — Vendored gather-based sparse attention (MLX stand-in for the TileLang kernel); fork adds C1 column-boundary + row-count gating (source: bd1bfd1e vendor commit; 3bf8316f perf(dsv41): gate C1 column-boundary derivation on call row count)
+- `vision.py` — LOCAL ADDITION (workstream H): native V4.1 vision tower -- 32-layer ViT + 3x3 aligner loaded bf16, fp32-verified vs torch reference (source: 6e54b90d merge vision workstreams; mlx_lm/models/deepseek_v41/README.md (vendoring note) local change 5; docs/DSV4_VISION_PORT_PLAN.md)
 
-**`mlx_lm/models/exl3/`**
+**`mlx_lm/models/exl3`**
 
-- `LICENSE` (A, #c=1)
-- `NOTICE` (A, #c=1)
-- `README.md` (A, #c=2)
-- `__init__.py` (A, #c=1)
-- `decode.py` (A, #c=1)
-- `exl3_linear.py` (A, #c=3)
-- `exl3_moe.py` (A, #c=2)
-- `gemv_metal.py` (A, #c=2)
-- `hadamard.py` (A, #c=1)
-- `layer_state.py` (A, #c=1)
-- `loader.py` (A, #c=2)
-- `metal_kernels.py` (A, #c=1)
-- `ops.py` (A, #c=1)
-- `perm.py` (A, #c=1)
-- `reconstruct.py` (A, #c=1)
-- `signs.py` (A, #c=1)
-- `stripe.py` (A, #c=1)
+- `LICENSE` — Apache-2.0 license copied with the vendored PonyExl3 kernel tree (source: 9ea86f91 feat(mlx-lm): vendor EXL3 trellis kernels as mlx_lm.models.exl3 (phase-2 integration))
+- `NOTICE` — PonyExl3 attribution notice copied alongside the vendored kernels (third-party components listed) (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `README.md` — Records provenance (PonyExl3 8e7fa6b + patched node tree), the vendored minimal closure, local import/header changes and the equivalence gate (source: 9ea86f91 vendor commit; 6391efca loader follow-up; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `__init__.py` — Vendored init reduced to the two-class surface (EXL3Linear, EXL3SwitchGLU); upstream forward/linear/generate modules not vendored (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md local change 3)
+- `decode.py` — Vendored MLX+Metal tile decode (no Python loop over codewords); absolute ponyexl3.* imports rewritten relative (source: 9ea86f91 feat(mlx-lm): vendor EXL3 trellis kernels as mlx_lm.models.exl3 (phase-2 integration))
+- `exl3_linear.py` — Vendored EXL3 quantized linear as an nn.Module (activations stay on device); used for the DSv4.1 dense projections (source: 9ea86f91 vendor commit; 6e54b90d feat(deepseek_v41): merge prefill/session/sampling/vision workstreams)
+- `exl3_moe.py` — Vendored EXL3 SwitchGLU experts + node-tree kernel work: v3 chunked prologue, v4 ALU opts ON, additive silu_clamp activation (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `gemv_metal.py` — Vendored fused Metal GEMV/GEMM (on-the-fly trellis decode + dot); v4 ALU opts (SWAR, direct-read shuffle) defaulted ON (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `hadamard.py` — Vendored MLX Hadamard helpers (parity with exl3.ref.hadamard); kept -- part of the kernels' import closure (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `layer_state.py` — Vendored per-layer MLX runtime state (device-resident trellis, signs, decoded weights) in the vendored closure (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `loader.py` — LOCAL ADDITION (not vendored): exllamav3-style EXL3 safetensors loader incl. the proven 2-way TP intermediate slice (source: 6391efca feat(mlx-lm): EXL3 checkpoint loader with proven TP slice (phase-12 follow-up); docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `metal_kernels.py` — Vendored custom Metal kernels for EXL3 trellis unpack and codebook decode (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `ops.py` — Vendored MLX-native fused linear ops (matmul and mx.compile prefill blocks) used by the vendored forward paths (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `perm.py` — Vendored tensor-core tile permutation (MLX take path) required by the trellis layout (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `reconstruct.py` — Vendored MLX weight reconstruction (Metal decode path), gated bit-identical to upstream on real expert tensors (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md; docs/benchmarks/phase1-exl3-format-validation-2026-09-27/README.md)
+- `signs.py` — Vendored MLX sign unpacking for EXL3 suh/svh packed sign bitfields (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `stripe.py` — Vendored striped EXL3 forward (cached stripe decode + MLX matmul per chunk) (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
 
-**`mlx_lm/models/exl3/ref/`**
+**`mlx_lm/models/exl3/ref`**
 
-- `__init__.py` (A, #c=1)
-- `codebook.py` (A, #c=1)
-- `layer.py` (A, #c=1)
-- `perm.py` (A, #c=1)
-- `signs.py` (A, #c=1)
-
+- `__init__.py` — Vendored numpy reference package init, reduced correspondingly; kept because the Metal code builds its codebooks through ref/ (source: 9ea86f91 vendor commit; mlx_lm/models/exl3/README.md)
+- `codebook.py` — Vendored procedural EXL3 codebook (CPU port of exllamav3_ext quant/codebook.cuh) needed by the Metal decode path (source: 9ea86f91 vendor commit; docs/deepseek-v41-exl3-plan.md)
+- `layer.py` — Vendored EXL3 linear layer container (numpy reference counterpart of exl3_linear.py) (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `perm.py` — Vendored numpy tile-element permutation from exllamav3 modules/quant/exl3_lib/quantize.py (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
+- `signs.py` — Vendored numpy packed sign-bitfield unpacker (suh/svh) mirroring LinearEXL3.unpack_bf (source: 9ea86f91 vendor commit; docs/benchmarks/phase12-exl3-vendor-tp-split-2026-09-28/README.md)
