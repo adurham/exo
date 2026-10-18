@@ -151,11 +151,17 @@ def banned_next_ids(
     return banned
 
 
+def _has_letter(text: str) -> bool:
+    return any(ch.isalpha() for ch in text)
+
+
 def contiguous_repeat_banned_ids(
     history: list[int],
     max_period: int = 0,
     min_blocks: int = 3,
     exempt: frozenset[int] = frozenset(),
+    word_only: bool = False,
+    decode: Any | None = None,
 ) -> set[int]:
     """Ids that would EXTEND a CONTIGUOUS periodic repeat (empty when off).
 
@@ -176,10 +182,20 @@ def contiguous_repeat_banned_ids(
     ``history[-p]`` (the first token of the previous block, i.e. the token the
     next block would start with). ``exempt`` control tokens are subtracted
     afterwards, so a delimiter can never be banned.
+
+    ``word_only`` (the shipped default, wired by the engine) drops candidates
+    whose decoded text carries no letter: a run of digits or punctuation is
+    STRUCTURE, not a semantic loop -- an IPv4 tail ("10.10.10."), a markdown
+    table separator, an ASCII rule, the opening brace of a repeated JSON object.
+    Banning those corrupts legitimate structured output (measured: a table
+    separator and a six-identical-object JSON array), while a loop of WORDS
+    ("Let me write." x6) is still caught. ``decode`` supplies the id->text
+    mapping; without it ``word_only`` cannot filter and is ignored.
     """
     if int(max_period) < 1 or int(min_blocks) < 2:
         return set()
-    h = [int(t) for t in history]
+    need = int(max_period) * int(min_blocks)
+    h = [int(t) for t in history[-need:]] if need > 0 else []
     out: set[int] = set()
     limit = min(int(max_period), len(h) // int(min_blocks))
     for p in range(1, limit + 1):
@@ -193,6 +209,8 @@ def contiguous_repeat_banned_ids(
             out.add(int(last[0]))
     if exempt:
         out -= {int(i) for i in exempt}
+    if word_only and decode is not None:
+        out = {i for i in out if _has_letter(decode(i))}
     return out
 
 
@@ -312,6 +330,7 @@ def format_ban_line(ban: "NoRepeatNgram", stats: BanTurnStats) -> str:
         f"[DSV41] no-repeat-ngram n={int(ban.n)} window={int(ban.window)} "
         f"contig_max_period={int(ban.contig_max_period)} "
         f"contig_min_blocks={int(ban.contig_min_blocks)} "
+        f"contig_word_only={int(bool(ban.contig_word_only))} "
         f"rows_changed={int(stats.rows_changed)} "
         f"masked_total={int(stats.masked_total)}"
     )
@@ -339,6 +358,11 @@ class NoRepeatNgram:
     #: blocks of period p <= ``contig_max_period`` must end the history.
     contig_max_period: int = 0
     contig_min_blocks: int = 3
+    #: Only ban candidates whose decoded text carries a letter (structure --
+    #: digits/punctuation -- is never a semantic loop). Needs ``decode``.
+    contig_word_only: bool = False
+    #: id -> text, supplied by the engine from the tokenizer (word_only filter).
+    decode: Any | None = None
 
     @property
     def legacy_enabled(self) -> bool:
@@ -374,6 +398,8 @@ class NoRepeatNgram:
                 self.contig_max_period,
                 self.contig_min_blocks,
                 self.exempt,
+                word_only=bool(self.contig_word_only),
+                decode=self.decode,
             )
         return out
 

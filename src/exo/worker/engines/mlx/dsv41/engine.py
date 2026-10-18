@@ -355,6 +355,29 @@ CONTIG_REPEAT_MAX_PERIOD_ENV = "EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD"
 CONTIG_REPEAT_MAX_PERIOD_DEFAULT = 0
 CONTIG_REPEAT_MIN_BLOCKS_ENV = "EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS"
 CONTIG_REPEAT_MIN_BLOCKS_DEFAULT = 3
+#: WORD-ONLY filtering (default ON): never ban a candidate whose decoded text
+#: has no letter -- a digits/punctuation run is structure (IPv4 tails, markdown
+#: table separators, ASCII rules, JSON object braces), not a semantic loop.
+CONTIG_REPEAT_WORD_ONLY_ENV = "EXO_DSV41_CONTIG_REPEAT_WORD_ONLY"
+CONTIG_REPEAT_WORD_ONLY_DEFAULT = 1
+#: Per-turn WARNING when the escape MOVES this many committed tokens (rows_changed):
+#: a stuck attractor the escape keeps perturbing rather than escaping. 0 = off.
+LOOP_ESCAPE_WARN_ROWS_ENV = "EXO_DSV41_LOOP_ESCAPE_WARN_ROWS"
+LOOP_ESCAPE_WARN_ROWS_DEFAULT = 10
+
+
+def _single_id_decoder(tokenizer: Any | None) -> Any | None:
+    """``id -> text`` for the word-only filter; None when no tokenizer is bound."""
+    if tokenizer is None:
+        return None
+
+    def _decode(i: int) -> str:
+        try:
+            return str(tokenizer.decode([int(i)]))
+        except Exception:  # noqa: BLE001 - a decode failure must never ban or crash
+            return ""
+
+    return _decode
 
 
 def resolve_no_repeat_ngram_exempt_ids(
@@ -423,11 +446,16 @@ def resolve_no_repeat_ngram(tokenizer: Any | None = None) -> NoRepeatNgram:
     min_blocks = _read_int_env(
         CONTIG_REPEAT_MIN_BLOCKS_ENV, CONTIG_REPEAT_MIN_BLOCKS_DEFAULT
     )
+    word_only = _read_int_env(
+        CONTIG_REPEAT_WORD_ONLY_ENV, CONTIG_REPEAT_WORD_ONLY_DEFAULT
+    ) != 0
     ban = NoRepeatNgram(
         n=n,
         window=window,
         contig_max_period=max_period,
         contig_min_blocks=min_blocks,
+        contig_word_only=word_only,
+        decode=_single_id_decoder(tokenizer) if word_only else None,
     )
     if ban.enabled:
         ban = ban.with_exempt(resolve_no_repeat_ngram_exempt_ids(tokenizer))
@@ -1896,6 +1924,17 @@ class Dsv41Engine(Engine):
             # pinned by no_repeat.format_ban_line.
             if ban.enabled and ban_stats is not None:
                 logger.info(format_ban_line(ban, ban_stats))
+                warn_rows = _read_int_env(
+                    LOOP_ESCAPE_WARN_ROWS_ENV, LOOP_ESCAPE_WARN_ROWS_DEFAULT
+                )
+                if warn_rows > 0 and ban_stats.rows_changed >= warn_rows:
+                    logger.warning(
+                        f"[DSV41] loop-escape is moving many tokens this turn "
+                        f"(rows_changed={ban_stats.rows_changed}, "
+                        f"masked_total={ban_stats.masked_total}, "
+                        f"period<={int(ban.contig_max_period)}) -- possible stuck "
+                        f"attractor; the degeneration guard is the backstop"
+                    )
 
     # ------------------------------------------------------------------ rounds
 

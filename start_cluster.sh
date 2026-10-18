@@ -59,7 +59,8 @@
 # (multilingual prose went DIRTY; this rule is CLEAN 20/20 + needles 6/6 +
 # tools 10/10 + park, and a real Hermes document-write session completes).
 : "${EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD:=64}"
-: "${EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS:=3}"
+: "${EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS:=4}"
+: "${EXO_DSV41_CONTIG_REPEAT_WORD_ONLY:=1}"
 # ── ROUND-Q1B-FIX: dense re-quant default (next19-dense production) ────────
 # DSv4.1 dense re-quant (native affine q6g64 on the dense slice) with the
 # SHARED-EXPERT linears at q8g64. Pure q6 g64 (affine6) regressed the t2
@@ -2787,6 +2788,7 @@ for NODE in "${NODES[@]}"; do
   # back-to-back; legitimate repetition elsewhere is untouched. 0/unset = off.
   [ -n "${EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD=$EXO_DSV41_CONTIG_REPEAT_MAX_PERIOD"
   [ -n "${EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS=$EXO_DSV41_CONTIG_REPEAT_MIN_BLOCKS"
+  [ -n "${EXO_DSV41_CONTIG_REPEAT_WORD_ONLY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_WORD_ONLY=$EXO_DSV41_CONTIG_REPEAT_WORD_ONLY"
   # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
   # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
   # 2026-10-13.md). Once a still-open reasoning block has run

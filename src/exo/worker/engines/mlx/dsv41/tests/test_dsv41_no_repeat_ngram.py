@@ -813,7 +813,7 @@ def test_the_telemetry_line_format_is_stable() -> None:
     ban = nr.NoRepeatNgram(n=6, window=2048)
     line = nr.format_ban_line(ban, nr.BanTurnStats(rows_changed=3, masked_total=7))
     assert line == (
-        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 rows_changed=3 masked_total=7"
+        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 contig_word_only=0 rows_changed=3 masked_total=7"
     )
 
 
@@ -831,7 +831,7 @@ def test_rounds_emits_one_telemetry_line_only_when_enabled(
             eng_mod.Dsv41Engine._rounds(engine, None, 0, 0)  # type: ignore[arg-type]
         ) == []
     assert cap.of("INFO") == [
-        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 rows_changed=0 masked_total=0"
+        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 contig_word_only=1 rows_changed=0 masked_total=0"
     ]
 
     monkeypatch.delenv(eng_mod.NO_REPEAT_NGRAM_ENV, raising=False)
@@ -895,3 +895,42 @@ def test_contig_per_row_uses_draft_context():
     ban = nr.NoRepeatNgram(n=0, window=0, contig_max_period=64, contig_min_blocks=3)
     rows = ban.banned_per_row([42, 42, 42], [])
     assert rows == [{42}]
+
+
+def test_contig_word_only_skips_structure():
+    vocab = {553: "10", 77: "|", 7: " banana"}
+    ban = nr.NoRepeatNgram(
+        n=0, window=0, contig_max_period=64, contig_min_blocks=3,
+        contig_word_only=True, decode=lambda i: vocab.get(i, ""),
+    )
+    assert ban.banned([553, 553, 553]) == set()   # digits: structure, not a loop
+    assert ban.banned([77, 77, 77]) == set()      # punctuation: structure
+    assert ban.banned([7, 7, 7]) == {7}           # a word: loop, banned
+
+
+def test_contig_word_only_off_bans_structure_too():
+    ban = nr.NoRepeatNgram(n=0, window=0, contig_max_period=64, contig_min_blocks=3)
+    assert ban.banned([553, 553, 553]) == {553}
+
+
+def test_contig_min_blocks_four_spares_three_blocks():
+    h = [553, 15, 553, 15, 553, 15]               # "10.10.10." = 3 blocks, p=2
+    assert nr.contiguous_repeat_banned_ids(h, 64, 4) == set()
+    assert nr.contiguous_repeat_banned_ids(h + [553, 15], 64, 4) == {553}
+
+
+def test_contig_max_period_boundary():
+    block = list(range(100, 164))                 # exactly p == max_period
+    assert nr.contiguous_repeat_banned_ids([1] + block * 3, 64, 3) == {100}
+    assert nr.contiguous_repeat_banned_ids([1] + block * 3, 63, 3) == set()
+
+
+def test_contig_misaligned_tail_is_not_a_repeat():
+    block = [201, 202, 203, 204, 205]
+    h = [9] + block * 2 + block[:-1] + [999]
+    assert nr.contiguous_repeat_banned_ids(h, 64, 3) == set()
+
+
+def test_contig_trims_long_history():
+    block = [11, 12, 13]
+    assert nr.contiguous_repeat_banned_ids(list(range(1000)) + block * 3, 64, 3) == {11}
