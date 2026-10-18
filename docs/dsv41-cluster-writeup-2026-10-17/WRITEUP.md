@@ -1301,6 +1301,12 @@ prefill (attempt 1, which had almost nothing cached); attempt 2 finished in 6,76
 cache reuse left it only ~701K rows to prefill (the ~299K cached caveat, §9.4) -- four hours
 has margin for the uncached remainder it actually had to do.
 
+**Status 2026-10-18: the 1M row does not currently complete at this SHA.** Two accepted
+attempts (master node API, fresh instances) each wedged a large collective and were
+SIGKILLed by the hang watchdog at ~70 s; a third was lost when its runner stuck in bring-up.
+The 4-hour window is not the binding constraint — the transport is. Details, thread dumps
+and per-attempt logs: `REPRO-RUN-2026-10-18.md`.
+
 ### 11.6 Reading the result
 
 The measurement rules are §9.1. Two repro-specific notes: cross-check against the runner's
