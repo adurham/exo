@@ -1,0 +1,107 @@
+{
+ "label": "d10k",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/depth_d10k.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792358616.631597,
+ "started_iso": "2026-10-18T21:23:36.631+00:00",
+ "ended_epoch": 1792358659.813139,
+ "ended_iso": "2026-10-18T21:24:19.813+00:00",
+ "wall_s": 43.182,
+ "response_id": "713bc351-9cad-40ac-9034-8390434a9b43",
+ "first_token_epoch": 1792358653.5065331,
+ "first_token_iso": "2026-10-18T21:24:13.506+00:00",
+ "ttft_s": 36.875,
+ "last_token_epoch": 1792358659.813036,
+ "decode_window_s": 6.307,
+ "token_frames": 197,
+ "completion_tokens": 200,
+ "prompt_tokens": 10004,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 10004,
+  "completion_tokens": 200,
+  "total_tokens": 10204,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 31.55,
+ "prefill_frames": 4,
+ "keepalive_frames": 2,
+ "progress": [
+  {
+   "epoch": 1792358631.223365,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358638.7089732,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358646.253267,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358653.503212,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 272.4706476456274,
+  "generation_tps": 0.0,
+  "prompt_tokens": 10004,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 121016854164
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 366,
+  "mtp_accepted_drafts_cumulative": 220,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the MoE `switch_mlp` / quantized GEMV path in DSv4 prefill \u2014 the expert-routing matmul that dominates chunk wall time and runs far below memory bandwidth. It is named as the top lever in the 2026-07-01/02 handoff (\"moe.switch_mlp is 43% of prefill chunk wall (spans, 495K) and runs at ~26% of memory bandwidth. This is THE remaining prefill lever\"), and it is the subject of the entire M-batched GEMV build, the kernel matrix, and the MXFP4 conversion play in that same document. The document that quantifies it most directly is `docs/prefill-throughput-breakthrough-2026-06-24.md` (referenced in the handoff's correction note) together with the handoff's own measured kernel",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/d10k.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 21:23:36 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "c7ee0a9d-d56f-462f-abfc-086e239c9d4e",
+  "first_token_epoch": 1792358653.5,
+  "first_token_ts": "2026-10-18 16:24:13.500",
+  "latency_s": 36.73,
+  "prefill_s": 36.72,
+  "prompt_tokens": 10004,
+  "reuse": 0,
+  "prefill_tok_s_uncached": 272.4,
+  "committed": 200,
+  "emitted": 200,
+  "server_elapsed_s": 43.0,
+  "server_reason": "length",
+  "tok_s_field": 4.6,
+  "server_decode_tok_s": 31.55
+ }
+}

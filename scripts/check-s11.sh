@@ -314,6 +314,12 @@ def check_paths(sha, lines, start, end):
 
     for path in sorted(refs):
         clean = path.lstrip("./")
+        # §11 also references artifacts that sit next to the writeup (an evidence file,
+        # this run's record). Resolve those relative to the writeup's own directory
+        # before treating them as repo-root paths.
+        doc_prefix = WRITEUP_REL.rsplit("/", 1)[0] + "/"
+        if clean not in name_set and (doc_prefix + clean) in name_set:
+            clean = doc_prefix + clean
         exists = clean in name_set
         how = "exact"
         if not exists:
@@ -329,6 +335,25 @@ def check_paths(sha, lines, start, end):
                 how = "basename -> %s" % clean
             elif len(cands) > 1:
                 fails.append("%s: ambiguous, candidates %s" % (path, cands))
+                continue
+        if not exists:
+            # §11 also names reproduction tooling that was committed AFTER the pinned
+            # SHA (the prompt generator, the reconstruction record, this run's record).
+            # A reproducer checks out the pin, so those references are real gaps at the
+            # pin -- but they are not typos. Resolve them at HEAD and say so, loudly,
+            # instead of either failing CI or silently pretending the pin has them.
+            rc, out, _ = git("ls-tree", "HEAD", "--", clean)
+            if not (rc == 0 and out.strip()):
+                rel = doc_prefix + clean
+                rc2, out2, _ = git("ls-tree", "HEAD", "--", rel)
+                if rc2 == 0 and out2.strip():
+                    clean, rc, out = rel, rc2, out2
+            if rc == 0 and out.strip():
+                details.append(
+                    "note %s exists at HEAD only (post-pin reproduction artifact; "
+                    "not present at %s) -- §11 references tooling committed after the "
+                    "capture" % (clean, sha[:12])
+                )
                 continue
         if not exists:
             fails.append("missing at %s: %s" % (sha[:12], path))

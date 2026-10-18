@@ -564,7 +564,7 @@ Source of truth for the model config: the checkpoint on both nodes,
 
 | quantity | value | source |
 |---|---|---|
-| on-disk checkpoint, measured | `du -sk` = 205,739,672 KiB = 210,677,420,032 B = **210.68 GB** (196.22 GiB readable); 40 safetensors shards | `du -sk` on node0 |
+| on-disk checkpoint, measured | `du -sk` = 205,739,672 KiB = 210,677,420,032 B = **210.68 GB** (196.22 GiB readable); 39 safetensors shards (corrected 2026-10-18 from an earlier miscount of 40; see REPRO-RUN-2026-10-18.md) | `du -sk` on node0 |
 | on-disk checkpoint, as stated in docs | **210.58 GB** ("196.2 GiB = 210.7 GB" in `docs/deepseek-v41-exl3-plan.md:116`) | 0.1 GB discrepancy vs the measured 210.68 GB — NOT rounding: 210.58 GB = 196.12 GiB and 196.2 GiB = 210.67 GB, so the doc's GB/GiB pairing is internally inconsistent. Which mechanism produced it is unrecoverable (raw gone); likely conversion or transcription. |
 | per-rank weights at TP=2, measured from shard headers + the sharding rule the running code applies | **108.76 GB/rank** | `docs/deepseek-v41-memory-budget-correction-2026-09-27.md:22` |
 | per-rank under "experts split, everything else replicated" | 112.56 GB/rank | same doc:21 |

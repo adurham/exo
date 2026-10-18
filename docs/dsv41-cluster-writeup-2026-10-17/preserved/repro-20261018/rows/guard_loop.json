@@ -1,0 +1,86 @@
+{
+ "label": "guard_loop",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/guard_loop.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792360097.044768,
+ "started_iso": "2026-10-18T21:48:17.044+00:00",
+ "ended_epoch": 1792360142.2988029,
+ "ended_iso": "2026-10-18T21:49:02.298+00:00",
+ "wall_s": 45.254,
+ "response_id": "3f4efdac-0f71-483e-857c-f3cfa2fe9212",
+ "first_token_epoch": 1792360098.993473,
+ "first_token_iso": "2026-10-18T21:48:18.993+00:00",
+ "ttft_s": 1.949,
+ "last_token_epoch": 1792360142.298496,
+ "decode_window_s": 43.305,
+ "token_frames": 1157,
+ "completion_tokens": 1200,
+ "prompt_tokens": 48,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 48,
+  "completion_tokens": 1200,
+  "total_tokens": 1248,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 900,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 27.69,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 68.50976978082436,
+  "generation_tps": 0.0,
+  "prompt_tokens": 48,
+  "generation_tokens": 1200,
+  "peak_memory_usage": {
+   "in_bytes": 127773046353
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 3046,
+  "mtp_accepted_drafts_cumulative": 1594,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "[SECTION 1]\nDistributed computing did not begin with a single invention or a single laboratory. Its roots lie in the postwar desire to make expensive computers serve many users at once and to connect machines so that they could share work, data, and storage. In the 1950s and 1960s, batch processing gave way to time-sharing systems such as MIT\u2019s CTSS and Project MAC, which demonstrated that a central machine could support many simultaneous users. Visionaries like J.C.R. Licklider described an \u201cIntergalactic Computer Network,\u201d while John McCarthy imagined computing as a utility. These ideas framed computation as a resource to be accessed remotely, not merely a local appliance. The earliest distributed systems were therefore less about independent computers cooperating as equals and more about terminals, schedulers, and shared mainframes, but they established the essential premise: computation could be spread across space and coordinated through communication.\n\n[SECTION 2]\nThe networking revolution of the 1960s and 1970s turned that premise into infrastructure. Paul Baran, Donald Davies, and Leonard Kleinrock developed packet switching, which broke messages into small pieces that could be routed independently and reassembled at the destination. ARPANET, launched in 1969, connected research computers and became a proving ground for remote login, file transfer, and electronic mail. In 1974, Vint Cerf and Robert Kahn published the design principles behind TCP/IP, and its adoption in the",
+ "reasoning": "We need answer. Need write 12-section essay history distributed computing. Each section begins with marker [SECTION n] on own line. No other headings. Need likely 12 sections. Need essay. Need ensure each section starts with [SECTION n] line. No other headings. Could include paragraphs. Need history. Need maybe from early concepts to modern. Need 12 sections. We need be accurate, engaging. Distributed computing history: time-sharing, ARPANET, client-server, RPC, distributed systems principles, clusters, grid computing, peer-to-peer, cloud, edge, blockchain? Need 12 sections. Each section marker own line. No other headings. We can write continuous essay with sections. Need not use other headings. Ensure no markdown headings? Just [SECTION n]. Fine.\n\nNeed maybe 12 sections:\n1. Origins in time-sharing and resource sharing\n2. ARPANET and packet switching\n3. Early distributed systems theory: concurrency, actors, CSP\n4. Client-server and RPC\n5. Local area networks, workstations, distributed OS\n6. Fault tolerance and consensus: Lamport, Byzantine, Paxos\n7. Internet-scale: web, search, CDNs\n8. Peer-to-peer and volunteer computing\n9. Cluster and grid computing\n10. Cloud computing and virtualization\n11. Big data, MapReduce, microservices, containers, orchestration\n12. Edge, IoT, blockchain, serverless, future.\n\nNeed essay. Each section maybe 2-3 paragraphs. Total maybe 1500-2000 words. Need no other headings. Start each section with [SECTION n] on own line. Then text. Ensure no headings like \"Origins\". Good.\n\nNeed maybe mention distributed computing definition. History. Could be nuanced: distributed computing not single invention, evolved from need to share resources, communicate, scale. Include key milestones. Need maybe mention theoretical foundations. Avoid too much hype. Mention failures and tradeoffs. 12 sections.\n\nLet's draft. Need ensure [SECTION n] on own line. No other headings. Could have paragraphs. Each section begins marker. Then prose. No bullet lists? Fine.\n\nNeed maybe section 1: early dreams: time-sharing, multiprocessors, resource sharing. 1950s-60s. MIT CTSS, Project MAC, Multics. Distributed computing roots in batch and time-sharing. \"Distributed\" as multiple autonomous computers connected. Early ideas by John McCarthy? Maybe \"computer utility\". Licklider \"Intergalactic Computer Network\". Good.\n\nSection 2: ARPANET and packet switching. 1960s. Baran, Davies, Kleinrock. 1969 first nodes. TCP/IP 1974 Cerf/Kahn. Internet. Distributed systems enabled by networking. Email, file transfer. Decentralized routing.\n\nSection 3: theoretical foundations: concurrency. Dijkstra semaphores, Hoare CSP, Hewitt actors. Lamport clocks, state machine replication. Need maybe section 3 and 6 overlap. Could separate: section 3 formal models and algorithms; section 6 consensus/fault tolerance. Fine.\n\nSection 4: client-server and RPC. 1970s-80s. Xerox PARC, Ethernet, Alto. RPC by Birrell and Nelson 1984. Sun RPC, NFS. Client-server architecture. Distributed object systems: CORBA, DCOM, Java RMI. Middleware.\n\nSection 5: distributed operating systems and workstation clusters. 1980s. Sprite, V system, Amoeba, Mach. Plan 9. Network file systems. Transparent access. Workstation clusters, Beowulf 1994. Condor, MOSIX. Parallel computing.\n\nSection 6: fault tolerance and consensus. Byzantine generals, Lamport/Shostak/Pease 1982. FLP impossibility 1985. Paxos 1989/1998. Viewstamped replication. Raft 2014. CAP theorem 2000. Eventual consistency. Practical systems: Chubby, ZooKeeper, etcd.\n\nSection 7: Internet-scale web and CDNs. 1990s. WWW, HTTP, search engines. Google's distributed infrastructure: GFS, Bigtable, MapReduce. CDNs Akamai. Load balancing, caching, DNS. Distributed computing becomes consumer",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/guard_loop.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 21:48:17 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "af314895-380d-43f8-8272-fb4d5ae394ba",
+  "first_token_epoch": 1792360098.988,
+  "first_token_ts": "2026-10-18 16:48:18.988",
+  "latency_s": 1.8,
+  "prefill_s": 0.7,
+  "prompt_tokens": 48,
+  "reuse": 0,
+  "prefill_tok_s_uncached": 68.6,
+  "committed": 1201,
+  "emitted": 1200,
+  "server_elapsed_s": 45.0,
+  "server_reason": "length",
+  "tok_s_field": 26.7,
+  "server_decode_tok_s": 27.75
+ }
+}

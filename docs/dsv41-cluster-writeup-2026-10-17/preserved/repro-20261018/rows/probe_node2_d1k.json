@@ -1,0 +1,71 @@
+{
+ "label": "probe_node2_d1k",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/depth_d1k.json",
+ "url": "http://macstudio-m4-2.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792360331.226641,
+ "started_iso": "2026-10-18T21:52:11.226+00:00",
+ "ended_epoch": 1792360343.355757,
+ "ended_iso": "2026-10-18T21:52:23.355+00:00",
+ "wall_s": 12.129,
+ "response_id": "902ba9f1-8c75-4fc1-b007-fb54c2336399",
+ "first_token_epoch": 1792360337.320557,
+ "first_token_iso": "2026-10-18T21:52:17.320+00:00",
+ "ttft_s": 6.094,
+ "last_token_epoch": 1792360343.167107,
+ "decode_window_s": 5.847,
+ "token_frames": 139,
+ "completion_tokens": 140,
+ "prompt_tokens": 1003,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 1003,
+  "completion_tokens": 140,
+  "total_tokens": 1143,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "stop",
+ "client_decode_tok_s": 23.77,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 188.95839458308214,
+  "generation_tps": 0.0,
+  "prompt_tokens": 1003,
+  "generation_tokens": 140,
+  "peak_memory_usage": {
+   "in_bytes": 129365367841
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 3521,
+  "mtp_accepted_drafts_cumulative": 1913,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the dashboard build step, which is called out as a hard prerequisite before exo can even run (`cd dashboard && npm install && npm run build && cd ..`) and is reinforced by the note that build output lands in `dashboard/build/` and is served by the API \u2014 making it the recurring gate on both first-run setup and any frontend change. The document that quantifies it most directly is `AGENTS.md`, since it is the only source that gives the concrete command sequence and output path, while `dashboard/` (Svelte 5 + TypeScript) supplies the surrounding context.",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/probe_node2_d1k.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 21:52:11 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": false,
+  "reason": "no obs first-token line matched"
+ }
+}

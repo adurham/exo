@@ -1,0 +1,187 @@
+{
+ "label": "d50k",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/depth_d50k.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792358660.71924,
+ "started_iso": "2026-10-18T21:24:20.719+00:00",
+ "ended_epoch": 1792358832.3821912,
+ "ended_iso": "2026-10-18T21:27:12.382+00:00",
+ "wall_s": 171.663,
+ "response_id": "3922d5fa-590c-4ab3-96af-5cc38b5d5f76",
+ "first_token_epoch": 1792358825.648173,
+ "first_token_iso": "2026-10-18T21:27:05.648+00:00",
+ "ttft_s": 164.929,
+ "last_token_epoch": 1792358832.381971,
+ "decode_window_s": 6.734,
+ "token_frames": 198,
+ "completion_tokens": 200,
+ "prompt_tokens": 50004,
+ "cached_tokens": 8192,
+ "usage": {
+  "prompt_tokens": 50004,
+  "completion_tokens": 200,
+  "total_tokens": 50204,
+  "prompt_tokens_details": {
+   "cached_tokens": 8192,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 29.55,
+ "prefill_frames": 20,
+ "keepalive_frames": 2,
+ "progress": [
+  {
+   "epoch": 1792358676.099145,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358684.1992419,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358691.998973,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358699.850014,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358707.698024,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358715.5804522,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358723.423435,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358731.322207,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358739.254617,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358747.517069,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358755.468103,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358763.776125,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358772.386859,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358780.937823,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358788.9165802,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358797.134677,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358805.21875,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358813.3479428,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358821.5840158,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358825.647421,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 253.89983153401278,
+  "generation_tps": 0.0,
+  "prompt_tokens": 50004,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 122311524433
+  },
+  "prefix_cache_hit": "partial",
+  "mtp_cycles_cumulative": 585,
+  "mtp_accepted_drafts_cumulative": 347,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the DeepSeek-V4-Flash attention indexer (`attn.indexer`) \u2014 specifically its O(P log P) argsort over the full pooled context P plus the materialization of the full `(B, H=64, L_chunk, P)` scores tensor, which grows with context and produces multi-second per-chunk stalls. It is named as the dominant context-scaling cost in the very first handoff (`Tiled-P Indexer Fix \u2014 Plan`, root-cause section: \"attn.indexer is the dominant context-scaling cost of DSv4 prefill\"), recurs in the `DSv4-Flash High-Context Prefill Cliff \u2014 Handoff (2026-06-21)` (span-profiler evidence: per-call avg 4532us \u2192 5362us A\u2192B, max ~22ms spikes across ~21 indexer layers compounding into the",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/d50k.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 21:24:20 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "1d0c39e9-d6c9-42d6-bf85-181bf09d2369",
+  "first_token_epoch": 1792358825.644,
+  "first_token_ts": "2026-10-18 16:27:05.644",
+  "latency_s": 164.73,
+  "prefill_s": 164.68,
+  "prompt_tokens": 50004,
+  "reuse": 8192,
+  "prefill_tok_s_uncached": 253.9,
+  "committed": 201,
+  "emitted": 200,
+  "server_elapsed_s": 171.4,
+  "server_reason": "length",
+  "tok_s_field": 1.2,
+  "server_decode_tok_s": 29.99
+ }
+}

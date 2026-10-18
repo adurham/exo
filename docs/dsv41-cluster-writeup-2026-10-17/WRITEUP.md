@@ -145,7 +145,7 @@ reliability layer (§3).
 
 `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` -- a 552B-parameter MoE with 16B
 active, quantized to EXL3 at 2.9 bits per weight. The checkpoint is 210.68 GB on disk
-(`du -sk` = 205,739,672 KiB), 40 safetensors shards, identical on both nodes. Config:
+(`du -sk` = 205,739,672 KiB), 39 safetensors shards, identical on both nodes. Config:
 `quant_method: exl3`, version 1.4.2, `codebook: mul1`, `avg_bits: 2.9`, `head_bits: 6`,
 `mtp_bits: 4`.
 
@@ -1183,7 +1183,7 @@ prompt files plus their generator (§11.5).
   using IPs and libp2p peer IDs hardcoded in `start_cluster.sh` (`NODES` at :1113, peer
   constants at :1025-1028) -- edit these for your cluster.
 - The checkpoint `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (210.68 GB by
-  allocation (`du`); the server reports `storageSize = 210713013432` B ~= 210.71 GB SI; 40
+  allocation (`du`); the server reports `storageSize = 210713013432` B ~= 210.71 GB SI; 39
   safetensors shards) present at `~/.exo/models/` on both nodes, identical.
 
 ### 11.2 The code
@@ -1259,22 +1259,31 @@ is how the 160K row is measured.
 One depth row:
 
 ```bash
-mkdir -p prompts   # the capture session's prompt files and their generator are not in this repo (§11.5)
-cd prompts
+# scripts/gen-prompts.py rebuilds prompts/ deterministically from the pinned SHA; the
+# committed bodies are equivalent-class reconstructions, not the capture session's originals.
+python3 scripts/gen-prompts.py
 curl -sS -N --max-time 3600 -X POST \
   http://node0.tailnet.ts.net:52415/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  --data-binary @depth_d100k.json \
+  --data-binary @prompts/depth_d100k.json \
   -w 'CURLMETA http=%{http_code} starttransfer=%{time_starttransfer} total=%{time_total}'
 ```
+
+Send **large** bodies (160K and 1M, >1 MB) to the node that is currently the master: a
+multi-megabyte command published from a non-master node is not accepted (the API retries at
+10/15/30 s, then gives up with "The cluster didn't accept the request"). Measured
+2026-10-18 — `REPRO-RUN-2026-10-18.md`.
 
 The per-frame epoch timestamps that §9.1's client channel is built on come from a line-stamping
 filter on the SSE stream, not from `-w`; the `CURLMETA` line is a wall-clock sanity check.
 
 Body shape (the corpus is the repo's own `docs/**.md` plus the repo's top-level handoff docs,
 concatenated in sorted order, truncated at the target token depth with the checkpoint's own
-tokenizer, then the question appended; the prompt files and their generator lived in the
-capture session's scratch directory, not in this repo):
+tokenizer, then the question appended). `scripts/gen-prompts.py` rebuilds the bodies
+deterministically (pinned SHA + checkpoint tokenizer, no network, no wall clock); they are
+**equivalent-class**, not the originals — the capture session's exact bytes are RAW-LOST
+(`preserved/RECONSTRUCTION.md`), so token counts match exactly while byte sizes differ by
+~1%.
 
 ```json
 {
@@ -1311,6 +1320,13 @@ The limiter needs `enable_thinking: true` to engage; it honors a per-request
 `reasoning_budget_tokens` field over its default of `0.75 x max_tokens` (the default is capped at 16384; an explicit request value is passed through uncapped -- `reasoning_budget.py:91-92`).
 
 _Static-checked at b88d65dd3304 on 2026-10-18 by scripts/check-s11.sh: the paths, CLI flags and constants §11 names all resolve at that SHA. Static only -- nothing was launched, so this does not show that the SHA boots on this hardware, that the hardcoded node/peer constants fit your cluster, or that any §9 figure reproduces._
+
+_Executed end-to-end at b88d65dd3304 on 2026-10-18 (author-executed, not third-party): the
+SHA booted, §11.4's constants matched exactly, and the §11.5 depth rows and §11.7 guard and
+limiter repros ran as documented. The 1M row did **not** complete -- it was killed by the
+hang watchdog at ~70 s on two accepted attempts (transport wedge in a large collective), and
+a >1 MB request sent to a non-master node is never accepted. Per-row numbers, deltas and
+evidence: `REPRO-RUN-2026-10-18.md`._
 
 ---
 

@@ -1,0 +1,49 @@
+# 1M attempt failures (2026-10-18)
+
+## attempt 1 (API node1, 16:47:11) — never accepted
+[ 2026-10-18 16:47:11.872 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:47:21.852 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2848 ] [33m[1mChat request 71d3b6d7-2be4-4f02-a289-eda628cfa38c not accepted after 10s; sending it again[0m
+[ 2026-10-18 16:47:21.918 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:47:36.853 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2848 ] [33m[1mChat request 71d3b6d7-2be4-4f02-a289-eda628cfa38c not accepted after 15s; sending it again[0m
+[ 2026-10-18 16:47:36.913 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:48:06.855 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2848 ] [33m[1mChat request 71d3b6d7-2be4-4f02-a289-eda628cfa38c not accepted after 30s; sending it again[0m
+[ 2026-10-18 16:48:06.855 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2855 ] [33m[1mGiving up on chat request 71d3b6d7-2be4-4f02-a289-eda628cfa38c: never accepted[0m
+[ 2026-10-18 16:48:06.917 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+
+## attempt 2 (API node1, 16:50:20) — never accepted
+[ 2026-10-18 16:50:34.307 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2848 ] [33m[1mChat request 92380f35-6a72-4595-b088-b37392a7a3fe not accepted after 10s; sending it again[0m
+[ 2026-10-18 16:50:49.309 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2848 ] [33m[1mChat request 92380f35-6a72-4595-b088-b37392a7a3fe not accepted after 15s; sending it again[0m
+[ 2026-10-18 16:51:19.312 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2848 ] [33m[1mChat request 92380f35-6a72-4595-b088-b37392a7a3fe not accepted after 30s; sending it again[0m
+[ 2026-10-18 16:51:19.313 | [33m[1mWARNING [0m | exo.api.main:_resend_until_accepted:2855 ] [33m[1mGiving up on chat request 92380f35-6a72-4595-b088-b37392a7a3fe: never accepted[0m
+
+## attempt 3 (API master node2, 16:52:32) — accepted, jaccl fault, watchdog SIGKILL
+[ 2026-10-18 16:52:32.377 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:32.378 | [34m[1mDEBUG   [0m | exo.master.main:_index_apply_broadcast:895 ] [34m[1mMaster indexing event: TaskCreated(event_id='803b445b-ea88-4427-b835-331f22925070' task_id='1e1230be-8660-49ff-b203-69befe7[0m
+[ 2026-10-18 16:52:32.457 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:32.459 | [1mINFO    [0m | exo.worker.runner.supervisor:start_task:822 ] [1mStarting task TextGeneration(task_id='1e1230be-8660-49ff-b203-69befe7eb828', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='8fabc16c-ff82-430f-8219-f3a542f137ba', command_id='b9fce7d0-f64a-4c38-952c-17ee5741cb64', task_params=TextGenerationTaskParams(model='dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw', input=[InputMessage(role='user', content=<InputMessageContent: # AGENTS.md
+[ 2026-10-18 16:52:32.468 | [1mINFO    [0m | exo.worker.runner.runner:handle_generation_tasks:703 ] [1mreceived chat request: TextGeneration(task_id='1e1230be-8660-49ff-b203-69befe7eb828', task_status=<TaskStatus.Pending: 'Pending'>, instance_id='8fabc16c-ff82-430f-8219-f3a542f137ba', command_id='b9fce7d0-f64a-4c38-952c-17ee5741cb64', task_params=TextGenerationTaskParams(model='dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw', input=[InputMessage(role='user', content=<InputMessageContent: # AGENTS.md
+[ 2026-10-18 16:52:32.471 | [34m[1mDEBUG   [0m | exo.master.main:_index_apply_broadcast:895 ] [34m[1mMaster indexing event: TaskStatusUpdated(event_id='e35e4945-c2ff-418d-ac63-5e986ea77f89' task_id='1e1230be-8660-49ff-b203-6[0m
+[ 2026-10-18 16:52:33.712 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='3bd267eb-474e-46db-9203-c63ff7502538', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:52:33.744 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:34.246 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='2c35548e-b6d0-4116-a193-590611ccb26c', since_idx=10934, snapshot=False)[0m
+[ 2026-10-18 16:52:35.297 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='82bebaf4-18b6-4c5d-bc5d-9fc77c1cee20', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:52:35.326 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:37.461 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='fb7cf5ea-f905-4f35-bb81-f793b5031ac4', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:52:37.493 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:41.465 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='390b5594-26bf-4205-853f-5cfe26a331b9', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:52:41.496 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:49.624 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='6ee6c98e-c8f5-4173-9f26-bdf68014cbc7', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:52:49.657 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:52:52.468 | [33m[1mWARNING [0m | exo.worker.runner.runner:handle_generation_tasks:838 ] [33m[1mjaccl transport fault in generator.step(): [Event::wait] Timed out: GPU event not signaled and no stream exception (peer rank stuck on an abandoned c>=2 collective); surfacing a clean fault for in-place reconnect / restart.. Attempting in-place reconnect (both ranks) to avoid a re-place.[0m
+[ 2026-10-18 16:52:52.469 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:607 ] [33m[1mRunner stderr: [jaccl-seq68] reconnect_fresh PRE rank=1 peer=0 send_seq=0 recv_seq=0[0m
+[ 2026-10-18 16:52:52.469 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:607 ] [33m[1mRunner stderr: [jaccl] reconnect_fresh rank=1 ENTER (size=2) — closing device contexts and rebuilding[0m
+[ 2026-10-18 16:52:59.777 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='555f0c85-6f91-4b96-b378-97b8060cede8', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:52:59.844 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:53:07.472 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:607 ] [33m[1mRunner stderr: [jaccl] [jaccl] recv EAGAIN, retrying (remaining=8, elapsed=35.0s, deadline=150.0s)[0m
+[ 2026-10-18 16:53:09.973 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='492d6b3b-d06e-481d-a069-0a266070d677', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:53:10.041 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:53:20.152 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='de214816-310b-4657-bdec-a6f08877360c', since_idx=10925, snapshot=False)[0m
+[ 2026-10-18 16:53:20.215 | [33m[1mWARNING [0m | exo.routing.router:_networking_publish:242 ] [33m[1mSending overlarge payload, network performance may be temporarily degraded[0m
+[ 2026-10-18 16:53:21.864 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:_check_hang:1137 ] [33m[1mRunner 4ab3e548-7e5c-4131-91c9-9d4b51dd3d2a silent for 48s; liveness probe baseline footprint=113.30GB, extending 20s for a growth check (1/20).[0m
+[ 2026-10-18 16:53:27.719 | [33m[1mWARNING [0m | exo.worker.runner.supervisor:<lambda>:607 ] [33m[1mRunner stderr: [jaccl] [jaccl] recv EAGAIN, retrying (remaining=8, elapsed=35.0s, deadline=150.0s)[0m
+[ 2026-10-18 16:53:30.339 | [1mINFO    [0m | exo.master.main:_command_processor:340 ] [1mExecuting command: RequestEventLog(command_id='0d597f0d-a513-4e41-b7e2-7b06a515fcd6', since_idx=10925, snapshot=False)[0m

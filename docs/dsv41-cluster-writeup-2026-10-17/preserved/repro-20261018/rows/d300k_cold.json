@@ -1,0 +1,85 @@
+{
+ "label": "d300k_cold",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/depth_d300k.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792360819.42359,
+ "started_iso": "2026-10-18T22:00:19.423+00:00",
+ "ended_epoch": 1792360828.739392,
+ "ended_iso": "2026-10-18T22:00:28.739+00:00",
+ "wall_s": 9.316,
+ "response_id": "429cd807-b207-4ad7-973b-0b764d3c5601",
+ "first_token_epoch": 1792360820.754754,
+ "first_token_iso": "2026-10-18T22:00:20.754+00:00",
+ "ttft_s": 1.331,
+ "last_token_epoch": 1792360828.739182,
+ "decode_window_s": 7.984,
+ "token_frames": 194,
+ "completion_tokens": 200,
+ "prompt_tokens": 300003,
+ "cached_tokens": 300003,
+ "usage": {
+  "prompt_tokens": 300003,
+  "completion_tokens": 200,
+  "total_tokens": 300203,
+  "prompt_tokens_details": {
+   "cached_tokens": 300003,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 24.92,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 0.0,
+  "generation_tps": 0.0,
+  "prompt_tokens": 300003,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 121393866720
+  },
+  "prefix_cache_hit": "partial",
+  "mtp_cycles_cumulative": 213,
+  "mtp_accepted_drafts_cumulative": 131,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: the single most frequently discussed performance bottleneck across this entire reference corpus is the **`moe.all_sum` cross-rank collective** \u2014 the per-layer MoE partial-sum reduction that runs on jaccl's CPU stream and forces a GPU\u2192CPU\u2192GPU drain every layer. It is the subject of an entire dedicated section (\u00a72, \"MoE / all_sum collective \u2014 the dominant cost center\") spanning at least 20 distinct docs from 2026-05-14 through 2026-08-21, and it recurs in nearly every other section: it is the top span in the shallow-feed attribution (`moe.all_sum` 39.5% of shallow wall, with `ffn` matching it to 0.2% while `switch_mlp` is only 0.1%), it is the target of the night's biggest shipped lever (`DSV4_MOE_ALLSUM_BF16`, +3.1%",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/d300k_cold.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 22:00:19 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "cac0c9f0-d028-4b7a-b84b-5102297d265c",
+  "first_token_epoch": 1792360820.749,
+  "first_token_ts": "2026-10-18 17:00:20.749",
+  "latency_s": 0.89,
+  "prefill_s": 0.0,
+  "prompt_tokens": 300003,
+  "reuse": 300003,
+  "committed": 201,
+  "emitted": 200,
+  "server_elapsed_s": 8.8,
+  "server_reason": "length",
+  "tok_s_field": 22.8,
+  "server_decode_tok_s": 25.25
+ }
+}

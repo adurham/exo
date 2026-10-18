@@ -1,0 +1,120 @@
+Analysis of sampling python (pid 60937) every 1 millisecond
+Process:         python3.13 [60937]
+Path:            /Users/USER/*/python3.13
+Load Address:    0x1002a8000
+Identifier:      python3.13
+Version:         ???
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  python3.13 [60853]
+Target Type:     live task (Roots Present)
+
+Date/Time:       2026-10-18 16:53:45.429 -0500
+Launch Time:     2026-10-18 16:18:08.543 -0500
+OS Version:      macOS 27.0 (26A428)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         113.3G
+Physical footprint (peak):  117.6G
+Idle exit:                  untracked
+----
+
+Call graph:
+    2054 Thread_9799498   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 2054 start  (in dyld) + 6688  [0x19cd8be80]
+    +   2054 Py_BytesMain  (in libpython3.13.dylib) + 36  [0x10179d414]
+    +     2054 pymain_main  (in libpython3.13.dylib) + 468  [0x10179d5f4]
+    +       2054 Py_RunMain  (in libpython3.13.dylib) + 892  [0x1017a7738]
+    +         2054 _PyRun_SimpleStringFlagsWithName  (in libpython3.13.dylib) + 280  [0x1017e9838]
+    +           2054 run_mod.llvm.18281762391043294983  (in libpython3.13.dylib) + 148  [0x1015ef104]
+    +             2054 run_eval_code_obj  (in libpython3.13.dylib) + 144  [0x1015efb90]
+    +               2054 PyEval_EvalCode  (in libpython3.13.dylib) + 132  [0x1015efce8]
+    +                 2054 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 40356  [0x10163571c]
+    +                   2054 ???  (in core.cpython-313-darwin.so)  load address 0x10890c000 + 0xecc18  [0x1089f8c18]
+    +                     2054 ???  (in core.cpython-313-darwin.so)  load address 0x10890c000 + 0x562ac  [0x1089622ac]
+    +                       2054 jaccl::MeshGroup::reconnect()  (in libjaccl.dylib) + 104  [0x108d54ac4]
+    +                         2054 jaccl::MeshGroup::reconnect_fresh()  (in libjaccl.dylib) + 1752  [0x108d55dac]
+    +                           2054 jaccl::MeshGroup::initialize(std::function<std::vector<std::vector<jaccl::Destination>> (std::vector<jaccl::Destination> const&)> const&)  (in libjaccl.dylib) + 624  [0x108d4fcd8]
+    +                             2054 jaccl::SideChannel::all_gather<std::vector<jaccl::Destination>>(std::vector<jaccl::Destination> const&)  (in libjaccl.dylib) + 244  [0x108d5eab8]
+    +                               2054 jaccl::TCPAllGather::operator()(char const*, char*, unsigned long)  (in libjaccl.dylib) + 108  [0x108d4d884]
+    +                                 2054 jaccl::TCPSocket::recv(char const*, void*, unsigned long)  (in libjaccl.dylib) + 232  [0x108d4a67c]
+    +                                   2054 __recvfrom  (in libsystem_kernel.dylib) + 8  [0x19d1213c8]
+    2054 Thread_9799551
+    + 2054 thread_start  (in libsystem_pthread.dylib) + 8  [0x19d15ccec]
+    +   2054 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19d161d00]
+    +     2054 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x101e588b0]
+    +       2054 thread_run  (in libpython3.13.dylib) + 160  [0x1017ba3b0]
+    +         2054 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x1018b2dec]
+    +           2054 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 52948  [0x10163884c]
+    +             2054 time_sleep  (in libpython3.13.dylib) + 268  [0x101968b80]
+    +               2054 PyEval_RestoreThread  (in libpython3.13.dylib) + 56  [0x1016aac28]
+    +                 2048 take_gil.llvm.8914855522214485887  (in libpython3.13.dylib) + 408  [0x1016aae4c]
+    +                 ! 2043 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19d1621d0]
+    +                 ! : 2043 __psynch_cvwait  (in libsystem_kernel.dylib) + 8,16  [0x19d12050c,0x19d120514]
+    +                 ! 5 _pthread_cond_wait  (in libsystem_pthread.dylib) + 340  [0x19d161f50]
+    +                 !   5 __gettimeofday  (in libsystem_kernel.dylib) + 12  [0x19d120b64]
+    +                 5 take_gil.llvm.8914855522214485887  (in libpython3.13.dylib) + 392  [0x1016aae3c]
+    +                 ! 5 _PyThread_cond_after  (in libpython3.13.dylib) + 104  [0x1016ab7c4]
+    +                 !   2 DYLD-STUB$$clock_gettime  (in libpython3.13.dylib) + 0  [0x101ee443c]
+    +                 !   2 clock_gettime  (in libsystem_c.dylib) + 256  [0x19cff81c4]
+    +                 !   : 1 gettimeofday  (in libsystem_c.dylib) + 56  [0x19cfefefc]
+    +                 !   : | 1 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x19d11ec20]
+    +                 !   : |   1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x19d11d0f8]
+    +                 !   : 1 gettimeofday  (in libsystem_c.dylib) + 0  [0x19cfefec4]
+    +                 !   1 clock_gettime  (in libsystem_c.dylib) + 116  [0x19cff8138]
+    +                 1 take_gil.llvm.8914855522214485887  (in libpython3.13.dylib) + 408  [0x1016aae4c]
+    2054 Thread_9799552
+    + 2054 thread_start  (in libsystem_pthread.dylib) + 8  [0x19d15ccec]
+    +   2054 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19d161d00]
+    +     2054 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x101e588b0]
+    +       2054 thread_run  (in libpython3.13.dylib) + 160  [0x1017ba3b0]
+    +         2054 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x1018b2dec]
+    +           2054 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 75208  [0x10163df40]
+    +             2054 method_vectorcall_VARARGS_KEYWORDS.llvm.8371976158726395142  (in libpython3.13.dylib) + 144  [0x1015e8cd0]
+    +               2054 lock_PyThread_acquire_lock  (in libpython3.13.dylib) + 60  [0x10171fbdc]
+    +                 2054 _PyMutex_LockTimed  (in libpython3.13.dylib) + 480  [0x10171fdf4]
+    +                   2054 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x10171ff80]
+    +                     2054 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x10172026c]
+    +                       2054 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19d1621d0]
+    +                         2054 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19d12050c]
+    2054 Thread_9799553
+    + 2054 thread_start  (in libsystem_pthread.dylib) + 8  [0x19d15ccec]
+    +   2054 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19d161d00]
+    +     2054 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x101e588b0]
+    +       2054 thread_run  (in libpython3.13.dylib) + 160  [0x1017ba3b0]
+    +         2054 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x1018b2dec]
+    +           2054 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 115880  [0x101647e20]
+    +             2054 slot_tp_iternext  (in libpython3.13.dylib) + 52  [0x1018d7978]
+    +               2054 vectorcall_method  (in libpython3.13.dylib) + 192  [0x1015ca464]
+    +                 2054 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 51944  [0x101638460]
+    +                   2054 os_read  (in libpython3.13.dylib) + 280  [0x101943744]
+    +                     2054 _Py_read  (in libpython3.13.dylib) + 140  [0x101722800]
+    +                       2054 read  (in libsystem_kernel.dylib) + 8  [0x19d11d910]
+    2054 Thread_9800280
+    + 2054 thread_start  (in libsystem_pthread.dylib) + 8  [0x19d15ccec]
+    +   2054 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19d161d00]
+    +     2054 std::__thread_proxy[abi:nqe220106]<std::tuple<std::unique_ptr<std::__thread_struct>, void (mlx::core::scheduler::StreamThread::*)(), mlx::core::scheduler::StreamThread*>>(void*)  (in libmlx.dylib) + 72  [0x10a17496c]
+    +       2054 mlx::core::scheduler::StreamThread::thread_fn()  (in libmlx.dylib) + 196  [0x10a174414]
+    +         2054 std::condition_variable::wait(std::unique_lock<std::mutex>&)  (in libc++.1.dylib) + 32  [0x19d0727bc]
+    +           2054 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19d1621d0]
+    +             2054 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19d12050c]
+    2054 Thread_9801309
+    + 2054 thread_start  (in libsystem_pthread.dylib) + 8  [0x19d15ccec]
+    +   2054 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19d161d00]
+    +     2054 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x101e588b0]
+    +       2054 thread_run  (in libpython3.13.dylib) + 160  [0x1017ba3b0]
+    +         2054 method_vectorcall.llvm.12181753219068989525  (in libpython3.13.dylib) + 400  [0x1018b2dec]
+    +           2054 _PyEval_EvalFrameDefault  (in libpython3.13.dylib) + 63892  [0x10163b30c]
+    +             2054 method_vectorcall_FASTCALL_KEYWORDS_METHOD.llvm.8371976158726395142  (in libpython3.13.dylib) + 132  [0x1018b69f8]
+    +               2054 _queue_SimpleQueue_get  (in libpython3.13.dylib) + 220  [0x101e92758]
+    +                 2054 _queue_SimpleQueue_get_impl  (in libpython3.13.dylib) + 180  [0x101e92a60]
+    +                   2054 _PyParkingLot_Park  (in libpython3.13.dylib) + 280  [0x10171ff80]
+    +                     2054 _PySemaphore_Wait  (in libpython3.13.dylib) + 148  [0x10172026c]
+    +                       2054 _pthread_cond_wait  (in libsystem_pthread.dylib) + 980  [0x19d1621d0]
+    +                         2054 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x19d12050c]
+    2054 Thread_9801310
+    + 2054 thread_start  (in libsystem_pthread.dylib) + 8  [0x19d15ccec]
+    +   2054 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x19d161d00]
+    +     2054 pythread_wrapper.llvm.10365607624085856658  (in libpython3.13.dylib) + 48  [0x101e588b0]
+    +       2054 thread_run  (in libpython3.13.dylib) + 160  [0x1017ba3b0]

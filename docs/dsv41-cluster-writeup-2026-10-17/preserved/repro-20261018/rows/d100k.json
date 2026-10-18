@@ -1,0 +1,207 @@
+{
+ "label": "d100k",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/depth_d100k.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792358833.266241,
+ "started_iso": "2026-10-18T21:27:13.266+00:00",
+ "ended_epoch": 1792359056.986995,
+ "ended_iso": "2026-10-18T21:30:56.986+00:00",
+ "wall_s": 223.721,
+ "response_id": "900b465a-1c74-413f-93f9-4d5780183cbb",
+ "first_token_epoch": 1792359049.947511,
+ "first_token_iso": "2026-10-18T21:30:49.947+00:00",
+ "ttft_s": 216.681,
+ "last_token_epoch": 1792359056.9865558,
+ "decode_window_s": 7.039,
+ "token_frames": 195,
+ "completion_tokens": 200,
+ "prompt_tokens": 100003,
+ "cached_tokens": 49152,
+ "usage": {
+  "prompt_tokens": 100003,
+  "completion_tokens": 200,
+  "total_tokens": 100203,
+  "prompt_tokens_details": {
+   "cached_tokens": 49152,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 28.27,
+ "prefill_frames": 24,
+ "keepalive_frames": 2,
+ "progress": [
+  {
+   "epoch": 1792358850.577664,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358859.484571,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358868.3573382,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358877.238423,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358886.104396,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358894.940045,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358903.806432,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358912.7477162,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358921.7294989,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358930.721386,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358939.699521,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358948.812889,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358957.778721,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358966.376405,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358974.707129,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358983.0382059,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358991.4167109,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792358999.791853,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792359008.8840399,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792359017.3308291,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792359025.7759418,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792359034.22106,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792359042.676576,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792359049.946311,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 234.97995512236375,
+  "generation_tps": 0.0,
+  "prompt_tokens": 100003,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 123012196739
+  },
+  "prefix_cache_hit": "partial",
+  "mtp_cycles_cumulative": 804,
+  "mtp_accepted_drafts_cumulative": 474,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: the single most frequently discussed performance bottleneck across the entire reference corpus is the `moe.all_sum` cross-rank collective in the MoE forward pass \u2014 it appears in at least 20 distinct documents spanning 2026-05-14 through 2026-08-22, and is the subject of the largest cluster of investigations (NOP-ablation cost attribution, the 178ms artifact, GPU-stream-boundary decomposition, skew-vs-wire analysis, the multi-doc quantized-all_sum failure chain, comm/compute overlap phases 0b/0c, the OPT-7 fence-gating revert, the jaccl-internal timing work, and the sync-span arithmetic reconciliation). The document that quantifies it most directly is `docs/moe-all-sum-dominant-cost-2026-08-19.md`, whose NOP-ablation (identity pass-through on `moe.all_sum`) measured a **2.63x speedup at",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/d100k.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 21:27:13 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "e63a39d8-c808-4174-a9dd-9e9087ef4b26",
+  "first_token_epoch": 1792359049.943,
+  "first_token_ts": "2026-10-18 16:30:49.943",
+  "latency_s": 216.5,
+  "prefill_s": 216.41,
+  "prompt_tokens": 100003,
+  "reuse": 49152,
+  "prefill_tok_s_uncached": 235.0,
+  "committed": 201,
+  "emitted": 200,
+  "server_elapsed_s": 223.5,
+  "server_reason": "length",
+  "tok_s_field": 0.9,
+  "server_decode_tok_s": 28.67
+ }
+}

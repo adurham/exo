@@ -1,0 +1,72 @@
+{
+ "label": "d160k",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/prompts_160k_nostream.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": false,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792359057.983652,
+ "started_iso": "2026-10-18T21:30:57.983+00:00",
+ "ended_epoch": 1792359338.195319,
+ "ended_iso": "2026-10-18T21:35:38.195+00:00",
+ "wall_s": 280.212,
+ "response_id": "fab655aa-0d55-4d08-82df-364b350b8c95",
+ "first_token_epoch": null,
+ "first_token_iso": null,
+ "ttft_s": null,
+ "last_token_epoch": null,
+ "decode_window_s": null,
+ "token_frames": 0,
+ "completion_tokens": 200,
+ "prompt_tokens": 160004,
+ "cached_tokens": 98304,
+ "usage": {
+  "prompt_tokens": 160004,
+  "completion_tokens": 200,
+  "total_tokens": 160204,
+  "prompt_tokens_details": {
+   "cached_tokens": 98304,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": null,
+ "prefill_frames": 0,
+ "keepalive_frames": 0,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": null,
+ "content": "BOTTLENECK: the single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective in the MoE forward pass \u2014 it is the subject of at least 20 distinct docs spanning 2026-05-14 through 2026-08-21, and is repeatedly re-measured, re-attributed, and re-litigated across the handoffs (`MOE_KERNEL_HANDOFF.md`, `docs/moe-all-sum-dominant-cost-2026-08-19.md`, `docs/moe-all-sum-178ms-artifact-real-bottleneck-2026-08-20.md`, `docs/moe-all-sum-skew-vs-comms-2026-08-19.md`, `docs/phase0a-allsum-boundary-decomposition-2026-08-20.md`, `docs/phase0b-collective-overlap-gate-2026-08-20.md`, `",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/d160k.sse",
+ "headers": {
+  "content-type": "application/json",
+  "date": "Sun, 18 Oct 2026 21:35:38 GMT"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "26eb3498-6083-4344-bdd2-1c8a23ea753c",
+  "first_token_epoch": 1792359331.525,
+  "first_token_ts": "2026-10-18 16:35:31.525",
+  "latency_s": 273.23,
+  "prefill_s": 273.08,
+  "prompt_tokens": 160004,
+  "reuse": 98304,
+  "prefill_tok_s_uncached": 225.9,
+  "committed": 201,
+  "emitted": 200,
+  "server_elapsed_s": 279.8,
+  "server_reason": "length",
+  "tok_s_field": 0.7,
+  "server_decode_tok_s": 30.34
+ }
+}

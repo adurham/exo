@@ -1,0 +1,86 @@
+{
+ "label": "limiter_default",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/limiter_default.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792360150.105362,
+ "started_iso": "2026-10-18T21:49:10.105+00:00",
+ "ended_epoch": 1792360155.471293,
+ "ended_iso": "2026-10-18T21:49:15.471+00:00",
+ "wall_s": 5.366,
+ "response_id": "ed58f8ae-0b27-487e-835e-489f427b91c7",
+ "first_token_epoch": 1792360150.9525602,
+ "first_token_iso": "2026-10-18T21:49:10.952+00:00",
+ "ttft_s": 0.847,
+ "last_token_epoch": 1792360155.3282099,
+ "decode_window_s": 4.376,
+ "token_frames": 165,
+ "completion_tokens": 172,
+ "prompt_tokens": 52,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 52,
+  "completion_tokens": 172,
+  "total_tokens": 224,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 106,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "stop",
+ "client_decode_tok_s": 39.08,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 79.72022799711205,
+  "generation_tps": 0.0,
+  "prompt_tokens": 52,
+  "generation_tokens": 172,
+  "peak_memory_usage": {
+   "in_bytes": 127773046353
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 3368,
+  "mtp_accepted_drafts_cumulative": 1823,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "Let the ball cost \\(x\\). Then the bat costs \\(x + 1.00\\). Together: \\(x + (x + 1.00) = 1.10\\), so \\(2x = 0.10\\), giving \\(x = 0.05\\).\n\nThe ball costs $0.05.",
+ "reasoning": "We need answer classic. Need think step by step then final one sentence. Need be careful. Let ball x, bat x+1. Total x+x+1=1.10 => 2x=0.10 => x=0.05. Final answer one sentence. They ask \"Think through it step by step, then give final answer in one sentence.\" We can include steps and final sentence. Need final answer in one sentence maybe \"The ball costs $0.05.\" Ensure not $0.10.",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/out/limiter_default.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 21:49:10 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "8e0502bb-e967-4185-a78e-0ef786ab82a1",
+  "first_token_epoch": 1792360150.947,
+  "first_token_ts": "2026-10-18 16:49:10.947",
+  "latency_s": 0.67,
+  "prefill_s": 0.65,
+  "prompt_tokens": 52,
+  "reuse": 0,
+  "prefill_tok_s_uncached": 80.0,
+  "committed": 174,
+  "emitted": 172,
+  "server_elapsed_s": 5.1,
+  "server_reason": "stop",
+  "tok_s_field": 34.0,
+  "server_decode_tok_s": 38.84
+ }
+}
