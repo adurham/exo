@@ -1521,3 +1521,26 @@ rounds closed:
   The writeup pointed at files that were not in git; now they are.
 
 No code change. Writeup content otherwise untouched.
+
+---
+
+## DSv4.1 cluster writeup — independent review pass, 20 corrections (2026-10-18)
+
+Second review round on `docs/dsv41-cluster-writeup-2026-10-17/`, run after the 2026-10-17
+rounds closed. Method: Fable consulted for the plan + acceptance bar and again to rule on
+findings; 4 DSv4.1-Flash subagents executed on a disjoint split; the parent re-verified every
+finding against its cited source before listing it.
+
+21 findings, 20 applied, 1 rejected. Highest-value catches: the EXL3 loader's replicated/sliced
+tensor pairs were swapped (§5.3); `b4871e8` was misattributed to a subgroup teardown/rebuild
+when it actually fixed `reconnect()`'s skipped `pool_connections_` (§3.2); §3.1 claimed
+software reliability over UC for the whole TP path while §6.2 says all_gather has none; §11 was
+not runnable (no `prompts/` dir, `git checkout main` instead of the pinned SHA, hardcoded node
+constants unmentioned); §10.8 still listed the guard `action` knob as untoggled after §12.6
+shipped it as `truncate`.
+
+Rejected: R18 (writeup more conservative than its own pack is not a defect).
+
+Full record, per-item verdicts and the raw agent findings: `review-2026-10-18/`.
+Still open: a pack-vs-raw-log pass (the packs are treated as authority throughout), and §11 has
+never been executed end to end by a third party.

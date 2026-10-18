@@ -7,6 +7,9 @@ and §12 draw on the live captures they name. Private identifiers are scrubbed t
 placeholders. Independently fact-checked against the evidence packs and copy-edited on
 2026-10-17; the review record and every applied fix are in `REVIEW-AND-FIXLOG-2026-10-17.md`._
 
+_Errata 2026-10-18: 20 corrections applied after an independent review pass (4 agents +
+reference-model ruling); the review record is in `review-2026-10-18/`._
+
 ---
 
 ## 0. TL;DR
@@ -51,7 +54,7 @@ were exercised and both behaved (the guard's retry semantics were later reworked
 | weights per rank | 108.76 GB measured | shard headers + the sharding rule the running code applies |
 | 1M KV per session | 3.2-4.2 GiB | MLA absorbed form, replicated not TP-sharded |
 | headroom at 1M | -2.3 GB (best) to -9.4 GB (worst) | 125.83 GB wired limit (120000 MiB) - 108.76 GB weights - 3.4-4.5 GB KV - 16-22 GB ESTIMATE |
-| guard / limiter | live fire at committed=269, period=1; limiter cut 600 -> 96 reasoning tokens exactly | HEAD `5a18b81` |
+| guard / limiter | live fire at committed=269, period=1 (pre-§12.6 rule; the contiguous-period escape ships default ON and no longer kills this repro); limiter cut 600 -> 96 reasoning tokens exactly | HEAD `5a18b81` |
 
 ---
 
@@ -65,7 +68,8 @@ efficiency), 128 GB unified memory each -- 256 GB across the pair. Both run macO
 20457.1.29. `sysctl hw.memsize` reports 137,438,953,472 B = 128 GiB on each.
 
 The GPU wired limit is raised on both nodes: `sysctl iogpu.wired_limit_mb = 120000`. Every
-doc in the corpus pins 115000 MB (120.6 GB); the live value is 120000 MB (120000 MiB =
+doc in the corpus pins 115000 MB (120.6 GB as MiB; the pack's D4.4 formula renders the same
+knob as 120.0 GB); the live value is 120000 MB (120000 MiB =
 125.83 GB, the corpus's reading of this knob), and any "% of wired limit" figure copied from a
 doc is computed against the wrong denominator. We use the live value.
 
@@ -205,7 +209,7 @@ reliability, loss detection and recovery from the NIC; here they are application
   `queue_pair_reset()` does not clear a dead-UC-data-path wedge.
 - Any RDMA queue teardown can drop the Thunderbolt XDomain link with no recovery short of a
   physical reboot, so reboot became a first-class operation and SIGKILL was banned on the
-  data path.
+  deploy path (the watchdog's own SIGKILL is a separate mechanism).
 - A jaccl fault used to unwind out of the MLX stream worker thread into `std::terminate` ->
   `SIGABRT`, killing both ranks. Capturing it into a per-`StreamThread` `std::exception_ptr`
   and rethrowing on the Python-facing thread (commit `407a53c`) turned a cluster-killer
@@ -233,8 +237,9 @@ HCA that Apple exposes through the ibverbs API. At the verbs layer it looks like
 RoCE device: an `ibv_context` per device name, queue pairs, completion queues, memory
 regions. What it does not give you is the queue-pair type everyone builds a reliable
 transport on -- no hardware RC, no UD, UC only (§2.2). jaccl, the RDMA backend inside our MLX
-fork, hardcodes `IBV_QPT_UC` and provides reliability over UC in software for the TP
-collectives (mlx `mesh.cpp:232-234`; the connection setup in `rdma.cpp` fixes the QP type).
+fork, hardcodes `IBV_QPT_UC` and provides reliability over UC in software for the all_reduce
+family only; `all_gather` stays on raw UC with a `StallWatch` and no reliability layer (§6.2)
+(mlx `mesh.cpp:232-234`; the connection setup in `rdma.cpp` fixes the QP type).
 UC is connection-oriented but has no hardware retransmit and no hardware acknowledgement: a
 send or receive whose completion never arrives is simply gone, and the only signal is a poll
 loop that stops making progress. So delivery, ordering, loss detection and recovery -- all of
@@ -401,8 +406,10 @@ ever cleared the dead-UC-path wedge -- at ~0.15 s instead of a re-place" (mlx `m
 It is gated by `MLX_JACCL_RECONNECT_FRESH=1` inside `reconnect()`. Commit `e399ecf`
 (2026-07-06) introduced it; `5d2c424` added the lock coverage it needed (it had been running
 with no lock while a concurrent collective could touch the group being torn down -- a
-use-after-free segfault), `b4871e8` gave it a real subgroup teardown/rebuild path instead of
-silently degrading to the QP-only reset, and `fa69baf`'s QP-less CoordGroup exists partly so
+use-after-free segfault). `b4871e8` fixed that degradation: `reconnect()` had skipped
+`pool_connections_` entirely, so the QP-only reset ran to "COMPLETE" on a transport that had
+never recovered; the fix gives `pool_connections_` the same full soft recovery the other three
+vectors already get, and `fa69baf`'s QP-less CoordGroup exists partly so
 the parent keeps full `reconnect_fresh` capability -- the RDMA `split()` path permanently
 forfeited it (mlx `mesh.h:116-121`; `dual-cable...:15-49,108-130`).
 
@@ -525,7 +532,7 @@ without which layer 39 diverges (RMS 150.5 vs 34.6); two ALU optimizations came 
 Overall the kernels run faster than the production MXFP4 kernels: 1.909x at decode R=1 and
 1.979x at verify R=4. The loader (commit
 `6391efc`): `mlx_lm/models/exl3/loader.py` builds the stacked buffers the kernels consume and
-carries the TP slice -- gate/up OUT-tiles plus matching down K-tiles, `gu_svh`/`dn_suh`
+carries the TP slice -- gate/up OUT-tiles plus matching down K-tiles, `gu_suh`/`dn_svh`
 replicated -- agreeing to cos 0.9999999 (the two ranks' partials sum to the full result).
 `Exl3Checkpoint` is a pread shard reader (LRU of 12 open shards). The format contract was
 verified against the real file: trellis int16, `k = packed*16//256`, `.mul1` int32, signs
@@ -561,7 +568,7 @@ the MLX allocator gc-release (allocator.cpp:149-151) and the fork's eval-driver 
 throttle (transforms.cpp:285-299) both ride the forward pass's registered command-buffer bytes
 crossing the threshold at ~340K. This is the best standing explanation, not live-confirmed
 (`PERFORMANCE_HISTORY.md:2943-2953`; §10.1). The proximate fix was raising `MLX_MAX_MB_PER_BUFFER` from 50
-to 200 (the limit is read in mlx `device.cpp:768-773`; the launcher lands it in exo `463ac5d`): a single indexer `argsort` at the era shape
+to 200 (the limit is read in mlx `device.cpp:807` at `b1778183`; the launcher lands it in exo `463ac5d`): a single indexer `argsort` at the era shape
 registered ~196 MB in one shot, 3.9x the 50 MB limit but under 200 MB. One correction:
 `EXO_DSV4_PREFILL_ARGPARTITION=1` was credited with the fix, but `mx.argpartition` on Metal
 delegates to the same `gpu_merge_sort(..., argsort=true)` as `argsort` (sort.cpp:342) and the
@@ -705,7 +712,7 @@ production, both visible in the live log at HEAD `5a18b81`.
 The guard watches the committed token stream for exact cycles (`EXO_LOOP_DETECT_WINDOW=160`,
 `MAX_PERIOD=24`, `MIN_REPEATS=6`, `ACTION=error`, plus a long-block detector). We fired the
 classic trigger -- "output the word banana exactly 40 times" -- and the model reasoned
-normally, then collapsed. The last deltas on the wire, verbatim, in order:
+normally, then collapsed. The last deltas on the wire, verbatim, in order (the six before them, up to the newline delta, are elided):
 
 ```
 delta.reasoning_content = "ban"
@@ -839,9 +846,13 @@ line-stamped with an epoch time; the decode window is last-committed-token delta
 first-committed-token delta, with `: keep-alive` and `: prefill_progress` comment frames
 excluded. (2) Server: the runner's own `[DSV41] obs first-token` and `obs turn-end` lines,
 correlated to the request by response `id` == `command_id` -> `task_id`. The two channels
-agree to within 0.3% on every deep row on the unrounded values (the tables below show rounded
+agree to within 0.3% on the 100K and 300K rows on unrounded values (0.154%, 0.032%); the 10K and
+50K rows agree to 0.63% and 0.36% (the tables below show rounded
 figures, so a row like 300K's 5.9 vs 6.0 reads coarser than the underlying agreement), which
 is what validates the method.
+
+**Decode rates exclude the first committed token** (the first-token delta is the window's
+start), so a 200-token turn over a 6.54 s window reads 30.4 tok/s, not 30.6.
 
 **The `tok_s=` field on a turn-end line is not a decode rate.** It divides committed tokens
 by elapsed *including* prefill (0.1 tok/s at 300K, 0.3 at 160K). It is quoted only where the
@@ -882,7 +893,7 @@ so the throughput figures can be read against real output rather than a token co
 
 [n1] the 1K row's 82-token window is dominated by first-token handling, so the client/server
 channels diverge here; it is excluded from the deep-row agreement claim in §9.1.
-[n2] the 160K run used `stream: false`; its 6.54 s decode window (30.4 tok/s) is server-measured
+[n2] the 160K run used `stream: false`; its 6.54 s decode window (30.4 tok/s, first token excluded -- §9.1) is server-measured
 only.
 
 Five further points at ~110-119K were harvested from another client's traffic on the same
@@ -900,7 +911,7 @@ after it ended; see the §9.1 caveat), and the 300K row's client wall carries ~3
 the server's own turn (1600.8 s client wall vs 1567.3 s server elapsed -- pre-turn handling the
 server does not count; prefill and decode rates are unaffected). The burst
 structure explains the mechanism: decode arrives in speculative rounds of ~3 tokens at every
-streamed depth (2.8-3.0 measured, constant), and what changes is the cost of a round:
+streamed depth measured for it (1K-300K; the 1M runs have no round data), and what changes is the cost of a round:
 
 | depth | tokens/round | median inter-round gap | implied tok/s |
 |---|---|---|---|
@@ -938,11 +949,12 @@ the ~6,725 s attempt 2 actually spent prefilling -- the first ~299K rows were ca
 
 Monotonic within the request. Prefill cost is primarily a function of POSITION in the
 context: the same request prefilled its first 100K rows at 216.8 tok/s in attempt 1 (starting
-near the prompt's start) and its ~300K-position rows at 182.2 tok/s in attempt 2. Two caveats keep
+near the prompt's start) and its ~300K-position rows at 182.2 tok/s in attempt 2. Three caveats keep
 this indicative rather than exact: attempt 1's band rate is a progress-position figure, and
 that run carried a partial cache of its own (~98K, §9.4); and the attempts' same-position
-bands differ (~68 tok/s vs 98.1 at the deepest, a cross-attempt swing of the size the repo's
-own boot-variance notes describe). The deepest stretches are the slowest with this attention
+bands differ (~68 tok/s vs 98.1 at the deepest, a +44% cross-attempt swing; the repo's
+own boot-variance notes document ~19% between-boot spread (6.02 on ~32 tok/s medians,
+evidence.md:291), which does not account for a swing of this size). The deepest stretches are the slowest with this attention
 implementation, which is why a 1M prefill cannot be front-loaded or parallelized away here.
 
 ### 9.4 The 1M run
@@ -955,7 +967,9 @@ Attempt 2 (4 h cap) COMPLETED: HTTP 200, `prompt_tokens=1,000,003`, `completion_
 2.92 tok/s decode (client and server agree). `curl_exit=0`, no timeout.
 
 The cache caveat, stated plainly: `cached_tokens=299,008`, server `prefix_cache_hit=partial`,
-`reuse=299008` -- those rows are attempt 1's partial prefill of the same prompt, left resident
+`reuse=299008` -- a resident prompt prefix left by attempt 1 (evidence-live.md:704 reports a
+299946-row match); neither figure reconciles with attempt 1's ~98K cache, so the prefix's
+origin is unresolved
 and reused. (What bounded the reuse at 299,008 of attempt 1's 802,816 rows is not established, and
 attempt 1's own 802,816 and its ~98K cached rows come from different counters -- if 802,816 is
 the uncached-only progress counter, its absolute coverage is higher and the "remaining ~197K"
@@ -1102,13 +1116,18 @@ column -- is not implemented
 
 - A **fully cold 1M prefill** was never measured (attempt 2 had 299,008 cached tokens); the
   ~2.8 h figure is an extrapolation from attempt 1's last band.
-- The guard's `action` knob (`warn` vs `error`) was not toggled -- it needs a relaunch.
+- The guard's `action` knob now defaults to `truncate` (§12.6); `warn` vs `truncate` was not A/B-toggled -- it needs a relaunch.
 - 1M decode is 2.92 tok/s; whether that is the same mechanism as the 300K cliff or a
   different one is not established.
 
 ---
 
 ## 11. How to reproduce
+
+**Before you start.** This section reproduces the build at the pinned SHA `b88d65dd` (table
+below). Three things are not in the repo and must be supplied: the two nodes' IPs and libp2p
+peer IDs hardcoded in `start_cluster.sh` (`NODES` :1113, peer constants :1025-1028), and the
+prompt files plus their generator (§11.5).
 
 ### 11.1 What you need
 
@@ -1120,8 +1139,9 @@ column -- is not implemented
 - `sysctl iogpu.wired_limit_mb = 120000` on both nodes -- reapplied by `start_cluster.sh` on
   every launch, since it does not survive a reboot by itself.
 - A controller machine (a laptop is what we use) with ssh to both nodes by name -- here over
-  Tailscale MagicDNS (node0/node1); the launcher discovers the nodes over the tailnet and
-  ssh's in.
+  Tailscale MagicDNS (node0/node1). The launcher connects to the two nodes over the tailnet
+  using IPs and libp2p peer IDs hardcoded in `start_cluster.sh` (`NODES` at :1113, peer
+  constants at :1025-1028) -- edit these for your cluster.
 - The checkpoint `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (210.68 GB by
   allocation (`du`); the server reports `storageSize = 210713013432` B ~= 210.71 GB SI; 40
   safetensors shards) present at `~/.exo/models/` on both nodes, identical.
@@ -1166,11 +1186,12 @@ changes go through git to the fork.
 
 ```
 cd ~/repos/exo
-git checkout main && git submodule update --init --recursive
+git checkout b88d65dd330478e8e1b8a565848af3c863be7a06   # detaches HEAD; the SHA pinned in the table above
+git submodule update --init --recursive
 EXO_TARGET_BRANCH=main ./start_cluster.sh   # names the branch the checkout is on; only a push-check
 ```
 
-Shutdown is SIGTERM-only via `scripts/exo_graceful_shutdown.sh`; SIGKILL leaks RDMA queue
+Shutdown is SIGTERM-only: `scripts/exo_graceful_shutdown.sh` runs ON each node (the launcher pipes it over `ssh node bash -s`), not on the controller; SIGKILL leaks RDMA queue
 pairs and can wedge the Thunderbolt link. If a node does need a reboot, use
 `./reboot-node.sh` (it drives `fdesetup authrestart` so FileVault auto-unlocks) -- a raw
 `sudo shutdown -r now` leaves the node at the FileVault unlock screen with no network.
@@ -1198,6 +1219,7 @@ is how the 160K row is measured.
 One depth row:
 
 ```bash
+mkdir -p prompts   # the capture session's prompt files and their generator are not in this repo (§11.5)
 cd prompts
 curl -sS -N --max-time 3600 -X POST \
   http://node0.tailnet.ts.net:52415/v1/chat/completions \
@@ -1246,7 +1268,7 @@ a relaunch. The guard's knobs and the limiter's behavior are in §7. The classic
 error event and a runner line naming the cycle (§7.1) -- the request itself is legitimate, so
 this is the guard's designed false-positive shape, fired deliberately to prove the detector.
 The limiter needs `enable_thinking: true` to engage; it honors a per-request
-`reasoning_budget_tokens` field over its `0.75 x max_tokens` default (capped at 16384).
+`reasoning_budget_tokens` field over its default of `0.75 x max_tokens` (the default is capped at 16384; an explicit request value is passed through uncapped -- `reasoning_budget.py:91-92`).
 
 ---
 
