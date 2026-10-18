@@ -332,7 +332,7 @@ def _greedy_token(
     """
     if ban is None or not ban.enabled:
         return int(mx.argmax(logits.reshape(-1), axis=-1).item())
-    banned = [ban.banned(history or [])]
+    banned = [ban.penalties(history or [])]
     ids, _masked, changed, masked_counts = argmax_after_ban_detailed(
         logits.reshape(1, -1), banned
     )
@@ -590,7 +590,7 @@ def _one_round(
         # round can never emit an invalid token. ``target`` is THE masked argmax:
         # the accept loop, the first-mismatch commit and the bonus all read it.
         target, masked_rows, changed, masked_counts = argmax_after_ban_detailed(
-            logits[0], ban_policy.banned_per_row(history or [], draft)
+            logits[0], ban_policy.penalties_per_row(history or [], draft)
         )
     else:
         target = [int(v) for v in logits[0]]

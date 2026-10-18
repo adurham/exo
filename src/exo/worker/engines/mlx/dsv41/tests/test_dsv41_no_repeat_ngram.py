@@ -813,7 +813,7 @@ def test_the_telemetry_line_format_is_stable() -> None:
     ban = nr.NoRepeatNgram(n=6, window=2048)
     line = nr.format_ban_line(ban, nr.BanTurnStats(rows_changed=3, masked_total=7))
     assert line == (
-        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 contig_word_only=0 rows_changed=3 masked_total=7"
+        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 contig_word_only=0 soft_multiplier=0 rows_changed=3 masked_total=7"
     )
 
 
@@ -831,7 +831,7 @@ def test_rounds_emits_one_telemetry_line_only_when_enabled(
             eng_mod.Dsv41Engine._rounds(engine, None, 0, 0)  # type: ignore[arg-type]
         ) == []
     assert cap.of("INFO") == [
-        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 contig_word_only=1 rows_changed=0 masked_total=0"
+        "[DSV41] no-repeat-ngram n=6 window=2048 contig_max_period=0 contig_min_blocks=3 contig_word_only=1 soft_multiplier=2 rows_changed=0 masked_total=0"
     ]
 
     monkeypatch.delenv(eng_mod.NO_REPEAT_NGRAM_ENV, raising=False)
@@ -934,3 +934,44 @@ def test_contig_misaligned_tail_is_not_a_repeat():
 def test_contig_trims_long_history():
     block = [11, 12, 13]
     assert nr.contiguous_repeat_banned_ids(list(range(1000)) + block * 3, 64, 3) == {11}
+
+
+def test_graded_tier_soft_then_hard():
+    block = [101, 102, 103, 104]
+    soft = nr.contiguous_repeat_penalties(
+        [9] + block * 4, 64, 4, soft_multiplier=2.0, soft_base=1.75, soft_allowed=4
+    )
+    assert 101 in soft and soft[101] not in (float("-inf"), 0.0)
+    hard = nr.contiguous_repeat_penalties(
+        [9] + block * 5, 64, 4, soft_multiplier=2.0, soft_base=1.75, soft_allowed=4
+    )
+    assert hard[101] == float("-inf")
+
+
+def test_graded_tier_soft_off_is_hard_everywhere():
+    block = [101, 102, 103, 104]
+    out = nr.contiguous_repeat_penalties([9] + block * 4, 64, 4, soft_multiplier=0.0)
+    assert out[101] == float("-inf")
+
+
+def test_graded_tier_ipv4_fourth_octet_stays_soft():
+    # "10.10.10." = period-2 ("10",".") x4 -> the 4th octet gets a SOFT nudge
+    # (with the word filter OFF; with it on the digits are filtered entirely).
+    ip = [553, 15] * 4
+    out = nr.NoRepeatNgram(
+        n=0, window=0, contig_max_period=64, contig_min_blocks=4,
+        soft_multiplier=2.0, soft_base=1.75, soft_allowed=4,
+    ).penalties(ip)
+    assert 553 in out and out[553] not in (float("-inf"), 0.0)
+
+
+def test_graded_tier_word_loop_goes_hard_on_fifth():
+    phrase = [11, 12, 13, 14, 15, 16]          # a 6-token word block
+    ban = nr.NoRepeatNgram(
+        n=0, window=0, contig_max_period=64, contig_min_blocks=4,
+        soft_multiplier=2.0, soft_base=1.75, soft_allowed=4,
+    )
+    four = ban.penalties(phrase * 4)
+    five = ban.penalties(phrase * 5)
+    assert four[11] != float("-inf")           # first tier: graded
+    assert five[11] == float("-inf")           # one more block: hard

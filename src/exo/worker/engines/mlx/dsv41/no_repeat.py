@@ -155,6 +155,64 @@ def _has_letter(text: str) -> bool:
     return any(ch.isalpha() for ch in text)
 
 
+def contiguous_repeat_penalties(
+    history: list[int],
+    max_period: int = 0,
+    min_blocks: int = 3,
+    exempt: frozenset[int] = frozenset(),
+    word_only: bool = False,
+    decode: Any | None = None,
+    soft_multiplier: float = 0.0,
+    soft_base: float = 1.75,
+    soft_allowed: int = 4,
+) -> dict[int, float]:
+    """DRY-style graded penalty for a contiguous repeat: ``{id: delta_logit}``.
+
+    The first qualifying repeat (exactly ``min_blocks`` back-to-back blocks) gets
+    a SOFT penalty -- ``soft_multiplier * soft_base ** max(0, period -
+    soft_allowed)`` -- subtracted from the candidate's logit, the shape
+    llama.cpp/vLLM's DRY sampler uses: enough to nudge a model off a coincidence
+    (the next octet of an IPv4 tail, a table separator) without forbidding a
+    token the model strongly expects. Once one MORE block repeats (the attractor
+    is real, ``k >= min_blocks + 1``) the candidate is banned outright
+    (``NEG_INF``). ``soft_multiplier <= 0`` makes every tier hard (the old
+    behaviour). ``exempt`` control tokens and the ``word_only`` structure filter
+    are applied last, as in the hard-only rule.
+    """
+    if int(max_period) < 1 or int(min_blocks) < 2:
+        return {}
+    need = int(max_period) * (int(min_blocks) + 1)
+    h = [int(t) for t in history[-need:]] if need > 0 else []
+    limit = min(int(max_period), len(h) // int(min_blocks))
+    out: dict[int, float] = {}
+    for p in range(1, limit + 1):
+        last = h[-p:]
+        ok = True
+        for b in range(2, int(min_blocks) + 1):
+            if h[-b * p:-(b - 1) * p] != last:
+                ok = False
+                break
+        if not ok:
+            continue
+        at_least = int(min_blocks) + 1
+        deeper = len(h) >= p * at_least and h[-at_least * p:-int(min_blocks) * p] == last
+        if deeper or float(soft_multiplier) <= 0.0:
+            score = NEG_INF
+        else:
+            score = float(soft_multiplier) * (
+                float(soft_base) ** max(0, p - int(soft_allowed))
+            )
+        cand = int(last[0])
+        if cand in out and out[cand] <= score:
+            continue
+        out[cand] = score
+    if exempt:
+        out = {i: s for i, s in out.items() if i not in exempt}
+    if word_only and decode is not None:
+        out = {i: s for i, s in out.items() if _has_letter(decode(i))}
+    return out
+
+
 def contiguous_repeat_banned_ids(
     history: list[int],
     max_period: int = 0,
@@ -163,57 +221,22 @@ def contiguous_repeat_banned_ids(
     word_only: bool = False,
     decode: Any | None = None,
 ) -> set[int]:
-    """Ids that would EXTEND a CONTIGUOUS periodic repeat (empty when off).
+    """Ids that would EXTEND a CONTIGUOUS periodic repeat (hard-only view).
 
-    Pure over an id list. The class this engine must escape is a BACK-TO-BACK
-    repeat: the model emits the same block of ``p`` tokens ``k`` times in a row
-    ("Let me write." x6, a 4-line planning cycle x6, a single token xN). Only
-    then is the token that would extend the pattern masked -- the token that
-    followed the previous identical block.
-
-    This is deliberately NOT the global no-repeat-n-gram rule: that rule also
-    fires on legitimate repetition anywhere in the window (a phrase reused 300
-    tokens later, a repeated file path, a JSON key chain, boilerplate), and
-    forcing those to mutate is silent corruption of good output. A contiguous
-    check only triggers while the model is actually stuck emitting a cycle.
-
-    ``min_blocks`` identical blocks of exactly ``p`` tokens must sit back to
-    back at the END of ``history`` for period ``p`` to fire; the banned id is
-    ``history[-p]`` (the first token of the previous block, i.e. the token the
-    next block would start with). ``exempt`` control tokens are subtracted
-    afterwards, so a delimiter can never be banned.
-
-    ``word_only`` (the shipped default, wired by the engine) drops candidates
-    whose decoded text carries no letter: a run of digits or punctuation is
-    STRUCTURE, not a semantic loop -- an IPv4 tail ("10.10.10."), a markdown
-    table separator, an ASCII rule, the opening brace of a repeated JSON object.
-    Banning those corrupts legitimate structured output (measured: a table
-    separator and a six-identical-object JSON array), while a loop of WORDS
-    ("Let me write." x6) is still caught. ``decode`` supplies the id->text
-    mapping; without it ``word_only`` cannot filter and is ignored.
+    Kept for callers/tests that want the binary rule; production uses
+    :func:`contiguous_repeat_penalties` (graded soft/hard tiers).
     """
-    if int(max_period) < 1 or int(min_blocks) < 2:
-        return set()
-    need = int(max_period) * int(min_blocks)
-    h = [int(t) for t in history[-need:]] if need > 0 else []
-    out: set[int] = set()
-    limit = min(int(max_period), len(h) // int(min_blocks))
-    for p in range(1, limit + 1):
-        last = h[-p:]
-        ok = True
-        for b in range(2, int(min_blocks) + 1):
-            if h[-b * p:-(b - 1) * p] != last:
-                ok = False
-                break
-        if ok:
-            out.add(int(last[0]))
-    if exempt:
-        out -= {int(i) for i in exempt}
-    if word_only and decode is not None:
-        out = {i for i in out if _has_letter(decode(i))}
-    return out
-
-
+    return set(
+        contiguous_repeat_penalties(
+            history,
+            max_period=max_period,
+            min_blocks=min_blocks,
+            exempt=exempt,
+            word_only=word_only,
+            decode=decode,
+            soft_multiplier=0.0,
+        ).keys()
+    )
 
 def _clone(logits: Any) -> Any:
     """A fresh, non-aliasing array of the same values.
@@ -230,16 +253,22 @@ def _clone(logits: Any) -> Any:
 def mask_rows(logits: Any, banned_per_row: list[set[int]]) -> Any:
     """Copy of ``logits`` with ``-inf`` at every banned id, one row at a time.
 
-    ``logits`` is ``[rows, vocab]`` (mx or numpy). ``banned_per_row`` is one id
-    iterable per row. Rows are independent and the result never aliases the input,
-    so two TP ranks applying the same ban to the same row get the same output
-    without communicating.
+    ``logits`` is ``[rows, vocab]`` (mx or numpy). ``banned_per_row`` is one
+    mapping ``{id: delta}`` per row (``NEG_INF`` = hard ban; a finite value is the
+    DRY-style graded penalty, ADDED to the logit), or a plain id set for a hard
+    ban. Rows are independent and the result never aliases the input, so two TP
+    ranks applying the same penalty to the same row get the same output without
+    communicating.
     """
     masked = _clone(logits)
     for row, banned in enumerate(banned_per_row):
-        ids = [int(i) for i in banned]
-        if ids:
-            masked[row, ids] = NEG_INF
+        if isinstance(banned, dict):
+            for i, delta in banned.items():
+                masked[row, int(i)] = masked[row, int(i)] + float(delta)
+        else:
+            ids = [int(i) for i in banned]
+            if ids:
+                masked[row, ids] = NEG_INF
     return masked
 
 
@@ -331,6 +360,7 @@ def format_ban_line(ban: "NoRepeatNgram", stats: BanTurnStats) -> str:
         f"contig_max_period={int(ban.contig_max_period)} "
         f"contig_min_blocks={int(ban.contig_min_blocks)} "
         f"contig_word_only={int(bool(ban.contig_word_only))} "
+        f"soft_multiplier={float(ban.soft_multiplier):g} "
         f"rows_changed={int(stats.rows_changed)} "
         f"masked_total={int(stats.masked_total)}"
     )
@@ -363,6 +393,10 @@ class NoRepeatNgram:
     contig_word_only: bool = False
     #: id -> text, supplied by the engine from the tokenizer (word_only filter).
     decode: Any | None = None
+    #: DRY-style graded penalty for the FIRST qualifying repeat; <= 0 = hard.
+    soft_multiplier: float = 0.0
+    soft_base: float = 1.75
+    soft_allowed: int = 4
 
     @property
     def legacy_enabled(self) -> bool:
@@ -393,14 +427,43 @@ class NoRepeatNgram:
         if self.legacy_enabled:
             out |= banned_next_ids(history, self.n, self.window, self.exempt)
         if self.contig_enabled:
-            out |= contiguous_repeat_banned_ids(
+            out |= set(
+                contiguous_repeat_penalties(
+                    history,
+                    self.contig_max_period,
+                    self.contig_min_blocks,
+                    self.exempt,
+                    word_only=bool(self.contig_word_only),
+                    decode=self.decode,
+                    soft_multiplier=float(self.soft_multiplier),
+                    soft_base=float(self.soft_base),
+                    soft_allowed=int(self.soft_allowed),
+                ).keys()
+            )
+        return out
+
+    def penalties(self, history: list[int]) -> dict[int, float]:
+        """``{id: delta_logit}`` -- the graded rule; ``NEG_INF`` = hard ban."""
+        if not self.enabled:
+            return {}
+        out: dict[int, float] = {}
+        if self.legacy_enabled:
+            for i in banned_next_ids(history, self.n, self.window, self.exempt):
+                out[int(i)] = NEG_INF
+        if self.contig_enabled:
+            for i, s in contiguous_repeat_penalties(
                 history,
                 self.contig_max_period,
                 self.contig_min_blocks,
                 self.exempt,
                 word_only=bool(self.contig_word_only),
                 decode=self.decode,
-            )
+                soft_multiplier=float(self.soft_multiplier),
+                soft_base=float(self.soft_base),
+                soft_allowed=int(self.soft_allowed),
+            ).items():
+                if int(i) not in out or s < out[int(i)]:
+                    out[int(i)] = float(s)
         return out
 
     def banned_per_row(self, history: list[int], draft: list[int]) -> list[set[int]]:
@@ -416,9 +479,17 @@ class NoRepeatNgram:
         """
         if not self.enabled:
             return [set() for _ in range(len(draft) + 1)]
-        rows = [self.banned(history)]
+        return [{i for i in row} for row in self.penalties_per_row(history, draft)]
+
+    def penalties_per_row(
+        self, history: list[int], draft: list[int]
+    ) -> list[dict[int, float]]:
+        """One graded penalty map per verify-batch row (see ``banned_per_row``)."""
+        if not self.enabled:
+            return [{} for _ in range(len(draft) + 1)]
+        rows = [self.penalties(history)]
         context = [int(t) for t in history]
         for token in draft:
             context.append(int(token))
-            rows.append(self.banned(context))
+            rows.append(self.penalties(context))
         return rows

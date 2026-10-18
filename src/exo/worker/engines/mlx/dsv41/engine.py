@@ -360,6 +360,22 @@ CONTIG_REPEAT_MIN_BLOCKS_DEFAULT = 3
 #: table separators, ASCII rules, JSON object braces), not a semantic loop.
 CONTIG_REPEAT_WORD_ONLY_ENV = "EXO_DSV41_CONTIG_REPEAT_WORD_ONLY"
 CONTIG_REPEAT_WORD_ONLY_DEFAULT = 1
+#: DRY-style graded tier: the first qualifying repeat gets a soft logit penalty
+#: (``soft_multiplier * soft_base ** max(0, period - soft_allowed)``) instead of
+#: a hard ban; one more block repeating makes it hard. 0 = every tier hard.
+CONTIG_REPEAT_SOFT_MULTIPLIER_ENV = "EXO_DSV41_CONTIG_REPEAT_SOFT_MULTIPLIER"
+CONTIG_REPEAT_SOFT_MULTIPLIER_DEFAULT = 2.0
+CONTIG_REPEAT_SOFT_BASE_ENV = "EXO_DSV41_CONTIG_REPEAT_SOFT_BASE"
+CONTIG_REPEAT_SOFT_BASE_DEFAULT = 1.75
+CONTIG_REPEAT_SOFT_ALLOWED_ENV = "EXO_DSV41_CONTIG_REPEAT_SOFT_ALLOWED"
+CONTIG_REPEAT_SOFT_ALLOWED_DEFAULT = 4
+
+
+def _read_float_env(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 #: Per-turn WARNING when the escape MOVES this many committed tokens (rows_changed):
 #: a stuck attractor the escape keeps perturbing rather than escaping. 0 = off.
 LOOP_ESCAPE_WARN_ROWS_ENV = "EXO_DSV41_LOOP_ESCAPE_WARN_ROWS"
@@ -449,6 +465,15 @@ def resolve_no_repeat_ngram(tokenizer: Any | None = None) -> NoRepeatNgram:
     word_only = _read_int_env(
         CONTIG_REPEAT_WORD_ONLY_ENV, CONTIG_REPEAT_WORD_ONLY_DEFAULT
     ) != 0
+    soft_multiplier = _read_float_env(
+        CONTIG_REPEAT_SOFT_MULTIPLIER_ENV, CONTIG_REPEAT_SOFT_MULTIPLIER_DEFAULT
+    )
+    soft_base = _read_float_env(
+        CONTIG_REPEAT_SOFT_BASE_ENV, CONTIG_REPEAT_SOFT_BASE_DEFAULT
+    )
+    soft_allowed = _read_int_env(
+        CONTIG_REPEAT_SOFT_ALLOWED_ENV, CONTIG_REPEAT_SOFT_ALLOWED_DEFAULT
+    )
     ban = NoRepeatNgram(
         n=n,
         window=window,
@@ -456,6 +481,9 @@ def resolve_no_repeat_ngram(tokenizer: Any | None = None) -> NoRepeatNgram:
         contig_min_blocks=min_blocks,
         contig_word_only=word_only,
         decode=_single_id_decoder(tokenizer) if word_only else None,
+        soft_multiplier=soft_multiplier,
+        soft_base=soft_base,
+        soft_allowed=soft_allowed,
     )
     if ban.enabled:
         ban = ban.with_exempt(resolve_no_repeat_ngram_exempt_ids(tokenizer))
