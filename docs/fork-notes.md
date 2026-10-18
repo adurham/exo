@@ -1594,3 +1594,25 @@ positive grep falsely "confirms". Warning placed inline at all three cited lines
 discriminating pattern.
 
 Full record: `review-2026-10-18/FIXLOG-PACK2.md`.
+
+---
+
+## DSv4.1 writeup — raw preservation + evidence-status section (2026-10-18)
+
+Fable consulted on the three open items (RAW-LOST unrecheckable, ~5-archive retention, §11
+never executed). Executed the time-critical parts:
+
+- **Recovery check first** (Fable's blind spot): no APFS local snapshots, no Time Machine
+  destination on either node or the controller; controller archives reach back only to
+  2026-04-16. CONCLUSION: the capture-day archive is genuinely unrecoverable — confirmed, not
+  assumed.
+- **Pulled all surviving archives off-node**: 2.9 GB / 60 files to `~/exo-archives/<node>/`
+  with a sha256 MANIFEST. Off-repo because 2.9 GB is too large for git and git-lfs costs money.
+- **`preserved/MANIFEST.txt`** committed: extracted lines, source-archive sha256, off-repo
+  inventory, and the recovery-check result.
+- **"Evidence status and limitations" section** added near the top of WRITEUP.md — factual, so
+  a reader does not have to grep for RAW-LOST to learn the evidence state.
+
+Delegated (running): `scripts/gen-prompts.py` + validation (reconstruction, honestly graded),
+`scripts/check-s11.sh` + CI (static lint, appends a dated status line), and
+`scripts/capture-evidence.sh` + hourly launchd pull (the root-cause fix so this never recurs).

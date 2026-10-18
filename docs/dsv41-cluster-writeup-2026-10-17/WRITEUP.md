@@ -15,6 +15,39 @@ the evidence packs applied 17 + 27 more (append-with-label policy, RAW-LOST labe
 
 ---
 
+## Evidence status and limitations
+
+Stated up front so a reader does not have to grep for it.
+
+**What was lost, and when.** The capture ran 2026-10-16/17. Its raw artifacts are gone: the
+capture-day log archive (`exo.2026-10-16_18-38-04_871911.log.zst`), all six prompt bodies
+(`prompts/`, incl. the 3.39 MB 1M body), and every `.sse` capture. Cause: log rotation, plus a
+scratch directory that was never committed. Recovery was checked and failed — no APFS local
+snapshots and no Time Machine destination on either node or the controller; the controller's
+own archives reach back only to 2026-04-16.
+
+**What that means.** Figures whose only surviving source is a quoted block in the evidence
+packs are labelled **RAW-LOST** — real when captured, no longer re-checkable against raw. The
+packs carry a three-state label (SOURCED / RAW-LOST / PROVENANCE-WEAK) and a dated absence
+check. A RAW-LOST figure is never silently upgraded.
+
+**What is preserved.** `preserved/` holds the extracted corroborating lines and the surviving
+guard dumps, each with a sha256 of its source archive. `preserved/MANIFEST.txt` records the
+off-repo archive inventory. The full archives (2.9 GB) live off-repo at `~/exo-archives/` on
+the controller — too large for git.
+
+**§11 status.** Statically checked at the pinned SHA; **not executed end to end by anyone** as
+of 2026-10-18. The prompt inputs are reconstructed stand-ins (see `preserved/RECONSTRUCTION.md`),
+validated by token count and quoted content — equivalent-class, not the originals. A static
+check proves the instructions are well-formed and not stale; it does not prove the SHA boots on
+that hardware, that the hardcoded constants are sufficient, or that the figures reproduce.
+
+**The fix so this does not recur.** `scripts/capture-evidence.sh` pulls logs, prompts and
+captures into `preserved/` at capture time, and an hourly launchd job mirrors the node logs
+off-node. Future writeups should not carry this limitation.
+
+---
+
 ## 0. TL;DR
 
 Two Apple Mac Studio M4 Max (128 GB unified memory each, 256 GB total) linked by a

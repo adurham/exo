@@ -1,0 +1,86 @@
+# Preserved raw-artifact manifest
+
+Extracted 2026-10-18 before further rotation. Full archives live OFF-REPO at
+`~/exo-archives/<node>/` on the controller laptop (2.9 GB, 60 files) with a sha256
+MANIFEST at `~/exo-archives/MANIFEST.txt`. Only the extracted lines and these hashes
+are committed, because the archives are too large for git.
+
+## Recovery check (2026-10-18)
+- APFS local snapshots: NONE on either node or the laptop.
+- Time Machine destinations: NONE configured on any of the three.
+- Controller archives reach back to 2026-04-16 but do NOT cover the 10-16/10-17 capture window.
+- CONCLUSION: the capture-day `exo.2026-10-16_18-38-04_871911.log.zst` is unrecoverable.
+
+## Extracted lines (from the surviving 10-17 archive)
+
+| file | source archive | sha256 (archive) |
+|---|---|---|
+| `dsv41-degeneration-guard-token-20261013-224154-5634.json` | `macstudio-m4-1/dsv41-degeneration-guard-token-20261013-224154-5634.json` | 7b2c059fdb774618 |
+| `dsv41-degeneration-guard-token-20261014-135110-69384.json` | `macstudio-m4-1/dsv41-degeneration-guard-token-20261014-135110-69384.json` | 64219225d4097ef6 |
+| `dsv41-degeneration-guard-token-20261016-235228-35168.json` | `macstudio-m4-2/dsv41-degeneration-guard-token-20261016-235228-35168.json` | 66941988208902f9 |
+| `loop-guard-env-from-20261017-archive.txt` | `macstudio-m4-1/exo.2026-10-17_20-40-39_097308.log.zst` | 58a007078c864bfc |
+
+## Off-repo archive inventory (sha256, first 16)
+```
+cabc73232f13db10  controller/dsv41-degeneration-aborted-NameError-20261017-230321-66249.json
+e0e00a36e1d6a741  controller/dsv41-degeneration-aborted-NameError-20261017-230322-66249.json
+e0e00a36e1d6a741  controller/dsv41-degeneration-aborted-NameError-20261017-230323-66249.json
+9333c6a9399e2dcb  controller/dsv41-degeneration-aborted-NameError-20261017-230353-66249.json
+aeb8965e7c9c6ce0  controller/dsv41-degeneration-aborted-RuntimeError-20261013-234813-30469.json
+9dac452781b8810e  controller/dsv41-degeneration-aborted-ValueError-20261017-230505-67431.json
+9dac452781b8810e  controller/dsv41-degeneration-aborted-ValueError-20261017-230523-67500.json
+9dac452781b8810e  controller/dsv41-degeneration-aborted-ValueError-20261017-230530-67529.json
+9dac452781b8810e  controller/dsv41-degeneration-aborted-ValueError-20261017-230554-67631.json
+9dac452781b8810e  controller/dsv41-degeneration-aborted-ValueError-20261017-230617-67719.json
+87c2235e4c489a3a  controller/dsv41-degeneration-aborted-ValueError-20261017-230704-67866.json
+87c2235e4c489a3a  controller/dsv41-degeneration-aborted-ValueError-20261017-230720-67924.json
+fafb98222661923d  controller/dsv41-degeneration-guard-token-20261013-235044-31141.json
+a8eb99974afdb372  controller/dsv41-degeneration-guard-token-20261017-215650-58202.json
+a8eb99974afdb372  controller/dsv41-degeneration-guard-token-20261017-215700-61337.json
+a8eb99974afdb372  controller/dsv41-degeneration-guard-token-20261017-215710-64354.json
+a8eb99974afdb372  controller/dsv41-degeneration-guard-token-20261017-230413-66432.json
+a8eb99974afdb372  controller/dsv41-degeneration-guard-token-20261017-230742-68163.json
+a8eb99974afdb372  controller/dsv41-degeneration-guard-token-20261017-234940-79302.json
+3d69d390a2ed29c1  controller/exo.2026-04-16_13-55-57_297995.log.zst
+868ace24deb0e411  controller/exo.2026-04-16_13-59-31_122661.log.zst
+b0f4efaf7e7edc45  controller/exo.2026-04-16_14-01-44_607211.log.zst
+2a7ee8d5823e6235  controller/exo.2026-04-21_22-03-11_284106.log.zst
+5e1960342b6c0a61  controller/exo.2026-04-21_22-03-35_307775.log.zst
+2e1f2238716e54f3  controller/exo.log
+e3b0c44298fc1c14  controller/runner_log/stderr.log
+e3b0c44298fc1c14  controller/runner_log/stdout.log
+7b2c059fdb774618  macstudio-m4-1/dsv41-degeneration-guard-token-20261013-224154-5634.json
+64219225d4097ef6  macstudio-m4-1/dsv41-degeneration-guard-token-20261014-135110-69384.json
+381be056c694678c  macstudio-m4-1/dsv41-degeneration-guard-token-20261014-135202-69384.json
+f1125de3238c281b  macstudio-m4-1/dsv41-degeneration-guard-token-20261014-135255-69384.json
+58a007078c864bfc  macstudio-m4-1/exo.2026-10-17_20-40-39_097308.log.zst
+48d119204739ec50  macstudio-m4-1/exo.2026-10-17_22-03-39_090405.log.zst
+61bc667606925781  macstudio-m4-1/exo.2026-10-17_23-11-08_628041.log.zst
+9a49094d1d087477  macstudio-m4-1/exo.2026-10-18_00-02-57_749029.log.zst
+20bf7b5a480349f5  macstudio-m4-1/exo.2026-10-18_13-56-18_856313.log.zst
+0c6d68a6f38890b3  macstudio-m4-1/exo.log
+5e4c7cf886cd4809  macstudio-m4-1/runner_log/stderr.log
+b265245473a3a034  macstudio-m4-1/runner_log/stdout.log
+233006530333d77a  macstudio-m4-2/dsv41-degeneration-aborted-SystemExit-20261017-061314-85343.json
+261c74fbea620cf9  macstudio-m4-2/dsv41-degeneration-aborted-SystemExit-20261017-071028-89680.json
+612af6a9da7cbb93  macstudio-m4-2/dsv41-degeneration-aborted-SystemExit-20261017-073513-91527.json
+5e1761bf5abc260c  macstudio-m4-2/dsv41-degeneration-aborted-SystemExit-20261017-074328-92152.json
+ab232ff019d496ae  macstudio-m4-2/dsv41-degeneration-client-cancel-20261015-151244-99455.json
+7189ee39f3819ffa  macstudio-m4-2/dsv41-degeneration-client-cancel-20261016-150043-2791.json
+b5f554b93716a425  macstudio-m4-2/dsv41-degeneration-client-cancel-20261016-150435-2791.json
+54151062a4521ef3  macstudio-m4-2/dsv41-degeneration-client-cancel-20261016-210241-35168.json
+ba2eead150b0e554  macstudio-m4-2/dsv41-degeneration-guard-token-20261013-225349-29932.json
+66941988208902f9  macstudio-m4-2/dsv41-degeneration-guard-token-20261016-235228-35168.json
+51ef2f7cbc8b74ef  macstudio-m4-2/dsv41-degeneration-guard-token-20261017-165707-28182.json
+fe99605cbce5a077  macstudio-m4-2/dsv41-degeneration-guard-token-20261017-171241-40921.json
+6016aecd71dbcb0b  macstudio-m4-2/dsv41-degeneration-guard-token-20261017-223216-80488.json
+8e461a7bda8cd7f1  macstudio-m4-2/exo.2026-10-17_22-03-40_251667.log.zst
+e5f7a87023e34bcc  macstudio-m4-2/exo.2026-10-17_23-11-09_567616.log.zst
+4e033f9a404c8ed1  macstudio-m4-2/exo.2026-10-18_00-02-58_829888.log.zst
+d0fc06074e6c8c6d  macstudio-m4-2/exo.2026-10-18_13-20-41_487081.log.zst
+e37201bf866147f7  macstudio-m4-2/exo.2026-10-18_14-27-03_569672.log.zst
+32f98f457eb6b60e  macstudio-m4-2/exo.log
+794cd1125e5ba748  macstudio-m4-2/runner_log/stderr.log
+89b300588cb585a0  macstudio-m4-2/runner_log/stdout.log
+e3b0c44298fc1c14  MANIFEST.txt
+```
