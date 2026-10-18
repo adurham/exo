@@ -1,0 +1,32 @@
+# 300K A/B (cold) + cold 1M — 2026-10-18, author-executed
+# controller: adam's MacBook Pro; nodes: macstudio-m4-1 (master), macstudio-m4-2
+# park store: moved aside before the first boot (dsv41_park.bak-20261018-172620 on both nodes),
+# left empty through both A/B boots, restored before the production relaunch.
+
+## boot 1 — exo 5a18b81 (plain; no 991cf11)
+LAUNCH: cd ~/repos/exo && git checkout 5a18b81 && EXO_TARGET_BRANCH=main bash ./start_cluster.sh
+READY 17:31:22 CDT; instance 07e8bb83; runners 10bcd7cc, 2429f245
+
+ROW: python3 scripts/s11-run.py --body prompts/depth_d300k.json --label ab-5a18b81-d300k \
+       --url http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions --max-time 5400
+RESULT: prompt 300003, cached 0, completion 200, finish length,
+        prefill 1419.54 s (server, 211.3 tok/s), client dec 13.82, server dec 13.89, wall 1434.52 s
+        71 rounds, 2.73 tok/round, median inter-round gap 0.197 s
+
+## boot 2 — exo b88d65dd (the §11 pinned SHA)
+LAUNCH: cd ~/repos/exo && git checkout b88d65dd && EXO_TARGET_BRANCH=main bash ./start_cluster.sh
+READY 18:03:32 CDT; instance e0b83def; runners 318cdd87, 0a1fde63
+
+ROW: python3 scripts/s11-run.py --body prompts/depth_d300k.json --label ab-b88d65dd-d300k ...
+RESULT: prompt 300003, cached 0, completion 200, finish length,
+        prefill 1418.51 s (server, 211.5 tok/s), client dec 13.87, server dec 13.94, wall 1433.51 s
+        71 rounds, 2.73 tok/round, median inter-round gap 0.195 s
+
+ROW: python3 scripts/s11-run.py --body prompts/prompts_1m.json --label cold-1m-b88d65dd ...
+RESULT: never accepted — http 200 SSE error event at 55.19 s, 0 token frames;
+        master: "Sending overlarge payload …", "not accepted after 15s/30s", "Giving up … never accepted"
+        cluster healthy after: 1 instance, 2 runners RunnerReady, 0 tasks
+
+## restore
+LAUNCH: git checkout main (06f659a4b) && EXO_TARGET_BRANCH=main bash ./start_cluster.sh
+park store restored on both nodes before the boot.

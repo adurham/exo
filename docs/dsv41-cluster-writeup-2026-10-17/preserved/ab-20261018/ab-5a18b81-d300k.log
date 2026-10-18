@@ -1,0 +1,2 @@
+{"label": "ab-5a18b81-d300k", "http_status": 200, "wall_s": 1434.516, "ttft_s": 1420.12, "prompt_tokens": 300003, "cached_tokens": 0, "completion_tokens": 200, "finish_reason": "length", "token_frames": 194, "decode_window_s": 14.395, "client_decode_tok_s": 13.82, "error": null}
+OUT /Users/adam.durham/.hermes/cache/scratch/ab300k-20261018/out/ab-5a18b81-d300k.json

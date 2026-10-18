@@ -1,0 +1,46 @@
+{
+ "label": "cold-1m-b88d65dd",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/prompts_1m.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [
+  {
+   "message": "The cluster didn't accept the request. Please check that the model is running and try again.",
+   "type": "InternalServerError",
+   "code": 500
+  }
+ ],
+ "started_epoch": 1792366099.8117309,
+ "started_iso": "2026-10-18T23:28:19.811+00:00",
+ "ended_epoch": 1792366155.0051289,
+ "ended_iso": "2026-10-18T23:29:15.005+00:00",
+ "wall_s": 55.193,
+ "response_id": null,
+ "first_token_epoch": null,
+ "first_token_iso": null,
+ "ttft_s": null,
+ "last_token_epoch": null,
+ "decode_window_s": null,
+ "token_frames": 0,
+ "completion_tokens": null,
+ "prompt_tokens": null,
+ "cached_tokens": null,
+ "usage": null,
+ "finish_reason": null,
+ "client_decode_tok_s": null,
+ "prefill_frames": 0,
+ "keepalive_frames": 6,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": null,
+ "content": "",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/ab300k-20261018/out/cold-1m-b88d65dd.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 23:28:19 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

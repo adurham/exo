@@ -1,0 +1,2 @@
+{"label": "cold-1m-b88d65dd", "http_status": 200, "wall_s": 55.193, "ttft_s": null, "prompt_tokens": null, "cached_tokens": null, "completion_tokens": null, "finish_reason": null, "token_frames": 0, "decode_window_s": null, "client_decode_tok_s": null, "error": null, "error_events": [{"message": "The cluster didn't accept the request. Please check that the model is running and try again.", "type": "InternalServerError", "code": 500}]}
+OUT /Users/adam.durham/.hermes/cache/scratch/ab300k-20261018/out/cold-1m-b88d65dd.json

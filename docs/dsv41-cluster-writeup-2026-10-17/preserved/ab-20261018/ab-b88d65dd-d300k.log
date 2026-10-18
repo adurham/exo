@@ -1,0 +1,2 @@
+{"label": "ab-b88d65dd-d300k", "http_status": 200, "wall_s": 1433.512, "ttft_s": 1419.167, "prompt_tokens": 300003, "cached_tokens": 0, "completion_tokens": 200, "finish_reason": "length", "token_frames": 194, "decode_window_s": 14.345, "client_decode_tok_s": 13.87, "error": null}
+OUT /Users/adam.durham/.hermes/cache/scratch/ab300k-20261018/out/ab-b88d65dd-d300k.json

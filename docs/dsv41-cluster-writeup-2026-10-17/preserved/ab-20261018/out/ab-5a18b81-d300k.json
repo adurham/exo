@@ -1,0 +1,817 @@
+{
+ "label": "ab-5a18b81-d300k",
+ "body_path": "/Users/adam.durham/.hermes/cache/scratch/s11-run-20261018/prompts/depth_d300k.json",
+ "url": "http://macstudio-m4-1.tail19c543.ts.net:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792362686.792493,
+ "started_iso": "2026-10-18T22:31:26.792+00:00",
+ "ended_epoch": 1792364121.308513,
+ "ended_iso": "2026-10-18T22:55:21.308+00:00",
+ "wall_s": 1434.516,
+ "response_id": "31fa6373-f8d4-4569-8180-fb64909938a4",
+ "first_token_epoch": 1792364106.9127371,
+ "first_token_iso": "2026-10-18T22:55:06.912+00:00",
+ "ttft_s": 1420.12,
+ "last_token_epoch": 1792364121.308158,
+ "decode_window_s": 14.395,
+ "token_frames": 194,
+ "completion_tokens": 200,
+ "prompt_tokens": 300003,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 300003,
+  "completion_tokens": 200,
+  "total_tokens": 300203,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 13.82,
+ "prefill_frames": 146,
+ "keepalive_frames": 56,
+ "progress": [
+  {
+   "epoch": 1792362701.721535,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362709.0941498,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362716.588125,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362724.2481742,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362732.103688,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362740.339585,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362748.270099,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362756.0736709,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362763.8704078,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362772.078325,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362780.103044,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362788.1903129,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362796.4568598,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362804.868848,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362812.775127,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362821.15211,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362829.140162,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362837.055542,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362845.352525,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362853.538063,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362861.730178,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362869.80925,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362877.847724,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362885.907766,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362894.0072699,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362902.165235,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362910.3127658,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362918.626857,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362926.7620502,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362934.944206,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362943.10465,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362951.29656,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362959.536043,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362967.844654,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362976.105002,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362984.3836532,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792362992.659217,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363000.961893,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363009.2039769,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363017.558302,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363025.9810638,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363034.376461,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363042.810726,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363051.239358,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363059.746905,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363068.257588,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363076.7164202,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363085.193999,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363093.8209128,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363102.403572,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363110.9868119,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363119.633804,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363128.3854961,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363137.202515,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363146.002274,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363154.8220491,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363163.7034051,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363172.6083908,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363181.3573189,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363190.2118819,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363199.1964731,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363208.2379289,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363217.14163,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363226.161684,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363235.2457511,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363244.329834,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363253.4174871,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363262.553781,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363271.721129,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363280.931065,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363290.082183,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363299.166592,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363308.369241,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363317.640043,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363326.919797,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363336.190371,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363345.506648,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363354.913886,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363364.1873128,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363373.61708,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363383.0816069,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363392.6152709,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363402.0237608,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363411.510567,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363421.0973802,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363430.722165,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363440.437454,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363450.255477,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363460.024174,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363469.9354508,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363479.936623,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363489.90131,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363499.982115,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363510.165466,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363520.3844311,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363530.641564,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363541.005922,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363551.459689,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363561.8830888,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363572.385504,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363582.9756339,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363593.546211,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363604.196913,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363614.80103,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363625.546323,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363636.294324,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363647.058953,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363657.804785,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363668.67966,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363679.694627,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363690.747205,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363701.781624,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363712.835923,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363724.002382,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363735.123119,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363746.406935,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363757.687016,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363769.193596,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363780.6160681,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363792.457537,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363804.287727,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363816.054471,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363828.0062132,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363839.887586,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363851.6379251,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363863.923147,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363875.906345,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363888.065425,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363900.221698,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363912.443943,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363924.794702,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363937.043335,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363949.4243572,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363961.814691,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363974.190557,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363986.56061,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792363998.9730098,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364011.4822478,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364023.947335,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364036.4831061,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364049.0535061,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364061.66004,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364074.276374,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364086.911016,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364099.5172942,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792364106.911189,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 211.33786345979516,
+  "generation_tps": 0.0,
+  "prompt_tokens": 300003,
+  "generation_tokens": 200,
+  "peak_memory_usage": {
+   "in_bytes": 132389592797
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 213,
+  "mtp_accepted_drafts_cumulative": 131,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: the single most frequently discussed performance bottleneck across this entire reference corpus is the **`moe.all_sum` cross-rank collective** \u2014 the per-layer MoE partial-sum reduction that runs on jaccl's CPU stream and forces a GPU\u2192CPU\u2192GPU drain every layer. It is the subject of an entire dedicated section (\u00a72, \"MoE / all_sum collective \u2014 the dominant cost center\") spanning at least 20 distinct docs from 2026-05-14 through 2026-08-21, and it recurs in nearly every other section: it is the top span in the shallow-feed attribution (`moe.all_sum` 39.5% of shallow wall, with `ffn` matching it to 0.2% while `switch_mlp` is only 0.1%), it is the target of the night's biggest shipped lever (`DSV4_MOE_ALLSUM_BF16`, +3.1%",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/.hermes/cache/scratch/ab300k-20261018/out/ab-5a18b81-d300k.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Sun, 18 Oct 2026 22:31:26 GMT",
+  "Transfer-Encoding": "chunked"
+ },
+ "server": {
+  "matched": true,
+  "method": "command_id->task_id",
+  "node": "macstudio-m4-1",
+  "turn": "1a622ca8-5676-4986-a8d3-31394ab0e50b",
+  "first_token_epoch": 1792364106.908,
+  "first_token_ts": "2026-10-18 17:55:06.908",
+  "latency_s": 1419.81,
+  "prefill_s": 1419.54,
+  "prompt_tokens": 300003,
+  "reuse": 0,
+  "prefill_tok_s_uncached": 211.3,
+  "committed": 201,
+  "emitted": 200,
+  "server_elapsed_s": 1434.2,
+  "server_reason": "length",
+  "tok_s_field": 0.1,
+  "server_decode_tok_s": 13.89
+ }
+}
