@@ -8,8 +8,10 @@ placeholders. Independently fact-checked against the evidence packs and copy-edi
 2026-10-17; the review record and every applied fix are in `REVIEW-AND-FIXLOG-2026-10-17.md`._
 
 _Errata 2026-10-18: 20 corrections applied after an independent review pass (4 agents +
-reference-model ruling); the review record is in `review-2026-10-18/`. A second pass over the
-evidence packs applied 17 more (append-with-label policy); see `FIXLOG-PACK.md`._
+reference-model ruling); the review record is in `review-2026-10-18/`. Two further passes over
+the evidence packs applied 17 + 27 more (append-with-label policy, RAW-LOST labelling); see
+`FIXLOG-PACK.md` and `FIXLOG-PACK2.md`. Surviving raw artifacts are preserved in
+`preserved/` with sha256._
 
 ---
 

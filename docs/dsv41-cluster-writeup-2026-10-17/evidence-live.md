@@ -13,11 +13,27 @@ replacement. A sourced figure is never overwritten by a recomputed one — that 
 back to the source doc. The original keeps its basis; the recomputed value is appended with its
 own basis; if the original's basis cannot be identified, it is tagged PROVENANCE-WEAK.
 
+**THREE STATES, not two:**
+- **SOURCED** — artifact extant, re-checkable now.
+- **RAW-LOST** — quoted verbatim at capture; artifact has since rotated/been deleted; the quoted
+  block in this pack is the sole surviving record. Date-stamped with the absence check.
+- **PROVENANCE-WEAK** — basis was never identified.
+Reserve UNVERIFIED for figures never checked at all.
+
+**FALSE-PROVENANCE TRAP:** a bare grep on the current `exo.log` for a captured turn-id returns
+hits that are prompt text echoed by later clients quoting this writeup, NOT obs records. A
+positive grep does not confirm the obs line — match the obs field shape `\[DSV41\] obs`.
+
+**PRESERVED COPIES** (extracted 2026-10-18 before rotation, in `preserved/`):
+`loop-guard-env-from-20261017-archive.txt`; `dsv41-degeneration-guard-token-20261016-235228-35168.json`
+(sha256 66941988208902f9); `...-20261014-135110-69384.json` (64219225d4097ef6);
+`...-20261013-224154-5634.json` (7b2c059fdb774618).
+
 | artifact | status |
 |---|---|
-| `~/.exo/exo_log/exo.2026-10-16_18-38-04_871911.log.zst` | **ROTATED-OUT** (last confirmed 2026-10-17) |
+| `~/.exo/exo_log/exo.2026-10-16_18-38-04_871911.log.zst` | **ROTATED-OUT** (last confirmed 2026-10-17) — corroborating lines extracted to `preserved/` |
 | `~/.exo/exo_log/exo.log` | on-disk (node macstudio-m4-1) — has GROWN since capture, so cited line numbers have drifted |
-| `~/.exo/exo_log/dsv41-degeneration-guard-token-2026101*.json` (4 files) | on-disk (node) |
+| `~/.exo/exo_log/dsv41-degeneration-guard-token-2026101*.json` (4 files) | **PRESERVED** in `preserved/` with sha256 (3 copied; the 4th is the Oct-13 warn dump) |
 | `~/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw/tokenizer.json` | on-disk (node) |
 | `prompts/` (all 6 files) | **GONE** — on neither controller nor node |
 | `run_160k.sse.timed.txt` | **GONE** |
@@ -49,6 +65,8 @@ capabilities=[text, thinking, thinking_toggle, vision], storageSize=210,713,013,
 
 Guard and limiter, as actually deployed (verbatim from the runner's own boot line
 in `~/.exo/exo_log/exo.2026-10-16_18-38-04_871911.log.zst`, retrieved from the
+  - **RAW-LOST** (confirmed absent controller+node0 2026-10-18; earliest survivor is `exo.2026-10-17_20-35-30`). NOT re-pointed: the later boot differs in source tag (535->737) and rank (1/2->0/2), so substituting it would misattribute which boot the quoted lines came from. Corroborating only: the later boot in `exo.2026-10-17_20-40-39_097308.log.zst` shows the same digest 633711af -> ACTION=error. Extracted copy: `preserved/loop-guard-env-from-20261017-archive.txt`.
+  - **FALSE-PROVENANCE TRAP:** a bare grep on the current `exo.log` for this turn-id returns hits that are prompt text echoed by later clients quoting this writeup, NOT obs records. A positive grep does not confirm the obs line. Match the obs field shape instead: `\[DSV41\] obs`.
 rotated archive with the absolute path `/opt/homebrew/bin/zstdcat`):
 
 ```
@@ -85,6 +103,7 @@ runs below where `max_tokens` was smaller).
   `N prompt tokens` on its prefill line), never a local estimate. Local counts
   come from the checkpoint-family tokenizer
   (`~/.exo/models/deepseek-ai--DeepSeek-V4-Flash/tokenizer.json`) and are labelled
+  - TOKENIZER NOTE: local counts use the controller tokenizer (sha 8f9f37ca); the server's served tokenizer differs (c90dfa01, +111 B — likely added/special tokens). The server-reported count is authoritative; the delta is 5 tokens in 160k and moves tok/s only in the third decimal (241.98 vs 241.99). No downstream figure is affected.
   as calibration only. They agreed with the server to within 5 tokens at 160K and
   exactly at 1M (999,999 + template = the server's 1,000,003).
 - Log retrieval caveat, recorded because it bit this session: over non-interactive
@@ -100,7 +119,7 @@ runs below where `max_tokens` was smaller).
 
 Captured 2026-10-16 23:22:54 CDT. Cluster HEAD `5a18b81debe3e4d1b82370d473614d0b4be82bf2` (branch `deploy/next28`). Model `dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw` (read from `/state`).
 
-**Exact request.** Prompt body written to `prompts/prompts_160k.json` (558,995 bytes; 159,999 tokens by the checkpoint-family tokenizer; the server tokenized the same body to 160,004). Never passed inline.
+**Exact request.** Prompt body written to `prompts/prompts_160k.json` (558,995 bytes; 159,999 tokens by the checkpoint-family tokenizer; the server tokenized the same body to 160,004). Never passed inline. **RAW-LOST** (confirmed absent controller+node0 2026-10-18) — the byte/token counts stand as captured.
 
 ```bash
 cd /Users/<user>/.hermes/cache/scratch/writeup/prompts
@@ -123,7 +142,7 @@ Body, minus the messages array (the corpus is 5.38 M chars of this repo's own `d
 }
 ```
 
-The full response, verbatim, exactly as the capture holds it (`run_160k.sse.timed.txt`, epoch-prefixed):
+The full response, verbatim, exactly as the capture holds it (`run_160k.sse.timed.txt`, epoch-prefixed). **RAW-LOST** (confirmed absent controller+node0 2026-10-18) — this block is the sole surviving record:
 
 ```
 1792211642.809520|{"id":"c4de4f2d-f449-43d5-b8c0-948d51dab341","object":"chat.completion","created":1792211642,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"message":{"role":"assistant","content":"BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective in the MoE forward pass, investigated across at least 20 distinct docs spanning 2026-05-14 through 2026-08-21. The document that quantifies it most directly is `docs/moe-all-sum-dominant-cost-2026-08-19.md`, which used a NOP-ablation to measure a 2.63x speedup (62.0% share) at 12K tokens and 2.57x (61.1%) at 38K tokens. Later work in `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md` and `docs/allsum-sync-span-artifact-arithmetic-check-2026-08-22.md` corrected those shares downward to a real ~2.9-5.3% of wall"},"finish_reason":"length"}],"usage":{"prompt_tokens":160004,"completion_tokens":200,"total_tokens":160204,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"completion_tokens_details":{"reasoning_tokens":0,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0}}}
@@ -147,7 +166,8 @@ The full response, verbatim, exactly as the capture holds it (`run_160k.sse.time
 
 ### Server-side cross-check (labelled separately, not client-measured)
 
-The runner's own `[DSV41] obs` lines for this request do separate the two phases, so the numbers exist server-side even though the client cannot see them. Quoted verbatim from `~/.exo/exo_log/exo.log` on node0; the response `id` in the capture is the runner's `command_id`, which names the `task_id` these lines carry:
+The runner's own `[DSV41] obs` lines for this request do separate the two phases, so the numbers exist server-side even though the client cannot see them. Quoted verbatim at capture from `~/.exo/exo_log/exo.log` on node0; that log has since rotated (current log begins 2026-10-18 13:56; the string is absent from all 5 retained `.zst`). **RAW-LOST** — the quote below is the sole surviving record. The response `id` in the capture is the runner's `command_id`, which names the `task_id` these lines carry:
+  - **FALSE-PROVENANCE TRAP:** a bare grep on the current `exo.log` for this turn-id returns 46 hits that are prompt text echoed by later clients quoting this writeup, NOT obs records. A positive grep does not confirm the obs line. Match the obs field shape: `\[DSV41\] obs`.
 
 ```
 [ 2026-10-16 23:22:55.048 | INFO | exo.worker.engines.mlx.dsv41.session:engine_prefill:378 ] [DSV41] prefill controls: fence_every=2 transient_budget_mb=2048 score_row_bytes=1 fence_hook=on (rows=160004, base=2048)
@@ -169,7 +189,7 @@ The runner's own `[DSV41] obs` lines for this request do separate the two phases
 BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective in the MoE forward pass, investigated across at least 20 distinct docs spanning 2026-05-14 through 2026-08-21. The document that quantifies it most directly is `docs/moe-all-sum-dominant-cost-2026-08-19.md`, which used a NOP-ablation to measure a 2.63x speedup (62.0% share) at 12K tokens and 2.57x (61.1%) at 38K tokens. Later work in `docs/jaccl-internal-timing-allsum-transport-fast-2026-08-21.md` and `docs/allsum-sync-span-artifact-arithmetic-check-2026-08-22.md` corrected those shares downward to a real ~2.9-5.3% of wall
 ```
 
-The answer is correct against the corpus it was given — `docs/moe-all-sum-dominant-cost-2026-08-19.md` is the document that quantifies the `moe.all_sum` cost, and the two correction docs it names are real files in this repo — which is what makes this a genuine 160K end-to-end run and not a token-count stunt.
+The answer is correct against the corpus it was given — `docs/moe-all-sum-dominant-cost-2026-08-19.md:18` (2.63x / 62.0%) and `:19` (2.57x / 61.1%) is the document that quantifies the `moe.all_sum` cost, and the two correction docs it names are real files in this repo — which is what makes this a genuine 160K end-to-end run and not a token-count stunt.
 
 ---
 
@@ -180,7 +200,7 @@ Depth-table runs: four prompts built from the SAME corpus prefix, `max_tokens=20
 A 300 K row was added later with the identical method (it was fired as the bracket for the 1M attempt), and five more points at ~110-119 K depth were harvested from the runner log where ANOTHER client's traffic left its own `obs` lines — same build, same instance, different prompts, which makes them independent corroboration rather than a repeat.
 
 ```bash
-# one row (repeated per depth); bodies live in prompts/depth_<tag>.json
+# one row (repeated per depth); bodies live in prompts/depth_<tag>.json. **RAW-LOST** (confirmed absent controller+node0 2026-10-18) — all five depth bodies are gone, so the table's client decode windows and 1003/10004/50004/100003/300003 counts cannot be recomputed from raw bytes.
 curl -sS -N --max-time 3600 -X POST \
   http://node0.tailnet.ts.net:52415/v1/chat/completions \
   -H 'Content-Type: application/json' \
@@ -235,13 +255,15 @@ A 5x cliff is the kind of number that is usually an artifact, so it was checked 
 | 100 K | 3.0 | 0.092 s | 32.6 |
 | 300 K | 2.9 | 0.486 s | 6.0 |
 
-A constant ~3 tokens/round with the round cost rising 5.3x is a per-round memory-side cost (KV read / residency), not a sampling or parser artifact — and it is consistent with the repo's own `deep-context-refault-mechanism` note. This is offered as the mechanism the numbers point at, not as a proven cause.
+A constant ~3 tokens/round with the round cost rising 5.3x is a per-round memory-side cost (KV read / residency), not a sampling or parser artifact — and it is consistent with the repo's own `docs/deep-context-refault-mechanism-confirmed-2026-09-22.md` note. This is offered as the mechanism the numbers point at, not as a proven cause.
 
 ### Verbatim server lines (ground truth for the timings)
 
 `d1k`:
 ```
 [ 2026-10-16 23:55:57.203 | INFO     | exo.worker.engines.mlx.dsv41.engine:_generate:1270 ] [DSV41] obs first-token turn=fec83031-7137-46c0-b381-ba466bb19979 latency=4.39s (prefill 3.93s, 1003 prompt tokens, reuse=0)
+  - **RAW-LOST** (confirmed absent controller+node0 2026-10-18): every depth, 300K and 1M obs line in this section is rotation-destroyed. The quoted blocks are the sole surviving record; the tables below stand as captured.
+  - **FALSE-PROVENANCE TRAP:** a bare turn-id grep on the current log returns prompt text echoed by later clients, not obs records. Match `\[DSV41\] obs`.
 [ 2026-10-16 23:55:59.549 | INFO     | exo.worker.engines.mlx.dsv41.engine:log_turn_end:1198 ] [DSV41] obs turn-end turn=fec83031-7137-46c0-b381-ba466bb19979 committed=83 emitted=82 elapsed=6.7s tok_s=12.3 reason=stop
 ```
 `d10k`:
@@ -293,7 +315,7 @@ Both mechanisms are ARMED in the running process and **cannot be toggled without
 
 ### 3a. LIVE guard fire — a real period-1 token loop killed mid-stream
 
-Request body `prompts/guard_banana.json` (`"stream": true`, `enable_thinking: true`, `max_tokens: 400`):
+Request body `prompts/guard_banana.json` (`"stream": true`, `enable_thinking: true`, `max_tokens: 400`). **RAW-LOST** (confirmed absent controller+node0 2026-10-18) — all four deliverable-3 bodies (guard_loop, limiter_default, limiter_96 too) are gone; the loop deltas and limiter pair survive only as prose below.
 
 ```json
 {
@@ -342,7 +364,7 @@ The model reasoned normally, then collapsed into the same token over and over. T
 data: {"error": {"message": "Generation terminated: repetition-loop degeneration detected (the model collapsed into a repeating token cycle). Failing the turn cleanly so it can be retried.", "type": "InternalServerError", "code": "repetition_loop"}}
 ```
 
-The runner's own log for the same turn (task_id `a5f8395c-cccc-41c4-91c4-6da384d0fa6b`), verbatim:
+The runner's own log for the same turn (task_id `a5f8395c-cccc-41c4-91c4-6da384d0fa6b`), verbatim. **PRESERVED COPY** at `preserved/dsv41-degeneration-guard-token-20261016-235228-35168.json` (host macstudio-m4-2, sha256 66941988208902f9) — the quoted log lines themselves are RAW-LOST:
 
 ```
 [ 2026-10-16 23:52:21.958 | INFO     | exo.worker.engines.mlx.dsv41.engine:_generate:1133 ] [DSV41] reasoning-budget limiter armed turn=a5f8395c-cccc-41c4-91c4-6da384d0fa6b: budget=300 think_start=128821 think_end=128822 starts_in_thinking=True
@@ -711,7 +733,7 @@ Its `digest=633711af` is the same digest the live guard fire reports, so the eff
 
 ## Deliverable 4 — 1M-context attempt
 
-**Request (identical for both attempts).** Body `prompts/prompts_1m.json`, 3,391,475 bytes, 999,999 tokens by the checkpoint-family tokenizer and **1,000,003** by the server's own count. `"stream": true`, `max_tokens: 100`, `enable_thinking: false`.
+**Request (identical for both attempts).** Body `prompts/prompts_1m.json`, 3,391,475 bytes, 999,999 tokens by the checkpoint-family tokenizer. **RAW-LOST** (confirmed absent controller+node0 2026-10-18) — the 1M body is gone, so the headline 1M claim rests entirely on the quoted server lines; neither its content nor its token length is re-checkable. and **1,000,003** by the server's own count. `"stream": true`, `max_tokens: 100`, `enable_thinking: false`.
 
 ```bash
 cd /Users/<user>/.hermes/cache/scratch/writeup
@@ -759,7 +781,7 @@ curl: (28) Operation timed out after 7200001 milliseconds with 69245 bytes recei
 CURLMETA http=200 starttransfer=0.011157 total=7200.003712 size=69245
 ```
 
-The real evidence for a prefill that never reaches generation is the **391 `: prefill_progress` frames**. Two of them, verbatim, and the last one received:
+The real evidence for a prefill that never reaches generation is the **391 `: prefill_progress` frames**. **PROVENANCE-WEAK** — no capture filename was ever recorded for 4b/4c, so the 391- and 342-frame series behind every attempt-1/attempt-2 band rate has no artifact to check at all. Two of them, verbatim, and the last one received:
 
 ```
 : prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":4096,"total_tokens":1000003}}
@@ -890,8 +912,8 @@ Sampled raw series (every 20th frame plus the last, so the curve can be re-check
 | server prefill | **6725.29 s** for 700,995 uncached rows = **104.2 tok/s** |
 | client time-to-first-token | **6726.57 s** |
 | client decode window | **33.87 s** |
-| **client decode rate** | **2.92 tok/s** |
-| **server decode rate** | **2.92 tok/s** (turn-end 6760.2 s - first-token 6726.3 s) |
+| **client decode rate** | **2.95 tok/s** |
+| **server decode rate** | **2.95 tok/s** (turn-end 6760.2 s - first-token 6726.3 s = 33.9 s; 100/33.9) |
 | generated text | 331 chars / 100 tokens |
 
 Server lines for the turn, verbatim (task_id `f8104803-3234-43a5-9428-1e4aa1c1b406`):

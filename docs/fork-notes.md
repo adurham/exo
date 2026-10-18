@@ -1569,3 +1569,28 @@ CONFLICT/CONVENTION tag inconsistencies that made conflicts unfindable.
 Structural additions: RAW STATUS tables, SOLE-SURVIVOR tags, dated edit policy, pack hashes.
 
 Full record: `review-2026-10-18/FIXLOG-PACK.md`.
+
+---
+
+## DSv4.1 cluster writeup — pack provenance pass, 27 corrections + raw preservation (2026-10-18)
+
+Third review round, second on the packs. Character differs: the raw artifacts are gone, so most
+findings are provenance findings, not number errors.
+
+URGENT ACTIONS FIRST: extracted the corroborating loop-guard lines from the 10-17 archive before
+it rotates, and copied the three surviving guard dumps into `preserved/` with sha256. These are
+the only re-checkable artifacts left and they lived on one machine's disk.
+
+Fable's refinement: THREE states, not two — SOURCED / RAW-LOST / PROVENANCE-WEAK. UNVERIFIED
+was wrong for rotated artifacts (it means "nobody checked"; these were checked, then the source
+rotated). RAW-LOST is date-stamped with the absence check and the quote is marked sole survivor.
+
+27 findings, 26 applied, 1 rejected (a re-point to a later archive — the later boot differs in
+source tag and rank, so substituting would misattribute which boot the quoted lines came from).
+
+Also caught: a FALSE-PROVENANCE TRAP — a bare grep on the current exo.log for a captured
+turn-id returns prompt text echoed by later clients quoting the writeup, not obs records, so a
+positive grep falsely "confirms". Warning placed inline at all three cited lines with the
+discriminating pattern.
+
+Full record: `review-2026-10-18/FIXLOG-PACK2.md`.
