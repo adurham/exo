@@ -168,6 +168,7 @@ def sample_one(
     *,
     banned: dict[int, float] | None = None,
     key: Any | None = None,
+    step: int = 0,
 ) -> int:
     """Sample ONE token from a single-row logits array (non-speculative path).
 
@@ -177,7 +178,11 @@ def sample_one(
     """
     if sampling.greedy:
         raise ValueError("sample_one is for the sampling path only")
-    key = mx.random.key(int(sampling.seed)) if key is None else key
+    key = (
+        mx.random.key((int(sampling.seed) + int(step) * 0x9E3779B1) % (2**32))
+        if key is None
+        else key
+    )
     raw = raw_logits if raw_logits.ndim > 1 else raw_logits.reshape(1, -1)
     rows = _apply_penalties(raw, [banned] if banned else None)
     rows = _fully_banned_fallback(rows, raw)
@@ -192,6 +197,7 @@ def sample_prefix(
     sampling: Sampling,
     banned_per_row: list[dict[int, float]] | None = None,
     key: Any | None = None,
+    step: int = 0,
 ) -> tuple[list[int], int]:
     """Rejection-sample a draft prefix; returns ``(committed, accepted_count)``.
 
@@ -204,7 +210,15 @@ def sample_prefix(
     gamma = len(draft)
     if gamma == 0:
         return [], 0
-    key = mx.random.key(int(sampling.seed)) if key is None else key
+    # The step is folded into the key: re-deriving it from the seed alone every
+    # round would replay the SAME accept uniforms, correlating accept/reject
+    # decisions across rounds (a bias the per-seed tests cannot see). ``step`` is
+    # the round counter, identical on every TP rank.
+    key = (
+        mx.random.key((int(sampling.seed) + int(step) * 0x9E3779B1) % (2**32))
+        if key is None
+        else key
+    )
     k_accept, k_res, k_bonus = mx.random.split(key, 3)
 
     raw = raw_logits
@@ -224,13 +238,19 @@ def sample_prefix(
         token = _row_draw(rows[gamma], k_bonus)
         return list(draft) + [token], gamma
 
-    # Rejection: draw from p with the rejected draft token's mass removed.
+    # Rejection: draw from p with the rejected draft token's mass removed. A peaked
+    # row under a tight top-p/min-p can leave the draft as the SOLE survivor; its
+    # residual then has no mass at all, and "rejecting" would sample noise (or NaN).
+    # Committing the draft is the exact answer there (p(draft) was ~1).
     rejected = int(draft[accepted])
     residual = mx.where(
         mx.arange(rows.shape[-1]) == rejected,
         mx.array(NEG_INF, dtype=rows.dtype),
         rows[accepted],
     )
+    _r = residual.astype(mx.float32)
+    if not float(mx.sum(mx.exp(_r - mx.max(_r))).item()) > 0.0:
+        return list(draft[: accepted + 1]), accepted + 1
     token = _row_draw(residual, k_res)
     return list(draft[:accepted]) + [int(token)], accepted
 

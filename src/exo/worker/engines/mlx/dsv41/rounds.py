@@ -679,8 +679,10 @@ def _one_round(
             if ban_policy is not None
             else None
         )
+        engine._sampling_step += 1
         committed, accepted = sample_prefix(
-            logits[0], draft, sampling=sampling, banned_per_row=penalties
+            logits[0], draft, sampling=sampling, banned_per_row=penalties,
+            step=engine._sampling_step,
         )
         if ban_policy is not None and ban_stats is not None:
             raw_ids = [

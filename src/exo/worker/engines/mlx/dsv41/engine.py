@@ -678,6 +678,9 @@ class Dsv41Engine(Engine):
     #: successive requests give the live acceptance rate -- the decode-depth
     #: ladder reads these via the API's ``mtp_*`` stats fields.
     _spec_rounds: int = field(default=0, init=False)
+    #: Monotonic per-turn sampling step, mixed into the per-round RNG key so
+    #: consecutive rounds never replay the same accept uniforms.
+    _sampling_step: int = field(default=0, init=False)
     _spec_accepted: int = field(default=0, init=False)
     _spec_drafted: int = field(default=0, init=False)
     #: Monotonic timestamp of the previous ``_session_fence_heartbeat`` call,

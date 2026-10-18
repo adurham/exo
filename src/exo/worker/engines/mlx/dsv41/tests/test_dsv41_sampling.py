@@ -128,3 +128,41 @@ def test_fully_banned_row_falls_back_instead_of_nan():
         banned_per_row=[{0: float("-inf"), 1: float("-inf")}],
     )
     assert committed[0] in (0, 1)
+
+
+def test_sampling_marginal_is_exact_chi_square():
+    """The draw must be an EXACT sampler of the transformed distribution.
+
+    A poorly-ranked draft (p ~ 0.07) is rejected almost every time, so nearly every
+    draw comes from the residual p (draft mass removed, renormalized) while a few
+    accept it -- the MIXTURE must reproduce p itself. 120k draws, chi-square on the
+    full marginal: this catches residual-renormalisation / off-by-one bugs that
+    per-seed determinism tests cannot see.
+    """
+    import math
+
+    pv = [0.40, 0.25, 0.15, 0.10, 0.07, 0.03]
+    rows = mx.array([[math.log(v) for v in pv]], dtype=mx.float32)
+    draft = [4]                                    # p=0.07: mostly rejected
+    n = 120_000
+    counts = [0] * 6
+    for seed in range(n):
+        committed, _accepted = sm.sample_prefix(
+            rows, draft, sampling=sm.Sampling(temperature=1.0, seed=seed)
+        )
+        counts[committed[0]] += 1
+    exp = [v * n for v in pv]
+    chi2 = sum((o - e) ** 2 / e for o, e in zip(counts, exp))
+    assert chi2 < 25.0, f"chi2={chi2:.1f} obs={counts} exp={[round(e) for e in exp]}"
+
+
+def test_step_advances_the_key():
+    """A key re-derived from the seed alone would replay the same uniform every
+    round; folding the step in must change the stream."""
+    rows = mx.array([[0.0, 0.0, 0.0, 0.0]])
+    def draw(step: int) -> int:
+        return sm.sample_prefix(rows, [0], sampling=sm.Sampling(temperature=1.0, seed=1), step=step)[0][0]
+    assert draw(0) == draw(0)        # same seed + step -> same draw
+    assert draw(0) != draw(1)        # the step advances the key
+    draws = {draw(st) for st in range(40)}
+    assert len(draws) >= 3           # and the stream really varies
