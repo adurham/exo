@@ -1848,6 +1848,14 @@ sys.exit(0 if got == pathlib.Path(sys.argv[1]).resolve() else 1)
   # is deterministic and offline (no re-resolution against remote branch HEAD,
   # which line ~721's `git reset --hard` would clobber every run anyway).
   # Same idiom as the Rust-bindings rebuild below.
+  # SKIP_NODE_INSTALLS=1: the three steps below (vendored-mlx-lm pin, Rust bindings
+  # rebuild, dashboard build) all need outbound network on the node (uv/pypi, maturin,
+  # npm). When ONLY Python sources changed, they are unnecessary -- the venv copies
+  # already match the unchanged gitlinks -- and a node whose egress is broken must
+  # still be able to start serving. Set it when the gitlinks/JS are unchanged.
+  if [ "${SKIP_NODE_INSTALLS:-0}" = "1" ]; then
+    echo "Skipping node installs on $NODE (SKIP_NODE_INSTALLS=1): mlx-lm pin, Rust bindings, dashboard."
+  else
   echo "Pinning mlx-lm to vendored submodule on $NODE..."
   ssh "$NODE" "$REMOTE_DEV_ENV; zsh -l -c 'cd ~/repos/exo && uv pip install --no-deps --force-reinstall ./mlx-lm'" || {
     echo "Failed to pin vendored mlx-lm on $NODE"
@@ -1866,6 +1874,7 @@ sys.exit(0 if got == pathlib.Path(sys.argv[1]).resolve() else 1)
     echo "Failed to build dashboard on $NODE"
     exit 1
   }
+  fi
 
 done
 
