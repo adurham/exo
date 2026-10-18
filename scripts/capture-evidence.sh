@@ -142,7 +142,7 @@ local_list() { # controller
   local pred=()
   [[ -n $SINCE ]] && pred=(-newermt "$SINCE")
   ( cd "$HOME/.exo/exo_log" 2>/dev/null || exit 3
-    find . -maxdepth 1 -type f \( -name 'exo.*.log.zst' -o -name 'dsv41-*.json' \) "${pred[@]}" -print 2>/dev/null |
+    find . -maxdepth 1 -type f \( -name 'exo.*.log.zst' -o -name 'dsv41-*.json' \) ${pred[@]:-} -print 2>/dev/null |
       sed 's|^\./||' | sort )
 }
 
