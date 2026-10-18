@@ -1,0 +1,8 @@
+# limerick [prose]
+PROMPT: Write a limerick about the moon.
+
+There once was a moon in the sky,  
+Who winked at the stars passing by.  
+He said with a grin,  
+“Let the night now begin,”  
+Then yawned as the sun climbed up high.

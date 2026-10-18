@@ -1,0 +1,4 @@
+# es_continue [multilingual]
+PROMPT: Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'
+
+El viento soplaba fuerte, y las espigas de hiera se inclinaban en oleadas largas, como si la tierra quisiera murmurar algo que nadie sabía escuchar. Las nubes corrían baj as y deshilachadas, y el cielotenía ese color de estaño viejoque anuncia tormenta. En el camino, un hombre de capa raíd a apretaba el paso; a sus espaldas, el pueblo quedaba reducidoa unas pocas luces tembl orosas. No había más sonidoque el silbido del aire entrelas piedras y, de vez en cuand o, el crujido lej ano de una rama que cedía.

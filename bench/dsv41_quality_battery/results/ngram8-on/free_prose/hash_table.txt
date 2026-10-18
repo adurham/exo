@@ -1,0 +1,8 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Imagine a giant wall of lockers, numbered 0 to 999. You need to store stuff by name, like “Maya’s backpack.” Instead of dumping it anywhere and searching every locker later, you make a rule: turn a name into a locker number. For ejemplo, add up the letters’ positions and take the last 3 digits, so “Maya” might become locker 472. You put Maya’s stuff in locker 472. Later, to find it, you do the same math and walk straight to 472. That rule that turns a key into a locker number is called a **hash function**. The lockers are called **buckets**.
+
+Two different names can map to the same locker. That’s called a **collision**. It’s normal, because there are way more possible names in the world than lockers. To handle it:
+
+- **Chaining:** each locker can hold a small list of items. If “Maya” and “Amy” both map to 472, locker

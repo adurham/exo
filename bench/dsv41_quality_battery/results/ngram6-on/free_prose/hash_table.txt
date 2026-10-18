@@ -1,0 +1,33 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Okay, imagine a giant school hallway with 1,000 numbered lockers. You want to store things by name, like “Maya’s backpack” or “Leo’s lunch.” Instead of searching every locker every time, you use a rule that turns a person’s name into a locker number.
+
+That rule is called a **hash function**. For example, maybe it adds up the letters’ positions in the alphabet, then takes the remainder after dividing by 1,000. “Maya” might become locker 472. To store Maya’s stuff, you go straight to locker 472. To later find Maya’s stuff, run the same rule, get 472 again, and open that locker. No scanning the whole hallway.
+
+That’s the core idea of a hash table: it stores **key → value** pairs, and uses a hash function to jump almost directly to where the value should be.
+
+Two problems show up:
+
+1. **Collisions.** Two different names might turn into the same locker number. “Maya” and “Amy” could both map to 472.
+2. **Fullness.** If too many things pile into the same lockers, lookup gets slow.
+
+For collisions, hash tables usually do one of two things:
+- Each locker holds a small list. Locker 472 might contain both Maya and Amy. To find Maya, you go to 472 and check the list for the exact name.
+- Or, if locker 472 is taken, you try 473, 474, etc., until you find an empty spot. When searching, you follow the same pattern.
+
+For fullness, when the table gets too crowded, it builds a bigger locker wall and moves everything into new spots. That’s called **rehashing**.
+
+Why is this fast? In the average case, adding, finding, or deleting something takes **constant time** — basically instant, even if there are millions of items. You compute the locker number and go there. In the worst case, if the hash function is terrible and every key lands in the same locker, it becomes as slow as searching a long list.
+
+Hash tables are used everywhere: Python dictionaries, JavaScript Maps, caches, database indexes, and sets. They’re great when you need fast lookup by a key.
+
+But they have limits:
+- They don’t keep things sorted.
+- Keys must be stable: the same key must always produce the same hash.
+- A bad hash function can ruin performance.
+- They use extra memory.
+
+Also, a hash function here is not encryption. It’s more like a fingerprint or an address-maker. It doesn’t hide the data; it just helps you find it quickly.
+
+So a hash table is basically a super-fast filing system: turn a key into a location, go there directly, and handle the occasional collision. Simple idea, very powerful.

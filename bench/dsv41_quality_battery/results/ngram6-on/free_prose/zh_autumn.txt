@@ -1,0 +1,6 @@
+# zh_autumn [multilingual]
+PROMPT: 先用一句中文描写秋雨的声音，然后用英文解释这句话的意思。(Write one Chinese sentence describing the sound of autumn rain, then explain it in English.)
+
+中文：秋雨淅浙沥沥，像无数细小而冰凉的手指，轻轻敲打着枯黄的梧叶。
+
+English: This Chinese sentence describes the sound of an autumn rain as a soft pitter-patter, compared to countless tiny, cold fingers gently tapping withered, yellow parasol-tree leaves. “淅淅沥沥” is an onomatopœia for light, steady rain, and the tapping image suggests a hushed, slightly melancholy autumn atmosphere.

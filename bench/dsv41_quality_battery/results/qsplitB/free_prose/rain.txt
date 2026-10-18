@@ -1,0 +1,4 @@
+# rain [prose]
+PROMPT: Write a short paragraph about the sound of rain on a metal roof.
+
+The rain hits the tin roof like a thousand tiny hammers, each drop a bright, percussive note that rolls and tumbles into the next. What begins as a scattered patter swells into a steady drumroll, then a roaring applause that drowns out every other sound in the house. It's a wild, tinny symphony—sharp and metallic, yet strangely soothing—and beneath its clatter, the whole world feels tucked in, wrapped tight against the storm.

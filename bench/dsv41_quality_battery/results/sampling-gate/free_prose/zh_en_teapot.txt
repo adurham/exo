@@ -1,0 +1,36 @@
+# zh_en_teapot [multilingual]
+PROMPT: Write a bilingual product description for a handmade ceramic teapot: the first half in English, the second half in Chinese (中文).
+
+**English**
+
+**Handcrafted Ceramic Teapot — Where Earth, Fire, and Art Meet**
+
+Every great cup of tea begins with the right vessel. This handmade ceramic teapot is shaped by skilled artisan hands, one at a time, from natural clay sourced with care. No two pieces are exactly alike — each carries its own subtle variations in glaze, texture, and form, making yours truly one of a kind.
+
+Fired at high temperature for lasting strength and heat retention, the teapot's gentle, even walls keep your brew warm while allowing the flavors to unfold beautifully. The ergonomic handle and precision-fit lid ensure a smooth, drip-free pour with every serving.
+
+Whether you're steeping a delicate green tea or a robust oolong, this teapot elevates an everyday ritual into a moment of calm and beauty. Perfect for personal use or as a thoughtful gift for any tea lover.
+
+**Details:**
+- Material: Natural clay, food-safe glaze
+- Capacity: Approx. 350 ml
+- Handmade and high-temperature fired
+- Minor variations in color and shape are natural and celebrated
+
+---
+
+**中文**
+
+**手作陶瓷茶壶 —— 泥土、火焰与艺术的相遇**
+
+一杯好茶，始于一把好壶。这款手作陶瓷茶壶由匠人纯手工拉坯成型，选用天然陶土，每一把都独一无二——釉色、纹理与器型各有微妙差异，让您手中的这把壶成为世间仅此一件的存在。
+
+经高温烧制，壶身坚固耐用且保温性佳。壶壁温润均匀，既能留住茶汤温度，又能让茶香层层释放。人体工学壶把与严丝合缝的壶盖，确保出水流畅、断水利落，每一次斟茶都从容优雅。
+
+无论是清雅的绿茶，还是醇厚的乌龙，这把壶都能将日常泡茶升华为一段静谧美好的时光。自用怡情，赠友亦显心意，是爱茶之人不可错过的雅器。
+
+**产品细节：**
+- 材质：天然陶土，食品级安全釉
+- 容量：约350毫升
+- 纯手工制作，高温烧成
+- 色泽与器型的细微差异皆为手作自然之美

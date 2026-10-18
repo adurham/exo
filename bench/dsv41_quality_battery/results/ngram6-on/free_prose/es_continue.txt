@@ -1,0 +1,6 @@
+# es_continue [multilingual]
+PROMPT: Continúa en el mismo idioma y estilo: 'El viento soplaba fuerte sobre las colinas, y ...'
+
+las ramas de los árboles se doblaban como si quisieran arrancarse de la tierra. En el cielo, nubes deshilachadas corrían hacia el este y la hierba seca silbaba al ras de los caminos. Nadie se aventuraba por el sendero; apenas un perro flaco asomó el hocico, olfateó la tormenta y volvió a guarecerse tras el muro. A lo Lejos, la casa de piedra parecía encogida bajo el golpeteó del temporal, con las ventanas cerradas y la chimenea humeante a duras penas.
+
+Todo anunciaba que la noche seria larga, y que aquel viento, lejos del amainar, tenía todavía más historias que contar.

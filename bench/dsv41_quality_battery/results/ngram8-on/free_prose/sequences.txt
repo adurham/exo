@@ -1,0 +1,8 @@
+# sequences [continuation]
+PROMPT: Complete these sequences and then explain your reasoning in prose: [2,4,8,16, ...], [a,c,e,g, ...], [1,1,2,3,5, ...].
+
+[2, 4, 8, 16, 32, 64, ...]  
+[a, c, e, g, i, k, ...]  
+[1, 1, 2, 3, 5, 8, 13, ...]
+
+Reasoning: The first sequence doubles each term: 2 → 4 → 8 → 16, so the next terms are 32 and 64. The second sequence lists every other letter of the alphabet: a, c, e, g, so it continues with i, k, and so on. The third sequence is the Fibonacci sequence, where each term is the sum of the two previous terms: 1 + 1 = 2, 1 + 2 = 3, 2 + 3 = 5, so the next terms are 8 and 13.

@@ -1,0 +1,8 @@
+# limerick [prose]
+PROMPT: Write a limerick about the moon.
+
+There once was a moon, full glee,
+Who danced with thestars in the sea.
+He said witha grin,
+“I’ll let night begin,”
+Then yawned as he sankdown for tea.

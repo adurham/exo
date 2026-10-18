@@ -1,0 +1,25 @@
+# hash_table [technical]
+PROMPT: Explain how a hash table works, in plain language, as if to a curious teenager.
+
+Imagine a giant wall of lockers, numbered 0 to 999. You want to store stuff by name, like “Maya’s backpack.” Instead of searching every locker, you make a rule: turn the name into a locker number. For example, add up the letters’ positions and take the last 3 digits. “Maya” might become 472. So Maya’s stuff goes in locker 472. Later, to find Maya, you do the same math and open locker 472 directly.
+
+That’s the basic idea of a hash table.
+
+- **Key**: the thing you look up, like “Maya.”
+- **Value**: the data you store, like her backpack.
+- **Hash function**: the rule that turns a key into a locker number.
+- **Bucket**: the locker/slot where data goes.
+
+A hash table is just a bunch of buckets plus a hash function. To insert, you compute the bucket and put the key-value pair there. To look up, you compute the same bucket and check there. To delete, you find it and remove it.
+
+The catch: two different keys can map to the same bucket. That’s called a **collision**. Since there are way more possible keys than buckets, collisions are normal. So each bucket might hold a small list. When you look up “Maya,” you go to bucket 472, then check the list for the exact key “Maya.” Another way is: if a bucket is full, try the next empty one. Both are ways to handle collisions.
+
+If the table gets too full, it slows down. So the computer makes a bigger wall of buckets and moves everything into new spots. That’s called **rehashing**.
+
+Why is it fast? Because you usually skip almost all the buckets and check only one. On average, insert/lookup/delete take constant time — meaning it doesn’t get much slower just because you have more data. Worst case, if the hash function is terrible and everything piles into one bucket, it becomes as slow as searching a list.
+
+Hash tables are used in Python dictionaries, JavaScript Maps, caches, databases, and sets. They’re not sorted, so finding the smallest or largest item means scanning. Keys also need to be stable — if a key changes, its hash changes.
+
+It’s not encryption. A hash function here is just a fast fingerprint/mapping. A good hash spreads keys evenly. A bad one causes traffic jams.
+
+So: hash tables trade extra memory and some messy collision handling for speed. They’re like a magical filing cabinet that usually lets you jump straight to the right drawer.

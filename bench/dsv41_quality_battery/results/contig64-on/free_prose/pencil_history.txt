@@ -1,0 +1,10 @@
+# pencil_history [prose]
+PROMPT: Write about the history of the pencil, at least 200 words.
+
+The pencil’s history begins with ancient styluses, but the modern pencil emerged from a lucky discovery. In the 1560s, a storm reportedly uprooted a tree near Borrowdale, England, exposing a strange black mineral. Shepherds used it to mark sheep, and because it resembled lead, people called it “lead,” even though it was graphite. Borrowdale graphite was exceptionally pure. Locals cut it into sticks, wrapped them in string or sheepskin, and used them for marking. England controlled the deposit and guarded it closely.
+
+In the 17th century, German craftsmen in Nuremberg began setting graphite into wooden holders, creating early wooden pencils. But pure Borrowdale graphite was scarce. During the Napoleonic Wars, France was cut off from English graphite. In 1795, French inventor Nicolas-Jacques Conté mixed powdered graphite with clay, shaped the mixture, and fired it. This produced a strong, reliable core and allowed manufacturers to control hardness by changing the graphite-to-clay ratio. Similar advances in Austria by Joseph Hardtmuth helped make pencils affordable and widely available.
+
+In 1812, William Munroe made some of the first American wooden pencils, and the Thoreau family in Concord, Massachusetts, later improved graphite processing. In 1822, Sampson Mordan and Gabriel Riddle patented an early mechanical pencil in Britain. In 1858, Hymen Lipman patented a pencil with an attached eraser. By the late 19th century, pencils were graded—HB, No. 2, and others—and yellow became a common color, popularized by the Koh-I-Noor pencil in 1890.
+
+Today, pencils are simple but sophisticated tools: graphite and clay cores in cedar or other wood, often with erasers and painted barrels. They remain essential in classrooms, art studios, and workshops worldwide.
