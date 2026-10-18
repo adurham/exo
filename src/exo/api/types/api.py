@@ -156,12 +156,22 @@ class Usage(BaseModel):
     completion_tokens_details: CompletionTokensDetails
 
 
+class ChoiceLoopCause(BaseModel):
+    """Vendor extension on a choice: why the engine cut the turn short."""
+
+    finish_cause: Literal["repetition_loop"] = "repetition_loop"
+    cycle_period: int | None = None
+    dropped_tokens: int = 0
+    retryable: bool = False
+
+
 class StreamingChoiceResponse(BaseModel):
     index: int
     delta: ChatCompletionMessage
     logprobs: Logprobs | None = None
     finish_reason: FinishReason | None = None
     usage: Usage | None = None
+    dsv41: ChoiceLoopCause | None = None
 
 
 class ChatCompletionChoice(BaseModel):
@@ -169,6 +179,7 @@ class ChatCompletionChoice(BaseModel):
     message: ChatCompletionMessage
     logprobs: Logprobs | None = None
     finish_reason: FinishReason | None = None
+    dsv41: ChoiceLoopCause | None = None
 
 
 class ChatCompletionResponse(BaseModel):

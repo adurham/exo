@@ -10,6 +10,7 @@ from exo.api.types import (
     TopLogprobItem,
     Usage,
 )
+from exo.shared.types.chunks import LoopCause
 from exo.utils.pydantic_ext import TaggedModel
 
 
@@ -36,6 +37,11 @@ class GenerationResponse(BaseRunnerResponse):
     # failure; carried to the master so the failure is counted by kind. None for
     # any other error (runner crash, generation error).
     tool_call_parse_failure_kind: ToolCallParseFailureKind | None = None
+    # Set on a ``finish_reason == "length"`` terminal that the engine shortened
+    # because it confirmed a repetition loop (guard action "truncate"). Carried
+    # to the terminal chunk and the OpenAI choice's ``dsv41`` extension so a
+    # client can distinguish it from an ordinary max-token cut.
+    loop_cause: LoopCause | None = None
 
 
 class ImageGenerationResponse(BaseRunnerResponse):

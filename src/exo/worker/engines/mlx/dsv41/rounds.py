@@ -205,6 +205,7 @@ def _final_response(
     mtp_cycles: int = 0,
     mtp_accepted: int = 0,
     error_code: str | None = None,
+    loop_cause: Any | None = None,
 ) -> GenerationResponse:
     """The terminal response for a request, with usage and stats attached.
 
@@ -246,6 +247,7 @@ def _final_response(
         )
     sel, top = logprob if logprob is not None else (None, None)
     return GenerationResponse(
+        loop_cause=loop_cause,
         text=text,
         token=token,
         logprob=sel,

@@ -65,7 +65,12 @@ from exo.api.types import (
     TopLogprobItem,
 )
 from exo.shared.models.model_cards import ModelId
-from exo.shared.types.chunks import ErrorChunk, GenerationChunk, PrefillProgressChunk
+from exo.shared.types.chunks import (
+    ErrorChunk,
+    GenerationChunk,
+    LoopCause,
+    PrefillProgressChunk,
+)
 from exo.shared.types.events import ChunkGenerated, Event
 from exo.shared.types.memory import Memory
 from exo.shared.types.tasks import GenerationTask, TaskId, TextGeneration
@@ -378,6 +383,11 @@ def _read_float_env(name: str, default: float) -> float:
         return default
 #: Per-turn WARNING when the escape MOVES this many committed tokens (rows_changed):
 #: a stuck attractor the escape keeps perturbing rather than escaping. 0 = off.
+#: Max tokens the emission gate holds while a cycle is merely SUSPECTED
+#: (guard.candidate()). Tokens stream immediately otherwise, so short turns are
+#: unaffected; the cap only bounds memory on a long unconfirmed repeat.
+LOOP_TAIL_BUFFER_ENV = "EXO_DSV41_LOOP_TAIL_BUFFER"
+LOOP_TAIL_BUFFER_DEFAULT = 512
 LOOP_ESCAPE_WARN_ROWS_ENV = "EXO_DSV41_LOOP_ESCAPE_WARN_ROWS"
 LOOP_ESCAPE_WARN_ROWS_DEFAULT = 10
 
@@ -1420,6 +1430,29 @@ class Dsv41Engine(Engine):
         # collective (the startup knob-equality check in __init__ is separate).
         guard = DegenerationGuard(token_text=tokenizer.decode)
         guard_action: LoopAction = loop_action()
+        #: Mid responses held back so a confirmed loop's tail never reaches the
+        #: client. 0 disables the gate (the tail may then already be streamed).
+        tail_buffer = max(
+            0, _read_int_env(LOOP_TAIL_BUFFER_ENV, LOOP_TAIL_BUFFER_DEFAULT)
+        )
+        pending_mid: list[Any] = []
+        #: Sticky "hold the tail" flag, refreshed every other committed token:
+        #: a full per-token candidate scan measured ~10% of a decode step.
+        gating = False
+
+        def drain(*, force: bool = False) -> Any:
+            """Stream buffered mid responses.
+
+            ``force`` flushes everything (an ordinary terminal, or the tail stopped
+            repeating); without it only the overflow past ``tail_buffer`` is
+            released, so a long unconfirmed repeat cannot grow memory. ``emitted``
+            counts tokens actually handed to the client, so a dropped buffer costs
+            nothing in usage accounting.
+            """
+            nonlocal emitted
+            while pending_mid and (force or len(pending_mid) > tail_buffer):
+                emitted += 1
+                yield pending_mid.pop(0)
 
         def log_turn_end(reason: str, committed: int | None = None) -> None:
             """One bounded summary line per request (see OBS_RATE_INTERVAL_SECONDS).
@@ -1446,6 +1479,7 @@ class Dsv41Engine(Engine):
         #: a whole ROUND before its tokens are yielded, so it runs ahead of the fire
         #: point; the dump must be the stream the guard JUDGED, not the round's tail).
         guard_consumed = 0
+        generated_count = 0
         try:
             for tid, lp_entry in committed_tokens():
                 last_tid = tid
@@ -1504,6 +1538,44 @@ class Dsv41Engine(Engine):
                             mtp_accepted=self._spec_accepted,
                         )
                         return
+                    if guard_action == "truncate":
+                        # End as a TRUNCATION, not an error: an error frame is a
+                        # retry signal and a greedy engine reproduces the same
+                        # cycle deterministically. The buffer is dropped so the
+                        # repeating tail is not streamed, and the terminal carries
+                        # where the cycle began so the client knows the answer is
+                        # incomplete without being told to retry.
+                        pending_mid.clear()
+                        cycle_len = max(0, len(hit.cycle_token_ids))
+                        # Generated-but-withheld: everything the guard judged
+                        # beyond what the client actually received. With the gate
+                        # holding the tail this is the whole cycle (plus the
+                        # confirming token); without it, only the un-emitted
+                        # remainder -- honest either way.
+                        dropped = max(0, guard_consumed - emitted)
+                        self._abort_turn(session, keep)
+                        log_turn_end(
+                            "degeneration-truncate", committed=guard_consumed
+                        )
+                        yield _final_response(
+                            token=tid,
+                            text="",
+                            prefill_tps=prefill_tps,
+                            prompt_tokens=turn.prompt_tokens,
+                            generated=emitted,
+                            reason="length",
+                            task_id=task_id,
+                            reused_tokens=turn.reused_tokens,
+                            loop_cause=LoopCause(
+                                finish_cause="repetition_loop",
+                                cycle_period=cycle_len,
+                                dropped_tokens=dropped,
+                                retryable=False,
+                            ),
+                            mtp_cycles=self._spec_drafted,
+                            mtp_accepted=self._spec_accepted,
+                        )
+                        return
                 if not first_token_logged:
                     first_token_logged = True
                     logger.info(
@@ -1525,15 +1597,19 @@ class Dsv41Engine(Engine):
                     last_rate_log = now
                 detokenizer.add_token(tid)
                 text = detokenizer.last_segment
-                emitted += 1
+                #: Committed tokens this turn has produced (the gate lags
+                #: ``emitted`` by up to ``tail_buffer``), so max-token accounting
+                #: stays on the committed stream.
+                generated_count += 1
                 accumulated += text
                 stop_hit = _stop_index(accumulated, stop_sequences)
                 if stop_hit is not None:
                     text = text[: max(0, len(text) - (len(accumulated) - stop_hit))]
                     final_reason = "stop"
-                if final_reason is None and emitted >= max_tokens:
+                if final_reason is None and generated_count >= max_tokens:
                     final_reason = "length"
                 if final_reason is not None:
+                    yield from drain(force=True)
                     self._end_turn(session, tokens_list, turn, produced, keep)
                     log_turn_end(str(final_reason))
                     yield _final_response(
@@ -1550,7 +1626,18 @@ class Dsv41Engine(Engine):
                         mtp_accepted=self._spec_accepted,
                     )
                     return
-                yield _mid_response(tid, text, task_id, as_logprob(lp_entry))
+                pending_mid.append(
+                    _mid_response(tid, text, task_id, as_logprob(lp_entry))
+                )
+                # Hold the tail while a cycle is merely suspected (so a confirmed
+                # loop's cycle can be dropped rather than streamed); release it the
+                # moment the tail stops repeating.
+                if guard_consumed % 2 == 0:
+                    gating = guard.candidate() is not None
+                if gating:
+                    yield from drain()
+                else:
+                    yield from drain(force=True)
         except GeneratorExit:
             # The consumer abandoned the generator (a close/GC), which is NOT a
             # client cancel: keep the pre-existing rollback semantics but do not

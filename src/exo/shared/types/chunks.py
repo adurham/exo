@@ -21,6 +21,26 @@ class BaseChunk(TaggedModel):
     model: ModelId
 
 
+class LoopCause(TaggedModel):
+    """Why a turn was cut short by the engine's own loop guard (vendor ext).
+
+    Rides on the terminal chunk (and the OpenAI choice as ``dsv41``) so a client
+    can tell a loop truncation from an ordinary length cap without string
+    matching. ``finish_cause`` is the same constant the old error used.
+    """
+
+    finish_cause: Literal["repetition_loop"] = "repetition_loop"
+    #: Raw-token period of the confirmed cycle (0 when the detector reports
+    #: block units and the caller did not convert).
+    cycle_period: int | None = None
+    #: Generated tokens dropped from the tail (the repeated cycle, minus whatever
+    #: had already been streamed before the guard confirmed it).
+    dropped_tokens: int = 0
+    #: True only for a cause a client can fix by retrying the SAME request.
+    #: A greedy engine's loop is deterministic: always False.
+    retryable: bool = False
+
+
 class TokenChunk(BaseChunk):
     text: str
     token_id: int
@@ -30,6 +50,8 @@ class TokenChunk(BaseChunk):
     logprob: float | None = None
     top_logprobs: list[TopLogprobItem] | None = None
     is_thinking: bool = False
+    #: Set on the TERMINAL chunk when the turn was truncated by the loop guard.
+    loop_cause: LoopCause | None = None
 
 
 class ErrorChunk(BaseChunk):

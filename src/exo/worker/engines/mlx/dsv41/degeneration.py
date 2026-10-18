@@ -120,14 +120,23 @@ LOOP_ACTION_ENV = "EXO_LOOP_DETECT_ACTION"
 
 #: dsv41's default action. Deliberately the SAME as the generic path's default
 #: ("error") -- see the module docstring's FINISH-REASON POLICY section.
-DEFAULT_LOOP_ACTION: "LoopAction" = "error"
+DEFAULT_LOOP_ACTION: "LoopAction" = "truncate"
 
 #: What a detected loop does to the turn:
 #: ``"error"`` -- fail the turn cleanly (finish_reason="error" -> ErrorChunk);
 #: ``"stop"``  -- terminate but surface the (already streamed) partial as a
 #:                normal completion;
 #: ``"warn"``  -- log only, never terminate (the pre-port behaviour).
-LoopAction = Literal["error", "stop", "warn"]
+#: What a CONFIRMED repetition cycle does to the turn.
+#:   * "truncate" (default) -- end the turn as finish_reason="length", drop the
+#:     repeating tail, and report ``dsv41.finish_cause="repetition_loop"`` so a
+#:     client can tell it apart from an ordinary cap. NOT retryable: under greedy
+#:     decoding the same request reproduces the same cycle, so an error frame
+#:     (which every OpenAI client treats as a retry signal) is a contract bug.
+#:   * "error"    -- the old clean-fail (SSE error + error_code); kept for A/B.
+#:   * "stop"     -- end the turn as a normal stop, keep the text.
+#:   * "warn"     -- log only, keep generating.
+LoopAction = Literal["error", "stop", "warn", "truncate"]
 
 #: The diagnostic that REPLACES the degenerate partial under the "error" action
 #: (re-exported so ``engine.py`` has one import seam for the whole guard).
@@ -335,6 +344,12 @@ class DegenerationGuard:
     #: Completed block hashes + their raw blocks (for the exact re-verify).
     block_hashes: list[int] = field(default_factory=list)
     block_tokens: list[list[int]] = field(default_factory=list)
+    #: Repeat count that makes the tail a CANDIDATE (the emission gate holds
+    #: tokens from here on; the detector itself still needs ``min_repeats``).
+    #: Deliberately below ``min_repeats`` so a loop's cycle is caught before it
+    #: would be confirmed, and well above anything ordinary prose produces
+    #: three identical back-to-back blocks are not a coincidence.
+    candidate_repeats: int = 3
     _token_warned: bool = field(default=False, init=False)
     _long_warned: bool = field(default=False, init=False)
 
@@ -347,6 +362,28 @@ class DegenerationGuard:
     def long_warned(self) -> bool:
         """Whether the long-period detector has already reported this request."""
         return self._long_warned
+
+    def candidate(self) -> int | None:
+        """Period of an UNCONFIRMED back-to-back repeat at the tail, else None.
+
+        The emission gate's signal: while this is not None the engine holds the
+        newest tokens, so a confirmed loop's cycle can be dropped instead of
+        streamed. It resolves (returns None) the moment the tail stops repeating,
+        which is what releases the held tokens. Cheap: the same scan as the
+        detector with a lower repeat threshold, once per committed token.
+        """
+        if not self.enabled or not self.recent_token_ids:
+            return None
+        # Only TIGHT periods matter for the gate (a phrase loop's period is
+        # small); scanning the full detector range here cost ~10% of a decode
+        # step, so bound it and let the caller throttle the check.
+        loop = _detect_token_loop(
+            self.recent_token_ids,
+            min(int(self.max_period), 8),
+            max(2, int(self.candidate_repeats)),
+            self.token_text,
+        )
+        return None if loop is None else int(loop[0])
 
     def feed(self, token_id: int) -> LoopHit | None:
         """Feed ONE committed token; returns a hit on the token that confirms one.

@@ -15,6 +15,7 @@ from exo.api.types import (
     ChatCompletionMessageText,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    ChoiceLoopCause,
     ErrorInfo,
     ErrorResponse,
     FinishReason,
@@ -256,6 +257,16 @@ def chunk_to_response(
                 delta=delta,
                 logprobs=logprobs,
                 finish_reason=chunk.finish_reason,
+                dsv41=(
+                    ChoiceLoopCause(
+                        finish_cause=chunk.loop_cause.finish_cause,
+                        cycle_period=chunk.loop_cause.cycle_period,
+                        dropped_tokens=chunk.loop_cause.dropped_tokens,
+                        retryable=chunk.loop_cause.retryable,
+                    )
+                    if chunk.loop_cause is not None
+                    else None
+                ),
             )
         ],
     )
@@ -405,6 +416,7 @@ async def collect_chat_response(
     logprobs_content: list[LogprobsContentItem] = []
     model: str | None = None
     finish_reason: FinishReason | None = None
+    loop_cause: Any | None = None
     error_message: str | None = None
     last_usage: Usage | None = None
 
@@ -435,6 +447,7 @@ async def collect_chat_response(
                     )
                 if chunk.finish_reason is not None:
                     finish_reason = chunk.finish_reason
+                    loop_cause = chunk.loop_cause
 
             case ToolCallChunk():
                 if model is None:
@@ -474,6 +487,16 @@ async def collect_chat_response(
                 if logprobs_content
                 else None,
                 finish_reason=finish_reason,
+                dsv41=(
+                    ChoiceLoopCause(
+                        finish_cause=loop_cause.finish_cause,
+                        cycle_period=loop_cause.cycle_period,
+                        dropped_tokens=loop_cause.dropped_tokens,
+                        retryable=loop_cause.retryable,
+                    )
+                    if loop_cause is not None
+                    else None
+                ),
             )
         ],
         usage=last_usage,

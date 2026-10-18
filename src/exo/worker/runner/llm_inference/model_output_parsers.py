@@ -153,6 +153,7 @@ def map_responses_to_chunks(
                     logprob=response.logprob,
                     top_logprobs=response.top_logprobs,
                     is_thinking=response.is_thinking,
+                    loop_cause=response.loop_cause,
                 )
         case ToolCallResponse():
             return ToolCallChunk(

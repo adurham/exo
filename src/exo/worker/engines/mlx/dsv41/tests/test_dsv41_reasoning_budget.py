@@ -490,10 +490,17 @@ class TestGuardCleanFailHasAStructuredCode:
             stream + [1], text_of=ANSWER_TEXT, max_output_tokens=500
         )
         chunks = _drain(engine)
-        errors = [c for c in chunks if isinstance(c, ErrorChunk)]
-        assert errors, "the guard must fail the degenerate turn"
-        assert errors[0].error_message == DEGENERATION_ERROR_TEXT
-        assert errors[0].error_code == REPETITION_LOOP_ERROR_CODE == "repetition_loop"
+        assert not any(isinstance(c, ErrorChunk) for c in chunks)
+        finals = [
+            c
+            for c in chunks
+            if isinstance(c, TokenChunk) and c.finish_reason == "length"
+        ]
+        assert finals, "the guard must truncate the degenerate turn"
+        cause = finals[-1].loop_cause
+        assert cause is not None
+        assert cause.finish_cause == REPETITION_LOOP_ERROR_CODE == "repetition_loop"
+        assert cause.retryable is False
 
     def test_a_clean_turn_carries_no_error_code(self):
         engine, _model, _tokenizer, _events = _engine(

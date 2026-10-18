@@ -40,6 +40,20 @@ import mlx.core as mx
 import pytest
 
 from exo.shared.types.chunks import ErrorChunk, TokenChunk
+
+
+def _loop_truncation(chunks):
+    """The terminal of a guard-truncated turn (finish_reason=length + cause)."""
+    finals = [
+        c
+        for c in chunks
+        if isinstance(c, TokenChunk) and c.finish_reason == "length"
+    ]
+    assert finals, "the guard must truncate the degenerate turn"
+    assert finals[-1].loop_cause is not None, "a truncation must carry its cause"
+    assert finals[-1].loop_cause.finish_cause == "repetition_loop"
+    assert finals[-1].loop_cause.retryable is False
+    return finals[-1]
 from exo.shared.types.common import CommandId
 from exo.shared.types.tasks import TaskId, TextGeneration
 from exo.shared.types.text_generation import (
@@ -341,8 +355,12 @@ class TestBatchedFeed:
             stream + [1], text_of=ANSWER_TEXT, max_output_tokens=2000
         )
         chunks = _drain(engine)
-        error = [c for c in chunks if isinstance(c, ErrorChunk)]
-        assert error and error[0].error_message == DEGENERATION_ERROR_TEXT
+        final = _loop_truncation(chunks)
+        assert not any(isinstance(c, ErrorChunk) for c in chunks), (
+            "a loop truncation must NOT be an error frame (an error is a retry "
+            "signal and greedy decoding reproduces the same cycle)"
+        )
+        assert final.loop_cause.dropped_tokens >= 0
 
         dumps = list(tmp_path.glob("*.json"))
         assert len(dumps) == 1, "a guard-fire must dump the committed tail"
@@ -354,6 +372,20 @@ class TestBatchedFeed:
             expected_hit.cycle_token_ids
         )
         assert payload["reason"] == "guard-token"
+
+    def test_the_gated_tail_is_dropped_not_streamed(self):
+        """A TIGHT cycle: the emission gate holds the tail while a repeat is
+        suspected, so the client's stream stops BEFORE the cycle rather than
+        receiving it and then being told to ignore it."""
+        text_of = {101: "AB", 102: "CD"}
+        engine, _model, _tokenizer, _events = _engine(
+            CYCLE * 12 + [1], text_of=text_of, max_output_tokens=500
+        )
+        chunks = _drain(engine)
+        final = _loop_truncation(chunks)
+        text = "".join(c.text for c in chunks if isinstance(c, TokenChunk))
+        assert "ABCDABCDABCD" not in text, f"the cycle leaked into the stream: {text!r}"
+        assert final.loop_cause.dropped_tokens >= 1
 
     def test_draft_tokens_are_never_fed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -368,7 +400,7 @@ class TestBatchedFeed:
 
         engine = _engine_with_head(stream + [1], lie_at=1, max_output_tokens=2000)
         chunks = _drain(engine)
-        assert any(isinstance(c, ErrorChunk) for c in chunks)
+        _loop_truncation(chunks)
         # This round really did commit SEVERAL tokens at once (a draft was accepted),
         # so the feed under test is the batched one, not a degenerate 1-token stream.
         assert engine._spec_drafted > 0 and engine._spec_accepted > 0
@@ -389,7 +421,7 @@ class TestBatchedFeed:
         monkeypatch.setenv("EXO_DSV41_PARK", "0")
         engine = _engine_with_head(CYCLE * 60 + [1], lie_at=1, max_output_tokens=500)
         chunks = _drain(engine)
-        assert any(isinstance(c, ErrorChunk) for c in chunks)
+        _loop_truncation(chunks)
 
         conversation = next(iter(engine._sessions._entries.values())).session
         # Rolled back to the pre-turn state, NOT checkpointed: the degenerate turn
@@ -427,19 +459,24 @@ class TestActionPolicy:
     pinned here is that it is the SAME policy as the generic path's by default, that
     it is always TERMINATING, and that a typo cannot disarm it."""
 
-    def test_default_action_is_error(self, monkeypatch: pytest.MonkeyPatch):
+    def test_default_action_is_truncate(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.delenv("EXO_LOOP_DETECT_ACTION", raising=False)
-        assert DEFAULT_LOOP_ACTION == "error"
-        assert loop_action() == "error"
+        assert DEFAULT_LOOP_ACTION == "truncate"
+        assert loop_action() == "truncate"
 
     def test_default_action_matches_the_generic_path(
         self, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.delenv("EXO_LOOP_DETECT_ACTION", raising=False)
-        assert loop_action() == _LOOP_DETECT_ACTION
+        # DELIBERATE DIVERGENCE (2026-10-17): the dsv41 engine truncates a loop
+        # (finish_reason="length" + a dsv41 cause) while the GENERIC path still
+        # fails the turn as an error -- it has no truncation implementation, and
+        # its "terminate" predicate only knows stop/error.
+        assert loop_action() == "truncate"
+        assert _LOOP_DETECT_ACTION == "error"
 
     def test_default_action_is_terminating(self):
-        assert DEFAULT_LOOP_ACTION in ("stop", "error")
+        assert DEFAULT_LOOP_ACTION in ("stop", "error", "truncate")
 
     def test_env_selects_stop(self, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setenv("EXO_LOOP_DETECT_ACTION", "stop")
@@ -453,7 +490,7 @@ class TestActionPolicy:
         self, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setenv("EXO_LOOP_DETECT_ACTION", "banana")
-        assert loop_action() == "error"
+        assert loop_action() == "truncate"
 
     def test_error_action_maps_to_an_error_chunk(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -605,7 +642,7 @@ class TestObservability:
         assert "DEGENERATION DETECTED" in text
         assert "guard_env_digest=" in text
         assert "period=2" in text
-        assert "action=error" in text
+        assert "action=truncate" in text
 
     def test_first_token_progress_and_turn_end_lines(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -842,8 +879,8 @@ class TestSeparatorExemption:
             max_output_tokens=100,
         )
         chunks = _drain(engine)
-        errors = [c for c in chunks if isinstance(c, ErrorChunk)]
-        assert errors and errors[0].error_message == DEGENERATION_ERROR_TEXT
+        assert not any(isinstance(c, ErrorChunk) for c in chunks)
+        _loop_truncation(chunks)
 
 
 # ------------------------------------------------------- rank-env fail-fast

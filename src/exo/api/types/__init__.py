@@ -16,6 +16,7 @@ from .api import ChatCompletionMessageImageUrl as ChatCompletionMessageImageUrl
 from .api import ChatCompletionMessageText as ChatCompletionMessageText
 from .api import ChatCompletionRequest as ChatCompletionRequest
 from .api import ChatCompletionResponse as ChatCompletionResponse
+from .api import ChoiceLoopCause as ChoiceLoopCause
 from .api import CompletionTokensDetails as CompletionTokensDetails
 from .api import CreateInstanceParams as CreateInstanceParams
 from .api import CreateInstanceResponse as CreateInstanceResponse
