@@ -33,7 +33,7 @@ The memory budget does not close -- from -2.3 GB best case to -9.4 GB worst case
 Speculative decode is a production default and worth +34.9% at 100K on the two medians below
 (36.63 vs 27.15 median tok/s; the baseline doc's paired analysis states +36.71%), 24 paired
 runs, 12/12 pairs -- a fixed-window A/B, a different instrument from the depth-run plateau above. A degeneration loop guard and a reasoning-budget limiter are armed live; both
-were exercised and both behaved (the guard's retry semantics remain open, §12.6).
+were exercised and both behaved (the guard's retry semantics were later reworked into a truncation contract -- §12.6).
 
 ### 0.1 Headline numbers
 
@@ -1365,24 +1365,56 @@ generated token (4.13 GiB / 1,048,576); the new caps add at most ~35-140 MB agai
 after the 16-22 GB estimate is -2.3 to -9.4 GB, so the caps' delta is immaterial either way).
 Memory is not the constraint.
 
-### 12.6 Still open
+### 12.6 Shipped after this writeup, and what is still open
 
 (These are specific to this fix; §10 holds the cluster's wider open set.)
 
-- **Controller request-path audit**: whether `use_prefix_cache` / `service_tier` reach the
-  main request path (§12.5) -- open.
+**Landed 2026-10-17 (same day, after the sections above were written):**
 
-Built, default OFF: `fix/dsv41-no-repeat-ngram` (`31b5367` + hardening `755000e`), a
-deterministic greedy loop escape -- no-repeat n-gram ban before the round argmax, masked-argmax
-accept path, control-token exemption, per-turn telemetry. The enable ladder (off-equivalence
-replay -> escape replay at n=5/6, n = n-gram length -> quality A/B -> perf -> soak) is not yet
-run; the knob is OFF everywhere. The escape targets the *confirmed exact-loop* case, not
-§12.2's withheld-output class -- it is not the text-level detector §12.5 declined to ship.
+- **Loop escape — SHIPPED, default ON** (`579183af6` + `f3010c4e2` + `cd54a361a`). The
+  no-repeat n-gram ban is NOT what shipped: it was rejected on the quality gate because it also
+  bans a phrase's second occurrence anywhere in the window and force-mutates legitimate output
+  (multilingual prose went DIRTY 1/20 at both n=6 and n=8; the arms and their outputs are in
+  `bench/dsv41_quality_battery/results/`). What shipped is the CONTIGUOUS-PERIOD rule: mask only
+  the token that would extend a block the model repeats back-to-back (>= 4 blocks, period <= 64),
+  applied only to candidates that carry a letter (digits/punctuation are structure -- IPv4 tails,
+  table separators, JSON braces, ASCII rules are never touched), with a graded first tier
+  (`2.0 * 1.75^max(0, period-4)` subtracted; one more block makes it hard). Knobs:
+  `EXO_DSV41_CONTIG_REPEAT_{MAX_PERIOD,MIN_BLOCKS,WORD_ONLY,SOFT_MULTIPLIER,SOFT_BASE,SOFT_ALLOWED}`,
+  defaulted in `start_cluster.sh` to 64 / 4 / 1 / 2.0 / 1.75 / 4. Certified on the live cluster:
+  full battery CLEAN (needles 6/6, tools 10/10, prose 0 DIRTY / 0 REVIEW, park), markdown-table and
+  JSON-array probes intact, the period-1 banana repro no longer guard-killed, and real Hermes
+  sessions writing 2,367 / 2,478 / 2,664-word documents through `write_file` with `reason=stop`.
 
-Also open by decision: when the guard fires on a confirmed loop, its `action="error"` fails
-the turn, the client retries an identical request, and greedy decode reproduces the loop --
-the hermes-agent breaker (§12.5) caps that at two wasted attempts, so the open item is the
-remaining cost, not an infinite loop. A
-cleaner termination (return partial content as `finish_reason="length"` plus a marker) would
-let the agent move on. Left unchanged deliberately -- it alters a shipped guard's semantics
+- **Guard termination — CHANGED from `action="error"` to `action="truncate"`** (`4c0fdb35b`, client
+  rule `f21f8ad24c` in hermes-agent). The old clean-fail was a contract bug: an error frame is a
+  retry signal to every OpenAI client, and a greedy engine reproduces the same cycle from the same
+  prompt, so the retry could never succeed. Now a confirmed loop ends the turn as
+  `finish_reason="length"` with a choice-level `dsv41={finish_cause:"repetition_loop", cycle_period,
+  dropped_tokens, retryable:false}`, and the repeating tail is WITHHELD (emission is gated while a
+  repeat is only suspected; `EXO_DSV41_LOOP_TAIL_BUFFER`, default 512, caps the hold). Live proof:
+  a period-2 digit loop returned HTTP 200 with `finish_reason:length` + the cause and 5 of 12 tokens
+  emitted; the client ends the turn on the cause instead of nudging four continuations into the same
+  cycle. The generic `batch_generate` path keeps its `error` default (no truncation implementation).
+
+- **Sampling — SHIPPED** (`d6ff8ad9e`): `temperature > 0` is served through rejection sampling under
+  the speculative decode (one-hot drafts => accept with probability `p(draft)`; residual sampling on
+  rejection; bonus from the last row), with a task-id-derived seed split in a fixed order so both TP
+  ranks commit identical tokens. Greedy stays byte-identical (temperature unset/0 never enters the
+  module). Live: greedy twice on one prompt was byte-identical, `temperature=0.7` three times gave
+  three distinct coherent turns, and the same-build greedy battery stayed CLEAN. Throughput on
+  ~30-token probes: 16-18 t/s in both modes.
+
+**Still open:**
+
+- **Controller request-path audit**: whether `use_prefix_cache` / `service_tier` reach the main
+  request path (§12.5) -- open.
+- **Paraphrase-drift loops**: every detector here is exact-match, so a loop that keeps rewording
+  itself is still only caught by the EOS/cap, not by the escape or the guard.
+- **Greedy-vs-sampled throughput at long generation**: the 16-18 t/s figure is from ~30-token
+  probes; the sampled path materialises full-vocab verify rows, so its cost at 4K+ outputs has not
+  been measured.
+- **Repetition penalty under sampling**: deliberately not wired (the count-aware penalty corrupted
+  tool-call copying at 1.1 when it was measured); the escape's penalties are the sanctioned
+  repetition control.
 and deserves its own review.
