@@ -1,0 +1,29 @@
+# node inventory at capture, 20261018T204006Z (UTC)
+Adams-Mac-Studio-M4-2
+27.0
+
+1.5G	/Users/adam.durham/.exo/exo_log
+
+total 93096
+drwxr-xr-x  22 adam.durham  staff       704 Oct 18 15:08 .
+drwxr-xr-x  16 adam.durham  staff       512 Oct  4 12:39 ..
+-rw-r--r--   1 adam.durham  staff     11848 Oct 17 06:13 dsv41-degeneration-aborted-SystemExit-20261017-061314-85343.json
+-rw-r--r--   1 adam.durham  staff     11854 Oct 17 07:10 dsv41-degeneration-aborted-SystemExit-20261017-071028-89680.json
+-rw-r--r--   1 adam.durham  staff     11859 Oct 17 07:35 dsv41-degeneration-aborted-SystemExit-20261017-073513-91527.json
+-rw-r--r--   1 adam.durham  staff     11863 Oct 17 07:43 dsv41-degeneration-aborted-SystemExit-20261017-074328-92152.json
+-rw-r--r--   1 adam.durham  staff      2292 Oct 15 15:12 dsv41-degeneration-client-cancel-20261015-151244-99455.json
+-rw-r--r--   1 adam.durham  staff       631 Oct 16 15:00 dsv41-degeneration-client-cancel-20261016-150043-2791.json
+-rw-r--r--   1 adam.durham  staff       631 Oct 16 15:04 dsv41-degeneration-client-cancel-20261016-150435-2791.json
+-rw-r--r--   1 adam.durham  staff       608 Oct 16 21:02 dsv41-degeneration-client-cancel-20261016-210241-35168.json
+-rw-r--r--   1 adam.durham  staff      1388 Oct 13 22:53 dsv41-degeneration-guard-token-20261013-225349-29932.json
+-rw-r--r--   1 adam.durham  staff      2104 Oct 16 23:52 dsv41-degeneration-guard-token-20261016-235228-35168.json
+-rw-r--r--   1 adam.durham  staff       608 Oct 17 16:57 dsv41-degeneration-guard-token-20261017-165707-28182.json
+-rw-r--r--   1 adam.durham  staff       608 Oct 17 17:12 dsv41-degeneration-guard-token-20261017-171241-40921.json
+-rw-r--r--   1 adam.durham  staff       615 Oct 17 22:32 dsv41-degeneration-guard-token-20261017-223216-80488.json
+-rw-r--r--   1 adam.durham  staff    450811 Oct 17 23:11 exo.2026-10-17_22-03-40_251667.log.zst
+-rw-r--r--   1 adam.durham  staff   1464936 Oct 18 00:02 exo.2026-10-17_23-11-09_567616.log.zst
+-rw-r--r--   1 adam.durham  staff   6225480 Oct 18 13:20 exo.2026-10-18_00-02-58_829888.log.zst
+-rw-r--r--   1 adam.durham  staff   2425433 Oct 18 14:27 exo.2026-10-18_13-20-41_487081.log.zst
+-rw-r--r--   1 adam.durham  staff   2492568 Oct 18 15:08 exo.2026-10-18_14-27-03_569672.log.zst
+-rw-r--r--   1 adam.durham  staff  34236550 Oct 18 15:40 exo.log
+drwxr-xr-x   4 adam.durham  staff       128 May 27 09:23 runner_log

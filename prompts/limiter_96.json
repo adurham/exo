@@ -1,0 +1,14 @@
+{
+ "model": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+ "messages": [
+  {
+   "role": "user",
+   "content": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost? Think through it step by step, then give the final answer in one sentence."
+  }
+ ],
+ "max_tokens": 800,
+ "temperature": 0.0,
+ "stream": true,
+ "enable_thinking": true,
+ "reasoning_budget_tokens": 96
+}

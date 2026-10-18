@@ -1,0 +1,14 @@
+run-id:  dsv41-cluster-writeup-2026-10-17
+stamp:   20261018T204006Z
+status:  NO CLIENT ARTIFACTS FOUND AT CAPTURE TIME
+
+prompts/ request bodies and .sse stream captures were not present. Probed:
+  /Users/adam.durham/exo-runs/dsv41-cluster-writeup-2026-10-17
+  /Users/adam.durham/exo-runs/latest
+  /Users/adam.durham/.hermes/cache/scratch/dsv41-cluster-writeup-2026-10-17
+  /Users/adam.durham/.hermes/cache/scratch/writeup
+  /Users/adam.durham/repos/exo/runs/dsv41-cluster-writeup-2026-10-17
+  /Users/adam.durham/repos/exo/docs/dsv41-cluster-writeup-2026-10-17/run-workspace
+
+These are not on the nodes (server writes only exo_log); they live in the
+client run workspace and die with it. Pass --run-workspace DIR at capture time.

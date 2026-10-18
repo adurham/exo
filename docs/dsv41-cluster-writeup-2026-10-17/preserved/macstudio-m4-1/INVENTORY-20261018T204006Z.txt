@@ -1,0 +1,20 @@
+# node inventory at capture, 20261018T204006Z (UTC)
+Adams-Mac-Studio-M4-1
+27.0
+
+1.4G	/Users/adam.durham/.exo/exo_log
+
+total 32320
+drwxr-xr-x  13 adam.durham  staff      416 Oct 18 15:27 .
+drwxr-xr-x@ 18 adam.durham  staff      576 Oct  4 12:39 ..
+-rw-r--r--   1 adam.durham  staff     1386 Oct 13 22:41 dsv41-degeneration-guard-token-20261013-224154-5634.json
+-rw-r--r--   1 adam.durham  staff     9506 Oct 14 13:51 dsv41-degeneration-guard-token-20261014-135110-69384.json
+-rw-r--r--   1 adam.durham  staff     9506 Oct 14 13:52 dsv41-degeneration-guard-token-20261014-135202-69384.json
+-rw-r--r--   1 adam.durham  staff     9506 Oct 14 13:52 dsv41-degeneration-guard-token-20261014-135255-69384.json
+-rw-r--r--   1 adam.durham  staff  1430946 Oct 17 23:11 exo.2026-10-17_22-03-39_090405.log.zst
+-rw-r--r--   1 adam.durham  staff   388400 Oct 18 00:02 exo.2026-10-17_23-11-08_628041.log.zst
+-rw-r--r--   1 adam.durham  staff  2879208 Oct 18 13:56 exo.2026-10-18_00-02-57_749029.log.zst
+-rw-r--r--   1 adam.durham  staff   917311 Oct 18 14:47 exo.2026-10-18_13-56-18_856313.log.zst
+-rw-r--r--   1 adam.durham  staff  1442612 Oct 18 15:27 exo.2026-10-18_14-47-17_383716.log.zst
+-rw-r--r--   1 adam.durham  staff  9265634 Oct 18 15:40 exo.log
+drwxr-xr-x   4 adam.durham  staff      128 May 27 09:23 runner_log

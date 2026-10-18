@@ -1310,6 +1310,8 @@ this is the guard's designed false-positive shape, fired deliberately to prove t
 The limiter needs `enable_thinking: true` to engage; it honors a per-request
 `reasoning_budget_tokens` field over its default of `0.75 x max_tokens` (the default is capped at 16384; an explicit request value is passed through uncapped -- `reasoning_budget.py:91-92`).
 
+_Static-checked at b88d65dd3304 on 2026-10-18 by scripts/check-s11.sh: the paths, CLI flags and constants §11 names all resolve at that SHA. Static only -- nothing was launched, so this does not show that the SHA boots on this hardware, that the hardcoded node/peer constants fit your cluster, or that any §9 figure reproduces._
+
 ---
 
 ## 12. The night the cluster killed itself (and the fix)

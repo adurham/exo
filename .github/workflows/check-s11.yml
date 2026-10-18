@@ -1,0 +1,89 @@
+name: check-s11
+
+# Static lint of docs/dsv41-cluster-writeup-2026-10-17/WRITEUP.md §11.
+#
+# This job is free-tier friendly and $0: it runs on a standard GitHub-hosted
+# ubuntu runner, needs no secrets, no cluster, no network beyond the repo
+# itself, and takes well under a minute. The repo's own .git is ~2.8 GB, so it
+# deliberately does NOT do a full clone: it checks out the triggering commit at
+# depth 2 and then shallow-fetches the single commit §11 pins. That is enough
+# for `git cat-file -e <sha>^{commit}`, `git ls-tree <sha>` and `git show
+# <sha>:<path>` -- which is all the lint needs.
+#
+# What a green run means: §11's paths, CLI flags and cross-referenced constants
+# resolve at the SHA §11 pins, and the status line in §11 still names that SHA.
+# What it does NOT mean: that the SHA boots on two Mac Studios, that the
+# hardcoded node/peer constants are right for anyone's cluster, or that any §9
+# figure reproduces. Nothing is launched. See the script's docstring.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-s11-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-lint:
+    name: §11 static lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Fetch the commit §11 pins
+        id: pin
+        run: |
+          set -euo pipefail
+          python3 --version
+          git --version
+
+          SHA="$(python3 - <<'PY'
+          import re, sys
+          path = "docs/dsv41-cluster-writeup-2026-10-17/WRITEUP.md"
+          text = open(path, encoding="utf-8").read().splitlines()
+          try:
+              s = next(i for i, l in enumerate(text) if re.match(r"^##\s*11\.\s", l))
+          except StopIteration:
+              sys.exit("no '## 11.' section in %s" % path)
+          e = next((i for i in range(s + 1, len(text))
+                    if re.match(r"^##\s*12\.\s", text[i])), len(text))
+          for line in text[s:e]:
+              if re.match(r"^\|\s*exo\s*\|", line):
+                  cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+                  for cell in reversed(cells):
+                      if re.match(r"^[0-9a-f]{40}$", cell):
+                          print(cell)
+                          sys.exit(0)
+          sys.exit("§11.2's exo row states no full 40-hex SHA")
+          PY
+          )"
+          echo "§11 pins $SHA"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          # One commit, its trees and blobs -- nothing else. Keeps this job cheap
+          # on a 2.8 GB history.
+          if ! git fetch --depth 1 origin "$SHA"; then
+            echo "::error::§11 pins $SHA but this remote does not serve it. The pin is stale at the remote (force-push, GC, or a SHA that only exists on the author's fork). Re-pin §11 or push the commit."
+            exit 1
+          fi
+          git cat-file -e "${SHA}^{commit}"
+
+      - name: Static lint of §11
+        run: python3 scripts/check-s11.sh --check-only
+
+      - name: Note what this job proved
+        if: success()
+        run: |
+          echo "§11 is well-formed and current at ${{ steps.pin.outputs.sha }}." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Nothing was launched. This says nothing about whether that SHA boots on two Mac Studios, whether the hardcoded node/peer constants fit any particular cluster, or whether the §9 figures reproduce." >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,5 @@
+# Raw capture bulk — lives off-repo at ~/exo-archives/. Never commit.
+*.tar.zst
+*.log.zst
+*/live/
+*/runner_log*/

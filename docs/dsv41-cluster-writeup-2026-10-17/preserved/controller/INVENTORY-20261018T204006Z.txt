@@ -1,0 +1,34 @@
+# controller inventory at capture, 20261018T204006Z (UTC)
+host=adams-macbook-pro-m4
+
+180K	/Users/adam.durham/.exo/exo_log
+
+total 360
+drwxr-xr-x@ 28 adam.durham  staff    896 Oct 17 23:49 .
+drwxr-xr-x@ 16 adam.durham  staff    512 Aug 30 23:22 ..
+-rw-r--r--@  1 adam.durham  staff    471 Oct 17 23:03 dsv41-degeneration-aborted-NameError-20261017-230321-66249.json
+-rw-r--r--@  1 adam.durham  staff    470 Oct 17 23:03 dsv41-degeneration-aborted-NameError-20261017-230322-66249.json
+-rw-r--r--@  1 adam.durham  staff    470 Oct 17 23:03 dsv41-degeneration-aborted-NameError-20261017-230323-66249.json
+-rw-r--r--@  1 adam.durham  staff    471 Oct 17 23:03 dsv41-degeneration-aborted-NameError-20261017-230353-66249.json
+-rw-r--r--@  1 adam.durham  staff    470 Oct 13 23:48 dsv41-degeneration-aborted-RuntimeError-20261013-234813-30469.json
+-rw-r--r--@  1 adam.durham  staff    478 Oct 17 23:05 dsv41-degeneration-aborted-ValueError-20261017-230505-67431.json
+-rw-r--r--@  1 adam.durham  staff    478 Oct 17 23:05 dsv41-degeneration-aborted-ValueError-20261017-230523-67500.json
+-rw-r--r--@  1 adam.durham  staff    478 Oct 17 23:05 dsv41-degeneration-aborted-ValueError-20261017-230530-67529.json
+-rw-r--r--@  1 adam.durham  staff    478 Oct 17 23:05 dsv41-degeneration-aborted-ValueError-20261017-230554-67631.json
+-rw-r--r--@  1 adam.durham  staff    478 Oct 17 23:06 dsv41-degeneration-aborted-ValueError-20261017-230617-67719.json
+-rw-r--r--@  1 adam.durham  staff    479 Oct 17 23:07 dsv41-degeneration-aborted-ValueError-20261017-230704-67866.json
+-rw-r--r--@  1 adam.durham  staff    479 Oct 17 23:07 dsv41-degeneration-aborted-ValueError-20261017-230720-67924.json
+-rw-r--r--@  1 adam.durham  staff    548 Oct 13 23:50 dsv41-degeneration-guard-token-20261013-235044-31141.json
+-rw-r--r--@  1 adam.durham  staff    591 Oct 17 21:56 dsv41-degeneration-guard-token-20261017-215650-58202.json
+-rw-r--r--@  1 adam.durham  staff    591 Oct 17 21:57 dsv41-degeneration-guard-token-20261017-215700-61337.json
+-rw-r--r--@  1 adam.durham  staff    591 Oct 17 21:57 dsv41-degeneration-guard-token-20261017-215710-64354.json
+-rw-r--r--@  1 adam.durham  staff    591 Oct 17 23:04 dsv41-degeneration-guard-token-20261017-230413-66432.json
+-rw-r--r--@  1 adam.durham  staff    591 Oct 17 23:07 dsv41-degeneration-guard-token-20261017-230742-68163.json
+-rw-r--r--@  1 adam.durham  staff    591 Oct 17 23:49 dsv41-degeneration-guard-token-20261017-234940-79302.json
+-rw-r--r--   1 adam.durham  staff  32518 Apr 16  2026 exo.2026-04-16_13-55-57_297995.log.zst
+-rw-r--r--   1 adam.durham  staff  27514 Apr 16  2026 exo.2026-04-16_13-59-31_122661.log.zst
+-rw-r--r--   1 adam.durham  staff  24674 Apr 21 22:03 exo.2026-04-16_14-01-44_607211.log.zst
+-rw-r--r--   1 adam.durham  staff   5166 Apr 21 22:03 exo.2026-04-21_22-03-11_284106.log.zst
+-rw-r--r--@  1 adam.durham  staff   1540 May  1 08:45 exo.2026-04-21_22-03-35_307775.log.zst
+-rw-r--r--@  1 adam.durham  staff   2763 May  1 08:45 exo.log
+drwxr-xr-x@  4 adam.durham  staff    128 May 27 13:10 runner_log

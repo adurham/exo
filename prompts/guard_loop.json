@@ -1,0 +1,13 @@
+{
+ "model": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+ "messages": [
+  {
+   "role": "user",
+   "content": "Write a 12-section essay about the history of distributed computing. Begin each section with a marker of the form [SECTION n] on its own line, where n is the section number. Do not use other headings."
+  }
+ ],
+ "max_tokens": 1200,
+ "temperature": 0.0,
+ "stream": true,
+ "enable_thinking": true
+}

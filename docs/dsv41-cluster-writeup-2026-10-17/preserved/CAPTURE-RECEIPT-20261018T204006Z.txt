@@ -1,0 +1,40 @@
+# Evidence capture receipt
+
+run-id:        dsv41-cluster-writeup-2026-10-17
+captured_at:   20261018T204006Z (UTC)
+captured_from: adams-macbook-pro-m4 (controller role, /Users/adam.durham/repos/exo)
+target:        /Users/adam.durham/repos/exo/docs/dsv41-cluster-writeup-2026-10-17/preserved
+tool:          scripts/capture-evidence.sh
+
+## Access model
+READ-ONLY on the Mac Studios. Remote operations were rsync reads from
+~/.exo/exo_log/ plus ssh ls/du/hostname. No file on any node was created,
+modified, or deleted; no service was restarted.
+
+## Sources
+- nodes: macstudio-m4-1 macstudio-m4-2
+- controller: 1
+- client workspace: auto-probe
+
+## Result
+- files captured: 51
+- rotated archives (exo.*.log.zst): 10
+- bytes on disk: 83845120
+- bundle: dsv41-cluster-writeup-2026-10-17-preserved-20261018T204006Z.tar.zst  sha256=95446c22dc3eb08ecaefcb4344828f6948e9f04222061017142498d5f13f4155
+- manifest: SHA256SUMS (51 entries)
+
+## Notes / gaps
+- client: no prompts//.sse source found (probed 6 paths + --run-workspace)
+
+## Node retention at capture
+```
+stamp	node	size	entries
+20261018T204006Z	macstudio-m4-1	1.4G	/Users/adam.durham/.exo/exo_log	11
+20261018T204006Z	macstudio-m4-2	1.5G	/Users/adam.durham/.exo/exo_log	20
+```
+
+## Verify
+```
+cd /Users/adam.durham/repos/exo/docs/dsv41-cluster-writeup-2026-10-17/preserved && shasum -a 256 -c SHA256SUMS
+zstd -t dsv41-cluster-writeup-2026-10-17-preserved-20261018T204006Z.tar.zst
+```

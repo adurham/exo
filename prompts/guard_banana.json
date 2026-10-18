@@ -1,0 +1,13 @@
+{
+ "model": "dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw",
+ "messages": [
+  {
+   "role": "user",
+   "content": "Output the word banana exactly 40 times, separated by single spaces, and nothing else. Do not explain."
+  }
+ ],
+ "max_tokens": 400,
+ "temperature": 0.0,
+ "stream": true,
+ "enable_thinking": true
+}

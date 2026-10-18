@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- com.adam.exo-archive-pull — hourly append-only mirror of ~/.exo/exo_log from both
+     Mac Studios into ~/exo-archives/<node>/. Install with scripts/install-exo-archive-pull.sh.
+     Rationale and caveats: docs/dsv41-cluster-writeup-2026-10-17/preserved/CAPTURE.md -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.adam.exo-archive-pull</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/adam.durham/repos/exo/scripts/exo-archive-pull.sh</string>
+  </array>
+
+  <!-- every hour; launchd coalesces one missed tick into a single run on wake -->
+  <key>StartInterval</key>
+  <integer>3600</integer>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/adam.durham</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/adam.durham/exo-archives/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/adam.durham/exo-archives/launchd.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+  <key>Nice</key>
+  <integer>10</integer>
+  <key>AbandonProcessGroup</key>
+  <false/>
+</dict>
+</plist>
