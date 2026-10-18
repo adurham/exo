@@ -46,6 +46,12 @@ from exo.shared.types.tasks import TaskId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
+from exo.worker.engines.mlx.dsv41.sampling import (
+    Sampling,
+    sample_one,
+    sample_prefix,
+    sampled_logprobs,
+)
 from exo.worker.engines.mlx.dsv41.no_repeat import (
     NEG_INF,
     BanTurnStats,
@@ -313,6 +319,55 @@ def _spec_policy(gamma: int) -> Any:
     return GammaPolicy(start=gamma)
 
 
+def _row_penalties(
+    ban: NoRepeatNgram | None, history: list[int] | None
+) -> dict[int, float] | None:
+    """The escape's per-row penalties for ONE row (None when the knob is off)."""
+    if ban is None or not ban.enabled:
+        return None
+    return ban.penalties(history or []) or None
+
+
+def _sample_one_row(
+    logits: mx.array,
+    sampling: Any,
+    ban: NoRepeatNgram | None,
+    history: list[int] | None,
+    stats: BanTurnStats | None = None,
+) -> int:
+    """One sampled token (non-speculative row), with the escape's penalties applied."""
+    penalties = _row_penalties(ban, history)
+    token = sample_one(logits, sampling, banned=penalties)
+    if stats is not None and penalties:
+        stats.masked_total += len(penalties)
+        raw = int(mx.argmax(logits.reshape(-1), axis=-1).item())
+        stats.rows_changed += int(token != raw)
+    return token
+
+
+def _sampled_row_logprobs(
+    logits: mx.array,
+    committed: list[int],
+    sampling: Any,
+    ban: NoRepeatNgram | None,
+    history: list[int] | None,
+    k: int,
+    lp_out: list[Any] | None,
+) -> None:
+    """Log-probs of SAMPLED tokens, read off the transformed row."""
+    if not k or lp_out is None:
+        return
+    lp_out.extend(
+        sampled_logprobs(
+            logits,
+            committed,
+            sampling,
+            banned_per_row=[_row_penalties(ban, history)],
+            k=k,
+        )
+    )
+
+
 def _greedy_token(
     logits: mx.array,
     ban: NoRepeatNgram | None,
@@ -411,6 +466,7 @@ def _one_round(
     ban: NoRepeatNgram | None = None,
     history: list[int] | None = None,
     ban_stats: BanTurnStats | None = None,
+    sampling: Sampling | None = None,
 ) -> tuple[list[int], float, int, int]:
     """One decode round: returns ``(tokens, ms, accepted, gamma)``.
 
@@ -494,8 +550,15 @@ def _one_round(
         # Plain greedy: one row in, one token out. Grow for that row first.
         _ensure_capacity_for_round(cache, 1)
         logits = model(anchor, cache, last_logit_only=True)
-        next_token = _greedy_token(logits, ban, history, ban_stats)
-        _row_logprobs(logits, logprobs, lp_out)
+        _sampling_on = sampling is not None and not sampling.greedy
+        if _sampling_on:
+            next_token = _sample_one_row(logits, sampling, ban, history, ban_stats)
+            _sampled_row_logprobs(
+                logits, [next_token], sampling, ban, history, logprobs, lp_out
+            )
+        else:
+            next_token = _greedy_token(logits, ban, history, ban_stats)
+            _row_logprobs(logits, logprobs, lp_out)
         committed = [next_token]
         if limiter is not None:
             committed = limiter.feed(committed)
@@ -519,8 +582,15 @@ def _one_round(
         # taps so round 2 can draft.
         _ensure_capacity_for_round(cache, 1)
         logits, taps = model(anchor, cache, last_logit_only=True, return_taps=True)
-        next_token = _greedy_token(logits, ban, history, ban_stats)
-        _row_logprobs(logits, logprobs, lp_out)
+        _sampling_on = sampling is not None and not sampling.greedy
+        if _sampling_on:
+            next_token = _sample_one_row(logits, sampling, ban, history, ban_stats)
+            _sampled_row_logprobs(
+                logits, [next_token], sampling, ban, history, logprobs, lp_out
+            )
+        else:
+            next_token = _greedy_token(logits, ban, history, ban_stats)
+            _row_logprobs(logits, logprobs, lp_out)
         draft_state = head.make_cache(1)
         head.append_ctx(tapcat(taps), draft_state)
         engine._draft_windows[_DRAFT_KEY] = draft_state
@@ -566,7 +636,11 @@ def _one_round(
     # row and argmax the same id with NO collective. The extra memory is bounded:
     # (1 + gamma) rows of one vocab row, only while the knob is enabled.
     ban_policy = ban if (ban is not None and ban.enabled) else None
-    if ban_policy is not None:
+    sampling_on = sampling is not None and not sampling.greedy
+    if ban_policy is not None or sampling_on:
+        # Both the escape and sampling need the FULL vocab rows (argmax=False):
+        # the mask/penalty has to land before the argmax or the distribution, and
+        # the full row is what makes the two TP ranks agree with no collective.
         logits, taps = model(verify_in, cache, return_taps=True, argmax=False)
         lp = None
     elif logprobs:
@@ -597,20 +671,55 @@ def _one_round(
     else:
         target = [int(v) for v in logits[0]]
 
-    accepted = 0
-    while (
-        accepted < gamma
-        and accepted < len(target)
-        and target[accepted] == draft[accepted]
-    ):
-        accepted += 1
+    if sampling_on:
+        # Rejection sampling over the verify batch: accept a draft with
+        # probability p(draft); at the first rejection draw the residual.
+        penalties = (
+            ban_policy.penalties_per_row(history or [], draft)
+            if ban_policy is not None
+            else None
+        )
+        committed, accepted = sample_prefix(
+            logits[0], draft, sampling=sampling, banned_per_row=penalties
+        )
+        if ban_policy is not None and ban_stats is not None:
+            raw_ids = [
+                int(v) for v in mx.argmax(logits[0], axis=-1).tolist()
+            ][: len(committed)]
+            ban_stats.masked_total += sum(
+                len(p) for p in (penalties or [])[: len(committed)]
+            )
+            ban_stats.rows_changed += sum(
+                1
+                for i, t in enumerate(committed)
+                if i < len(raw_ids) and t != raw_ids[i]
+            )
+        if logprobs and lp_out is not None:
+            lp_out.extend(
+                sampled_logprobs(
+                    logits[0],
+                    committed,
+                    sampling,
+                    banned_per_row=penalties,
+                    k=logprobs,
+                )
+            )
+    else:
+        accepted = 0
+        while (
+            accepted < gamma
+            and accepted < len(target)
+            and target[accepted] == draft[accepted]
+        ):
+            accepted += 1
     # The token at the first mismatch is the target's own argmax -- it is
     # committed along with the accepted drafts, so a round always commits at
     # least one token and the cache lands on a position the target produced. A
     # draft that ran out of script (``len(draft) < gamma``) is exhausted: the
     # round then commits what it did produce plus the target's answer for the next
     # position, so the decoded count still advances by one.
-    committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
+    if not sampling_on:
+        committed = draft[:accepted] + [target[min(accepted, len(target) - 1)]]
     if limiter is not None:
         # Reasoning-budget cut: admit only up to the threshold. A SHORTER batch
         # means the rollback target and the draft-window append below both follow
@@ -625,7 +734,9 @@ def _one_round(
         for i in range(min(len(committed), len(masked_counts))):
             ban_stats.rows_changed += int(changed[i])
             ban_stats.masked_total += int(masked_counts[i])
-    if lp is not None and lp_out is not None:
+    if sampling_on:
+        pass
+    elif lp is not None and lp_out is not None:
         # committed[i] == target[i] (accepted drafts match the target), so row
         # i of the verify forward carries committed token i's log-probs.
         _rows_logprobs(lp, len(committed), lp_out)

@@ -51,6 +51,7 @@ uses.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from collections.abc import Generator, Iterator
@@ -106,6 +107,7 @@ from exo.worker.engines.mlx.dsv41.errors import (
 )
 from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
+from exo.worker.engines.mlx.dsv41.sampling import Sampling, resolve_sampling
 from exo.worker.engines.mlx.dsv41.no_repeat import (
     BanTurnStats,
     NoRepeatNgram,
@@ -1244,6 +1246,19 @@ class Dsv41Engine(Engine):
         tokenizer = self.loaded.tokenizer
         vision = self.vision_processor
         _refuse_unsupported(params, vision_available=vision is not None)
+        # Sampling is resolved ONCE per request. Greedy stays the byte-identical
+        # default path; a temperature > 0 enters the rejection sampler in
+        # rounds._one_round.
+        sampling = self._resolve_sampler(params, task_id)
+        if not sampling.greedy:
+            logger.info(
+                f"[DSV41] sampling armed turn={task_id} "
+                f"temperature={sampling.temperature:g} "
+                f"top_p={sampling.top_p if sampling.top_p is not None else '-'} "
+                f"top_k={sampling.top_k if sampling.top_k is not None else '-'} "
+                f"min_p={sampling.min_p if sampling.min_p is not None else '-'} "
+                f"seed={sampling.seed}"
+            )
 
         max_tokens = resolve_max_output_tokens(params.max_output_tokens)
         # One INFO line ONLY when the resolution actually changed the number
@@ -1389,7 +1404,8 @@ class Dsv41Engine(Engine):
         def committed_tokens() -> Iterator[tuple[int, Any]]:
             yield anchor, (anchor_lp[0] if anchor_lp else None)
             for batch, lps in self._rounds(
-                session, anchor, max_tokens - 1, logprobs=lp_k, limiter=limiter
+                session, anchor, max_tokens - 1, logprobs=lp_k, limiter=limiter,
+                sampling=sampling,
             ):
                 produced.extend(batch)
                 for i, t in enumerate(batch):
@@ -1812,6 +1828,7 @@ class Dsv41Engine(Engine):
         embeddings: mx.array | None,
         image_span_end: int = 0,
         token_types: list[int] | None = None,
+        sampling: "Sampling | None" = None,
     ) -> TurnOutcome:
         """Run one conversation turn: delta prefill, then decode rounds.
 
@@ -1830,7 +1847,9 @@ class Dsv41Engine(Engine):
             token_types=token_types,
         )
         produced = [anchor]
-        for batch, _lps in self._rounds(session, anchor, max_tokens - 1):
+        for batch, _lps in self._rounds(
+            session, anchor, max_tokens - 1, sampling=sampling
+        ):
             produced.extend(batch)
         turn.tokens = produced
         session.sync_history(tokens, turn)
@@ -1896,6 +1915,7 @@ class Dsv41Engine(Engine):
         *,
         logprobs: int = 0,
         limiter: "ReasoningBudgetLimiter | None" = None,
+        sampling: "Sampling | None" = None,
     ) -> Iterator[tuple[list[int], list[Any]]]:
         """Decode rounds from the anchor; yields each round's committed tokens
         and (when ``logprobs`` > 0) their log-prob entries.
@@ -1965,6 +1985,7 @@ class Dsv41Engine(Engine):
                     ban=ban,
                     history=history,
                     ban_stats=ban_stats,
+                    sampling=sampling,
                 )
                 # Cumulative spec counters (deltas across requests = live
                 # acceptance rate; _accepted == _gamma means a fully-accepted round).
@@ -2068,15 +2089,26 @@ class Dsv41Engine(Engine):
 
     # ------------------------------------------------------------------ sampling
 
-    def _resolve_sampler(self, params: TextGenerationTaskParams) -> Any | None:
-        temperature = params.temperature
-        if temperature is None:
-            temperature = self.default_temperature
-        if temperature is not None and temperature > 0:
-            raise Dsv41UnsupportedFeature(
-                "DSv4.1 serving is greedy-only in this build: speculative "
-                "sampling is not implemented yet, so a request with "
-                f"temperature={temperature} cannot be honoured honestly. Send "
-                "temperature=0, or leave sampling unset with no card default."
+    def _resolve_sampler(
+        self, params: TextGenerationTaskParams, task_id: TaskId | None = None
+    ) -> Sampling:
+        """Resolve this request's sampling (greedy unless the request asks more).
+
+        The seed is derived from the TASK ID, not drawn: both TP ranks must feed
+        the same keys into the rejection sampler, or the ranks would commit
+        different tokens and deadlock in the next all-sum. A stable per-request
+        seed also makes a replay reproducible.
+        """
+        seed = 0
+        if task_id is not None:
+            seed = int(
+                hashlib.sha256(str(task_id).encode()).hexdigest()[:8], 16
             )
-        return self.sampler
+        return resolve_sampling(
+            params,
+            default_temperature=self.default_temperature,
+            default_top_p=self.default_top_p,
+            default_top_k=self.default_top_k,
+            default_min_p=self.default_min_p,
+            seed=seed,
+        )

@@ -184,8 +184,24 @@ class ScriptedModel:
                 }
                 return (out, self._taps(fed), lp) if return_taps else (out, lp)
             return (out, self._taps(fed)) if return_taps else out
-        logits = self.logits[self._index(cache.offset)]
-        return (logits, self._taps(1)) if return_taps else logits
+        # FULL-VOCAB rows for every fed row: the escape/sampling paths request
+        # argmax=False over a verify batch and need one logit row per row (the
+        # one-hot table is per predicted token, so stack them).
+        if rows == 1:
+            # Single-row forward (plain step / first round): the pre-existing table
+            # lookup -- byte-identical to what this fake always returned.
+            logits = self.logits[self._index(cache.offset)]
+        else:
+            # Verify batch (escape / sampling): one FULL-VOCAB row per fed row.
+            ids = self._ids_for(input_ids, cache.offset)
+            width = max(int(t) for t in ids) + 1   # one common width, or stack fails
+            table = []
+            for t in ids:
+                row = [0.0] * width
+                row[int(t)] = 1.0
+                table.append(row)
+            logits = mx.array(table, dtype=mx.float32)
+        return (logits, self._taps(rows)) if return_taps else logits
 
     def _index(self, offset: int) -> int:
         """Table index for the token the position ``offset`` predicts."""
@@ -327,6 +343,9 @@ def _engine(
     device_rank: int = 0,
     enable_thinking: bool | None = None,
     reasoning_budget_tokens: int | None = None,
+    temperature: float = 0.0,
+    top_p: float | None = None,
+    top_k: int | None = None,
     bench: bool = False,
 ) -> tuple[Dsv41Engine, ScriptedModel, FakeTokenizer, list[Any]]:
     tokenizer = FakeTokenizer(text_of=text_of)
@@ -358,7 +377,9 @@ def _engine(
         model=MODEL,
         input=[InputMessage(role="user", content=InputMessageContent(content))],
         max_output_tokens=max_output_tokens,
-        temperature=0.0,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
         stop=stop,
         tools=tools,
         images=images or [],
@@ -1314,3 +1335,73 @@ def test_engine_routes_an_image_request_to_a_cold_session(monkeypatch: pytest.Mo
     )
     assert engine._sessions.stats["cold"] == 2
     assert engine._active is None
+
+
+# ---------------------------------------------------------------- sampling
+def _peaked(engine: Dsv41Engine, model: ScriptedModel) -> None:
+    """Give the fake's rows a dominant peak so p(scripted token) ~ 1 under sampling.
+
+    ``_one_hot`` is [0]*n + peak, i.e. the 0-mass rows are LEGITIMATELY samplable
+    at temperature > 0. Peak them so a sampled turn must reproduce the script
+    exactly -- that is what makes the assertion meaningful.
+    """
+    model.logits = [
+        mx.array([0.0] * (int(t) + 1), dtype=mx.float32).at[int(t)].add(60.0)
+        for t in model.script
+    ]
+
+
+def test_sampling_serves_temperature_above_zero():
+    """A temperature > 0 request is SERVED through the sampler (the old build raised
+    Dsv41UnsupportedFeature) and, with peaked rows, reproduces the script exactly."""
+    engine, model, _tok, _ev = _engine(
+        [34, 35, 36, 1], text_of=ANSWER_TEXT, max_output_tokens=8, temperature=0.7
+    )
+    _peaked(engine, model)
+    assert _text_of(_drain(engine)) == "hi there bye"
+
+
+def test_sampling_resolution_is_per_request_and_seeded_by_task():
+    from exo.shared.types.text_generation import TextGenerationTaskParams
+    from exo.shared.types.tasks import TaskId
+
+    engine, _m, _t, _e = _engine([34, 1], text_of=ANSWER_TEXT, max_output_tokens=4)
+    params = TextGenerationTaskParams(
+        model=MODEL,
+        input=[InputMessage(role="user", content=InputMessageContent("hi"))],
+        max_output_tokens=8,
+        temperature=0.7,
+        top_p=0.9,
+        top_k=20,
+    )
+    s = engine._resolve_sampler(params, TaskId("task-x"))
+    assert not s.greedy
+    assert (s.temperature, s.top_p, s.top_k) == (0.7, 0.9, 20)
+    # The seed comes from the TASK id: same task -> same seed (TP-rank parity),
+    # a different task -> a different stream.
+    assert engine._resolve_sampler(params, TaskId("task-x")).seed == s.seed
+    assert engine._resolve_sampler(params, TaskId("task-y")).seed != s.seed
+    # A temperature-0 request stays on the untouched greedy path.
+    assert engine._resolve_sampler(
+        params.model_copy(update={"temperature": 0.0}), TaskId("task-x")
+    ).greedy
+
+
+def test_greedy_turns_do_not_arm_sampling(capsys):
+    engine, _model, _tok, _ev = _engine(
+        [34, 35, 36, 1], text_of=ANSWER_TEXT, max_output_tokens=8, temperature=0.0
+    )
+    chunks = _drain(engine)
+    assert _text_of(chunks) == "hi there bye"
+    assert "sampling armed" not in capsys.readouterr().err
+
+
+def test_sampling_is_deterministic_for_one_task():
+    outs = []
+    for _ in range(2):
+        engine, model, _tok, _ev = _engine(
+            [34, 35, 36, 1], text_of=ANSWER_TEXT, max_output_tokens=8, temperature=0.9
+        )
+        _peaked(engine, model)
+        outs.append(_text_of(_drain(engine)))
+    assert outs[0] == outs[1] == "hi there bye"
