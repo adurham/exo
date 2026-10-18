@@ -1416,5 +1416,4 @@ Memory is not the constraint.
   been measured.
 - **Repetition penalty under sampling**: deliberately not wired (the count-aware penalty corrupted
   tool-call copying at 1.1 when it was measured); the escape's penalties are the sanctioned
-  repetition control.
-and deserves its own review.
+  repetition control -- a decision that deserves its own review.

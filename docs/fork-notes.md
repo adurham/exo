@@ -1502,3 +1502,22 @@ Tensor==Pipeline garbage -> lazy single-node load showed HC weights at 0.0.
 
 Full writeup:
 `.hermes/plans/2026-06-10_dsv4_hyperconnection_fix_and_cohost_bench.md`
+
+---
+
+## DSv4.1 cluster writeup — evidence committed, orphan fragment fixed (2026-10-18)
+
+Housekeeping on `docs/dsv41-cluster-writeup-2026-10-17/` after the writeup's review
+rounds closed:
+
+- **Orphan fragment fixed.** `WRITEUP.md` line 1420 was a dangling
+  "and deserves its own review." left behind when §12.6 was appended over the
+  original §12.6 ending (the guard-termination item, since shipped). Reattached to
+  the repetition-penalty-under-sampling bullet, which is the open decision it
+  actually belongs to.
+- **Evidence committed.** `bench/dsv41_quality_battery/results/` (806 files, 8.9 MB)
+  was untracked while §12.6 cited it as the evidence for the rejected n-gram arms
+  (ngram6-on, ngram8-on, contig3-on, contig64-on, graded-final, offcheck, qsplitA).
+  The writeup pointed at files that were not in git; now they are.
+
+No code change. Writeup content otherwise untouched.
