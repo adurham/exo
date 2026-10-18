@@ -1544,3 +1544,28 @@ Rejected: R18 (writeup more conservative than its own pack is not a defect).
 Full record, per-item verdicts and the raw agent findings: `review-2026-10-18/`.
 Still open: a pack-vs-raw-log pass (the packs are treated as authority throughout), and §11 has
 never been executed end to end by a third party.
+
+---
+
+## DSv4.1 cluster writeup — evidence-pack review pass, 17 corrections (2026-10-18)
+
+Second review round, this time on the EVIDENCE PACKS rather than the writeup — the packs are the
+authority the writeup rests on, so a defect there propagates.
+
+Recon finding: the packs' raw artifacts are largely GONE (the specific exo.log.zst rotated out;
+`prompts/` and the `.sse` files exist on neither machine). The packs are now the only surviving
+record of that capture.
+
+Fable's governing policy, now written into both packs: NEVER overwrite a sourced figure —
+corrections are append-with-label, because replacing a sourced value with a recomputed one
+severs the chain back to the source doc. Unidentifiable bases get tagged PROVENANCE-WEAK.
+
+17 findings, 16 applied, 1 rejected (the agent read a 299946-vs-299008 pair as a typo; they are
+two distinct real quantities — resident cache vs block-aligned cached_tokens). Highest-value:
+a positional-vs-suffix counter misreading in the 1M prefill accounting (resolved from source,
+`engine.py:1191-1192`), a GB/GiB conversion error mislabelled as rounding, and several
+CONFLICT/CONVENTION tag inconsistencies that made conflicts unfindable.
+
+Structural additions: RAW STATUS tables, SOLE-SURVIVOR tags, dated edit policy, pack hashes.
+
+Full record: `review-2026-10-18/FIXLOG-PACK.md`.

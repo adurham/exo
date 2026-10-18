@@ -3,6 +3,21 @@
 
 # EVIDENCE PACK (task A1) - homelab exo/MLX 2-node cluster writeup
 
+## RAW STATUS (as of 2026-10-18)
+
+This pack is mostly repo-doc citations (still fully checkable) plus live SSH probes. Pack
+sha256 (first 16): `6b5d81bdb7b6cc92`.
+
+**EDIT POLICY from 2026-10-18:** corrections are APPEND-WITH-LABEL, never in-place
+replacement. A sourced figure is never overwritten by a recomputed one. The original keeps its
+basis; the recomputed value is appended with its own basis; if the original's basis cannot be
+identified, it is tagged PROVENANCE-WEAK.
+
+**SOLE-SURVIVOR:** figures whose only surviving source is this pack (the live SSH probe rows —
+`ibv_devinfo`, `sysctl`, `top`, `ifconfig`, serials). A dispute over one cannot be adjudicated
+by re-reading raw.
+
+
 Produced: 2026-10-16 23:27 
 Author: subagent A1 (docs + git + read-only SSH). Append-only file per brief.
 Repos (READ-ONLY, none modified): /Users/<user>/repos/exo (+ mlx and mlx-lm submodules).
@@ -33,7 +48,7 @@ kill, restart or model call was issued by this task.
 | 3 | prefill | 331.6 tok/s | 500K (nominal; real ~352.6K) | 2026-08-21 | same tag | docs/PERFORMANCE_HISTORY.md:154 | fresh full feed (needle PASS) | CONFLICT depth-label |
 | 4 | decode | 17.48 tok/s | 100K | 2026-08-21 | same tag | docs/PERFORMANCE_HISTORY.md:155 | decode-only | async fence SILENTLY BROKEN |
 | 5 | decode | 18.60 tok/s | 300K | 2026-08-21 | same tag | docs/PERFORMANCE_HISTORY.md:156 | decode-only | async fence SILENTLY BROKEN |
-| 6 | decode | 17.26 tok/s | 500K (nominal) | 2026-08-21 | same tag | docs/PERFORMANCE_HISTORY.md:157 | decode-only | async fence SILENTLY BROKEN |
+| 6 | decode | 17.26 tok/s | 500K (nominal; real ~352.6K) | 2026-08-21 | same tag | docs/PERFORMANCE_HISTORY.md:157 | decode-only | async fence SILENTLY BROKEN |
 | 7 | decode | 18.6-18.9 tok/s | short (512-tok prompt) | 2026-08-21 | same tag | docs/PERFORMANCE_HISTORY.md:158 | decode-only | async fence SILENTLY BROKEN |
 | 8 | prefill | 359.7 tok/s | 100K | 2026-08-22 | config EXO_DSV4_MOE_FUSED_GATE_UP=1 + EXO_DSV4_FENCE_ASYNC=1 | docs/PERFORMANCE_HISTORY.md:72 | fresh full feed (needle PASS) | - |
 | 9 | prefill | 348.2 tok/s | 300K | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:73 | fresh full feed (needle PASS) | - |
@@ -88,7 +103,7 @@ All numbers below are REAL measured values printed in /Users/<user>/repos/exo/do
 | prefill tok/s | 324.1 | 500K | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:74 | fresh full feed TTFT rate | CONVENTION-AMBIGUOUS (500K nominal vs ~352.6K real) |
 | decode tok/s | 26.91 | 100K | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:75 | decode-only; async fence genuinely engaged | none |
 | decode tok/s | 24.44 | 300K | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:76 | decode-only | none |
-| decode tok/s | 21.51 | 500K (nominal) | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:77 | decode-only | CONVENTION-AMBIGUOUS (nominal depth; B1 re-measured real 352.6K at 23.48, +9.2%, methodological gap) |
+| decode tok/s | 21.51 | 500K (nominal) | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:77 | decode-only | CONFLICT + CONVENTION-AMBIGUOUS (nominal depth; B1 re-measured real 352.6K at 23.48, +9.2%, methodological gap) |
 | decode tok/s | 29.2-31.1 | 512-2000 tok prompt | 2026-08-22 | same | docs/PERFORMANCE_HISTORY.md:78 | decode-only short-ctx | none |
 | prefill tok/s | 339 @500K "earlier multi-week campaign baseline" | 500K | ~2026-06/07 (earlier campaign) | none stated | docs/known-good-prefill-baseline-2026-08-21.md:36; docs/PERFORMANCE_HISTORY.md:140 | unspecified | PROVENANCE-WEAK (no raw run cited in either doc; used only as a parity reference) |
 
@@ -182,7 +197,7 @@ All numbers below are REAL measured values printed in /Users/<user>/repos/exo/do
 | decode tok/s | TP 27.79 | same run | 2026-08-24 | none stated | docs/p5-tp-prefill-gap-2026-08-24.md:345 | decode-only (usage) | CONVENTION-AMBIGUOUS (post-prefill 64-max-token window implied by probe; doc does not state window) |
 | prefill tok/s | PP 277.0 (TTFT 255.06 s) | 70,656 real | 2026-08-24 | none stated | docs/p5-tp-prefill-gap-2026-08-24.md:28,430-436 | fresh full feed TTFT rate | none |
 | decode tok/s | PP 24.74 | same run | 2026-08-24 | none stated | docs/p5-tp-prefill-gap-2026-08-24.md:434 | decode-only (usage) | CONVENTION-AMBIGUOUS |
-| prefill tok/s | TP full chunk-loop 377 vs PP full chunk-loop 372 vs PP opening 523 | 70.5K | 2026-08-24 | none stated | docs/p5-tp-prefill-gap-2026-08-24.md:526-531 | chunk-loop rate (NOT TTFT) | CONVENTION-AMBIGUOUS — doc exists precisely to separate these; PP hides 55.8 s drain outside the loop |
+| prefill tok/s | TP full chunk-loop 377 vs PP full chunk-loop 372 vs PP opening 523 | 70.5K | 2026-08-24 | none stated | docs/p5-tp-prefill-gap-2026-08-24.md:526-531 | chunk-loop rate (NOT TTFT) | CONVENTION-AMBIGUOUS — doc exists precisely to separate these; PP hides ~65 s drain outside the loop (255.06 s TTFT - 70,656/372) |
 | prefill tok/s per-chunk | TP instantaneous 398.8 @2K → 362.7 @69.6K; PP 484.2 @28.7K → 106.8 @52K (stall) | 2K-70K | 2026-08-24 | none stated | docs/p5-tp-prefill-gap-2026-08-24.md:358-364,454-462 | chunk-loop instantaneous | CONVENTION-AMBIGUOUS |
 
 ## 9. P3 family: decode anchors and pool-grow A/B (DSv4-Flash-0731 TP, 2026-08-23)
@@ -240,7 +255,8 @@ All numbers below are REAL measured values printed in /Users/<user>/repos/exo/do
 | metric | value | ctx depth | date | commit/tag | source (path:line) | convention | flags |
 |---|---|---|---|---|---|---|---|
 | decode tok/s | batched-ON median 36.63 vs spec-OFF 27.15 (+36.71%), CI [+28.26,+51.02]%, 12/12 pairs | 100K | 2026-08-27 | tag dspark-mtp-prod-20260827-1745; mlx-lm dda9237, exo 6eba31ff1, docs 56be3ea18 | docs/dspark-mtp-production-baseline-2026-08-27.md:18-21,42-43; docs/PERFORMANCE_HISTORY.md:4985 | 256-token fixed-window decode tok/s (~28.3 rowseq median) | none |
-| decode tok/s (verdict REVERT, rowseq width-3, pre-promotion A/B) | ON median 28.30 (IQR 27.44-29.90) vs OFF median 27.49 (+1.87%, CI [−0.82,+9.45] → FAIL) | 100K | 2026-08-26 | stage 2b commit 433dce6c1 | docs/dspark-verdict-measurement-2026-08-26.md:59-60; docs/PERFORMANCE_HISTORY.md:4865 | 256-token fixed-window | none |
+  - STATISTIC: +36.71% is the source doc's PAIRED-difference statistic. Ratio of the two displayed medians is 36.63/27.15 = +34.92%. Both are correct; they are different estimators.
+| decode tok/s (verdict REVERT, rowseq width-3, pre-promotion A/B) | ON median 28.30 (IQR 27.44-29.90) vs OFF median 27.49 (+1.87%, CI [−0.82,+9.45] → FAIL) | 100K | 2026-08-26 | stage 2b commit 433dce6c1 | docs/dspark-verdict-measurement-2026-08-26.md:59-60; docs/PERFORMANCE_HISTORY.md:4865 | 256-token fixed-window | PROVENANCE-WEAK on the percentage: ratio of the displayed medians is 28.30/27.49 = +2.95%, not +1.87%; the +1.87% basis is not recoverable from the stated pair |
 | decode tok/s (stage 2 width-5, pre-A/B) | 27.57 @100K (−3.1% vs baseline 28.46); 22.13 @352.6K (−11.7% vs 25.07) → REVERT | 100K / 352.6K | 2026-08-25 | none stated | docs/dspark-mtp-ab-preregister-2026-08-25.md:844-845 | decode (usage+events recorded) | none |
 | decode tok/s (stage 2b width-3) | +13.3% @100K over a 12.46 s truncated window = NOT clean (retracted as inflated; later full result 27.57) | 100K | 2026-08-25 | commit 433dce6c1 | docs/dspark-mtp-ab-preregister-2026-08-25.md:893-897,1126-1134 | decode (truncated window) | PROVENANCE-WEAK + CONVENTION-AMBIGUOUS (early-stop truncated window; doc explicitly flags) |
 | decode tok/s @352.6K (pre-fix gate, collapses included) | ON n=16 median 19.87 (4/16 collapsed to ~1; healthy runs 16.9-31.1) vs stripped-OFF n=9 median 24.19; gate −17.87% FAIL | 352.6K | 2026-08-27 | none stated | docs/dspark-352k-memory-regression-2026-08-27.md:169-174; docs/PERFORMANCE_HISTORY.md:5023-5026 | fixed-window decode @352.6K | none |
@@ -264,7 +280,7 @@ All numbers below are REAL measured values printed in /Users/<user>/repos/exo/do
 | decode tok/s | generation length effect at identical depth: 400 tok = 27.08 vs 800 tok = 33.20 | same | 2026-09-22 | same | docs/vec-divergence-verified-fixed-and-depth-is-the-real-lever-2026-09-22.md:93-94 | decode-only? | CONVENTION-AMBIGUOUS (same basis as above) |
 | decode tok/s | 29.5 (loop, retired -0731 checkpoint) → 33.7-35.5 (vec, same comparison) | short ctx | 2026-07-12 (retired checkpoint) | none stated | docs/vec-divergence-verified-fixed-and-depth-is-the-real-lever-2026-09-22.md:56-57 | decode | CONFLICT vs Vision-Exp 27.39/27.33 — cross-checkpoint comparison, documented as non-transferable |
 | decode tok/s | 2,216→29.17; 21,855→33.22; 68,002→31.78; 115,614→36.74 (needle verified, decode_s 20.6-16.3 s) | 2.2K/21.9K/68K/115.6K | 2026-09-22 | none stated | docs/decode-flat-across-depth-36tps-at-115k-2026-09-22.md:33-36 | server-reported decode_tps (probe's own), decode-only | none — but SUPERSEDED at depth (below) |
-| decode tok/s + prefill tok/s | 2,216→29.17/213.5; 21,855→33.22/397.6; 68,002→31.78/422.3; 115,614→36.74/423.3; 273,622→26.83/409.0; 564,926→13.36/371.8 (mem 115.66 GB = 95.9% of wired limit) | six-rung ladder | 2026-09-22 | none stated | docs/decode-depth-ladder-to-565k-memory-wall-2026-09-22.md:15-20 | server decode_tps + prefill tok/s from probe | none (565K value CONFLICT-qualified below) |
+| decode tok/s + prefill tok/s | 2,216→29.17/213.5; 21,855→33.22/397.6; 68,002→31.78/422.3; 115,614→36.74/423.3; 273,622→26.83/409.0; 564,926→13.36/371.8 (mem 115.66 GB = 95.9% of wired limit) | six-rung ladder | 2026-09-22 | none stated | docs/decode-depth-ladder-to-565k-memory-wall-2026-09-22.md:15-20 | server decode_tps + prefill tok/s from probe | CONFLICT (565K value CONFLICT-qualified below) |
 | decode tok/s (WRONG harness, retracted example) | 27.03 / 23.26 / 18.96 / 15.75 / 12.31 (wall-clock incl. prefill) vs correct decode-only 27.12 / 25.65 / 24.39 / 24.91 / 28.83 | 20 / 605 / 1,771 / 3,521 / 7,021 | 2026-09-22 | none stated | docs/decode-flat-across-depth-36tps-at-115k-2026-09-22.md:15-19 | wall-clock tok/s (WRONG, documented as measurement bug) | PROVENANCE-WEAK (retracted instrument; kept as the canonical anti-example) |
 | decode tok/s (content swing) | 30.5 (prose) to 45.9 (list-reverse) at fixed ~10.5K depth | ~10.5K | 2026-09-22 | none stated | docs/decode-depth-ladder-to-565k-memory-wall-2026-09-22.md:32-33 | decode-only | none (documented content confound) |
 | decode tok/s | 250K reproduces at 26.72-26.83 (two independent runs); 273K 26.8; 565K ~13.4 | 250K/273K/565K | 2026-09-22 | none stated | docs/deep-context-refault-mechanism-confirmed-2026-09-22.md:6,98 | decode_tps | none |
@@ -289,7 +305,7 @@ All numbers below are REAL measured values printed in /Users/<user>/repos/exo/do
 | decode tok/s | P11 measured median 30.71 = −10.41% vs 34.28 reference (decode gap re-audit) | same | 2026-08-31 | none stated | docs/PERFORMANCE_HISTORY.md:7345-7355 | decode-only | none |
 | decode tok/s | P12 (QUERY_TILED_SDPA + EXACT_TOPK_PREFILL ON) 32.18 vs P13 (both OFF) 36.08; gap 3.90 tok/s; flags worth 34.76 (QTILE) + ~4.30 (TOPK) tok/s of prefill; prefill medians 417.21 → 378.15 (−9.36%) | same bench depth | 2026-08-31→09-01 | P06 mxfp8 stack | docs/PERFORMANCE_HISTORY.md:7715,7614-7676 | decode-only medians; prefill TTFT | CONVENTION-AMBIGUOUS |
 | decode tok/s | P05 32.49 (NOT-THIS-FLAG); P09-era 32.06; outlier boot 30.06; between-boot spread 6.02 tok/s; P15 warmup 12.00 (rejected) | same bench depth | 2026-08-31→09-03 | none stated | docs/PERFORMANCE_HISTORY.md:7732,7791,7929,7958-7986,8080 | decode-only medians, between-boot A/B | PROVENANCE-WEAK (boot-to-boot variance dominates sub-~3 tok/s deltas; doc mandates relabeling) |
-| decode tok/s (entropy study) | natural high-entropy prose 33.58 = pooled repetitive 33.58; random letter-strings 28.66 (−12.6%) | matched depth | 2026-09-01 | none stated | docs/PERFORMANCE_HISTORY.md:8138 | decode-only | none |
+| decode tok/s (entropy study) | natural high-entropy prose 33.58 = pooled repetitive 33.58; random letter-strings 28.66 (−12.6%) | matched depth | 2026-09-01 | none stated | docs/PERFORMANCE_HISTORY.md:8138 | decode-only | PROVENANCE-WEAK on the percentage: ratio of the displayed pair is 28.66/33.58 = −14.7%, not −12.6%; the −12.6% basis is not recoverable |
 | decode tok/s (temperature study) | temp=1.0 32.535 vs temp=0.8 pooled 33.579 (−3.11%, Welch p=0.101) | matched depth | 2026-09-01 | none stated | docs/PERFORMANCE_HISTORY.md:8157 | decode-only | none |
 | decode tok/s (real-session vs bench) | real session decode @140-160K n=16: 34.06 mean vs benchmark 31.84 @150K (+2.22) | 140-160K | 2026-09-01 | none stated | docs/PERFORMANCE_HISTORY.md:8169 | decode-only (both) | none |
 | decode tok/s (convention reconciliation) | same traffic measured as: decode-only 33.00; +TTFT/prefill 22.44; full wall 21.82; visible-answer-only 9.04 | 140-160K | 2026-09-01 | none stated | docs/PERFORMANCE_HISTORY.md:8172-8175 | same payload, four conventions | CONVENTION-AMBIGUOUS (intentionally — this is the convention-clarification measurement) |
@@ -344,7 +360,7 @@ All numbers below are REAL measured values printed in /Users/<user>/repos/exo/do
 | spec decode tok/s | plain 16.5; γ=2 22.3; γ=3 22.7; γ=4 20.2; per-prompt @γ3: 21.6/25.4/20.9 | 96-tok windows | 2026-09-28 | same branch | docs/benchmarks/phase16-dsv41-dspark-spec-2026-09-28/README.md:13-18 | mean over 3 prompts | none |
 | spec decode tok/s (verify-cost round) | γ3 23.5 (per-prompt 22.4/26.5/21.6); plain 16.9; γ2/3/4 = 23.3/23.5/21.2 (run 3) | same | 2026-09-28 | same | docs/benchmarks/phase17-dsv41-verify-cost-2026-09-28/README.md:8-9,59 | mean over 3 prompts | none |
 | one-sync + adaptive gamma | 22.9 mean; +1.1 tok/s mean on 2 of 3 prompts (γ per prompt) | 96-tok windows | 2026-09-28 | same | docs/benchmarks/phase18-dsv41-adaptive-gamma-2026-09-28/README.md:1,16,20 | mean tok/s | none |
-| prefill tok/s (exo integration gate; DSv4.1) | 2,048: 9.9 (incl. first-run compile); 8,192: 73.7; 16K: crashed (527 GPU timeouts) | 2K/8K/16K | 2026-09-28 | none stated | docs/benchmarks/phase19-dsv41-exo-integration-gate-2026-09-28/README.md:23-25 | fresh feed | none (production V4 comparison "~430 @100K" stated in :27-28; see CONFLICT note vs old-stack 359-366) |
+| prefill tok/s (exo integration gate; DSv4.1) | 2,048: 9.9 (incl. first-run compile); 8,192: 73.7; 16K: crashed (527 GPU timeouts) | 2K/8K/16K | 2026-09-28 | none stated | docs/benchmarks/phase19-dsv41-exo-integration-gate-2026-09-28/README.md:23-25 | fresh feed | CONFLICT (production V4 comparison "~430 @100K" stated in :27-28; see CONFLICT note vs old-stack 359-366) |
 | prefill/decode (M1 window) | 8K: 130.4 prefill / 1.6 decode right after; 16K: 72.7 / 5.0 (collapse explained in phase21 as compile) | 8K/16K | 2026-09-28 | mlx-lm feat/dsv41-exl3 acf9b55 | docs/benchmarks/phase20-dsv41-m1-window-2026-09-28/README.md:9-10 | fresh feed + post-prompt decode | none (decode value retracted/explained by phase21) |
 | prefill/decode (context scaling) | 8K 129-130; 16K 73→129 with 512-row chunks; steady post-prompt decode 12.8-13.2 @8K/16K | 8K/16K | 2026-09-29 | same branch | docs/benchmarks/phase21-dsv41-context-scaling-2026-09-29/README.md:10-11,33-34 | fresh feed + steady-state decode | none |
 | prefill tok/s (served production through API) | 2K: 218.6 (TTFT 9.389 s); 8K: 223.9 (TTFT 36.598 s); 16K: refused (16384 cache cap) | 2K/8K/16K | 2026-10-01 | exo 6909d121, mlx-lm ad6f9d3 | docs/benchmarks/phase22-dsv41-prefill-speed-2026-10-01/README.md:58-62 | TTFT to first content token, fresh feed, prefix cache off | none |
@@ -363,7 +379,7 @@ NOTE: this section's prefill rows carry a documented convention split — "fresh
 
 | metric | value | ctx depth | date | commit/tag | source (path:line) | convention | flags |
 |---|---|---|---|---|---|---|---|
-| prefill tok/s (full re-prefill mislabeled as delta) | r160 (160K cold): 782.8 s = 204 tok/s; r500 "110 tok/s at 500K"; r750 "75 tok/s at 750K"; r1m ≈56 tok/s — ALL LATER DECLARED ARTIFACTS (1-row-chunk frame bug) | 160K/500K/750K/1M | 2026-10-04→10-05 | build 7a3096e85 era | docs/PERFORMANCE_HISTORY.md:10300-10301,10303,10374-10390 (corrections) | full feeds mis-read as delta | PROVENANCE-WEAK + CONFLICT — artifact numbers 110/75/56 vs corrected framefix numbers below |
+| prefill tok/s (full re-prefill mislabeled as delta) | r160 (160K cold): 782.8 s = 204 tok/s; r500 "110 tok/s at 500K"; r750 "75 tok/s at 750K"; r1m ≈56 tok/s — ALL LATER DECLARED ARTIFACTS (1-row-chunk frame bug) | 160K/500K/750K/1M | 2026-10-04→10-05 | build 7a3096e85 era | docs/PERFORMANCE_HISTORY.md:10300-10301,10303,10374-10390 (corrections) | full feeds mis-read as delta | PROVENANCE-WEAK + CONFLICT — artifact numbers 110/75/56 vs corrected framefix numbers below. NOTE: rows/s ≡ tokens in this source (PH:10398 "100,001 tok in 407.7 s = 245.3 rows/s"), so the 110 tok/s vs 103.6 rows/s pair IS a genuine same-unit conflict, not a unit mismatch. |
 | prefill tok/s (wedge era) | 268.7 wedge check; then ~56 tok/s effective on same feed shape | 160K | 2026-10-05 | none stated | docs/PERFORMANCE_HISTORY.md:10330-10333 | fresh feed | PROVENANCE-WEAK (declared driver-state wedge artifact) |
 | prefill rows/s (framefix, delta) | r500 delta completes at 103.6 rows/s (pre-fix 2 h+ stall) | 500K delta | 2026-10-05 | framefix build | docs/PERFORMANCE_HISTORY.md:10415 | incremental delta feed, rows/s | none |
 | prefill (delta 100K→200K, M2 HIER A/B) | wire: 338.8 → 390.2 tok/s (+15.2%); base 160K build 714.9 s = 223.8 tok/s | 100K→200K delta | 2026-10-06 | next4 build (sync spans 0207d7c0f/66e7344) | docs/PERFORMANCE_HISTORY.md:10484,10523-10528 | incremental delta, wire tok/s | CONVENTION-AMBIGUOUS (wire vs row rate — corrected globally at PH:10890-10913; the two bases share a floor) |
@@ -549,7 +565,7 @@ Source of truth for the model config: the checkpoint on both nodes,
 | quantity | value | source |
 |---|---|---|
 | on-disk checkpoint, measured | `du -sk` = 205,739,672 KiB = 210,677,420,032 B = **210.68 GB** (196.22 GiB readable); 40 safetensors shards | `du -sk` on node0 |
-| on-disk checkpoint, as stated in docs | **210.58 GB** ("196.2 GiB = 210.7 GB" in `docs/deepseek-v41-exl3-plan.md:116`) | minor rounding CONFLICT, 0.1 GB |
+| on-disk checkpoint, as stated in docs | **210.58 GB** ("196.2 GiB = 210.7 GB" in `docs/deepseek-v41-exl3-plan.md:116`) | 0.1 GB discrepancy vs the measured 210.68 GB — NOT rounding: 210.58 GB = 196.12 GiB and 196.2 GiB = 210.67 GB, so the doc's GB/GiB pairing is internally inconsistent. Which mechanism produced it is unrecoverable (raw gone); likely conversion or transcription. |
 | per-rank weights at TP=2, measured from shard headers + the sharding rule the running code applies | **108.76 GB/rank** | `docs/deepseek-v41-memory-budget-correction-2026-09-27.md:22` |
 | per-rank under "experts split, everything else replicated" | 112.56 GB/rank | same doc:21 |
 | naive file/2 | 105.29 GB/rank | same doc:23 |
@@ -591,10 +607,10 @@ At 1,048,576 tokens, per session, per node (cache is NOT TP-sharded - it is repl
 | compressed KV (`comp_kv`), 1 source at ratio 1 | 1,048,576 | 1 x 1,048,576 x 512 x 2 B | 1,073,741,824 B = 1.00 GiB |
 | index keys (`index_k`), 3 sources at ratio 2 | 524,288 each | 3 x 524,288 x 128 x 2 B | 402,653,184 B = 0.375 GiB |
 | index keys (`index_k`), 5 sources at ratio 1 | 1,048,576 each | 5 x 1,048,576 x 128 x 2 B | 1,342,177,280 B = 1.25 GiB |
-| **total, one 1M session** | | | **4,434,427,904 B = 4.13 GiB** |
+| **total, one 1M session** | | | **4,434,427,904 B = 4.13 GiB** | PROVENANCE-WEAK + DERIVED (arithmetic from config dims; no raw run behind it, as L356) |
 
 Cross-check against the code's own claim: `cache.py:29` states "a 1M session's compressed/index
-caches are ~3.2 GiB in bf16, ~6.4 GiB fp32". CONFLICT / CONVENTION: 3.2 GiB is reproduced exactly
+caches are ~3.2 GiB in bf16, ~6.4 GiB fp32". CONVENTION-AMBIGUOUS: 3.2 GiB is reproduced exactly
 if `index_k` is counted only on the 4 kv-source layers (3 x ratio-2 + 1 x ratio-1 = 0.625 GiB, total
 3.13 GiB ~= 3.2 GiB) rather than on all 8 `index_source_layer_ids` (which gives 4.13 GiB). Which
 convention the running build uses was NOT resolved by this task; treat "1M KV" as 3.2-4.2 GiB and
@@ -636,6 +652,7 @@ Live readings (read-only SSH, both nodes, same timestamp):
 | largest exo python process RSS | 16,294,080 KB = 15.5 GiB (pid 25115) | 15,658,288 KB = 14.9 GiB (pid 35168) |
 
 CONFLICT: every doc in the corpus pins `iogpu.wired_limit_mb = 115000` -> 120.6 GB
+  - UNIT RULE: this pack renders MiB as GB throughout. Under that rule 115000 MiB = 120.6 GB and the live 120000 MiB = 125.83 GB. The L634 cell's bare "120 GB" is the decimal-MB reading of the same number; both are stated, the MiB rule is used for arithmetic.
 (`docs/PERFORMANCE_HISTORY.md:7436`, `docs/decode-depth-ladder-to-565k-memory-wall-2026-09-22.md:22`,
 `docs/deepseek-v41-exl3-plan.md:52`, `docs/overnight-closeout-levers-exhausted-2026-09-23.md:95`).
 The LIVE value on both nodes is 120000. Any "% of wired limit" figure copied from a doc is computed
@@ -947,7 +964,7 @@ open, :2446-2457), T4 straggler tail (bounded open, :2472-2494), T5 occupancy (a
 | 8 | 500K depth label | every T1-era row labelled 500K | real prompt 352,599 tok (docs/p3-worker-b1-live-depth-anchors-2026-08-23.md:26) | label the real depth |
 | 9 | DSpark FULLBLOCK 15.9x collapse | source doc major-corrects it as not reproduced (docs/dspark-fullblock-context-scaling-cliff-2026-08-04.md:326-356) | still listed as "Unresolved" for DSpark enablement in docs/p4-scoping-mtp-for-tp-2026-08-24.md:1074 | report both, with dates |
 | 10 | checkpoint identity | DeepSeek-V4-Flash-0731 / V4.1-EXL3 lineage (rows 1-20) | DeepSeek-V4-Flash-Vision-Exp (rows 21-23) | different model; do not blend |
-| 11 | on-disk checkpoint size | 210.68 GB measured (`du -sk`) | 210.58 GB in docs/deepseek-v41-exl3-plan.md:116 | rounding; prefer the measured value |
+| 11 | on-disk checkpoint size | 210.68 GB measured (`du -sk`) | 210.58 GB in docs/deepseek-v41-exl3-plan.md:116; live /state `storageSize=210,713,013,432 B` (210.71 GB logical, evidence-live.md:22) | rounding; prefer the measured value |
 | 12 | import-time mlx version | `mlx 0.32.5.dev20261016+b17781838` live | `0.32.3.dev20261002+b1778183` in uv.lock:1383 | same git SHA (b1778183*); version string is set at build time |
 | 13 | MTP c>=2 degenerate output | listed open, "root cause unknown" docs/b2-quality-handoff-2026-06-24.md:185 | RESOLVED same day, two root-cause bugs fixed, docs/b2-mtp-resolution-2026-06-24.md:4 | closed - do not quote the open language |
 | 14 | speculative-decode "ceiling ~30-35 tok/s" | docs/PERFORMANCE_HISTORY.md:1318 | superseded immediately at :1321 by depth-gated batched verify 36.63 tok/s | treat :1318 as history |

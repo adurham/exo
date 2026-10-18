@@ -8,7 +8,8 @@ placeholders. Independently fact-checked against the evidence packs and copy-edi
 2026-10-17; the review record and every applied fix are in `REVIEW-AND-FIXLOG-2026-10-17.md`._
 
 _Errata 2026-10-18: 20 corrections applied after an independent review pass (4 agents +
-reference-model ruling); the review record is in `review-2026-10-18/`._
+reference-model ruling); the review record is in `review-2026-10-18/`. A second pass over the
+evidence packs applied 17 more (append-with-label policy); see `FIXLOG-PACK.md`._
 
 ---
 
@@ -968,8 +969,9 @@ Attempt 2 (4 h cap) COMPLETED: HTTP 200, `prompt_tokens=1,000,003`, `completion_
 
 The cache caveat, stated plainly: `cached_tokens=299,008`, server `prefix_cache_hit=partial`,
 `reuse=299008` -- a resident prompt prefix left by attempt 1 (evidence-live.md:704 reports a
-299946-row match); neither figure reconciles with attempt 1's ~98K cache, so the prefix's
-origin is unresolved
+299946-row match; `usage.cached_tokens` is 299,008 at :859, block-aligned down to 1024 rows --
+the 938-row gap is 0.3% and immaterial); neither figure reconciles with attempt 1's ~98K cache,
+so the prefix's origin is unresolved
 and reused. (What bounded the reuse at 299,008 of attempt 1's 802,816 rows is not established, and
 attempt 1's own 802,816 and its ~98K cached rows come from different counters -- if 802,816 is
 the uncached-only progress counter, its absolute coverage is higher and the "remaining ~197K"
@@ -977,7 +979,9 @@ is an upper bound; the 2.8 h extrapolation inherits that uncertainty.) Generated
 prefill. The `prefill_progress` counter tracks uncached tokens only, which is why its last
 frame reads 700,995 while `total_tokens` reads 1,000,003; the turn reached 100% of the work
 it had to do. Attempt 1 (~98K cached) is the closer cold proxy; extrapolating its last band
-(~68 tok/s) over its remaining ~197K tokens puts a cold 1M prefill at roughly 2.8 h.
+(~68 tok/s) over its remaining ~197K tokens puts a cold 1M prefill at roughly 2.8 h -- a lower
+bound, since the band rate is positional and counts the ~98K cached prefix as already done
+(evidence-live.md:939).
 
 ### 9.5 Speculative decode
 
@@ -1115,7 +1119,8 @@ column -- is not implemented
 ### 10.8 What the live session could not close
 
 - A **fully cold 1M prefill** was never measured (attempt 2 had 299,008 cached tokens); the
-  ~2.8 h figure is an extrapolation from attempt 1's last band.
+  ~2.8 h figure is an extrapolation from attempt 1's last band, and a lower bound -- the band
+  rate is positional and counts the cached prefix as done (evidence-live.md:939).
 - The guard's `action` knob now defaults to `truncate` (§12.6); `warn` vs `truncate` was not A/B-toggled -- it needs a relaunch.
 - 1M decode is 2.92 tok/s; whether that is the same mechanism as the 300K cliff or a
   different one is not established.

@@ -3,6 +3,32 @@
 
 # TASK A2 — LIVE EVIDENCE (cluster API runs)
 
+## RAW STATUS (as of 2026-10-18)
+
+The raw artifacts this pack cites are largely GONE. A reader must know which figures can still
+be re-checked against raw and which cannot. Pack sha256 (first 16): `dc8db91c9e80dee3`.
+
+**EDIT POLICY from 2026-10-18:** corrections are APPEND-WITH-LABEL, never in-place
+replacement. A sourced figure is never overwritten by a recomputed one — that severs the chain
+back to the source doc. The original keeps its basis; the recomputed value is appended with its
+own basis; if the original's basis cannot be identified, it is tagged PROVENANCE-WEAK.
+
+| artifact | status |
+|---|---|
+| `~/.exo/exo_log/exo.2026-10-16_18-38-04_871911.log.zst` | **ROTATED-OUT** (last confirmed 2026-10-17) |
+| `~/.exo/exo_log/exo.log` | on-disk (node macstudio-m4-1) — has GROWN since capture, so cited line numbers have drifted |
+| `~/.exo/exo_log/dsv41-degeneration-guard-token-2026101*.json` (4 files) | on-disk (node) |
+| `~/.exo/models/dealignai--DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw/tokenizer.json` | on-disk (node) |
+| `prompts/` (all 6 files) | **GONE** — on neither controller nor node |
+| `run_160k.sse.timed.txt` | **GONE** |
+
+**SOLE-SURVIVOR:** every figure whose only surviving source is this pack. A dispute over one
+cannot be adjudicated by re-reading raw.
+
+**Still checkable WITHOUT raw** (do these first if a figure is disputed): the exo source on
+disk (log format strings, cache alignment, engine constants), and pure derived arithmetic.
+
+
 Author: subagent A2. Captured 2026-10-16 22:57 CDT through 2026-10-17 (CDT).
 Host running the captures: controller (a SEPARATE machine from the
 serving node, so no capture work competed with the GPU).
@@ -131,6 +157,7 @@ The runner's own `[DSV41] obs` lines for this request do separate the two phases
 
 - Server-measured prefill: **661.18 s** for 160,004 tokens = **242.0 tok/s** (this is the prefill-only figure; the whole-request basis above is 239.5 tok/s).
 - Server-measured decode window: turn-end (667.9 s) minus first-token latency (661.36 s) = **6.54 s** for 200 tokens = **30.4 tok/s**. Marked *server-side only*: it could not be corroborated against client timing on this attempt.
+  - CONVENTION: 30.4 is the n-1 figure (199 decode tokens / 6.54 s); 200/6.54 = 30.6. The pack's tables use n-1 throughout (e.g. :168 d1k 34.5 = 81/2.35).
 - `tok_s=0.3` on the turn-end line is NOT a decode rate: that field divides committed tokens by elapsed INCLUDING prefill. Do not quote it as decode.
 - `reuse=0` plus `cached_tokens=0` and `rows=160004` (the full prompt) together establish this prefill as genuinely cache-cold and complete.
 
@@ -702,6 +729,7 @@ Cluster HEAD `5a18b81debe3e4d1b82370d473614d0b4be82bf2` throughout.
 - **Attempt 2 (4 hours (14400 s)): COMPLETED.** `prompt_tokens=1,000,003`, `completion_tokens=100`, `finish_reason=length`, wall 6760.5 s.
 
 One denominator note for attempt 2: the server reported `session reuse: this 1000003-token prompt matches a resident conversation on 299946 rows`, so ~300 K of the prompt came from cache and `processed_tokens` counts the remaining ~700 K rows it actually had to prefill. The band table for attempt 2 is therefore read against ~700 K, not 1,000,003.
+  - TWO DISTINCT QUANTITIES, not a typo: the resident conversation is 299,946 rows (:704) while `usage.cached_tokens` is 299,008 (:859). 299,008 = 292×1024 exactly; the prefix reuse is aligned down to a 1024-row block boundary (`DEFAULT_CHECKPOINT_SPACING_ROWS = 1024`, session.py:158). The 938-row gap is 0.3% and immaterial downstream.
 
 ### 4b. Attempt 1 (2 h cap) — PARTIAL
 
@@ -937,6 +965,8 @@ Attempt 2 finished: **HTTP 200, `prompt_tokens=1,000,003`, `completion_tokens=10
 - So the prefill actually performed was **700,995 uncached tokens at **104.2 tok/s** (server `prompt_tps=104.23`; 700,995 / 6725.29 s).
 - **The `prefill_progress` counter tracks UNCACHED tokens only.** That is why its last frame reads `processed_tokens: 700995` while `total_tokens` reads `1000003` — the two are on different denominators by design, and reading the 700,995 as "only got 70% of the way" would be exactly backwards. The turn reached 100% of the work it had to do.
 - A **fully cold** 1M prefill is therefore not what was measured. Attempt 1, which had only ~98 K cached, is the closer proxy: it reached 802,816 of 1,000,003 tokens in 7,181 s before the 2 h cap killed it, on a curve still falling. Extrapolating attempt 1's last band (~68 tok/s) over its remaining ~197 K tokens puts a **cold 1M prefill at roughly 2.9 h** — which is why the brief's 2 h window was not enough and the 4 h one was.
+  - CONVENTION: the progress counter is POSITIONAL — `_session_progress` sends `processed_tokens=rows_done` against `total_tokens=active.prefill_total` (engine.py:1191-1192), i.e. the full prompt length. So 802,816/1,000,003 = 80.3% and the ~197 K remainder stand as written; the ~98 K cached prefix is counted as already done.
+  - CAVEAT on the extrapolation: because the counter is positional, the ~68 tok/s band rate includes cached rows that cost zero compute. Using it as a compute rate overstates throughput by ~98 K/~704 K ≈ 14%, so 2.9 h is a lower bound on cold-prefill wall time.
 
 Prefill throughput by depth, measured within these two requests (no cross-run confound — 391 progress frames in attempt 1, 342 in attempt 2):
 
