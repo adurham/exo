@@ -166,6 +166,8 @@ from exo.metrics import (
 from exo.metrics.metrics import set_up as _metrics_set_up
 from exo.routing.event_router import NodeEventReceiver
 from exo.shared.apply import apply
+from exo.shared.command_trace import meta as command_meta
+from exo.shared.command_trace import enabled as command_trace_enabled
 from exo.shared.constants import (
     ENABLE_DISAGGREGATION,
     EXO_CACHE_HOME,
@@ -2814,9 +2816,14 @@ class API:
     async def _forward(self, command: Command) -> None:
         while self.paused:
             await self.paused_ev.wait()
+        tracing = command_trace_enabled()
+        if tracing:
+            logger.info(f"[CMDX] publish begin {command_meta(command)}")
         await self.command_sender.send(
             ForwarderCommand(origin=self._system_id, command=command)
         )
+        if tracing:
+            logger.info(f"[CMDX] publish done {command_meta(command)}")
 
     async def _send_from_cleanup(self, command: Command) -> None:
         # Stream cleanup runs after a client disconnect has cancelled the
@@ -2824,6 +2831,8 @@ class API:
         # the master. Skip _send's election pause too: a shielded wait on it
         # could block shutdown forever.
         with anyio.CancelScope(shield=True):
+            if command_trace_enabled():
+                logger.info(f"[CMDX] cleanup publish begin {command_meta(command)}")
             await self.command_sender.send(
                 ForwarderCommand(origin=self._system_id, command=command)
             )

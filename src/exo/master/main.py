@@ -20,6 +20,8 @@ from exo.master.placement_utils import (
     jit_instances_to_reap,
 )
 from exo.shared.apply import apply
+from exo.shared.command_trace import meta as command_meta
+from exo.shared.command_trace import enabled as command_trace_enabled
 from exo.shared.constants import EXO_TRACING_ENABLED
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.chunks import ErrorChunk, ImageChunk
@@ -331,6 +333,10 @@ class Master:
     async def _command_processor(self) -> None:
         with self.command_receiver as commands:
             async for forwarder_command in commands:
+                if command_trace_enabled():
+                    logger.info(
+                        f"[CMDXR] received {command_meta(forwarder_command.command)}"
+                    )
                 if not self._first_time(forwarder_command.command.command_id):
                     logger.debug(
                         f"Ignoring command {forwarder_command.command.command_id}: already processed"

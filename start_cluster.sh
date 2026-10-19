@@ -2804,6 +2804,12 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_CONTIG_REPEAT_SOFT_MULTIPLIER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_SOFT_MULTIPLIER=$EXO_DSV41_CONTIG_REPEAT_SOFT_MULTIPLIER"
   [ -n "${EXO_DSV41_CONTIG_REPEAT_SOFT_BASE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_SOFT_BASE=$EXO_DSV41_CONTIG_REPEAT_SOFT_BASE"
   [ -n "${EXO_DSV41_CONTIG_REPEAT_SOFT_ALLOWED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_CONTIG_REPEAT_SOFT_ALLOWED=$EXO_DSV41_CONTIG_REPEAT_SOFT_ALLOWED"
+  # EXO_CMD_TRACE: opt-in command-delivery tracing (src/exo/shared/command_trace.py).
+  # The API logs [CMDX] publish begin/done and the master logs [CMDXR] received, each
+  # carrying command id, byte size and digest -- the only way to separate "the publish
+  # call never completed" from "the command was lost before the master's subscription"
+  # when a request is reported as never accepted. Default off.
+  [ -n "${EXO_CMD_TRACE:-}" ] && EXO_ENV="$EXO_ENV EXO_CMD_TRACE=$EXO_CMD_TRACE"
   # EXO_REASONING_BUDGET*: the reasoning-budget limiter ported into the dsv41
   # engine (degeneration-guard PHASE 2; docs/dsv41-reasoning-budget-limiter-
   # 2026-10-13.md). Once a still-open reasoning block has run
