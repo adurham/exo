@@ -1,0 +1,2640 @@
+1792385964.973498	: keep-alive
+1792385964.973501	
+1792385974.975914	: keep-alive
+1792385974.975929	
+1792385984.267170	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":4096,"total_tokens":1000003}}
+1792385984.267195	
+1792385992.378837	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":6144,"total_tokens":1000003}}
+1792385992.378851	
+1792386000.575823	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":8192,"total_tokens":1000003}}
+1792386000.575838	
+1792386008.796654	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":10240,"total_tokens":1000003}}
+1792386008.796668	
+1792386017.065729	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":12288,"total_tokens":1000003}}
+1792386017.065744	
+1792386025.521654	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":14336,"total_tokens":1000003}}
+1792386025.521670	
+1792386033.891124	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":16384,"total_tokens":1000003}}
+1792386033.891138	
+1792386042.353984	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":18432,"total_tokens":1000003}}
+1792386042.353999	
+1792386050.691125	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":20480,"total_tokens":1000003}}
+1792386050.691139	
+1792386058.925819	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":22528,"total_tokens":1000003}}
+1792386058.925834	
+1792386067.380292	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":24576,"total_tokens":1000003}}
+1792386067.380310	
+1792386075.398830	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":26624,"total_tokens":1000003}}
+1792386075.398843	
+1792386083.347274	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":28672,"total_tokens":1000003}}
+1792386083.347288	
+1792386091.279859	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":30720,"total_tokens":1000003}}
+1792386091.279873	
+1792386099.275922	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":32768,"total_tokens":1000003}}
+1792386099.275937	
+1792386107.296855	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":34816,"total_tokens":1000003}}
+1792386107.296869	
+1792386115.441257	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":36864,"total_tokens":1000003}}
+1792386115.441271	
+1792386123.503104	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":38912,"total_tokens":1000003}}
+1792386123.503118	
+1792386131.522949	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":40960,"total_tokens":1000003}}
+1792386131.522969	
+1792386139.745874	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":43008,"total_tokens":1000003}}
+1792386139.745888	
+1792386147.983996	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":45056,"total_tokens":1000003}}
+1792386147.984011	
+1792386156.248581	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":47104,"total_tokens":1000003}}
+1792386156.248619	
+1792386164.494643	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":49152,"total_tokens":1000003}}
+1792386164.494657	
+1792386172.763468	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":51200,"total_tokens":1000003}}
+1792386172.763483	
+1792386181.038375	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":53248,"total_tokens":1000003}}
+1792386181.038389	
+1792386189.446818	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":55296,"total_tokens":1000003}}
+1792386189.446832	
+1792386197.764033	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":57344,"total_tokens":1000003}}
+1792386197.764047	
+1792386206.140530	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":59392,"total_tokens":1000003}}
+1792386206.140545	
+1792386214.504160	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":61440,"total_tokens":1000003}}
+1792386214.504176	
+1792386222.960992	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":63488,"total_tokens":1000003}}
+1792386222.961007	
+1792386231.387999	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":65536,"total_tokens":1000003}}
+1792386231.388028	
+1792386239.837542	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":67584,"total_tokens":1000003}}
+1792386239.837556	
+1792386248.361819	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":69632,"total_tokens":1000003}}
+1792386248.361833	
+1792386256.946824	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":71680,"total_tokens":1000003}}
+1792386256.946838	
+1792386265.438379	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":73728,"total_tokens":1000003}}
+1792386265.438396	
+1792386273.985320	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":75776,"total_tokens":1000003}}
+1792386273.985335	
+1792386282.516021	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":77824,"total_tokens":1000003}}
+1792386282.516047	
+1792386291.102131	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":79872,"total_tokens":1000003}}
+1792386291.102146	
+1792386299.638437	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":81920,"total_tokens":1000003}}
+1792386299.638451	
+1792386308.302217	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":83968,"total_tokens":1000003}}
+1792386308.302231	
+1792386317.069691	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":86016,"total_tokens":1000003}}
+1792386317.069706	
+1792386325.789493	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":88064,"total_tokens":1000003}}
+1792386325.789509	
+1792386334.636801	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":90112,"total_tokens":1000003}}
+1792386334.636816	
+1792386343.593179	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":92160,"total_tokens":1000003}}
+1792386343.593193	
+1792386352.745578	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":94208,"total_tokens":1000003}}
+1792386352.745614	
+1792386361.802574	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":96256,"total_tokens":1000003}}
+1792386361.802588	
+1792386370.774878	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":98304,"total_tokens":1000003}}
+1792386370.774892	
+1792386380.024844	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":100352,"total_tokens":1000003}}
+1792386380.024860	
+1792386389.233331	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":102400,"total_tokens":1000003}}
+1792386389.233344	
+1792386398.490573	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":104448,"total_tokens":1000003}}
+1792386398.490587	
+1792386407.902237	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":106496,"total_tokens":1000003}}
+1792386407.902253	
+1792386417.318255	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":108544,"total_tokens":1000003}}
+1792386417.318270	
+1792386426.848355	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":110592,"total_tokens":1000003}}
+1792386426.848379	
+1792386436.416964	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":112640,"total_tokens":1000003}}
+1792386436.416978	
+1792386446.026067	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":114688,"total_tokens":1000003}}
+1792386446.026082	
+1792386455.703816	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":116736,"total_tokens":1000003}}
+1792386455.703832	
+1792386465.408778	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":118784,"total_tokens":1000003}}
+1792386465.408792	
+1792386475.196881	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":120832,"total_tokens":1000003}}
+1792386475.196896	
+1792386484.937461	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":122880,"total_tokens":1000003}}
+1792386484.937475	
+1792386494.748137	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":124928,"total_tokens":1000003}}
+1792386494.748151	
+1792386504.749510	: keep-alive
+1792386504.749524	
+1792386504.811221	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":126976,"total_tokens":1000003}}
+1792386504.811235	
+1792386514.812205	: keep-alive
+1792386514.812227	
+1792386514.863496	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":129024,"total_tokens":1000003}}
+1792386514.863508	
+1792386524.862272	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":131072,"total_tokens":1000003}}
+1792386524.862286	
+1792386534.862616	: keep-alive
+1792386534.862630	
+1792386534.959501	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":133120,"total_tokens":1000003}}
+1792386534.959517	
+1792386544.960028	: keep-alive
+1792386544.960041	
+1792386545.132560	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":135168,"total_tokens":1000003}}
+1792386545.132575	
+1792386555.133579	: keep-alive
+1792386555.133593	
+1792386555.349856	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":137216,"total_tokens":1000003}}
+1792386555.349870	
+1792386565.350970	: keep-alive
+1792386565.350984	
+1792386565.603177	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":139264,"total_tokens":1000003}}
+1792386565.603206	
+1792386575.603433	: keep-alive
+1792386575.603446	
+1792386575.850994	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":141312,"total_tokens":1000003}}
+1792386575.851007	
+1792386585.853233	: keep-alive
+1792386585.853248	
+1792386586.164887	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":143360,"total_tokens":1000003}}
+1792386586.164901	
+1792386596.166413	: keep-alive
+1792386596.166427	
+1792386596.643724	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":145408,"total_tokens":1000003}}
+1792386596.643741	
+1792386606.645425	: keep-alive
+1792386606.645440	
+1792386607.052043	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":147456,"total_tokens":1000003}}
+1792386607.052057	
+1792386617.052590	: keep-alive
+1792386617.052604	
+1792386617.418540	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":149504,"total_tokens":1000003}}
+1792386617.418556	
+1792386627.419417	: keep-alive
+1792386627.419443	
+1792386628.040077	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":151552,"total_tokens":1000003}}
+1792386628.040107	
+1792386638.040604	: keep-alive
+1792386638.040618	
+1792386638.630046	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":153600,"total_tokens":1000003}}
+1792386638.630060	
+1792386648.630723	: keep-alive
+1792386648.630748	
+1792386649.233050	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":155648,"total_tokens":1000003}}
+1792386649.233063	
+1792386659.234715	: keep-alive
+1792386659.234741	
+1792386659.832046	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":157696,"total_tokens":1000003}}
+1792386659.832059	
+1792386669.834093	: keep-alive
+1792386669.834107	
+1792386670.493814	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":159744,"total_tokens":1000003}}
+1792386670.493829	
+1792386680.494203	: keep-alive
+1792386680.494233	
+1792386681.486558	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":161792,"total_tokens":1000003}}
+1792386681.486572	
+1792386691.488027	: keep-alive
+1792386691.488041	
+1792386692.535011	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":163840,"total_tokens":1000003}}
+1792386692.535025	
+1792386702.535644	: keep-alive
+1792386702.535660	
+1792386703.587278	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":165888,"total_tokens":1000003}}
+1792386703.587310	
+1792386713.588505	: keep-alive
+1792386713.588518	
+1792386714.778037	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":167936,"total_tokens":1000003}}
+1792386714.778051	
+1792386724.779459	: keep-alive
+1792386724.779474	
+1792386725.883465	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":169984,"total_tokens":1000003}}
+1792386725.883479	
+1792386735.885438	: keep-alive
+1792386735.885454	
+1792386737.056140	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":172032,"total_tokens":1000003}}
+1792386737.056154	
+1792386747.056845	: keep-alive
+1792386747.056866	
+1792386748.348626	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":174080,"total_tokens":1000003}}
+1792386748.348640	
+1792386758.348944	: keep-alive
+1792386758.348958	
+1792386759.587072	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":176128,"total_tokens":1000003}}
+1792386759.587087	
+1792386769.587289	: keep-alive
+1792386769.587306	
+1792386770.884837	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":178176,"total_tokens":1000003}}
+1792386770.884865	
+1792386780.886577	: keep-alive
+1792386780.886602	
+1792386782.361963	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":180224,"total_tokens":1000003}}
+1792386782.361977	
+1792386792.364277	: keep-alive
+1792386792.364302	
+1792386793.849020	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":182272,"total_tokens":1000003}}
+1792386793.849048	
+1792386803.849448	: keep-alive
+1792386803.849462	
+1792386805.345613	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":184320,"total_tokens":1000003}}
+1792386805.345627	
+1792386815.346365	: keep-alive
+1792386815.346380	
+1792386816.866710	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":186368,"total_tokens":1000003}}
+1792386816.866723	
+1792386826.868347	: keep-alive
+1792386826.868361	
+1792386828.438897	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":188416,"total_tokens":1000003}}
+1792386828.438911	
+1792386838.441147	: keep-alive
+1792386838.441161	
+1792386839.976299	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":190464,"total_tokens":1000003}}
+1792386839.976318	
+1792386849.978340	: keep-alive
+1792386849.978359	
+1792386851.597581	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":192512,"total_tokens":1000003}}
+1792386851.597599	
+1792386861.599225	: keep-alive
+1792386861.599240	
+1792386863.295091	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":194560,"total_tokens":1000003}}
+1792386863.295105	
+1792386873.296299	: keep-alive
+1792386873.296313	
+1792386874.927310	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":196608,"total_tokens":1000003}}
+1792386874.927324	
+1792386884.928409	: keep-alive
+1792386884.928422	
+1792386886.594729	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":198656,"total_tokens":1000003}}
+1792386886.594743	
+1792386896.597206	: keep-alive
+1792386896.597221	
+1792386898.219840	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":200704,"total_tokens":1000003}}
+1792386898.219858	
+1792386908.220095	: keep-alive
+1792386908.220110	
+1792386909.913314	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":202752,"total_tokens":1000003}}
+1792386909.913328	
+1792386919.915478	: keep-alive
+1792386919.915492	
+1792386921.662315	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":204800,"total_tokens":1000003}}
+1792386921.662329	
+1792386931.663720	: keep-alive
+1792386931.663735	
+1792386933.589641	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":206848,"total_tokens":1000003}}
+1792386933.589654	
+1792386943.591047	: keep-alive
+1792386943.591061	
+1792386945.412043	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":208896,"total_tokens":1000003}}
+1792386945.412057	
+1792386955.414258	: keep-alive
+1792386955.414272	
+1792386957.179960	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":210944,"total_tokens":1000003}}
+1792386957.179975	
+1792386967.182054	: keep-alive
+1792386967.182072	
+1792386968.997575	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":212992,"total_tokens":1000003}}
+1792386968.997590	
+1792386978.998944	: keep-alive
+1792386978.998959	
+1792386980.860724	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":215040,"total_tokens":1000003}}
+1792386980.860738	
+1792386990.861343	: keep-alive
+1792386990.861356	
+1792386992.788635	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":217088,"total_tokens":1000003}}
+1792386992.788649	
+1792387002.790889	: keep-alive
+1792387002.790903	
+1792387004.569216	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":219136,"total_tokens":1000003}}
+1792387004.569230	
+1792387014.570483	: keep-alive
+1792387014.570498	
+1792387016.512251	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":221184,"total_tokens":1000003}}
+1792387016.512278	
+1792387026.513768	: keep-alive
+1792387026.513783	
+1792387028.401807	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":223232,"total_tokens":1000003}}
+1792387028.401820	
+1792387038.402352	: keep-alive
+1792387038.402368	
+1792387040.377755	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":225280,"total_tokens":1000003}}
+1792387040.377770	
+1792387050.379647	: keep-alive
+1792387050.379664	
+1792387052.477818	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":227328,"total_tokens":1000003}}
+1792387052.477833	
+1792387062.479118	: keep-alive
+1792387062.479135	
+1792387064.447384	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":229376,"total_tokens":1000003}}
+1792387064.447398	
+1792387074.448260	: keep-alive
+1792387074.448292	
+1792387076.445768	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":231424,"total_tokens":1000003}}
+1792387076.445782	
+1792387086.447233	: keep-alive
+1792387086.447247	
+1792387088.505566	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":233472,"total_tokens":1000003}}
+1792387088.505586	
+1792387098.505883	: keep-alive
+1792387098.505900	
+1792387100.598652	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":235520,"total_tokens":1000003}}
+1792387100.598666	
+1792387110.600624	: keep-alive
+1792387110.600649	
+1792387112.668519	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":237568,"total_tokens":1000003}}
+1792387112.668533	
+1792387122.670951	: keep-alive
+1792387122.670967	
+1792387124.784989	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":239616,"total_tokens":1000003}}
+1792387124.785003	
+1792387134.786013	: keep-alive
+1792387134.786045	
+1792387136.928192	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":241664,"total_tokens":1000003}}
+1792387136.928208	
+1792387146.930522	: keep-alive
+1792387146.930537	
+1792387149.075652	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":243712,"total_tokens":1000003}}
+1792387149.075683	
+1792387159.076665	: keep-alive
+1792387159.076681	
+1792387161.258928	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":245760,"total_tokens":1000003}}
+1792387161.258942	
+1792387171.259398	: keep-alive
+1792387171.259423	
+1792387173.560961	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":247808,"total_tokens":1000003}}
+1792387173.560986	
+1792387183.562619	: keep-alive
+1792387183.562633	
+1792387185.834452	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":249856,"total_tokens":1000003}}
+1792387185.834466	
+1792387195.834755	: keep-alive
+1792387195.834770	
+1792387198.174693	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":251904,"total_tokens":1000003}}
+1792387198.174707	
+1792387208.174982	: keep-alive
+1792387208.174997	
+1792387210.563445	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":253952,"total_tokens":1000003}}
+1792387210.563461	
+1792387220.565120	: keep-alive
+1792387220.565135	
+1792387222.872730	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":256000,"total_tokens":1000003}}
+1792387222.872745	
+1792387232.873456	: keep-alive
+1792387232.873472	
+1792387235.297838	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":258048,"total_tokens":1000003}}
+1792387235.297853	
+1792387245.298695	: keep-alive
+1792387245.298712	
+1792387247.764270	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":260096,"total_tokens":1000003}}
+1792387247.764285	
+1792387257.765816	: keep-alive
+1792387257.765830	
+1792387260.190465	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":262144,"total_tokens":1000003}}
+1792387260.190479	
+1792387270.191694	: keep-alive
+1792387270.191709	
+1792387272.818224	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":264192,"total_tokens":1000003}}
+1792387272.818238	
+1792387282.819087	: keep-alive
+1792387282.819101	
+1792387285.534847	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":266240,"total_tokens":1000003}}
+1792387285.534862	
+1792387295.535626	: keep-alive
+1792387295.535641	
+1792387298.080324	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":268288,"total_tokens":1000003}}
+1792387298.080350	
+1792387308.080786	: keep-alive
+1792387308.080805	
+1792387310.536697	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":270336,"total_tokens":1000003}}
+1792387310.536711	
+1792387320.537066	: keep-alive
+1792387320.537081	
+1792387323.110457	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":272384,"total_tokens":1000003}}
+1792387323.110471	
+1792387333.111040	: keep-alive
+1792387333.111054	
+1792387335.677625	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":274432,"total_tokens":1000003}}
+1792387335.677639	
+1792387345.680138	: keep-alive
+1792387345.680158	
+1792387348.475084	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":276480,"total_tokens":1000003}}
+1792387348.475104	
+1792387358.476419	: keep-alive
+1792387358.476434	
+1792387361.216473	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":278528,"total_tokens":1000003}}
+1792387361.216488	
+1792387371.218764	: keep-alive
+1792387371.218780	
+1792387373.785095	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":280576,"total_tokens":1000003}}
+1792387373.785110	
+1792387383.786709	: keep-alive
+1792387383.786723	
+1792387386.491115	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":282624,"total_tokens":1000003}}
+1792387386.491131	
+1792387396.492310	: keep-alive
+1792387396.492324	
+1792387399.106193	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":284672,"total_tokens":1000003}}
+1792387399.106207	
+1792387409.106778	: keep-alive
+1792387409.106803	
+1792387411.788042	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":286720,"total_tokens":1000003}}
+1792387411.788057	
+1792387421.789094	: keep-alive
+1792387421.789108	
+1792387424.520546	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":288768,"total_tokens":1000003}}
+1792387424.520561	
+1792387434.520671	: keep-alive
+1792387434.520685	
+1792387437.370869	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":290816,"total_tokens":1000003}}
+1792387437.370882	
+1792387447.371479	: keep-alive
+1792387447.371504	
+1792387450.263084	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":292864,"total_tokens":1000003}}
+1792387450.263111	
+1792387460.263249	: keep-alive
+1792387460.263265	
+1792387463.094630	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":294912,"total_tokens":1000003}}
+1792387463.094646	
+1792387473.096059	: keep-alive
+1792387473.096074	
+1792387475.846691	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":296960,"total_tokens":1000003}}
+1792387475.846721	
+1792387485.848908	: keep-alive
+1792387485.848923	
+1792387488.589354	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":299008,"total_tokens":1000003}}
+1792387488.589368	
+1792387498.591256	: keep-alive
+1792387498.591273	
+1792387501.393609	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":301056,"total_tokens":1000003}}
+1792387501.393623	
+1792387511.394579	: keep-alive
+1792387511.394594	
+1792387514.148630	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":303104,"total_tokens":1000003}}
+1792387514.148645	
+1792387524.150538	: keep-alive
+1792387524.150553	
+1792387527.024420	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":305152,"total_tokens":1000003}}
+1792387527.024435	
+1792387537.025807	: keep-alive
+1792387537.025825	
+1792387539.960805	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":307200,"total_tokens":1000003}}
+1792387539.960819	
+1792387549.962030	: keep-alive
+1792387549.962045	
+1792387552.944110	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":309248,"total_tokens":1000003}}
+1792387552.944124	
+1792387562.945424	: keep-alive
+1792387562.945438	
+1792387565.845310	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":311296,"total_tokens":1000003}}
+1792387565.845326	
+1792387575.847303	: keep-alive
+1792387575.847316	
+1792387578.773780	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":313344,"total_tokens":1000003}}
+1792387578.773795	
+1792387588.774699	: keep-alive
+1792387588.774713	
+1792387591.737881	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":315392,"total_tokens":1000003}}
+1792387591.737895	
+1792387601.739363	: keep-alive
+1792387601.739378	
+1792387604.758106	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":317440,"total_tokens":1000003}}
+1792387604.758122	
+1792387614.758843	: keep-alive
+1792387614.758858	
+1792387617.729347	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":319488,"total_tokens":1000003}}
+1792387617.729361	
+1792387627.731304	: keep-alive
+1792387627.731319	
+1792387630.950237	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":321536,"total_tokens":1000003}}
+1792387630.950251	
+1792387640.951251	: keep-alive
+1792387640.951268	
+1792387644.097887	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":323584,"total_tokens":1000003}}
+1792387644.097902	
+1792387654.100997	: keep-alive
+1792387654.101034	
+1792387657.246599	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":325632,"total_tokens":1000003}}
+1792387657.246614	
+1792387667.247410	: keep-alive
+1792387667.247424	
+1792387670.233293	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":327680,"total_tokens":1000003}}
+1792387670.233307	
+1792387680.234217	: keep-alive
+1792387680.234233	
+1792387683.379025	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":329728,"total_tokens":1000003}}
+1792387683.379041	
+1792387693.380235	: keep-alive
+1792387693.380251	
+1792387696.427645	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":331776,"total_tokens":1000003}}
+1792387696.427660	
+1792387706.427937	: keep-alive
+1792387706.427951	
+1792387709.584719	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":333824,"total_tokens":1000003}}
+1792387709.584733	
+1792387719.585125	: keep-alive
+1792387719.585143	
+1792387722.780016	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":335872,"total_tokens":1000003}}
+1792387722.780030	
+1792387732.780554	: keep-alive
+1792387732.780568	
+1792387736.211348	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":337920,"total_tokens":1000003}}
+1792387736.211363	
+1792387746.212122	: keep-alive
+1792387746.212137	
+1792387749.507111	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":339968,"total_tokens":1000003}}
+1792387749.507126	
+1792387759.507760	: keep-alive
+1792387759.507786	
+1792387762.702015	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":342016,"total_tokens":1000003}}
+1792387762.702029	
+1792387772.702391	: keep-alive
+1792387772.702405	
+1792387775.991604	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":344064,"total_tokens":1000003}}
+1792387775.991619	
+1792387785.994173	: keep-alive
+1792387785.994202	
+1792387789.335434	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":346112,"total_tokens":1000003}}
+1792387789.335450	
+1792387799.337118	: keep-alive
+1792387799.337144	
+1792387803.072970	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":348160,"total_tokens":1000003}}
+1792387803.072987	
+1792387813.074618	: keep-alive
+1792387813.074635	
+1792387816.441338	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":350208,"total_tokens":1000003}}
+1792387816.441353	
+1792387826.443174	: keep-alive
+1792387826.443190	
+1792387829.863603	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":352256,"total_tokens":1000003}}
+1792387829.863617	
+1792387839.865404	: keep-alive
+1792387839.865418	
+1792387843.225531	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":354304,"total_tokens":1000003}}
+1792387843.225546	
+1792387853.225950	: keep-alive
+1792387853.225965	
+1792387856.692835	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":356352,"total_tokens":1000003}}
+1792387856.692849	
+1792387866.694410	: keep-alive
+1792387866.694434	
+1792387870.094433	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":358400,"total_tokens":1000003}}
+1792387870.094448	
+1792387880.095423	: keep-alive
+1792387880.095446	
+1792387883.506816	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":360448,"total_tokens":1000003}}
+1792387883.506830	
+1792387893.507989	: keep-alive
+1792387893.508006	
+1792387896.861396	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":362496,"total_tokens":1000003}}
+1792387896.861411	
+1792387906.863337	: keep-alive
+1792387906.863352	
+1792387910.361962	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":364544,"total_tokens":1000003}}
+1792387910.361977	
+1792387920.362817	: keep-alive
+1792387920.362843	
+1792387923.783174	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":366592,"total_tokens":1000003}}
+1792387923.783603	
+1792387933.783512	: keep-alive
+1792387933.783533	
+1792387937.326130	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":368640,"total_tokens":1000003}}
+1792387937.326147	
+1792387947.326650	: keep-alive
+1792387947.326667	
+1792387950.741563	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":370688,"total_tokens":1000003}}
+1792387950.741577	
+1792387960.742041	: keep-alive
+1792387960.742056	
+1792387964.278258	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":372736,"total_tokens":1000003}}
+1792387964.278272	
+1792387974.279092	: keep-alive
+1792387974.279109	
+1792387977.707511	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":374784,"total_tokens":1000003}}
+1792387977.707526	
+1792387987.709756	: keep-alive
+1792387987.709770	
+1792387991.431530	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":376832,"total_tokens":1000003}}
+1792387991.431545	
+1792388001.431880	: keep-alive
+1792388001.431898	
+1792388004.997552	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":378880,"total_tokens":1000003}}
+1792388004.997567	
+1792388014.999108	: keep-alive
+1792388014.999122	
+1792388018.676121	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":380928,"total_tokens":1000003}}
+1792388018.676135	
+1792388028.676593	: keep-alive
+1792388028.676608	
+1792388032.366863	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":382976,"total_tokens":1000003}}
+1792388032.366877	
+1792388042.368599	: keep-alive
+1792388042.368613	
+1792388046.105976	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":385024,"total_tokens":1000003}}
+1792388046.105991	
+1792388056.107427	: keep-alive
+1792388056.107441	
+1792388059.722959	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":387072,"total_tokens":1000003}}
+1792388059.722979	
+1792388069.719452	: keep-alive
+1792388069.719468	
+1792388073.289426	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":389120,"total_tokens":1000003}}
+1792388073.289441	
+1792388083.291125	: keep-alive
+1792388083.291140	
+1792388087.059565	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":391168,"total_tokens":1000003}}
+1792388087.059579	
+1792388097.060241	: keep-alive
+1792388097.060256	
+1792388100.737897	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":393216,"total_tokens":1000003}}
+1792388100.737911	
+1792388110.739070	: keep-alive
+1792388110.739085	
+1792388114.642828	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":395264,"total_tokens":1000003}}
+1792388114.642842	
+1792388124.643081	: keep-alive
+1792388124.643096	
+1792388128.349604	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":397312,"total_tokens":1000003}}
+1792388128.349619	
+1792388138.349977	: keep-alive
+1792388138.349993	
+1792388142.174168	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":399360,"total_tokens":1000003}}
+1792388142.174182	
+1792388152.175320	: keep-alive
+1792388152.175335	
+1792388155.963961	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":401408,"total_tokens":1000003}}
+1792388155.963975	
+1792388165.965951	: keep-alive
+1792388165.965966	
+1792388169.942719	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":403456,"total_tokens":1000003}}
+1792388169.942733	
+1792388179.945153	: keep-alive
+1792388179.945171	
+1792388183.723470	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":405504,"total_tokens":1000003}}
+1792388183.723484	
+1792388193.724235	: keep-alive
+1792388193.724249	
+1792388197.704207	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":407552,"total_tokens":1000003}}
+1792388197.704223	
+1792388207.706449	: keep-alive
+1792388207.706463	
+1792388211.617107	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":409600,"total_tokens":1000003}}
+1792388211.617122	
+1792388221.617400	: keep-alive
+1792388221.617414	
+1792388225.407452	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":411648,"total_tokens":1000003}}
+1792388225.407466	
+1792388235.409474	: keep-alive
+1792388235.409488	
+1792388239.359700	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":413696,"total_tokens":1000003}}
+1792388239.359715	
+1792388249.361953	: keep-alive
+1792388249.361967	
+1792388253.360968	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":415744,"total_tokens":1000003}}
+1792388253.360983	
+1792388263.361381	: keep-alive
+1792388263.361397	
+1792388267.752855	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":417792,"total_tokens":1000003}}
+1792388267.752869	
+1792388277.753817	: keep-alive
+1792388277.753831	
+1792388281.773224	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":419840,"total_tokens":1000003}}
+1792388281.773238	
+1792388291.774833	: keep-alive
+1792388291.774848	
+1792388295.880249	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":421888,"total_tokens":1000003}}
+1792388295.880264	
+1792388305.880631	: keep-alive
+1792388305.880645	
+1792388310.082407	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":423936,"total_tokens":1000003}}
+1792388310.082422	
+1792388320.083799	: keep-alive
+1792388320.083813	
+1792388324.088579	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":425984,"total_tokens":1000003}}
+1792388324.088593	
+1792388334.090427	: keep-alive
+1792388334.090442	
+1792388338.327735	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":428032,"total_tokens":1000003}}
+1792388338.327749	
+1792388348.328020	: keep-alive
+1792388348.328035	
+1792388352.496599	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":430080,"total_tokens":1000003}}
+1792388352.496613	
+1792388362.497672	: keep-alive
+1792388362.497754	
+1792388366.662406	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":432128,"total_tokens":1000003}}
+1792388366.662419	
+1792388376.664231	: keep-alive
+1792388376.664250	
+1792388380.907534	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":434176,"total_tokens":1000003}}
+1792388380.907548	
+1792388390.909729	: keep-alive
+1792388390.909743	
+1792388395.072888	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":436224,"total_tokens":1000003}}
+1792388395.072902	
+1792388405.073326	: keep-alive
+1792388405.073340	
+1792388409.408047	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":438272,"total_tokens":1000003}}
+1792388409.408062	
+1792388419.408302	: keep-alive
+1792388419.408316	
+1792388423.709450	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":440320,"total_tokens":1000003}}
+1792388423.709464	
+1792388433.709749	: keep-alive
+1792388433.709763	
+1792388437.886737	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":442368,"total_tokens":1000003}}
+1792388437.886751	
+1792388447.887675	: keep-alive
+1792388447.887689	
+1792388452.100840	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":444416,"total_tokens":1000003}}
+1792388452.100854	
+1792388462.101085	: keep-alive
+1792388462.101100	
+1792388466.354923	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":446464,"total_tokens":1000003}}
+1792388466.354938	
+1792388476.356481	: keep-alive
+1792388476.356495	
+1792388480.658112	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":448512,"total_tokens":1000003}}
+1792388480.658132	
+1792388490.658693	: keep-alive
+1792388490.658709	
+1792388495.334124	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":450560,"total_tokens":1000003}}
+1792388495.334142	
+1792388505.334525	: keep-alive
+1792388505.334546	
+1792388509.728046	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":452608,"total_tokens":1000003}}
+1792388509.729878	
+1792388519.730290	: keep-alive
+1792388519.730304	
+1792388524.066603	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":454656,"total_tokens":1000003}}
+1792388524.066619	
+1792388534.067805	: keep-alive
+1792388534.067818	
+1792388538.444156	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":456704,"total_tokens":1000003}}
+1792388538.444171	
+1792388548.445252	: keep-alive
+1792388548.445278	
+1792388552.959084	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":458752,"total_tokens":1000003}}
+1792388552.959106	
+1792388562.961588	: keep-alive
+1792388562.961614	
+1792388567.898602	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":460800,"total_tokens":1000003}}
+1792388567.898616	
+1792388577.898948	: keep-alive
+1792388577.898961	
+1792388582.992412	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":462848,"total_tokens":1000003}}
+1792388582.992429	
+1792388592.993304	: keep-alive
+1792388592.993319	
+1792388597.897654	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":464896,"total_tokens":1000003}}
+1792388597.897668	
+1792388607.898303	: keep-alive
+1792388607.898320	
+1792388612.715330	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":466944,"total_tokens":1000003}}
+1792388612.715354	
+1792388622.715579	: keep-alive
+1792388622.715593	
+1792388627.157889	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":468992,"total_tokens":1000003}}
+1792388627.157904	
+1792388637.159336	: keep-alive
+1792388637.159350	
+1792388642.128636	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":471040,"total_tokens":1000003}}
+1792388642.128650	
+1792388652.129312	: keep-alive
+1792388652.129327	
+1792388657.733418	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":473088,"total_tokens":1000003}}
+1792388657.733432	
+1792388667.733663	: keep-alive
+1792388667.733676	
+1792388673.578520	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":475136,"total_tokens":1000003}}
+1792388673.578534	
+1792388683.578910	: keep-alive
+1792388683.578934	
+1792388689.586337	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":477184,"total_tokens":1000003}}
+1792388689.586352	
+1792388699.587485	: keep-alive
+1792388699.587499	
+1792388705.880647	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":479232,"total_tokens":1000003}}
+1792388705.880661	
+1792388715.881882	: keep-alive
+1792388715.881897	
+1792388722.898627	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":481280,"total_tokens":1000003}}
+1792388722.898647	
+1792388732.899656	: keep-alive
+1792388732.899673	
+1792388740.158677	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":483328,"total_tokens":1000003}}
+1792388740.158692	
+1792388750.160634	: keep-alive
+1792388750.160647	
+1792388758.612134	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":485376,"total_tokens":1000003}}
+1792388758.612148	
+1792388768.612423	: keep-alive
+1792388768.612438	
+1792388774.943585	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":487424,"total_tokens":1000003}}
+1792388774.943600	
+1792388784.945100	: keep-alive
+1792388784.945115	
+1792388792.383071	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":489472,"total_tokens":1000003}}
+1792388792.383086	
+1792388802.383171	: keep-alive
+1792388802.383187	
+1792388810.815007	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":491520,"total_tokens":1000003}}
+1792388810.815026	
+1792388820.815237	: keep-alive
+1792388820.815251	
+1792388829.803917	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":493568,"total_tokens":1000003}}
+1792388829.803939	
+1792388839.805617	: keep-alive
+1792388839.805631	
+1792388848.376463	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":495616,"total_tokens":1000003}}
+1792388848.376492	
+1792388858.378257	: keep-alive
+1792388858.378339	
+1792388865.901985	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":497664,"total_tokens":1000003}}
+1792388865.902002	
+1792388875.902231	: keep-alive
+1792388875.902245	
+1792388885.902505	: keep-alive
+1792388885.902519	
+1792388886.313683	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":499712,"total_tokens":1000003}}
+1792388886.313697	
+1792388896.314211	: keep-alive
+1792388896.314248	
+1792388906.314907	: keep-alive
+1792388906.314921	
+1792388906.682666	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":501760,"total_tokens":1000003}}
+1792388906.682712	
+1792388916.684991	: keep-alive
+1792388916.685007	
+1792388926.685672	: keep-alive
+1792388926.685699	
+1792388926.994593	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":503808,"total_tokens":1000003}}
+1792388926.994607	
+1792388936.995180	: keep-alive
+1792388936.995203	
+1792388946.997392	: keep-alive
+1792388946.997406	
+1792388947.570226	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":505856,"total_tokens":1000003}}
+1792388947.570240	
+1792388957.571600	: keep-alive
+1792388957.571613	
+1792388967.573830	: keep-alive
+1792388967.573845	
+1792388967.669582	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":507904,"total_tokens":1000003}}
+1792388967.669597	
+1792388977.671346	: keep-alive
+1792388977.671360	
+1792388987.673302	: keep-alive
+1792388987.673318	
+1792388988.299436	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":509952,"total_tokens":1000003}}
+1792388988.299451	
+1792388998.299844	: keep-alive
+1792388998.299857	
+1792389008.300303	: keep-alive
+1792389008.300317	
+1792389009.907340	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":512000,"total_tokens":1000003}}
+1792389009.907354	
+1792389019.909500	: keep-alive
+1792389019.909523	
+1792389029.909736	: keep-alive
+1792389029.909750	
+1792389031.240321	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":514048,"total_tokens":1000003}}
+1792389031.240336	
+1792389041.241974	: keep-alive
+1792389041.241989	
+1792389051.242333	: keep-alive
+1792389051.242347	
+1792389052.631626	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":516096,"total_tokens":1000003}}
+1792389052.631641	
+1792389062.631954	: keep-alive
+1792389062.631969	
+1792389072.633980	: keep-alive
+1792389072.633996	
+1792389074.387523	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":518144,"total_tokens":1000003}}
+1792389074.387543	
+1792389084.389389	: keep-alive
+1792389084.389403	
+1792389094.389592	: keep-alive
+1792389094.389606	
+1792389096.518945	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":520192,"total_tokens":1000003}}
+1792389096.518959	
+1792389106.520466	: keep-alive
+1792389106.520480	
+1792389116.522743	: keep-alive
+1792389116.522758	
+1792389118.154589	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":522240,"total_tokens":1000003}}
+1792389118.154603	
+1792389128.155326	: keep-alive
+1792389128.155340	
+1792389138.156643	: keep-alive
+1792389138.156661	
+1792389140.692899	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":524288,"total_tokens":1000003}}
+1792389140.692914	
+1792389150.693389	: keep-alive
+1792389150.693403	
+1792389160.693712	: keep-alive
+1792389160.693744	
+1792389163.422191	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":526336,"total_tokens":1000003}}
+1792389163.422206	
+1792389173.422563	: keep-alive
+1792389173.422577	
+1792389183.424709	: keep-alive
+1792389183.424723	
+1792389186.944674	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":528384,"total_tokens":1000003}}
+1792389186.944688	
+1792389196.945441	: keep-alive
+1792389196.945464	
+1792389206.946263	: keep-alive
+1792389206.946278	
+1792389209.769911	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":530432,"total_tokens":1000003}}
+1792389209.769926	
+1792389219.770488	: keep-alive
+1792389219.770514	
+1792389229.770636	: keep-alive
+1792389229.770651	
+1792389233.833119	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":532480,"total_tokens":1000003}}
+1792389233.833134	
+1792389243.834954	: keep-alive
+1792389243.834968	
+1792389253.836361	: keep-alive
+1792389253.836376	
+1792389257.898684	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":534528,"total_tokens":1000003}}
+1792389257.898703	
+1792389267.900432	: keep-alive
+1792389267.900446	
+1792389277.901373	: keep-alive
+1792389277.901387	
+1792389282.358982	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":536576,"total_tokens":1000003}}
+1792389282.359008	
+1792389292.359383	: keep-alive
+1792389292.359397	
+1792389302.361590	: keep-alive
+1792389302.361604	
+1792389307.264959	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":538624,"total_tokens":1000003}}
+1792389307.264973	
+1792389317.266759	: keep-alive
+1792389317.266773	
+1792389327.268653	: keep-alive
+1792389327.270643	
+1792389332.031974	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":540672,"total_tokens":1000003}}
+1792389332.031992	
+1792389342.033447	: keep-alive
+1792389342.033462	
+1792389352.035400	: keep-alive
+1792389352.035417	
+1792389357.140442	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":542720,"total_tokens":1000003}}
+1792389357.140456	
+1792389367.140731	: keep-alive
+1792389367.140747	
+1792389377.143059	: keep-alive
+1792389377.143083	
+1792389382.522784	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":544768,"total_tokens":1000003}}
+1792389382.522799	
+1792389392.523083	: keep-alive
+1792389392.523100	
+1792389402.523735	: keep-alive
+1792389402.523749	
+1792389407.945968	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":546816,"total_tokens":1000003}}
+1792389407.945983	
+1792389417.946698	: keep-alive
+1792389417.946720	
+1792389427.946951	: keep-alive
+1792389427.946982	
+1792389433.211374	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":548864,"total_tokens":1000003}}
+1792389433.211388	
+1792389443.213600	: keep-alive
+1792389443.213614	
+1792389453.214443	: keep-alive
+1792389453.214456	
+1792389458.445660	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":550912,"total_tokens":1000003}}
+1792389458.445674	
+1792389468.446610	: keep-alive
+1792389468.446624	
+1792389478.448060	: keep-alive
+1792389478.448073	
+1792389483.900119	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":552960,"total_tokens":1000003}}
+1792389483.900133	
+1792389493.900750	: keep-alive
+1792389493.900764	
+1792389503.901138	: keep-alive
+1792389503.901153	
+1792389509.140641	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":555008,"total_tokens":1000003}}
+1792389509.140655	
+1792389519.141041	: keep-alive
+1792389519.141058	
+1792389529.143269	: keep-alive
+1792389529.143284	
+1792389534.604251	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":557056,"total_tokens":1000003}}
+1792389534.604272	
+1792389544.605665	: keep-alive
+1792389544.605679	
+1792389554.606529	: keep-alive
+1792389554.606543	
+1792389560.030364	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":559104,"total_tokens":1000003}}
+1792389560.030378	
+1792389570.030991	: keep-alive
+1792389570.031005	
+1792389580.031515	: keep-alive
+1792389580.031529	
+1792389585.595624	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":561152,"total_tokens":1000003}}
+1792389585.595638	
+1792389595.597456	: keep-alive
+1792389595.597473	
+1792389605.598409	: keep-alive
+1792389605.598422	
+1792389611.358162	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":563200,"total_tokens":1000003}}
+1792389611.358176	
+1792389621.358680	: keep-alive
+1792389621.358709	
+1792389631.360743	: keep-alive
+1792389631.360758	
+1792389636.843537	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":565248,"total_tokens":1000003}}
+1792389636.843552	
+1792389646.845178	: keep-alive
+1792389646.845199	
+1792389656.846655	: keep-alive
+1792389656.846669	
+1792389662.860875	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":567296,"total_tokens":1000003}}
+1792389662.860889	
+1792389672.861197	: keep-alive
+1792389672.861211	
+1792389682.863750	: keep-alive
+1792389682.863773	
+1792389688.616173	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":569344,"total_tokens":1000003}}
+1792389688.616188	
+1792389698.617730	: keep-alive
+1792389698.617744	
+1792389708.619948	: keep-alive
+1792389708.619963	
+1792389714.316658	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":571392,"total_tokens":1000003}}
+1792389714.316671	
+1792389724.318863	: keep-alive
+1792389724.318887	
+1792389734.319488	: keep-alive
+1792389734.319502	
+1792389740.209560	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":573440,"total_tokens":1000003}}
+1792389740.209574	
+1792389750.210775	: keep-alive
+1792389750.210791	
+1792389760.211587	: keep-alive
+1792389760.211602	
+1792389765.777600	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":575488,"total_tokens":1000003}}
+1792389765.777621	
+1792389775.778153	: keep-alive
+1792389775.778186	
+1792389785.779465	: keep-alive
+1792389785.779481	
+1792389791.495829	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":577536,"total_tokens":1000003}}
+1792389791.495843	
+1792389801.497444	: keep-alive
+1792389801.497457	
+1792389811.499002	: keep-alive
+1792389811.499016	
+1792389817.204113	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":579584,"total_tokens":1000003}}
+1792389817.204128	
+1792389827.207380	: keep-alive
+1792389827.207394	
+1792389837.210686	: keep-alive
+1792389837.210701	
+1792389843.041036	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":581632,"total_tokens":1000003}}
+1792389843.041051	
+1792389853.043785	: keep-alive
+1792389853.043800	
+1792389863.044922	: keep-alive
+1792389863.044937	
+1792389868.734875	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":583680,"total_tokens":1000003}}
+1792389868.734921	
+1792389878.735507	: keep-alive
+1792389878.735522	
+1792389888.736142	: keep-alive
+1792389888.736166	
+1792389894.482684	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":585728,"total_tokens":1000003}}
+1792389894.482698	
+1792389904.484595	: keep-alive
+1792389904.484610	
+1792389914.484943	: keep-alive
+1792389914.484957	
+1792389920.415047	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":587776,"total_tokens":1000003}}
+1792389920.415061	
+1792389930.417282	: keep-alive
+1792389930.417296	
+1792389940.418743	: keep-alive
+1792389940.418766	
+1792389946.137376	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":589824,"total_tokens":1000003}}
+1792389946.137390	
+1792389956.139447	: keep-alive
+1792389956.139461	
+1792389966.140932	: keep-alive
+1792389966.140946	
+1792389971.959264	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":591872,"total_tokens":1000003}}
+1792389971.959279	
+1792389981.959702	: keep-alive
+1792389981.959716	
+1792389991.961921	: keep-alive
+1792389991.961935	
+1792389997.707863	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":593920,"total_tokens":1000003}}
+1792389997.707877	
+1792390007.709549	: keep-alive
+1792390007.709564	
+1792390017.710291	: keep-alive
+1792390017.710306	
+1792390023.589677	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":595968,"total_tokens":1000003}}
+1792390023.589692	
+1792390033.590991	: keep-alive
+1792390033.591006	
+1792390043.592049	: keep-alive
+1792390043.592063	
+1792390049.616672	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":598016,"total_tokens":1000003}}
+1792390049.616688	
+1792390059.617367	: keep-alive
+1792390059.617381	
+1792390069.619179	: keep-alive
+1792390069.619200	
+1792390075.604046	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":600064,"total_tokens":1000003}}
+1792390075.604060	
+1792390085.604987	: keep-alive
+1792390085.605002	
+1792390095.607128	: keep-alive
+1792390095.607143	
+1792390101.610713	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":602112,"total_tokens":1000003}}
+1792390101.610727	
+1792390111.612239	: keep-alive
+1792390111.612254	
+1792390121.614489	: keep-alive
+1792390121.614509	
+1792390127.582055	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":604160,"total_tokens":1000003}}
+1792390127.582069	
+1792390137.584296	: keep-alive
+1792390137.584319	
+1792390147.585736	: keep-alive
+1792390147.585769	
+1792390153.630783	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":606208,"total_tokens":1000003}}
+1792390153.630797	
+1792390163.632426	: keep-alive
+1792390163.632448	
+1792390173.633528	: keep-alive
+1792390173.633541	
+1792390179.624072	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":608256,"total_tokens":1000003}}
+1792390179.624087	
+1792390189.625406	: keep-alive
+1792390189.625420	
+1792390199.627169	: keep-alive
+1792390199.627187	
+1792390205.753586	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":610304,"total_tokens":1000003}}
+1792390205.753600	
+1792390215.755563	: keep-alive
+1792390215.755587	
+1792390225.757773	: keep-alive
+1792390225.757787	
+1792390231.935211	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":612352,"total_tokens":1000003}}
+1792390231.935225	
+1792390241.937189	: keep-alive
+1792390241.937203	
+1792390251.938687	: keep-alive
+1792390251.938703	
+1792390257.962044	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":614400,"total_tokens":1000003}}
+1792390257.962058	
+1792390267.962678	: keep-alive
+1792390267.962704	
+1792390277.964740	: keep-alive
+1792390277.964754	
+1792390284.194009	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":616448,"total_tokens":1000003}}
+1792390284.194023	
+1792390294.194962	: keep-alive
+1792390294.194976	
+1792390304.197236	: keep-alive
+1792390304.197250	
+1792390310.369722	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":618496,"total_tokens":1000003}}
+1792390310.369737	
+1792390320.370918	: keep-alive
+1792390320.370933	
+1792390330.372964	: keep-alive
+1792390330.372979	
+1792390336.717521	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":620544,"total_tokens":1000003}}
+1792390336.717535	
+1792390346.718150	: keep-alive
+1792390346.718163	
+1792390356.718761	: keep-alive
+1792390356.718775	
+1792390362.993731	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":622592,"total_tokens":1000003}}
+1792390362.993745	
+1792390372.995025	: keep-alive
+1792390372.995038	
+1792390382.995249	: keep-alive
+1792390382.995263	
+1792390389.407609	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":624640,"total_tokens":1000003}}
+1792390389.407624	
+1792390399.409922	: keep-alive
+1792390399.409945	
+1792390409.410183	: keep-alive
+1792390409.410210	
+1792390415.799438	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":626688,"total_tokens":1000003}}
+1792390415.799452	
+1792390425.801607	: keep-alive
+1792390425.801624	
+1792390435.803246	: keep-alive
+1792390435.803270	
+1792390442.206128	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":628736,"total_tokens":1000003}}
+1792390442.206143	
+1792390452.208063	: keep-alive
+1792390452.208077	
+1792390462.208585	: keep-alive
+1792390462.208601	
+1792390468.674622	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":630784,"total_tokens":1000003}}
+1792390468.674636	
+1792390478.674949	: keep-alive
+1792390478.674963	
+1792390488.675468	: keep-alive
+1792390488.675482	
+1792390495.071728	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":632832,"total_tokens":1000003}}
+1792390495.072248	
+1792390505.072163	: keep-alive
+1792390505.072177	
+1792390515.073821	: keep-alive
+1792390515.073836	
+1792390521.679202	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":634880,"total_tokens":1000003}}
+1792390521.679219	
+1792390531.679981	: keep-alive
+1792390531.679996	
+1792390541.681287	: keep-alive
+1792390541.681302	
+1792390548.232095	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":636928,"total_tokens":1000003}}
+1792390548.232110	
+1792390558.232838	: keep-alive
+1792390558.232852	
+1792390568.233576	: keep-alive
+1792390568.233591	
+1792390574.778703	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":638976,"total_tokens":1000003}}
+1792390574.778717	
+1792390584.780838	: keep-alive
+1792390584.780852	
+1792390594.783096	: keep-alive
+1792390594.783110	
+1792390601.227753	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":641024,"total_tokens":1000003}}
+1792390601.227767	
+1792390611.228351	: keep-alive
+1792390611.228366	
+1792390621.228845	: keep-alive
+1792390621.228860	
+1792390627.821565	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":643072,"total_tokens":1000003}}
+1792390627.821579	
+1792390637.822175	: keep-alive
+1792390637.822190	
+1792390647.823530	: keep-alive
+1792390647.823545	
+1792390654.382794	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":645120,"total_tokens":1000003}}
+1792390654.382808	
+1792390664.385377	: keep-alive
+1792390664.385401	
+1792390674.385861	: keep-alive
+1792390674.385876	
+1792390680.927705	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":647168,"total_tokens":1000003}}
+1792390680.927720	
+1792390690.929918	: keep-alive
+1792390690.929933	
+1792390700.930170	: keep-alive
+1792390700.930185	
+1792390707.653205	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":649216,"total_tokens":1000003}}
+1792390707.653219	
+1792390717.653586	: keep-alive
+1792390717.653601	
+1792390727.655425	: keep-alive
+1792390727.655439	
+1792390734.212812	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":651264,"total_tokens":1000003}}
+1792390734.212826	
+1792390744.214239	: keep-alive
+1792390744.214252	
+1792390754.216364	: keep-alive
+1792390754.216378	
+1792390760.873818	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":653312,"total_tokens":1000003}}
+1792390760.873832	
+1792390770.874351	: keep-alive
+1792390770.874365	
+1792390780.874644	: keep-alive
+1792390780.874658	
+1792390787.549652	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":655360,"total_tokens":1000003}}
+1792390787.549666	
+1792390797.551926	: keep-alive
+1792390797.551941	
+1792390807.552421	: keep-alive
+1792390807.552446	
+1792390814.450094	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":657408,"total_tokens":1000003}}
+1792390814.450109	
+1792390824.451890	: keep-alive
+1792390824.451904	
+1792390834.453294	: keep-alive
+1792390834.453316	
+1792390841.140277	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":659456,"total_tokens":1000003}}
+1792390841.140291	
+1792390851.141975	: keep-alive
+1792390851.141991	
+1792390861.143609	: keep-alive
+1792390861.143638	
+1792390868.129197	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":661504,"total_tokens":1000003}}
+1792390868.129211	
+1792390878.131627	: keep-alive
+1792390878.131641	
+1792390888.132210	: keep-alive
+1792390888.132225	
+1792390895.038494	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":663552,"total_tokens":1000003}}
+1792390895.038514	
+1792390905.040133	: keep-alive
+1792390905.040148	
+1792390915.042011	: keep-alive
+1792390915.042025	
+1792390921.884187	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":665600,"total_tokens":1000003}}
+1792390921.884202	
+1792390931.886067	: keep-alive
+1792390931.886082	
+1792390941.888258	: keep-alive
+1792390941.888273	
+1792390948.997294	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":667648,"total_tokens":1000003}}
+1792390948.997308	
+1792390958.999959	: keep-alive
+1792390958.999981	
+1792390969.001479	: keep-alive
+1792390969.001493	
+1792390975.976105	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":669696,"total_tokens":1000003}}
+1792390975.976120	
+1792390985.976784	: keep-alive
+1792390985.976797	
+1792390995.977901	: keep-alive
+1792390995.977915	
+1792391002.993992	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":671744,"total_tokens":1000003}}
+1792391002.994005	
+1792391012.995079	: keep-alive
+1792391012.995096	
+1792391022.996314	: keep-alive
+1792391022.996339	
+1792391030.054934	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":673792,"total_tokens":1000003}}
+1792391030.054948	
+1792391040.056140	: keep-alive
+1792391040.056153	
+1792391050.056569	: keep-alive
+1792391050.056583	
+1792391057.241261	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":675840,"total_tokens":1000003}}
+1792391057.241275	
+1792391067.241952	: keep-alive
+1792391067.241973	
+1792391077.242871	: keep-alive
+1792391077.242885	
+1792391084.304745	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":677888,"total_tokens":1000003}}
+1792391084.304771	
+1792391094.306907	: keep-alive
+1792391094.306929	
+1792391104.308906	: keep-alive
+1792391104.308921	
+1792391111.561501	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":679936,"total_tokens":1000003}}
+1792391111.561515	
+1792391121.563475	: keep-alive
+1792391121.563490	
+1792391131.563904	: keep-alive
+1792391131.563917	
+1792391138.733346	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":681984,"total_tokens":1000003}}
+1792391138.733360	
+1792391148.734216	: keep-alive
+1792391148.734231	
+1792391158.734861	: keep-alive
+1792391158.734880	
+1792391166.082477	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":684032,"total_tokens":1000003}}
+1792391166.082491	
+1792391176.083579	: keep-alive
+1792391176.083603	
+1792391186.084266	: keep-alive
+1792391186.084280	
+1792391193.211244	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":686080,"total_tokens":1000003}}
+1792391193.211259	
+1792391203.212224	: keep-alive
+1792391203.212239	
+1792391213.214499	: keep-alive
+1792391213.215870	
+1792391220.338396	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":688128,"total_tokens":1000003}}
+1792391220.338410	
+1792391230.338980	: keep-alive
+1792391230.338998	
+1792391240.340860	: keep-alive
+1792391240.340874	
+1792391247.689795	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":690176,"total_tokens":1000003}}
+1792391247.689809	
+1792391257.691780	: keep-alive
+1792391257.691796	
+1792391267.692043	: keep-alive
+1792391267.692058	
+1792391274.939565	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":692224,"total_tokens":1000003}}
+1792391274.939580	
+1792391284.941545	: keep-alive
+1792391284.941559	
+1792391294.942558	: keep-alive
+1792391294.942573	
+1792391302.361603	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":694272,"total_tokens":1000003}}
+1792391302.361619	
+1792391312.363195	: keep-alive
+1792391312.363209	
+1792391322.365466	: keep-alive
+1792391322.365480	
+1792391329.651690	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":696320,"total_tokens":1000003}}
+1792391329.651704	
+1792391339.653228	: keep-alive
+1792391339.653241	
+1792391349.653682	: keep-alive
+1792391349.653696	
+1792391357.229905	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":698368,"total_tokens":1000003}}
+1792391357.229919	
+1792391367.231988	: keep-alive
+1792391367.232002	
+1792391377.232617	: keep-alive
+1792391377.232632	
+1792391384.612331	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":700416,"total_tokens":1000003}}
+1792391384.612345	
+1792391394.614235	: keep-alive
+1792391394.614250	
+1792391404.616499	: keep-alive
+1792391404.616513	
+1792391412.034898	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":702464,"total_tokens":1000003}}
+1792391412.034912	
+1792391422.036838	: keep-alive
+1792391422.036853	
+1792391432.037412	: keep-alive
+1792391432.037427	
+1792391439.547813	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":704512,"total_tokens":1000003}}
+1792391439.547827	
+1792391449.548168	: keep-alive
+1792391449.548182	
+1792391459.550035	: keep-alive
+1792391459.550048	
+1792391467.092989	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":706560,"total_tokens":1000003}}
+1792391467.093003	
+1792391477.095304	: keep-alive
+1792391477.095320	
+1792391487.097003	: keep-alive
+1792391487.097018	
+1792391494.613191	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":708608,"total_tokens":1000003}}
+1792391494.613205	
+1792391504.615718	: keep-alive
+1792391504.615739	
+1792391514.617848	: keep-alive
+1792391514.617861	
+1792391522.217401	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":710656,"total_tokens":1000003}}
+1792391522.217415	
+1792391532.219686	: keep-alive
+1792391532.219700	
+1792391542.221973	: keep-alive
+1792391542.221987	
+1792391549.914678	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":712704,"total_tokens":1000003}}
+1792391549.914691	
+1792391559.916878	: keep-alive
+1792391559.916892	
+1792391569.918646	: keep-alive
+1792391569.918659	
+1792391577.446850	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":714752,"total_tokens":1000003}}
+1792391577.446865	
+1792391587.447297	: keep-alive
+1792391587.447312	
+1792391597.449496	: keep-alive
+1792391597.449509	
+1792391605.215979	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":716800,"total_tokens":1000003}}
+1792391605.215993	
+1792391615.217112	: keep-alive
+1792391615.217128	
+1792391625.217366	: keep-alive
+1792391625.217380	
+1792391632.881335	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":718848,"total_tokens":1000003}}
+1792391632.881349	
+1792391642.881611	: keep-alive
+1792391642.881626	
+1792391652.882489	: keep-alive
+1792391652.882504	
+1792391660.749392	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":720896,"total_tokens":1000003}}
+1792391660.749406	
+1792391670.750611	: keep-alive
+1792391670.750625	
+1792391680.752387	: keep-alive
+1792391680.752401	
+1792391688.413551	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":722944,"total_tokens":1000003}}
+1792391688.413565	
+1792391698.415112	: keep-alive
+1792391698.415126	
+1792391708.416357	: keep-alive
+1792391708.416371	
+1792391716.321085	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":724992,"total_tokens":1000003}}
+1792391716.321100	
+1792391726.321680	: keep-alive
+1792391726.321694	
+1792391736.323614	: keep-alive
+1792391736.323628	
+1792391744.156687	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":727040,"total_tokens":1000003}}
+1792391744.156703	
+1792391754.158679	: keep-alive
+1792391754.158693	
+1792391764.160932	: keep-alive
+1792391764.160945	
+1792391772.100309	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":729088,"total_tokens":1000003}}
+1792391772.100323	
+1792391782.102437	: keep-alive
+1792391782.102451	
+1792391792.103296	: keep-alive
+1792391792.103321	
+1792391799.984987	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":731136,"total_tokens":1000003}}
+1792391799.985001	
+1792391809.986038	: keep-alive
+1792391809.986052	
+1792391819.986705	: keep-alive
+1792391819.986729	
+1792391828.057546	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":733184,"total_tokens":1000003}}
+1792391828.057564	
+1792391838.059720	: keep-alive
+1792391838.059735	
+1792391848.061962	: keep-alive
+1792391848.061976	
+1792391856.046772	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":735232,"total_tokens":1000003}}
+1792391856.046786	
+1792391866.047607	: keep-alive
+1792391866.047621	
+1792391876.049830	: keep-alive
+1792391876.049845	
+1792391884.115005	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":737280,"total_tokens":1000003}}
+1792391884.115020	
+1792391894.116913	: keep-alive
+1792391894.116934	
+1792391904.118364	: keep-alive
+1792391904.118378	
+1792391912.223924	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":739328,"total_tokens":1000003}}
+1792391912.223946	
+1792391922.224346	: keep-alive
+1792391922.224360	
+1792391932.226019	: keep-alive
+1792391932.226033	
+1792391940.245627	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":741376,"total_tokens":1000003}}
+1792391940.245642	
+1792391950.247895	: keep-alive
+1792391950.247910	
+1792391960.248110	: keep-alive
+1792391960.248126	
+1792391968.508262	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":743424,"total_tokens":1000003}}
+1792391968.508278	
+1792391978.509316	: keep-alive
+1792391978.509331	
+1792391988.509753	: keep-alive
+1792391988.509768	
+1792391996.497113	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":745472,"total_tokens":1000003}}
+1792391996.497127	
+1792392006.497336	: keep-alive
+1792392006.497350	
+1792392016.498229	: keep-alive
+1792392016.498243	
+1792392024.580775	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":747520,"total_tokens":1000003}}
+1792392024.580789	
+1792392034.581523	: keep-alive
+1792392034.581538	
+1792392044.582388	: keep-alive
+1792392044.582440	
+1792392052.609749	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":749568,"total_tokens":1000003}}
+1792392052.609763	
+1792392062.611962	: keep-alive
+1792392062.611976	
+1792392072.613422	: keep-alive
+1792392072.613437	
+1792392080.879250	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":751616,"total_tokens":1000003}}
+1792392080.879264	
+1792392090.881033	: keep-alive
+1792392090.881048	
+1792392100.881555	: keep-alive
+1792392100.881569	
+1792392109.335285	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":753664,"total_tokens":1000003}}
+1792392109.335299	
+1792392119.336531	: keep-alive
+1792392119.336546	
+1792392129.338610	: keep-alive
+1792392129.338624	
+1792392137.539829	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":755712,"total_tokens":1000003}}
+1792392137.539843	
+1792392147.542490	: keep-alive
+1792392147.542514	
+1792392157.544011	: keep-alive
+1792392157.544040	
+1792392165.827742	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":757760,"total_tokens":1000003}}
+1792392165.827756	
+1792392175.827994	: keep-alive
+1792392175.828008	
+1792392185.830261	: keep-alive
+1792392185.830275	
+1792392194.356064	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":759808,"total_tokens":1000003}}
+1792392194.356079	
+1792392204.358038	: keep-alive
+1792392204.358053	
+1792392214.359196	: keep-alive
+1792392214.359210	
+1792392222.826143	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":761856,"total_tokens":1000003}}
+1792392222.826157	
+1792392232.827040	: keep-alive
+1792392232.827053	
+1792392242.828442	: keep-alive
+1792392242.828458	
+1792392251.346685	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":763904,"total_tokens":1000003}}
+1792392251.346699	
+1792392261.348023	: keep-alive
+1792392261.348038	
+1792392271.349049	: keep-alive
+1792392271.349064	
+1792392279.751555	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":765952,"total_tokens":1000003}}
+1792392279.751568	
+1792392289.753015	: keep-alive
+1792392289.753029	
+1792392299.755261	: keep-alive
+1792392299.755276	
+1792392308.416549	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":768000,"total_tokens":1000003}}
+1792392308.416563	
+1792392318.417787	: keep-alive
+1792392318.417801	
+1792392328.418359	: keep-alive
+1792392328.418372	
+1792392336.966296	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":770048,"total_tokens":1000003}}
+1792392336.966310	
+1792392346.967095	: keep-alive
+1792392346.967108	
+1792392356.967874	: keep-alive
+1792392356.967888	
+1792392365.565624	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":772096,"total_tokens":1000003}}
+1792392365.565639	
+1792392375.566218	: keep-alive
+1792392375.566242	
+1792392385.567588	: keep-alive
+1792392385.567613	
+1792392394.252608	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":774144,"total_tokens":1000003}}
+1792392394.252622	
+1792392404.254720	: keep-alive
+1792392404.254735	
+1792392414.254985	: keep-alive
+1792392414.254999	
+1792392422.934241	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":776192,"total_tokens":1000003}}
+1792392422.934255	
+1792392432.935221	: keep-alive
+1792392432.935236	
+1792392442.935853	: keep-alive
+1792392442.935868	
+1792392451.673744	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":778240,"total_tokens":1000003}}
+1792392451.673759	
+1792392461.675760	: keep-alive
+1792392461.675776	
+1792392471.676107	: keep-alive
+1792392471.676122	
+1792392480.375892	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":780288,"total_tokens":1000003}}
+1792392480.375906	
+1792392490.376894	: keep-alive
+1792392490.376908	
+1792392500.379168	: keep-alive
+1792392500.379183	
+1792392509.089198	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":782336,"total_tokens":1000003}}
+1792392509.089212	
+1792392519.089580	: keep-alive
+1792392519.089598	
+1792392529.091238	: keep-alive
+1792392529.091251	
+1792392537.746675	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":784384,"total_tokens":1000003}}
+1792392537.746690	
+1792392547.748354	: keep-alive
+1792392547.748369	
+1792392557.749839	: keep-alive
+1792392557.749853	
+1792392566.581969	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":786432,"total_tokens":1000003}}
+1792392566.581983	
+1792392576.584237	: keep-alive
+1792392576.584253	
+1792392586.585494	: keep-alive
+1792392586.585508	
+1792392595.376557	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":788480,"total_tokens":1000003}}
+1792392595.376572	
+1792392605.377875	: keep-alive
+1792392605.377890	
+1792392615.380160	: keep-alive
+1792392615.380178	
+1792392624.296130	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":790528,"total_tokens":1000003}}
+1792392624.296145	
+1792392634.298422	: keep-alive
+1792392634.298437	
+1792392644.300722	: keep-alive
+1792392644.300735	
+1792392653.150461	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":792576,"total_tokens":1000003}}
+1792392653.150475	
+1792392663.152145	: keep-alive
+1792392663.152167	
+1792392673.152875	: keep-alive
+1792392673.152901	
+1792392682.178395	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":794624,"total_tokens":1000003}}
+1792392682.178410	
+1792392692.179311	: keep-alive
+1792392692.179326	
+1792392702.181282	: keep-alive
+1792392702.181298	
+1792392711.233467	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":796672,"total_tokens":1000003}}
+1792392711.233482	
+1792392721.234680	: keep-alive
+1792392721.234695	
+1792392731.235413	: keep-alive
+1792392731.235429	
+1792392740.358309	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":798720,"total_tokens":1000003}}
+1792392740.358323	
+1792392750.359653	: keep-alive
+1792392750.359667	
+1792392760.361912	: keep-alive
+1792392760.361925	
+1792392769.356551	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":800768,"total_tokens":1000003}}
+1792392769.356567	
+1792392779.358772	: keep-alive
+1792392779.358786	
+1792392789.359428	: keep-alive
+1792392789.359443	
+1792392798.482884	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":802816,"total_tokens":1000003}}
+1792392798.482899	
+1792392808.483996	: keep-alive
+1792392808.484015	
+1792392818.484189	: keep-alive
+1792392818.484203	
+1792392827.710685	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":804864,"total_tokens":1000003}}
+1792392827.710699	
+1792392837.712835	: keep-alive
+1792392837.712849	
+1792392847.715084	: keep-alive
+1792392847.715100	
+1792392856.881917	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":806912,"total_tokens":1000003}}
+1792392856.881932	
+1792392866.883362	: keep-alive
+1792392866.883376	
+1792392876.884709	: keep-alive
+1792392876.884724	
+1792392886.185971	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":808960,"total_tokens":1000003}}
+1792392886.185985	
+1792392896.187346	: keep-alive
+1792392896.187361	
+1792392906.189017	: keep-alive
+1792392906.189032	
+1792392915.297937	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":811008,"total_tokens":1000003}}
+1792392915.297952	
+1792392925.300013	: keep-alive
+1792392925.300027	
+1792392935.301263	: keep-alive
+1792392935.301277	
+1792392944.545360	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":813056,"total_tokens":1000003}}
+1792392944.545374	
+1792392954.545952	: keep-alive
+1792392954.545966	
+1792392964.546836	: keep-alive
+1792392964.546850	
+1792392973.934316	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":815104,"total_tokens":1000003}}
+1792392973.934330	
+1792392983.935207	: keep-alive
+1792392983.935222	
+1792392993.936391	: keep-alive
+1792392993.936405	
+1792393003.259757	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":817152,"total_tokens":1000003}}
+1792393003.259774	
+1792393013.261173	: keep-alive
+1792393013.261186	
+1792393023.262154	: keep-alive
+1792393023.262801	
+1792393032.591213	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":819200,"total_tokens":1000003}}
+1792393032.591232	
+1792393042.592987	: keep-alive
+1792393042.593002	
+1792393052.594645	: keep-alive
+1792393052.594659	
+1792393061.962842	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":821248,"total_tokens":1000003}}
+1792393061.962856	
+1792393071.963668	: keep-alive
+1792393071.963683	
+1792393081.964144	: keep-alive
+1792393081.964159	
+1792393091.362907	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":823296,"total_tokens":1000003}}
+1792393091.362922	
+1792393101.365369	: keep-alive
+1792393101.365383	
+1792393111.367017	: keep-alive
+1792393111.367031	
+1792393120.752255	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":825344,"total_tokens":1000003}}
+1792393120.752270	
+1792393130.752562	: keep-alive
+1792393130.752575	
+1792393140.754838	: keep-alive
+1792393140.754851	
+1792393150.546351	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":827392,"total_tokens":1000003}}
+1792393150.546367	
+1792393160.547342	: keep-alive
+1792393160.547357	
+1792393170.548972	: keep-alive
+1792393170.548995	
+1792393180.022272	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":829440,"total_tokens":1000003}}
+1792393180.022286	
+1792393190.024048	: keep-alive
+1792393190.024070	
+1792393200.024673	: keep-alive
+1792393200.024687	
+1792393209.699079	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":831488,"total_tokens":1000003}}
+1792393209.699094	
+1792393219.700004	: keep-alive
+1792393219.700018	
+1792393229.700475	: keep-alive
+1792393229.700489	
+1792393239.197769	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":833536,"total_tokens":1000003}}
+1792393239.197783	
+1792393249.199372	: keep-alive
+1792393249.199397	
+1792393259.200235	: keep-alive
+1792393259.200250	
+1792393268.801403	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":835584,"total_tokens":1000003}}
+1792393268.801418	
+1792393278.803327	: keep-alive
+1792393278.803340	
+1792393288.804557	: keep-alive
+1792393288.804571	
+1792393298.358201	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":837632,"total_tokens":1000003}}
+1792393298.358216	
+1792393308.360267	: keep-alive
+1792393308.360282	
+1792393318.361220	: keep-alive
+1792393318.361233	
+1792393327.968276	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":839680,"total_tokens":1000003}}
+1792393327.968291	
+1792393337.969079	: keep-alive
+1792393337.969103	
+1792393347.970850	: keep-alive
+1792393347.970864	
+1792393357.650180	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":841728,"total_tokens":1000003}}
+1792393357.650194	
+1792393367.652263	: keep-alive
+1792393367.652287	
+1792393377.653543	: keep-alive
+1792393377.653558	
+1792393387.457569	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":843776,"total_tokens":1000003}}
+1792393387.457583	
+1792393397.459524	: keep-alive
+1792393397.459546	
+1792393407.459681	: keep-alive
+1792393407.459695	
+1792393417.167157	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":845824,"total_tokens":1000003}}
+1792393417.167171	
+1792393427.168175	: keep-alive
+1792393427.168198	
+1792393437.168764	: keep-alive
+1792393437.168779	
+1792393447.042018	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":847872,"total_tokens":1000003}}
+1792393447.042032	
+1792393457.043184	: keep-alive
+1792393457.043199	
+1792393467.045247	: keep-alive
+1792393467.045261	
+1792393476.829634	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":849920,"total_tokens":1000003}}
+1792393476.829648	
+1792393486.830015	: keep-alive
+1792393486.830028	
+1792393496.832115	: keep-alive
+1792393496.832129	
+1792393506.693773	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":851968,"total_tokens":1000003}}
+1792393506.693787	
+1792393516.694543	: keep-alive
+1792393516.694569	
+1792393526.695832	: keep-alive
+1792393526.695847	
+1792393536.523508	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":854016,"total_tokens":1000003}}
+1792393536.523522	
+1792393546.523986	: keep-alive
+1792393546.524000	
+1792393556.524777	: keep-alive
+1792393556.524791	
+1792393566.525459	: keep-alive
+1792393566.525473	
+1792393566.755481	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":856064,"total_tokens":1000003}}
+1792393566.755496	
+1792393576.756843	: keep-alive
+1792393576.756859	
+1792393586.757429	: keep-alive
+1792393586.757443	
+1792393596.514451	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":858112,"total_tokens":1000003}}
+1792393596.514465	
+1792393606.516187	: keep-alive
+1792393606.516201	
+1792393616.518377	: keep-alive
+1792393616.518391	
+1792393626.519191	: keep-alive
+1792393626.519205	
+1792393626.712927	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":860160,"total_tokens":1000003}}
+1792393626.712941	
+1792393636.714518	: keep-alive
+1792393636.714538	
+1792393646.714961	: keep-alive
+1792393646.714975	
+1792393656.656333	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":862208,"total_tokens":1000003}}
+1792393656.656347	
+1792393666.657302	: keep-alive
+1792393666.657324	
+1792393676.657466	: keep-alive
+1792393676.657481	
+1792393686.441587	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":864256,"total_tokens":1000003}}
+1792393686.441601	
+1792393696.443721	: keep-alive
+1792393696.443737	
+1792393706.445329	: keep-alive
+1792393706.445344	
+1792393716.108365	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":866304,"total_tokens":1000003}}
+1792393716.108380	
+1792393726.110025	: keep-alive
+1792393726.110039	
+1792393736.111389	: keep-alive
+1792393736.111404	
+1792393746.054067	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":868352,"total_tokens":1000003}}
+1792393746.054083	
+1792393756.056234	: keep-alive
+1792393756.056248	
+1792393766.057010	: keep-alive
+1792393766.057024	
+1792393775.772183	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":870400,"total_tokens":1000003}}
+1792393775.772200	
+1792393785.773642	: keep-alive
+1792393785.773657	
+1792393795.773901	: keep-alive
+1792393795.773915	
+1792393805.708341	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":872448,"total_tokens":1000003}}
+1792393805.708358	
+1792393815.709579	: keep-alive
+1792393815.709605	
+1792393825.710008	: keep-alive
+1792393825.710022	
+1792393835.334266	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":874496,"total_tokens":1000003}}
+1792393835.334281	
+1792393845.335883	: keep-alive
+1792393845.335897	
+1792393855.336592	: keep-alive
+1792393855.336606	
+1792393865.197620	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":876544,"total_tokens":1000003}}
+1792393865.197643	
+1792393875.198847	: keep-alive
+1792393875.198861	
+1792393885.200695	: keep-alive
+1792393885.200709	
+1792393894.881592	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":878592,"total_tokens":1000003}}
+1792393894.881607	
+1792393904.883688	: keep-alive
+1792393904.883702	
+1792393914.884918	: keep-alive
+1792393914.884932	
+1792393924.885232	: keep-alive
+1792393924.885246	
+1792393924.896470	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":880640,"total_tokens":1000003}}
+1792393924.896477	
+1792393934.897213	: keep-alive
+1792393934.897238	
+1792393944.898580	: keep-alive
+1792393944.898595	
+1792393954.604353	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":882688,"total_tokens":1000003}}
+1792393954.604367	
+1792393964.604908	: keep-alive
+1792393964.604923	
+1792393974.605627	: keep-alive
+1792393974.605642	
+1792393984.443976	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":884736,"total_tokens":1000003}}
+1792393984.443990	
+1792393994.445217	: keep-alive
+1792393994.445232	
+1792394004.446851	: keep-alive
+1792394004.446865	
+1792394014.384418	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":886784,"total_tokens":1000003}}
+1792394014.384432	
+1792394024.386605	: keep-alive
+1792394024.386622	
+1792394034.388714	: keep-alive
+1792394034.388729	
+1792394044.389556	: keep-alive
+1792394044.389571	
+1792394044.645634	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":888832,"total_tokens":1000003}}
+1792394044.645648	
+1792394054.646814	: keep-alive
+1792394054.646829	
+1792394064.647690	: keep-alive
+1792394064.647704	
+1792394074.573656	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":890880,"total_tokens":1000003}}
+1792394074.573676	
+1792394084.574342	: keep-alive
+1792394084.574357	
+1792394094.576548	: keep-alive
+1792394094.576562	
+1792394104.577269	: keep-alive
+1792394104.577284	
+1792394104.648523	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":892928,"total_tokens":1000003}}
+1792394104.649791	
+1792394114.648674	: keep-alive
+1792394114.648688	
+1792394124.649392	: keep-alive
+1792394124.649411	
+1792394134.650366	: keep-alive
+1792394134.650380	
+1792394134.717131	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":894976,"total_tokens":1000003}}
+1792394134.717146	
+1792394144.717375	: keep-alive
+1792394144.717390	
+1792394154.717695	: keep-alive
+1792394154.717709	
+1792394164.719756	: keep-alive
+1792394164.719769	
+1792394164.893590	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":897024,"total_tokens":1000003}}
+1792394164.893604	
+1792394174.895636	: keep-alive
+1792394174.895658	
+1792394184.896155	: keep-alive
+1792394184.896169	
+1792394194.897196	: keep-alive
+1792394194.897215	
+1792394194.978439	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":899072,"total_tokens":1000003}}
+1792394194.978455	
+1792394204.978979	: keep-alive
+1792394204.978993	
+1792394214.981164	: keep-alive
+1792394214.981178	
+1792394224.981749	: keep-alive
+1792394224.981763	
+1792394225.220972	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":901120,"total_tokens":1000003}}
+1792394225.220987	
+1792394235.222277	: keep-alive
+1792394235.222291	
+1792394245.222883	: keep-alive
+1792394245.222897	
+1792394255.224878	: keep-alive
+1792394255.224892	
+1792394255.361649	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":903168,"total_tokens":1000003}}
+1792394255.361683	
+1792394265.363371	: keep-alive
+1792394265.363396	
+1792394275.363593	: keep-alive
+1792394275.363607	
+1792394285.365090	: keep-alive
+1792394285.365104	
+1792394285.652351	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":905216,"total_tokens":1000003}}
+1792394285.652365	
+1792394295.654660	: keep-alive
+1792394295.654678	
+1792394305.656329	: keep-alive
+1792394305.656357	
+1792394315.656781	: keep-alive
+1792394315.656795	
+1792394315.927172	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":907264,"total_tokens":1000003}}
+1792394315.927186	
+1792394325.929678	: keep-alive
+1792394325.929702	
+1792394335.929860	: keep-alive
+1792394335.929874	
+1792394345.930434	: keep-alive
+1792394345.930449	
+1792394346.256346	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":909312,"total_tokens":1000003}}
+1792394346.256360	
+1792394356.256762	: keep-alive
+1792394356.256777	
+1792394366.257366	: keep-alive
+1792394366.257380	
+1792394376.259592	: keep-alive
+1792394376.259617	
+1792394376.435603	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":911360,"total_tokens":1000003}}
+1792394376.435616	
+1792394386.437061	: keep-alive
+1792394386.437074	
+1792394396.437883	: keep-alive
+1792394396.437897	
+1792394406.440039	: keep-alive
+1792394406.440055	
+1792394407.123411	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":913408,"total_tokens":1000003}}
+1792394407.123426	
+1792394417.124530	: keep-alive
+1792394417.124544	
+1792394427.125020	: keep-alive
+1792394427.125034	
+1792394437.127265	: keep-alive
+1792394437.127279	
+1792394437.811837	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":915456,"total_tokens":1000003}}
+1792394437.811851	
+1792394447.812499	: keep-alive
+1792394447.812513	
+1792394457.813404	: keep-alive
+1792394457.813417	
+1792394467.815099	: keep-alive
+1792394467.815114	
+1792394468.608136	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":917504,"total_tokens":1000003}}
+1792394468.608151	
+1792394478.609921	: keep-alive
+1792394478.609935	
+1792394488.612130	: keep-alive
+1792394488.612142	
+1792394498.613516	: keep-alive
+1792394498.613538	
+1792394499.225044	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":919552,"total_tokens":1000003}}
+1792394499.225059	
+1792394509.227280	: keep-alive
+1792394509.227293	
+1792394519.228481	: keep-alive
+1792394519.228495	
+1792394529.229650	: keep-alive
+1792394529.229664	
+1792394530.068013	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":921600,"total_tokens":1000003}}
+1792394530.068033	
+1792394540.069218	: keep-alive
+1792394540.069232	
+1792394550.069490	: keep-alive
+1792394550.069504	
+1792394560.071708	: keep-alive
+1792394560.071722	
+1792394560.625943	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":923648,"total_tokens":1000003}}
+1792394560.625962	
+1792394570.627354	: keep-alive
+1792394570.627369	
+1792394580.628046	: keep-alive
+1792394580.628060	
+1792394590.628338	: keep-alive
+1792394590.628352	
+1792394591.669742	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":925696,"total_tokens":1000003}}
+1792394591.669756	
+1792394601.671852	: keep-alive
+1792394601.671865	
+1792394611.674097	: keep-alive
+1792394611.674112	
+1792394621.676635	: keep-alive
+1792394621.676657	
+1792394622.434300	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":927744,"total_tokens":1000003}}
+1792394622.434338	
+1792394632.436491	: keep-alive
+1792394632.436504	
+1792394642.438736	: keep-alive
+1792394642.438750	
+1792394652.440837	: keep-alive
+1792394652.440851	
+1792394653.221614	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":929792,"total_tokens":1000003}}
+1792394653.221628	
+1792394663.222904	: keep-alive
+1792394663.222918	
+1792394673.224933	: keep-alive
+1792394673.224948	
+1792394683.225710	: keep-alive
+1792394683.225736	
+1792394683.884958	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":931840,"total_tokens":1000003}}
+1792394683.884973	
+1792394693.887232	: keep-alive
+1792394693.887248	
+1792394703.889262	: keep-alive
+1792394703.889276	
+1792394713.890233	: keep-alive
+1792394713.890249	
+1792394714.763362	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":933888,"total_tokens":1000003}}
+1792394714.763382	
+1792394724.764705	: keep-alive
+1792394724.764720	
+1792394734.766937	: keep-alive
+1792394734.766951	
+1792394744.767338	: keep-alive
+1792394744.767352	
+1792394745.316159	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":935936,"total_tokens":1000003}}
+1792394745.316174	
+1792394755.317793	: keep-alive
+1792394755.317806	
+1792394765.320041	: keep-alive
+1792394765.320055	
+1792394775.322262	: keep-alive
+1792394775.322276	
+1792394776.104211	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":937984,"total_tokens":1000003}}
+1792394776.104226	
+1792394786.105394	: keep-alive
+1792394786.105411	
+1792394796.107216	: keep-alive
+1792394796.107229	
+1792394806.107443	: keep-alive
+1792394806.107457	
+1792394806.748463	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":940032,"total_tokens":1000003}}
+1792394806.748477	
+1792394816.750357	: keep-alive
+1792394816.750372	
+1792394826.752592	: keep-alive
+1792394826.752606	
+1792394836.753146	: keep-alive
+1792394836.753160	
+1792394837.517631	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":942080,"total_tokens":1000003}}
+1792394837.517645	
+1792394847.518824	: keep-alive
+1792394847.518839	
+1792394857.520117	: keep-alive
+1792394857.520130	
+1792394867.520519	: keep-alive
+1792394867.520534	
+1792394868.254570	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":944128,"total_tokens":1000003}}
+1792394868.254584	
+1792394878.256785	: keep-alive
+1792394878.256799	
+1792394888.257517	: keep-alive
+1792394888.257531	
+1792394898.259020	: keep-alive
+1792394898.259034	
+1792394899.191175	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":946176,"total_tokens":1000003}}
+1792394899.191190	
+1792394909.193081	: keep-alive
+1792394909.193102	
+1792394919.194662	: keep-alive
+1792394919.194676	
+1792394929.194989	: keep-alive
+1792394929.195004	
+1792394929.891236	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":948224,"total_tokens":1000003}}
+1792394929.891250	
+1792394939.891964	: keep-alive
+1792394939.891978	
+1792394949.892878	: keep-alive
+1792394949.892892	
+1792394959.893641	: keep-alive
+1792394959.893655	
+1792394960.858583	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":950272,"total_tokens":1000003}}
+1792394960.858599	
+1792394970.860021	: keep-alive
+1792394970.860035	
+1792394980.861476	: keep-alive
+1792394980.861490	
+1792394990.862161	: keep-alive
+1792394990.862177	
+1792394991.734332	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":952320,"total_tokens":1000003}}
+1792394991.734396	
+1792395001.736063	: keep-alive
+1792395001.736077	
+1792395011.736421	: keep-alive
+1792395011.736436	
+1792395021.738671	: keep-alive
+1792395021.738685	
+1792395022.984534	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":954368,"total_tokens":1000003}}
+1792395022.984548	
+1792395032.986787	: keep-alive
+1792395032.986801	
+1792395042.990602	: keep-alive
+1792395042.990616	
+1792395052.990029	: keep-alive
+1792395052.990043	
+1792395053.970153	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":956416,"total_tokens":1000003}}
+1792395053.970180	
+1792395063.971753	: keep-alive
+1792395063.971774	
+1792395073.972140	: keep-alive
+1792395073.972154	
+1792395083.973927	: keep-alive
+1792395083.973941	
+1792395084.758886	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":958464,"total_tokens":1000003}}
+1792395084.758939	
+1792395094.760130	: keep-alive
+1792395094.760144	
+1792395104.762488	: keep-alive
+1792395104.762512	
+1792395114.764597	: keep-alive
+1792395114.764612	
+1792395115.805241	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":960512,"total_tokens":1000003}}
+1792395115.805258	
+1792395125.805535	: keep-alive
+1792395125.805549	
+1792395135.807788	: keep-alive
+1792395135.807803	
+1792395145.808056	: keep-alive
+1792395145.808070	
+1792395146.952113	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":962560,"total_tokens":1000003}}
+1792395146.952132	
+1792395156.952419	: keep-alive
+1792395156.952432	
+1792395166.954250	: keep-alive
+1792395166.954265	
+1792395176.956439	: keep-alive
+1792395176.956466	
+1792395178.156265	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":964608,"total_tokens":1000003}}
+1792395178.156280	
+1792395188.157545	: keep-alive
+1792395188.157559	
+1792395198.158828	: keep-alive
+1792395198.158842	
+1792395208.161108	: keep-alive
+1792395208.161122	
+1792395209.409024	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":966656,"total_tokens":1000003}}
+1792395209.409038	
+1792395219.410097	: keep-alive
+1792395219.410110	
+1792395229.412534	: keep-alive
+1792395229.412548	
+1792395239.413274	: keep-alive
+1792395239.413289	
+1792395240.482147	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":968704,"total_tokens":1000003}}
+1792395240.482162	
+1792395250.483373	: keep-alive
+1792395250.483387	
+1792395260.484257	: keep-alive
+1792395260.484272	
+1792395270.484991	: keep-alive
+1792395270.485006	
+1792395271.659475	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":970752,"total_tokens":1000003}}
+1792395271.659490	
+1792395281.659694	: keep-alive
+1792395281.659708	
+1792395291.661035	: keep-alive
+1792395291.661050	
+1792395301.661731	: keep-alive
+1792395301.661746	
+1792395303.133970	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":972800,"total_tokens":1000003}}
+1792395303.133984	
+1792395313.135140	: keep-alive
+1792395313.135154	
+1792395323.136041	: keep-alive
+1792395323.136057	
+1792395333.138161	: keep-alive
+1792395333.138174	
+1792395334.474192	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":974848,"total_tokens":1000003}}
+1792395334.474218	
+1792395344.476178	: keep-alive
+1792395344.476191	
+1792395354.477358	: keep-alive
+1792395354.477375	
+1792395364.479599	: keep-alive
+1792395364.479615	
+1792395365.943872	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":976896,"total_tokens":1000003}}
+1792395365.943887	
+1792395375.945811	: keep-alive
+1792395375.945825	
+1792395385.946669	: keep-alive
+1792395385.946684	
+1792395395.947032	: keep-alive
+1792395395.947046	
+1792395397.047884	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":978944,"total_tokens":1000003}}
+1792395397.047898	
+1792395407.048264	: keep-alive
+1792395407.048278	
+1792395417.050536	: keep-alive
+1792395417.050551	
+1792395427.052324	: keep-alive
+1792395427.052338	
+1792395428.535090	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":980992,"total_tokens":1000003}}
+1792395428.535107	
+1792395438.537295	: keep-alive
+1792395438.537310	
+1792395448.539578	: keep-alive
+1792395448.539593	
+1792395458.541798	: keep-alive
+1792395458.541812	
+1792395459.886070	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":983040,"total_tokens":1000003}}
+1792395459.886084	
+1792395469.887606	: keep-alive
+1792395469.887620	
+1792395479.887972	: keep-alive
+1792395479.887989	
+1792395489.888687	: keep-alive
+1792395489.888704	
+1792395491.796320	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":985088,"total_tokens":1000003}}
+1792395491.796334	
+1792395501.797430	: keep-alive
+1792395501.797445	
+1792395511.798020	: keep-alive
+1792395511.798033	
+1792395521.800285	: keep-alive
+1792395521.800299	
+1792395523.288058	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":987136,"total_tokens":1000003}}
+1792395523.288071	
+1792395533.289594	: keep-alive
+1792395533.289608	
+1792395543.291336	: keep-alive
+1792395543.291350	
+1792395553.292784	: keep-alive
+1792395553.292812	
+1792395555.090734	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":989184,"total_tokens":1000003}}
+1792395555.090749	
+1792395565.091782	: keep-alive
+1792395565.091811	
+1792395575.092242	: keep-alive
+1792395575.092258	
+1792395585.092607	: keep-alive
+1792395585.092636	
+1792395586.900032	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":991232,"total_tokens":1000003}}
+1792395586.900048	
+1792395596.900521	: keep-alive
+1792395596.900538	
+1792395606.902702	: keep-alive
+1792395606.902717	
+1792395616.905409	: keep-alive
+1792395616.905433	
+1792395618.642557	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":993280,"total_tokens":1000003}}
+1792395618.642577	
+1792395628.644399	: keep-alive
+1792395628.644415	
+1792395638.646058	: keep-alive
+1792395638.646073	
+1792395648.648255	: keep-alive
+1792395648.648270	
+1792395650.099788	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":995328,"total_tokens":1000003}}
+1792395650.099802	
+1792395660.100158	: keep-alive
+1792395660.100172	
+1792395670.101543	: keep-alive
+1792395670.101557	
+1792395680.102456	: keep-alive
+1792395680.102471	
+1792395682.127515	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":997376,"total_tokens":1000003}}
+1792395682.127529	
+1792395692.129768	: keep-alive
+1792395692.129782	
+1792395702.130138	: keep-alive
+1792395702.130153	
+1792395712.131301	: keep-alive
+1792395712.131315	
+1792395714.138965	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":999424,"total_tokens":1000003}}
+1792395714.138979	
+1792395722.286746	: prefill_progress {"PrefillProgressChunk":{"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","processed_tokens":1000003,"total_tokens":1000003}}
+1792395722.286760	
+1792395722.361072	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395722,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"B"}}]}
+1792395722.361086	
+1792395730.411482	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395730,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"OT"}}]}
+1792395730.411503	
+1792395730.412599	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395730,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"TL"}}]}
+1792395730.412606	
+1792395730.412819	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395730,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"EN"}}]}
+1792395730.412824	
+1792395730.412919	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395730,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"ECK"}}]}
+1792395730.412924	
+1792395731.031605	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395731,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":":"}}]}
+1792395731.031619	
+1792395731.031741	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395731,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" the"}}]}
+1792395731.031749	
+1792395731.031856	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395731,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" single"}}]}
+1792395731.031863	
+1792395731.862994	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395731,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" most"}}]}
+1792395731.863007	
+1792395731.863962	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395731,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" frequently"}}]}
+1792395731.863967	
+1792395733.130356	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" discussed"}}]}
+1792395733.130370	
+1792395733.131709	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" performance"}}]}
+1792395733.131714	
+1792395733.131876	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" bottleneck"}}]}
+1792395733.131880	
+1792395733.131986	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" across"}}]}
+1792395733.131993	
+1792395733.709383	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" the"}}]}
+1792395733.709397	
+1792395733.710819	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" entire"}}]}
+1792395733.710827	
+1792395733.710983	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" reference"}}]}
+1792395733.710988	
+1792395733.711091	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395733,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" corpus"}}]}
+1792395733.711096	
+1792395734.306494	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395734,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" is"}}]}
+1792395734.306509	
+1792395734.306584	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395734,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" the"}}]}
+1792395734.306591	
+1792395734.306690	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395734,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" **"}}]}
+1792395734.306697	
+1792395735.060579	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"Mo"}}]}
+1792395735.060594	
+1792395735.060734	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"E"}}]}
+1792395735.060742	
+1792395735.060882	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" `"}}]}
+1792395735.060887	
+1792395735.060990	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"all"}}]}
+1792395735.060996	
+1792395735.638307	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"_sum"}}]}
+1792395735.638320	
+1792395735.639623	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"`"}}]}
+1792395735.639633	
+1792395735.639753	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" cross"}}]}
+1792395735.639758	
+1792395735.639866	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395735,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-rank"}}]}
+1792395735.639871	
+1792395736.201215	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395736,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" collective"}}]}
+1792395736.201229	
+1792395736.201373	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395736,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"**"}}]}
+1792395736.201381	
+1792395736.201533	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395736,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" —"}}]}
+1792395736.201540	
+1792395736.201635	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395736,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" it"}}]}
+1792395736.201640	
+1792395736.742055	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395736,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" recurs"}}]}
+1792395736.742069	
+1792395737.472650	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395737,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" in"}}]}
+1792395737.472664	
+1792395738.211859	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395738,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" at"}}]}
+1792395738.211872	
+1792395738.212046	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395738,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" least"}}]}
+1792395738.212053	
+1792395738.212222	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395738,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+1792395738.212229	
+1792395738.212325	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395738,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" 20"}}]}
+1792395738.212330	
+1792395738.850469	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395738,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" distinct"}}]}
+1792395738.850483	
+1792395739.629186	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395739,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" documents"}}]}
+1792395739.629210	
+1792395739.629236	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395739,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" spanning"}}]}
+1792395739.629241	
+1792395740.567657	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395740,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+1792395740.567671	
+1792395740.569223	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395740,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" 202"}}]}
+1792395740.569231	
+1792395740.569404	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395740,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"6"}}]}
+1792395740.569411	
+1792395740.569551	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395740,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395740.569555	
+1792395740.569654	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395740,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"05"}}]}
+1792395740.569658	
+1792395741.203620	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395741.203633	
+1792395741.203801	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"14"}}]}
+1792395741.203823	
+1792395741.203982	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" through"}}]}
+1792395741.203989	
+1792395741.835658	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+1792395741.835671	
+1792395741.836248	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" 202"}}]}
+1792395741.836255	
+1792395741.837551	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"6"}}]}
+1792395741.837556	
+1792395741.837718	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395741.837726	
+1792395741.837815	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395741,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"08"}}]}
+1792395741.837820	
+1792395742.406910	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395742,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395742.406924	
+1792395742.408318	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395742,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"21"}}]}
+1792395742.408325	
+1792395742.408480	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395742,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":","}}]}
+1792395742.408487	
+1792395742.408589	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395742,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" and"}}]}
+1792395742.408596	
+1792395743.023367	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395743,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" is"}}]}
+1792395743.023380	
+1792395743.023501	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395743,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" the"}}]}
+1792395743.023508	
+1792395743.023615	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395743,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" subject"}}]}
+1792395743.023619	
+1792395743.630392	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395743,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" of"}}]}
+1792395743.631907	
+1792395743.632321	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395743,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" the"}}]}
+1792395743.632330	
+1792395743.632337	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395743,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" largest"}}]}
+1792395743.632340	
+1792395744.307777	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395744,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" single"}}]}
+1792395744.307792	
+1792395745.083300	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395745,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" topic"}}]}
+1792395745.083316	
+1792395745.814089	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395745,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" cluster"}}]}
+1792395745.814103	
+1792395745.814156	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395745,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" in"}}]}
+1792395745.814161	
+1792395746.496646	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395746,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" the"}}]}
+1792395746.496660	
+1792395746.496788	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395746,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" repo"}}]}
+1792395746.496794	
+1792395746.496943	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395746,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" (`"}}]}
+1792395746.496948	
+1792395747.158931	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395747,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"docs"}}]}
+1792395747.158944	
+1792395747.158999	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395747,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"/m"}}]}
+1792395747.159004	
+1792395747.871437	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395747,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"oe"}}]}
+1792395747.871451	
+1792395747.871553	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395747,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-all"}}]}
+1792395747.871560	
+1792395747.871649	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395747,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-sum"}}]}
+1792395747.871654	
+1792395748.574600	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395748,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-d"}}]}
+1792395748.574619	
+1792395748.575961	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395748,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"ominant"}}]}
+1792395748.575969	
+1792395748.576133	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395748,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-cost"}}]}
+1792395748.576140	
+1792395748.576236	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395748,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395748.576241	
+1792395749.330907	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"202"}}]}
+1792395749.330920	
+1792395749.331409	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"6"}}]}
+1792395749.331416	
+1792395749.331568	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395749.331575	
+1792395749.331671	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"08"}}]}
+1792395749.331675	
+1792395749.913030	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-"}}]}
+1792395749.913045	
+1792395749.914239	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"19"}}]}
+1792395749.914245	
+1792395749.914403	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":".md"}}]}
+1792395749.914410	
+1792395749.914501	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395749,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"`,"}}]}
+1792395749.914505	
+1792395750.581613	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395750,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":" `"}}]}
+1792395750.581627	
+1792395750.583079	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395750,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"docs"}}]}
+1792395750.583087	
+1792395750.583244	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395750,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"/m"}}]}
+1792395750.583248	
+1792395750.583354	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395750,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"oe"}}]}
+1792395750.583358	
+1792395751.118885	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-all"}}]}
+1792395751.118901	
+1792395751.120215	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-sum"}}]}
+1792395751.120222	
+1792395751.120382	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-sk"}}]}
+1792395751.120387	
+1792395751.120488	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"ew"}}]}
+1792395751.120493	
+1792395751.730423	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-v"}}]}
+1792395751.730436	
+1792395751.730526	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"s"}}]}
+1792395751.730533	
+1792395751.819661	data: {"id":"6c29d013-0e79-450a-8d5c-487e7aa8c1a4","object":"chat.completion","created":1792395751,"model":"dealignai/DeepSeek-V4.1-Flash-UNCENSORED-EXL3-2.9bpw","choices":[{"index":0,"delta":{"role":"assistant","content":"-com"},"finish_reason":"length"}],"usage":{"prompt_tokens":1000003,"completion_tokens":99,"total_tokens":1000102,"prompt_tokens_details":{"cached_tokens":0,"audio_tokens":0},"completion_tokens_details":{"reasoning_tokens":0,"audio_tokens":0,"accepted_prediction_tokens":0,"rejected_prediction_tokens":0}}}
+1792395751.819675	
+1792395751.820004	: generation_stats {"prompt_tps":102.50506229685747,"generation_tps":0.0,"prompt_tokens":1000003,"generation_tokens":99,"peak_memory_usage":{"in_bytes":166234863524},"prefix_cache_hit":"none","mtp_cycles_cumulative":111,"mtp_accepted_drafts_cumulative":72,"phase_marks_ms":null,"api_phase_marks_ms":null}
+1792395751.820013	
+1792395751.820022	data: [DONE]
+1792395751.820027	
