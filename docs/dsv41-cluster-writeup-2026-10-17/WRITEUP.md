@@ -956,7 +956,10 @@ unmeasured (two points). There is no second slow mode hiding in the 1K-160K rang
 > per-round cost (0.486 s vs 0.196 s) at the same code and cache state** — that is the open
 > quantity, with two candidates recorded rather than guessed: concurrent client traffic (this
 > section's own five harvested points are another client on that instance) and machine thermal
-> state. The test that separates them: re-run 300K with a second client streaming.
+> state. That test has since been run (`REPRO-RUN-2026-10-18.md` §11.10): a second chat request
+> fired at the row's first token does **not** overlap its decode — it is serialized and starts
+> after the row ends — so contention is ruled out, and the surviving candidate is a one-off
+> residency/refault event of the kind §10.1 already records.
 
 **The 300K cliff is not a simple artifact.** No request begins inside the window (the turn's
 first-token is 02:31:59.523, turn-end 02:32:31.188, next request's first-token 02:32:38.018 --

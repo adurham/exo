@@ -1,0 +1,20 @@
+{
+ "label": "contention2-300k",
+ "wall_s": 127.22,
+ "ttft_s": 0.46,
+ "frames": 194,
+ "decode_s": 14.284,
+ "tok_s": 13.58,
+ "rounds": 71,
+ "tok_per_round": 2.73,
+ "median_gap_s": 0.201,
+ "second_fired_at": 1792382292.607442,
+ "second_ttft_s": 15.13,
+ "second_frames": 2646,
+ "second_tok_s": 23.72,
+ "second_errors": [],
+ "errors": [],
+ "median_gap_overlap_s": null,
+ "median_gap_solo_s": 0.201,
+ "overlap_gap_count": 0
+}

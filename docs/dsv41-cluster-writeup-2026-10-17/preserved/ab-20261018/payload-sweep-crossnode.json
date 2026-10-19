@@ -1,0 +1,54 @@
+{
+ "label": "crossnode",
+ "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+ "results": [
+  {
+   "target_bytes": 900000,
+   "actual_bytes": 899995,
+   "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+   "outcome": "accepted",
+   "secs": 1.48,
+   "content": "OK"
+  },
+  {
+   "target_bytes": 1031711,
+   "actual_bytes": 1031706,
+   "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+   "outcome": "accepted",
+   "secs": 0.48,
+   "content": "OK"
+  },
+  {
+   "target_bytes": 1200000,
+   "actual_bytes": 1199995,
+   "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+   "outcome": "accepted",
+   "secs": 0.4,
+   "content": "OK"
+  },
+  {
+   "target_bytes": 1600000,
+   "actual_bytes": 1599995,
+   "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+   "outcome": "accepted",
+   "secs": 0.33,
+   "content": "OK"
+  },
+  {
+   "target_bytes": 2200000,
+   "actual_bytes": 2199995,
+   "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+   "outcome": "accepted",
+   "secs": 0.47,
+   "content": "OK"
+  },
+  {
+   "target_bytes": 3334717,
+   "actual_bytes": 3334712,
+   "api": "http://macstudio-m4-2.tail19c543.ts.net:52415",
+   "outcome": "accepted",
+   "secs": 0.51,
+   "content": "OK"
+  }
+ ]
+}
