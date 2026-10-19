@@ -1,0 +1,67 @@
+{
+ "label": "limiter_default-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/limiter_default.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792434563.208245,
+ "started_iso": "2026-10-19T18:29:23.208+00:00",
+ "ended_epoch": 1792434570.061294,
+ "ended_iso": "2026-10-19T18:29:30.061+00:00",
+ "wall_s": 6.853,
+ "response_id": "58d53535-10db-4a91-8bd5-f27e466280d4",
+ "first_token_epoch": 1792434564.103998,
+ "first_token_iso": "2026-10-19T18:29:24.103+00:00",
+ "ttft_s": 0.896,
+ "last_token_epoch": 1792434569.960507,
+ "decode_window_s": 5.857,
+ "token_frames": 164,
+ "completion_tokens": 170,
+ "prompt_tokens": 52,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 52,
+  "completion_tokens": 170,
+  "total_tokens": 222,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 117,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "stop",
+ "client_decode_tok_s": 28.86,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 66.56532871866081,
+  "generation_tps": 0.0,
+  "prompt_tokens": 52,
+  "generation_tokens": 170,
+  "peak_memory_usage": {
+   "in_bytes": 135993248342
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 2099,
+  "mtp_accepted_drafts_cumulative": 1360,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "Let the ball cost \\(x\\). Then the bat costs \\(x + 1.00\\), so \\(2x + 1.00 = 1.10\\), giving \\(x = 0.05\\).  \nThe ball costs $0.05.",
+ "reasoning": "We need answer classic. Need think step by step but final one sentence. Need be careful: ball x, bat x+1, total 2x+1=1.10 => x=.05. Final answer one sentence. Could include reasoning? User says think step by step then final answer in one sentence. We can provide concise steps then final sentence? \"The ball costs $0.05.\" Need maybe one sentence final. Let's craft with steps maybe bullets then final one sentence. But \"final answer in one sentence\" likely final line. Need not overdo.",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/limiter_default-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:29:23 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

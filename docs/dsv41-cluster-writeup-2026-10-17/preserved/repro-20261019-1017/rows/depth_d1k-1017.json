@@ -1,0 +1,67 @@
+{
+ "label": "depth_d1k-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/depth_d1k.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792432793.884008,
+ "started_iso": "2026-10-19T17:59:53.884+00:00",
+ "ended_epoch": 1792432805.739776,
+ "ended_iso": "2026-10-19T18:00:05.739+00:00",
+ "wall_s": 11.856,
+ "response_id": "a77a3437-5a0f-4347-8704-1b48630ab54d",
+ "first_token_epoch": 1792432798.267141,
+ "first_token_iso": "2026-10-19T17:59:58.267+00:00",
+ "ttft_s": 4.383,
+ "last_token_epoch": 1792432805.739389,
+ "decode_window_s": 7.472,
+ "token_frames": 200,
+ "completion_tokens": 199,
+ "prompt_tokens": 1003,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 1003,
+  "completion_tokens": 199,
+  "total_tokens": 1202,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 26.5,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 238.6770438393731,
+  "generation_tps": 0.0,
+  "prompt_tokens": 1003,
+  "generation_tokens": 199,
+  "peak_memory_usage": {
+   "in_bytes": 124170210425
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 348,
+  "mtp_accepted_drafts_cumulative": 214,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: Across the reference material, the single most frequently discussed performance bottleneck is the cost of model loading/weight transfer and inference latency across the cluster\u2014i.e., the overhead of sharding large models over multiple devices and the network/runner-process costs that dominate startup and per-token latency\u2014rather than raw compute. The document that quantifies it most directly is `AGENTS.md`, which ties the architecture to concrete operational constraints: it describes the Worker as the component that \"downloads models\" and \"manages runner processes,\" the Master as the component that \"places model instances across nodes,\" and the Router as zenoh-based pub/sub, and it makes the dashboard build a required prerequisite before running exo, while also specifying the exact commands and pre-commit gates (`uv run basedpyright`, `uv run ruff check`, `nix fmt`, `uv run pytest`) that must pass. Supporting detail comes from `src/exo/shared/types/state.py",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/depth_d1k-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 17:59:53 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

@@ -1,0 +1,188 @@
+{
+ "label": "depth_d100k-1017settled",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/depth_d100k.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792438723.792133,
+ "started_iso": "2026-10-19T19:38:43.792+00:00",
+ "ended_epoch": 1792438995.02413,
+ "ended_iso": "2026-10-19T19:43:15.024+00:00",
+ "wall_s": 271.232,
+ "response_id": "05fbb597-a944-4681-935c-02ef3de8e85f",
+ "first_token_epoch": 1792438958.809852,
+ "first_token_iso": "2026-10-19T19:42:38.809+00:00",
+ "ttft_s": 235.018,
+ "last_token_epoch": 1792438995.023734,
+ "decode_window_s": 36.214,
+ "token_frames": 190,
+ "completion_tokens": 199,
+ "prompt_tokens": 100003,
+ "cached_tokens": 49152,
+ "usage": {
+  "prompt_tokens": 100003,
+  "completion_tokens": 199,
+  "total_tokens": 100202,
+  "prompt_tokens_details": {
+   "cached_tokens": 49152,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 5.47,
+ "prefill_frames": 24,
+ "keepalive_frames": 4,
+ "progress": [
+  {
+   "epoch": 1792438742.407938,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438751.77889,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438761.367137,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438770.6400158,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438779.958648,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438789.009378,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438797.881919,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438807.1210198,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438816.147703,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438825.260649,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438834.2521899,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438843.550965,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438852.855679,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438862.08159,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438871.3823261,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438880.987293,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438890.466451,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438900.00666,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438909.70302,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438919.499234,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438929.432661,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438939.551073,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438949.666139,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792438958.809612,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 216.5943380157723,
+  "generation_tps": 0.0,
+  "prompt_tokens": 100003,
+  "generation_tokens": 199,
+  "peak_memory_usage": {
+   "in_bytes": 136741596262
+  },
+  "prefix_cache_hit": "partial",
+  "mtp_cycles_cumulative": 3225,
+  "mtp_accepted_drafts_cumulative": 1822,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: the single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective in the MoE path, which is investigated in at least twenty distinct documents spanning 2026-05-14 through 2026-08-21 and is explicitly called \"the dominant cost center\" in the consolidated performance history. The document that quantifies it most directly is `docs/moe-all-sum-dominant-cost-2026-08-19.md`, which uses a NOP-ablation (identity pass-through on `moe.all_sum`) at two depths to measure a 2.63x speedup at 12,066-12,069 tokens (162.5 \u2192 427.5 tok/s, 62.0% share) and 2.57x at 38,066-38,067 tokens (167.3 \u2192 430.3 tok/s, 61.1% share), consistent across depths",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017-settled/depth_d100k-1017settled.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 19:38:43 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

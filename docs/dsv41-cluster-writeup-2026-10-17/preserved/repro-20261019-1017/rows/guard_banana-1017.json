@@ -1,0 +1,67 @@
+{
+ "label": "guard_banana-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/guard_banana.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792434514.9498072,
+ "started_iso": "2026-10-19T18:28:34.949+00:00",
+ "ended_epoch": 1792434528.6216478,
+ "ended_iso": "2026-10-19T18:28:48.621+00:00",
+ "wall_s": 13.672,
+ "response_id": "c11398a7-72ae-4877-beed-73641323cfc0",
+ "first_token_epoch": 1792434515.747236,
+ "first_token_iso": "2026-10-19T18:28:35.747+00:00",
+ "ttft_s": 0.797,
+ "last_token_epoch": 1792434528.620812,
+ "decode_window_s": 12.874,
+ "token_frames": 390,
+ "completion_tokens": 399,
+ "prompt_tokens": 26,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 26,
+  "completion_tokens": 399,
+  "total_tokens": 425,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 300,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 30.92,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 42.79843020478792,
+  "generation_tps": 0.0,
+  "prompt_tokens": 26,
+  "generation_tokens": 399,
+  "peak_memory_usage": {
+   "in_bytes": 135993248342
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 1735,
+  "mtp_accepted_drafts_cumulative": 1149,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "banana banana banana banana banana banana Banana? all lowercase. Let's final:\nbanana banana banana banana banana banana Banana? Wait \"Banana\" uppercase? Use lowercase all. Need 40. Let's write:\nbanana banana banana banana banana banana Banana? no.\n\nLet's count final string tokens:\n1 banana\n2 banana\n3 banana\n4 banana\n5 banana\n6 banana\n7 banana\n8 banana\n9 banana\n10 banana\n11 banana\n12 banana\n13",
+ "reasoning": "We need answer exactly word banana 40 times separated by single spaces nothing else. Need count carefully. Need output only. Let's construct 40 bananas. Need ensure exactly 40. Could group mentally. Need final only. Let's count sequence:\n1 banana\n2 banana\n3 banana\n4 banana\n5 banana\n6 banana\n7 banana\n8 banana\n9 banana\n10 banana\n11 banana\n12 banana\n13 banana\n14 banana\n15 banana\n16 banana\n17 banana\n18 banana\n19 banana\n20 banana\n21 banana\n22 banana\n23 banana\n24 banana\n25 banana\n26 banana\n27 banana\n28 banana\n29 banana\n30 banana\n31 banana\n32 banana\n33 banana\n34 banana\n35 banana\n36 banana\n37 banana\n38 banana\n39 banana\n40 banana\n\nNeed output string. Let's write with spaces. Count maybe use grouping in final? Only spaces no line breaks? \"separated by single spaces\" can be one line. Need exactly 40. Let's produce carefully. I can count in chunks of 10 in my head but final continuous. Let's create:\nbanana banana banana banana banana banana Banana? all lowercase. 10:\n1 banana\n2 banana\n3 banana\n4 banana\n5 banana\n6 banana\n7 banana\n8 banana\n9 banana\n10 banana\nthen 11-20 etc. Need final continuous. Let's compose with 40 tokens. To avoid",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/guard_banana-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:28:34 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

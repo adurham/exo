@@ -1,0 +1,67 @@
+{
+ "label": "t300-sweep",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/t300.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792441742.337211,
+ "started_iso": "2026-10-19T20:29:02.337+00:00",
+ "ended_epoch": 1792441775.1216278,
+ "ended_iso": "2026-10-19T20:29:35.121+00:00",
+ "wall_s": 32.784,
+ "response_id": "0115a12d-ebde-4941-bd82-2ee7cd179784",
+ "first_token_epoch": 1792441744.113268,
+ "first_token_iso": "2026-10-19T20:29:04.113+00:00",
+ "ttft_s": 1.776,
+ "last_token_epoch": 1792441775.121176,
+ "decode_window_s": 31.008,
+ "token_frames": 250,
+ "completion_tokens": 249,
+ "prompt_tokens": 294,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 294,
+  "completion_tokens": 249,
+  "total_tokens": 543,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 8.0,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 177.28682411617547,
+  "generation_tps": 0.0,
+  "prompt_tokens": 294,
+  "generation_tokens": 249,
+  "peak_memory_usage": {
+   "in_bytes": 124170201629
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 480,
+  "mtp_accepted_drafts_cumulative": 343,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "# AGENTS.md \u2014 exo Repository Guide\n\n## Project Overview\n\nexo is a distributed AI inference system that connects multiple devices into a cluster. It enables running large language models across multiple machines using MLX as the inference backend and zenoh for peer-to-peer networking.\n\n## Build & Run Commands\n\n```bash\n# Build the dashboard (required before running exo)\ncd dashboard && npm install && npm run build && cd ..\n\n# Run exo (starts both master and worker with API at http://localhost:52415)\nuv run exo\n\n# Run with verbose logging\nuv run exo -v   # or -vv for more verbose\n\n# Run tests (excludes slow tests by default)\nuv run pytest\n\n# Run all tests including slow tests\nuv run pytest -m \"\"\n\n# Run a specific test file\nuv run pytest src/exo/shared/tests/test_election.py\n\n# Run a specific test function\nuv run pytest src/exo/shared/tests/test_election.py::test_function_name\n\n# Type checking (strict mode)\nuv run basedpyright\n\n# Linting\nuv run ruff check\n\n# Format code (using nix)\nnix fmt\n```\n\n## Pre",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-sweep/t300-sweep.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 20:29:02 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

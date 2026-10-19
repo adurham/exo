@@ -1,0 +1,53 @@
+{
+ "label": "prompts_160k_nostream-1017settled",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/prompts_160k_nostream.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": false,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792438995.137622,
+ "started_iso": "2026-10-19T19:43:15.137+00:00",
+ "ended_epoch": 1792439336.243893,
+ "ended_iso": "2026-10-19T19:48:56.243+00:00",
+ "wall_s": 341.106,
+ "response_id": "da36d991-4e2a-4c70-85be-1a977c6c99ec",
+ "first_token_epoch": null,
+ "first_token_iso": null,
+ "ttft_s": null,
+ "last_token_epoch": null,
+ "decode_window_s": null,
+ "token_frames": 0,
+ "completion_tokens": 199,
+ "prompt_tokens": 160004,
+ "cached_tokens": 98304,
+ "usage": {
+  "prompt_tokens": 160004,
+  "completion_tokens": 199,
+  "total_tokens": 160203,
+  "prompt_tokens_details": {
+   "cached_tokens": 98304,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": null,
+ "prefill_frames": 0,
+ "keepalive_frames": 0,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": null,
+ "content": "BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective in the MoE path \u2014 the dominant cost center, with at least 20 distinct docs spanning 2026-05-14 through 2026-08-21, and it is quantified most directly by `docs/moe-all-sum-dominant-cost-2026-08-19.md`, whose NOP-ablation (file-toggle identity pass-through on `moe.all_sum`) measured 162.5 tok/s baseline vs 427.5 tok/s with the collective disabled at 12,066-12,069 tokens (2.63x speedup, 62.0% share) and 167.3 vs 430.3 tok/s at 38,066-38,067 tokens (2.57x, 61.1% share), consistent at two depths and thereby ruling out cold-start confounds; that doc",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017-settled/prompts_160k_nostream-1017settled.sse",
+ "headers": {
+  "content-type": "application/json",
+  "date": "Mon, 19 Oct 2026 19:48:56 GMT"
+ }
+}

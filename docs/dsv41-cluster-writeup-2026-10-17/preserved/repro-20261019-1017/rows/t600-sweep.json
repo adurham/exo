@@ -1,0 +1,67 @@
+{
+ "label": "t600-sweep",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/t600.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792441775.199866,
+ "started_iso": "2026-10-19T20:29:35.199+00:00",
+ "ended_epoch": 1792441822.063668,
+ "ended_iso": "2026-10-19T20:30:22.063+00:00",
+ "wall_s": 46.864,
+ "response_id": "bd864690-d204-4048-8146-4b9215dc1aa0",
+ "first_token_epoch": 1792441778.043498,
+ "first_token_iso": "2026-10-19T20:29:38.043+00:00",
+ "ttft_s": 2.844,
+ "last_token_epoch": 1792441822.063225,
+ "decode_window_s": 44.02,
+ "token_frames": 250,
+ "completion_tokens": 249,
+ "prompt_tokens": 602,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 602,
+  "completion_tokens": 249,
+  "total_tokens": 851,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 5.63,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 221.03759923662315,
+  "generation_tps": 0.0,
+  "prompt_tokens": 602,
+  "generation_tokens": 249,
+  "peak_memory_usage": {
+   "in_bytes": 124170201629
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 744,
+  "mtp_accepted_drafts_cumulative": 505,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "# AGENTS.md \u2014 exo\n\nGuidance for AI coding agents working in this repo. **Read this before touching code.**\n\n## TL;DR \u2014 Pre-Commit Checklist (REQUIRED)\n\nCI fails if any of these fail. Run them all before committing:\n\n```bash\nuv run basedpyright && uv run ruff check && nix fmt && uv run pytest\n```\n\n- `basedpyright` must report **0 errors** (strict mode).\n- `ruff check` must pass.\n- `nix fmt` must be applied \u2014 stage any files it rewrites.\n- `pytest` must pass (slow tests excluded by default; use `-m \"\"` to include them).\n\nCI runs `nix flake check`, which also runs Rust tests.\n\n## Project Overview\n\nexo is a distributed AI inference system that clusters multiple devices to run large language models. Inference backend is MLX; peer-to-peer networking is zenoh.\n\n## Build & Run\n\n```bash\n# Dashboard build is REQUIRED before running exo\ncd dashboard && npm install && npm run build && cd ..\n\n# Run exo (master + worker, API at http://localhost:52415)\nuv run exo\n\n# Verbose logging",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-sweep/t600-sweep.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 20:29:35 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

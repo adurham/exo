@@ -1,0 +1,88 @@
+{
+ "label": "depth_d10k-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/depth_d10k.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792432805.828599,
+ "started_iso": "2026-10-19T18:00:05.828+00:00",
+ "ended_epoch": 1792432854.4078,
+ "ended_iso": "2026-10-19T18:00:54.407+00:00",
+ "wall_s": 48.579,
+ "response_id": "96fb3b6f-0bf9-4e7b-ae13-8ff74a0b03d9",
+ "first_token_epoch": 1792432847.280016,
+ "first_token_iso": "2026-10-19T18:00:47.280+00:00",
+ "ttft_s": 41.451,
+ "last_token_epoch": 1792432854.407457,
+ "decode_window_s": 7.127,
+ "token_frames": 195,
+ "completion_tokens": 199,
+ "prompt_tokens": 10004,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 10004,
+  "completion_tokens": 199,
+  "total_tokens": 10203,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 27.78,
+ "prefill_frames": 4,
+ "keepalive_frames": 2,
+ "progress": [
+  {
+   "epoch": 1792432821.97011,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432830.5467331,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432839.2363892,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432847.2797709,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 241.9881586519096,
+  "generation_tps": 0.0,
+  "prompt_tokens": 10004,
+  "generation_tokens": 199,
+  "peak_memory_usage": {
+   "in_bytes": 124170210425
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 567,
+  "mtp_accepted_drafts_cumulative": 340,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the MoE `switch_mlp` / quantized GEMV path in prefill (and, secondarily, the indexer's O(P log P) argsort), which is repeatedly framed as the dominant remaining prefill lever and the target of multiple optimization cycles. The document that quantifies it most directly is the \"MoE Prefill Kernel Optimization \u2014 Handoff (2026-07-01/02)\" section of `AGENTS.md`, which gives explicit measured bandwidth figures (fp_qmv_fast 448 GB/s vs steel qmm dense M=6 at 173 GB/s and the production gather path at 141 GB/s), states that `moe.switch_mlp` is 43% of prefill chunk wall at 495K and runs at ~26% of memory bandwidth, and projects that recovering ~300 GB/s there yields roughly +15\u201320",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/depth_d10k-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:00:05 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

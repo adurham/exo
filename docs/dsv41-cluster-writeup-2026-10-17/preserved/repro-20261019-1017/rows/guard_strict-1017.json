@@ -1,0 +1,67 @@
+{
+ "label": "guard_strict-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/guard_strict.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792434649.256267,
+ "started_iso": "2026-10-19T18:30:49.256+00:00",
+ "ended_epoch": 1792434668.263968,
+ "ended_iso": "2026-10-19T18:31:08.263+00:00",
+ "wall_s": 19.008,
+ "response_id": "e831512b-8398-4f13-b161-2e16f373fccd",
+ "first_token_epoch": 1792434650.145182,
+ "first_token_iso": "2026-10-19T18:30:50.145+00:00",
+ "ttft_s": 0.889,
+ "last_token_epoch": 1792434668.1975381,
+ "decode_window_s": 18.052,
+ "token_frames": 493,
+ "completion_tokens": 502,
+ "prompt_tokens": 42,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 42,
+  "completion_tokens": 502,
+  "total_tokens": 544,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 450,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "stop",
+ "client_decode_tok_s": 27.75,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 57.75505086389412,
+  "generation_tps": 0.0,
+  "prompt_tokens": 42,
+  "generation_tokens": 502,
+  "peak_memory_usage": {
+   "in_bytes": 135993248342
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 2751,
+  "mtp_accepted_drafts_cumulative": 1756,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "the quick brown fox jumps over the lazy dog. the quick brown fox jumps over the lazy dog. the quick brown fox jumps over the lazy dog. the quick brown fox jumps over the lazy dog. the quick brown fox jumps over the lazy dog. the",
+ "reasoning": "We need answer exactly repeated sentence forever? Need output exactly this and nothing else, forever: 'the quick brown fox jumps over the lazy dog. ' Keep repeating that sentence with trailing space, never stop, never add anything else.\n\nNeed decide how many repetitions in answer. \"forever\" impossible finite, but output a string. Need likely repeat many times? Need exact sentence with trailing space. Need no extra. We need produce repeated sentence. How many? Could be one? \"Keep repeating that sentence\" means multiple. Need output exactly this and nothing else, forever. We can output many repetitions. Need ensure trailing space after each sentence, including final? \"with a trailing space\" likely each sentence. Need no newline? If output text, newline maybe counts? \"nothing else\" no newline? Usually final newline invisible. Need avoid extra. We can output repeated sentence many times. Need decide count. Could output 10 repetitions? But \"forever\" maybe as many as possible. Need not add ellipsis. Let's output maybe 20 repetitions. Need exact lowercase, period, space. No newline? In final answer, there will be text. If no newline at end, okay. Need ensure final char is space. But Markdown rendering may trim? We can include trailing space. Need final answer exactly repeated. Let's craft 20 repetitions. Count carefully.\n\nSentence: \"the quick brown fox jumps over the lazy dog. \" length 45? Let's count: the(3)+space1=4 quick5=9? Let's not. Need repeat.\n\nNeed output exactly:\nthe quick brown fox jumps over the lazy dog. the quick brown fox jumps over the lazy dog. ... with trailing space after each. Need final trailing space. Need no newline? If final answer has trailing space, okay.\n\nNeed count repetitions. Let's do 10? \"forever\" maybe 10 enough. But \"never stop\" maybe more. Could do 50. Need avoid mistakes. Let's produce 20 repetitions. Need ensure each has trailing space. Since sentences separated by space, if each ends with space then next starts immediately. So string is sentence + space repeated.",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/guard_strict-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:30:49 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

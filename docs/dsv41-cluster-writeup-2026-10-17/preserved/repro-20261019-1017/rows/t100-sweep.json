@@ -1,0 +1,67 @@
+{
+ "label": "t100-sweep",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/t100.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792441724.3784199,
+ "started_iso": "2026-10-19T20:28:44.378+00:00",
+ "ended_epoch": 1792441742.255888,
+ "ended_iso": "2026-10-19T20:29:02.255+00:00",
+ "wall_s": 17.877,
+ "response_id": "11b9c65d-af38-4a72-a574-70e5f18460a3",
+ "first_token_epoch": 1792441725.9736772,
+ "first_token_iso": "2026-10-19T20:28:45.973+00:00",
+ "ttft_s": 1.595,
+ "last_token_epoch": 1792441742.255542,
+ "decode_window_s": 16.282,
+ "token_frames": 245,
+ "completion_tokens": 249,
+ "prompt_tokens": 84,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 84,
+  "completion_tokens": 249,
+  "total_tokens": 333,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 15.23,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 96.18141188304403,
+  "generation_tps": 0.0,
+  "prompt_tokens": 84,
+  "generation_tokens": 249,
+  "peak_memory_usage": {
+   "in_bytes": 124170201629
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 270,
+  "mtp_accepted_drafts_cumulative": 163,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "# exo \u2014 Agent Guide\n\n## Project Overview\n\nexo is a distributed AI inference system that connects multiple devices into a cluster. It enables running large language models across multiple machines using MLX as the inference backend and zenoh for peer-to-peer networking.\n\n## Build & Run Commands\n\n```bash\n# Build the project\nuv sync\n\n# Run the main application\nuv run exo\n\n# Run tests\nuv run pytest\n\n# Run a specific test file\nuv run pytest tests/test_specific.py\n\n# Run linting\nuv run ruff check .\n\n# Format code\nuv run ruff format .\n```\n\n## Architecture\n\n### Core Components\n\n- **`exo/`** \u2014 Main package\n  - **`main.py`** \u2014 Entry point, CLI argument parsing, and app bootstrap\n  - **`runner/`** \u2014 Inference runner that orchestrates model loading and generation across the cluster\n  - **`worker/`** \u2014 Per-device worker that executes shards of the model\n  - **`networking/`** \u2014 zenoh-based peer-to-peer transport, topic routing, and message serialization\n  - **`models/`** \u2014 Model definitions, sharding logic, and",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-sweep/t100-sweep.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 20:28:44 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

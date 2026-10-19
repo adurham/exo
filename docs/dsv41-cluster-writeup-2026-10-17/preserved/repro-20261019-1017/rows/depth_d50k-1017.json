@@ -1,0 +1,168 @@
+{
+ "label": "depth_d50k-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/depth_d50k.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792432854.493772,
+ "started_iso": "2026-10-19T18:00:54.493+00:00",
+ "ended_epoch": 1792433040.442313,
+ "ended_iso": "2026-10-19T18:04:00.442+00:00",
+ "wall_s": 185.949,
+ "response_id": "0291560c-2ce7-45d2-b73c-37790d02b14b",
+ "first_token_epoch": 1792433032.821472,
+ "first_token_iso": "2026-10-19T18:03:52.821+00:00",
+ "ttft_s": 178.328,
+ "last_token_epoch": 1792433040.441952,
+ "decode_window_s": 7.62,
+ "token_frames": 197,
+ "completion_tokens": 199,
+ "prompt_tokens": 50004,
+ "cached_tokens": 8192,
+ "usage": {
+  "prompt_tokens": 50004,
+  "completion_tokens": 199,
+  "total_tokens": 50203,
+  "prompt_tokens_details": {
+   "cached_tokens": 8192,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 25.98,
+ "prefill_frames": 20,
+ "keepalive_frames": 2,
+ "progress": [
+  {
+   "epoch": 1792432871.2674408,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432880.340567,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432889.298348,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432898.259785,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432907.276605,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432916.314775,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432925.2759721,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432934.258637,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432943.348174,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432951.9123251,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432960.278805,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432968.71649,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432977.155039,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432985.567567,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792432994.0421891,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433002.452929,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433011.201973,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433019.99716,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433028.6652958,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433032.8211598,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 234.73788457019066,
+  "generation_tps": 0.0,
+  "prompt_tokens": 50004,
+  "generation_tokens": 199,
+  "peak_memory_usage": {
+   "in_bytes": 126421692188
+  },
+  "prefix_cache_hit": "partial",
+  "mtp_cycles_cumulative": 780,
+  "mtp_accepted_drafts_cumulative": 468,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: The single most frequently discussed performance bottleneck across the reference material is the DeepSeek-V4-Flash prefill cliff \u2014 the sharp collapse of prefill throughput from ~270 t/s to ~40-48 t/s at roughly 340-380K context, driven by the `attn.indexer` path's O(P log P) argsort and the ballooning `(B,64,L,P)` score-tensor materialization, which compounds into multi-second per-chunk stalls. It is quantified most directly in `PREFILL_CLIFF_HANDOFF.md` (the 2026-06-21 handoff, with the span-profiler A=300K vs B=360K numbers: indexer per-call avg 4532us\u21925362us, max ~22ms, and the bucketed throughput table), and it recurs as the framing for the tiled-P fix in the `Tiled-P Indexer Fix \u2014 Plan",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/depth_d50k-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:00:54 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

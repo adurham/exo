@@ -1,0 +1,67 @@
+{
+ "label": "agentic_pagination-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/agentic_pagination.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792434642.397126,
+ "started_iso": "2026-10-19T18:30:42.397+00:00",
+ "ended_epoch": 1792434649.192134,
+ "ended_iso": "2026-10-19T18:30:49.192+00:00",
+ "wall_s": 6.795,
+ "response_id": "60cc3dae-dbec-4ab8-a318-5d3477b84fc7",
+ "first_token_epoch": 1792434646.326699,
+ "first_token_iso": "2026-10-19T18:30:46.326+00:00",
+ "ttft_s": 3.93,
+ "last_token_epoch": 1792434646.715946,
+ "decode_window_s": 0.389,
+ "token_frames": 14,
+ "completion_tokens": 110,
+ "prompt_tokens": 488,
+ "cached_tokens": 0,
+ "usage": {
+  "prompt_tokens": 488,
+  "completion_tokens": 110,
+  "total_tokens": 598,
+  "prompt_tokens_details": {
+   "cached_tokens": 0,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "tool_calls",
+ "client_decode_tok_s": 280.03,
+ "prefill_frames": 0,
+ "keepalive_frames": 1,
+ "progress": [],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 133.25018092672576,
+  "generation_tps": 0.0,
+  "prompt_tokens": 488,
+  "generation_tokens": 110,
+  "peak_memory_usage": {
+   "in_bytes": 135993248342
+  },
+  "prefix_cache_hit": "none",
+  "mtp_cycles_cumulative": 2189,
+  "mtp_accepted_drafts_cumulative": 1441,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "I'll start by locating the failing test and the pagination implementation.\n\n",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/agentic_pagination-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:30:42 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}

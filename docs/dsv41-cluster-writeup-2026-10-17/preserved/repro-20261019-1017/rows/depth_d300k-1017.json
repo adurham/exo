@@ -1,0 +1,408 @@
+{
+ "label": "depth_d300k-1017",
+ "body_path": "/Users/adam.durham/s11run-20261018/prompts/depth_d300k.json",
+ "url": "http://127.0.0.1:52415/v1/chat/completions",
+ "stream": true,
+ "http_status": 200,
+ "error": null,
+ "error_events": [],
+ "started_epoch": 1792433616.25749,
+ "started_iso": "2026-10-19T18:13:36.257+00:00",
+ "ended_epoch": 1792434514.8385978,
+ "ended_iso": "2026-10-19T18:28:34.838+00:00",
+ "wall_s": 898.581,
+ "response_id": "32171d5d-67ec-4891-b545-a1d97f279658",
+ "first_token_epoch": 1792434457.287551,
+ "first_token_iso": "2026-10-19T18:27:37.287+00:00",
+ "ttft_s": 841.03,
+ "last_token_epoch": 1792434514.8380978,
+ "decode_window_s": 57.551,
+ "token_frames": 190,
+ "completion_tokens": 199,
+ "prompt_tokens": 300003,
+ "cached_tokens": 159744,
+ "usage": {
+  "prompt_tokens": 300003,
+  "completion_tokens": 199,
+  "total_tokens": 300202,
+  "prompt_tokens_details": {
+   "cached_tokens": 159744,
+   "audio_tokens": 0
+  },
+  "completion_tokens_details": {
+   "reasoning_tokens": 0,
+   "audio_tokens": 0,
+   "accepted_prediction_tokens": 0,
+   "rejected_prediction_tokens": 0
+  }
+ },
+ "finish_reason": "length",
+ "client_decode_tok_s": 3.44,
+ "prefill_frames": 68,
+ "keepalive_frames": 69,
+ "progress": [
+  {
+   "epoch": 1792433638.5552251,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433649.128835,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433659.719729,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433670.5126631,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433681.1530938,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433691.869411,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433702.746915,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433713.507715,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433724.063452,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433734.2553349,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433744.473817,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433754.8364968,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433765.336035,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433775.83831,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433786.35811,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433797.022627,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433807.688928,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433818.456429,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433829.437123,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433840.5596669,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433851.702976,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433863.008777,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433874.3398242,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433886.030349,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433897.658617,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433909.1475468,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433920.745615,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433932.7782881,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433944.578188,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433956.899869,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433969.205025,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433981.522712,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792433994.005095,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434006.2869911,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434019.0247822,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434031.605481,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434044.4884841,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434057.222198,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434070.277632,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434083.404664,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434096.355424,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434109.620054,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434122.891746,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434136.1091719,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434149.488797,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434162.790714,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434176.242806,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434189.681209,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434203.116339,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434216.536754,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434230.070265,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434243.591398,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434257.0535412,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434270.588424,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434284.202817,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434297.725247,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434311.398537,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434325.070838,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434338.763714,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434352.439747,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434366.20048,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434379.917103,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434393.853806,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434407.5971851,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434421.50448,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434435.256227,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434449.139214,
+   "processed_tokens": null,
+   "total_tokens": null
+  },
+  {
+   "epoch": 1792434457.285216,
+   "processed_tokens": null,
+   "total_tokens": null
+  }
+ ],
+ "prefill_bands": [],
+ "generation_stats": {
+  "prompt_tps": 166.8873488521367,
+  "generation_tps": 0.0,
+  "prompt_tokens": 300003,
+  "generation_tokens": 199,
+  "peak_memory_usage": {
+   "in_bytes": 135993248342
+  },
+  "prefix_cache_hit": "partial",
+  "mtp_cycles_cumulative": 1335,
+  "mtp_accepted_drafts_cumulative": 881,
+  "phase_marks_ms": null,
+  "api_phase_marks_ms": null
+ },
+ "content": "BOTTLENECK: the single most frequently discussed performance bottleneck across the reference material is the `moe.all_sum` cross-rank collective (and, more broadly, the MoE/collective cost center), which recurs across at least twenty distinct docs spanning 2026-05-14 through 2026-08-21 and is treated as the dominant cost center in \u00a72 of `PERFORMANCE_HISTORY.md`. It is quantified most directly by `docs/moe-all-sum-dominant-cost-2026-08-19.md`, whose NOP-ablation (file-toggle identity pass-through on `moe.all_sum`) measured at two depths \u2014 12,066-12,069 tok: baseline 162.5 tok/s vs NOP 427.5 tok/s = 2.63x speedup, all_sum share 62.0%; 38,066-38,067 tok: baseline 167.3 tok/s vs NOP 430",
+ "reasoning": "",
+ "sse_path": "/Users/adam.durham/s11run-20261018/out-1017/depth_d300k-1017.sse",
+ "headers": {
+  "content-type": "text/event-stream; charset=utf-8",
+  "date": "Mon, 19 Oct 2026 18:13:36 GMT",
+  "Transfer-Encoding": "chunked"
+ }
+}
