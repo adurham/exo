@@ -63,7 +63,10 @@ the three forks carry 2,607 / 277 / 527 commits of divergence from upstream to d
 It works. A 1,000,003-token prompt completed end to end: HTTP 200, `finish_reason=length`,
 6,760.5 s wall, 104.2 tok/s prefill over the rows it actually had to prefill, 2.92 tok/s
 decode (299,008 of the prompt's rows came from cache -- see §9.4). Decode holds a ~30 tok/s plateau to 160K and then falls off a cliff to 6.0 tok/s at
-300K. Prefill degrades with position: 245.1 tok/s at 100K, 195.4 at 300K, 64.9 over the deepest
+300K [erratum 2026-10-18: a genuinely cold 300K row decodes at 13.9 tok/s on both `5a18b81`
+and `b88d65dd`, and 22-25 tok/s when the prefix is restored from the park store -- the 6.0
+figure is cache/instance state, not a code property. See the §9.2 erratum and
+`REPRO-RUN-2026-10-18.md` §11.8]. Prefill degrades with position: 245.1 tok/s at 100K, 195.4 at 300K, 64.9 over the deepest
 band of the 1M request.
 
 The memory budget does not close -- from -2.3 GB best case to -9.4 GB worst case per node at 1M
@@ -82,7 +85,7 @@ were exercised and both behaved (the guard's retry semantics were later reworked
 | 1M prefill | 104.2 tok/s | 700,995 uncached rows / 6,725.29 s (partial prefix cache, 299,008 cached) |
 | 1M decode | 2.92 tok/s | client and server channels agree |
 | decode plateau | 34.5 / 31.4 / 29.4 / 30.7 / 30.4 tok/s at 1K / 10K / 50K / 100K / 160K | client decode window, spec-ON; the 160K point is server-side only (that run used `stream:false` -- client decode not separable) |
-| decode cliff | 6.0 tok/s at 300K | 5x falloff inside 1.5 doublings |
+| decode cliff | 6.0 tok/s at 300K | 5x falloff inside 1.5 doublings as measured that night; a cold re-run measured 13.9 tok/s at both SHAs -- see the §9.2 erratum |
 | prefill by depth | 255.2 / 275.1 / 257.7 / 245.1 / 242.0 / 195.4 tok/s at 1K / 10K / 50K / 100K / 160K / 300K | uncached, server-measured |
 | spec decode gain | +34.9% from the two medians (36.63 vs 27.15 tok/s; the baseline doc's paired analysis states +36.71%), CI [+28.26,+51.02]%, 12/12 pairs | 24 paired runs, 256-tok fixed window, 100K |
 | fork divergence | exo 2,607 (2,568 no-merge), mlx 277 (253), mlx-lm 527 (485) commits ahead of upstream | `git rev-list --count` |
@@ -941,6 +944,20 @@ build and instance -- consistent with the plateau, not repeats: 26.7 / 32.2 / 32
 flat part and put the cliff somewhere in 160K-300K; its shape inside that interval is
 unmeasured (two points). There is no second slow mode hiding in the 1K-160K range.
 
+> **ERRATUM (2026-10-18 — `REPRO-RUN-2026-10-18.md` §11.8).** A genuinely cold 300K row
+> (`cached = 0`, park store emptied, two separate boots) measures **13.9 tok/s on both
+> `5a18b81` and `b88d65dd`** — 2.3x this table's 6.0 — with the same round size (2.73
+> tok/round, vs 2.9 here) and a **0.196 s** median inter-round gap (vs 0.486 s here). One fixed
+> build spans the rest: `b88d65dd` gives 13.9 tok/s cold, 22.1 with 159,744 tokens restored
+> from the park store, and 25.2 with all 300,003 restored. Decode at 300K is therefore a
+> function of prefix residency, not of depth alone and not of the SHA — and §9 was measured at
+> `5a18b81` before the 10:05 `991cf11` deploy, so this row's build is the one the re-run used.
+> The "5x falloff" is 2.3x when both ends are measured cold. **What does not reproduce is the
+> per-round cost (0.486 s vs 0.196 s) at the same code and cache state** — that is the open
+> quantity, with two candidates recorded rather than guessed: concurrent client traffic (this
+> section's own five harvested points are another client on that instance) and machine thermal
+> state. The test that separates them: re-run 300K with a second client streaming.
+
 **The 300K cliff is not a simple artifact.** No request begins inside the window (the turn's
 first-token is 02:31:59.523, turn-end 02:32:31.188, next request's first-token 02:32:38.018 --
 after it ended; see the §9.1 caveat), and the 300K row's client wall carries ~33.5 s outside
@@ -1048,6 +1065,11 @@ burst structure, not a captured trace. Keep two claims apart: refault as *a phen
 CONFIRMED (page-ins measured, swap/compressor ruled out), while refault as *the cause of this
 degradation* is unproven -- and its fix explicitly not attempted
 (`docs/deep-context-refault-mechanism-confirmed-2026-09-22.md:95-98`).
+
+*2026-10-18:* the depth-to-depth ratio itself is cache-state dependent -- at 300K one build
+measures 13.9 tok/s cold and 22-25 tok/s with a restored prefix (§9.2 erratum,
+`REPRO-RUN-2026-10-18.md` §11.8) -- so the interval's shape must be re-measured with cache
+state held fixed before the onset can be located.
 
 **Prefill cliff at ~340K.** The gc_limit-threshold model stated in §5.3 is the best standing
 explanation but is not live-confirmed; `k_eff` (the model's effective read multiple) is
