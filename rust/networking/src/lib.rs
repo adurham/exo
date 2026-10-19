@@ -35,6 +35,23 @@ pub fn cfg(identity: &str, listen_port: u16) -> Result<zenoh::Config> {
     cfg.insert_json5("adminspace/enabled", "true")?;
     //cfg.insert_json5("transport/link/tx/batch_size", "9216")?;
     cfg.insert_json5("transport/link/rx/buffer_size", "16777216")?;
+    // Multi-fragment command delivery. Commands whose serialised form is a few MB (the 1M row's
+    // TextGeneration is 6.69 MB) are pushed as many fragments by CongestionControl::Drop
+    // publishers (swarm.rs declares every publisher that way). Zenoh's defaults are a 2-batch
+    // queue per priority (2 x 65,535 B) and a 50 ms deadline for fragments of one message: at
+    // ~1 Gbps over the Thunderbolt control link a 6 MB message takes about that long, so trailing
+    // fragments were dropped and the peer never reassembled the command -- silently, with no
+    // error on either end, which surfaced only as "the cluster didn't accept the request".
+    // Measured boundary before this change: 6.00 MB delivered, 6.20 MB lost (REPRO-RUN-2026-10-18
+    // §11.12). Deepen the queue and give a whole message 2 s to clear.
+    cfg.insert_json5(
+        "transport/link/tx/queue/size",
+        "{control:8,real_time:8,interactive_high:8,interactive_low:8,data_high:8,data:8,data_low:8,background:8}",
+    )?;
+    cfg.insert_json5(
+        "transport/link/tx/queue/congestion_control/drop/max_wait_before_drop_fragments",
+        "2000000",
+    )?;
     //cfg.insert_json5("timestamping/enabled", "true")?;
     cfg.insert_json5("plugins/storage_manager/__required__", "true")?;
     cfg.insert_json5(
