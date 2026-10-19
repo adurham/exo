@@ -93,7 +93,46 @@ Per node, in this order — both nodes can run in parallel:
 7. **Rollback**: keep the old weights (196 GiB) until step 5 passes on the new
    pair. If they cannot both be held, rollback = re-download (~1-2 h).
 
-## 5. Open items
+## 5. Execution log
+
+- **2026-10-19 00:19 — prepped both nodes (approved by owner).** Deleted
+  `deepseek-ai--DeepSeek-V4-Flash-Vision-Exp` (156 G, retired) and
+  `local--DeepSeek-V4-Flash-DSpark-MTP` (10 G) on **both** Studios, so they
+  mirror. Free space: m4-1 119 → **286 GiB**, m4-2 210 → **377 GiB**.
+  No open file handles on either directory before deletion; neither is referenced
+  by the placed instance.
+- **2026-10-19 00:20 — 1017 engram download started on both nodes**
+  (`hf download deepseek-ai/DeepSeek-V4.1-Flash-1017` with the 12-shard subset
+  that matches the current install's layout, into
+  `~/.exo/models/deepseek-ai--DeepSeek-V4.1-Flash-1017-engram`, 244.2 GB).
+  m4-2 keeps a full copy rather than its current 2-shard subset so the nodes
+  stay mirrored.
+- **Weights are NOT downloaded yet** and cannot be: 198 GiB does not fit
+  alongside the old weights on either node (m4-1 would have ~59 GiB left after
+  the engram tables). The weight swap is therefore a maintenance window:
+  stop cluster → drop the old weight dir → download 43 shards (trimmed index,
+  `index-trimmed.json`: 12 engram entries removed, 43 shards referenced) →
+  point `EXO_DSV41_ENGRAM_DIR` at the 1017 tables → relaunch → run the gate.
+
+- **2026-10-19 12:48 — 1017 is LIVE.** `READY (2/2)`, load warmup ~90 s, both
+  runners serving `dealignai/DeepSeek-V4.1-Flash-1017-EXL3-2.9bpw-UNCENSORED`.
+  Three blockers had to be fixed first, none of them about the weights:
+  1. the upstream index ships `metadata.total_size: 0` → pydantic `PositiveInt`
+     rejects it, and exo re-downloaded the index at every boot (wiping the
+     trimmed shard map). Fixed in `cf1c60656`: a valid local index wins.
+  2. no curated model card existed for the new id, so the auto-generated one
+     declared `supports_tensor = false` and placement refused Tensor sharding.
+     Card written on both nodes (`engine = "dsv41"`, Metal-only, real
+     `storage_size` 212,742,339,040).
+  3. the checkpoint stores **layer 14** `attn.wo_b` and
+     `ffn.shared_experts.w2` as plain BF16 (`.weight`, no trellis group), so the
+     TP slicer — which only walks trellis groups — left them full-size while the
+     activations were per-rank:
+     `(1,512,4096) vs (8192,5120)` then `(512,1152) vs (2304,5120)`.
+     Fixed in mlx-lm `e598cb6ed` (superproject `e598cb6ed` bump): any raw
+     `<name>.weight` gets the same 128-wide block slice on the same axis.
+
+## 6. Open items
 
 - **ABLITERATION QUALITY.** 1017's gains were measured on the official model.
   The dealignai build is an abliteration of an EXL3 quant; the Sept build was
