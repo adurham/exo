@@ -436,7 +436,15 @@ async def fetch_config_data(model_id: ModelId) -> ConfigData:
 
 
 async def fetch_safetensors_size(model_id: ModelId) -> Memory:
-    """Gets model size from safetensors index or falls back to HF API."""
+    """Gets model size from the local safetensors index, falling back to HF API.
+
+    A local index WINS over the Hub copy. A locally managed model dir may
+    deliberately ship a shard-subset index (a quant that stores tables the
+    engine reads from a separate release), and re-downloading the upstream file
+    would both discard that layout and re-import its defects — upstream indexes
+    exist with ``metadata.total_size == 0``, which pydantic rejects outright
+    (``PositiveInt``), turning a working local model into a placement failure.
+    """
     from exo.download.download_utils import (
         download_file_with_retry,
         resolve_model_dir,
@@ -444,6 +452,22 @@ async def fetch_safetensors_size(model_id: ModelId) -> Memory:
     from exo.shared.types.worker.downloads import ModelSafetensorsIndex
 
     target_dir = await resolve_model_dir(model_id)
+    local_index = target_dir / "model.safetensors.index.json"
+    if await aios.path.exists(local_index):
+        try:
+            async with aiofiles.open(local_index, "r") as f:
+                index_data = ModelSafetensorsIndex.model_validate_json(await f.read())
+        except ValidationError as e:
+            err = e.errors()[0]
+            logger.warning(
+                f"Local model.safetensors.index.json for {model_id} is unusable "
+                f"({err['type']} at metadata.total_size); using the Hub total"
+            )
+        else:
+            metadata = index_data.metadata
+            if metadata is not None and metadata.total_size is not None:
+                return Memory.from_bytes(metadata.total_size)
+
     index_path = await download_file_with_retry(
         model_id,
         "main",
