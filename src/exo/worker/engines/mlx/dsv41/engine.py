@@ -329,6 +329,59 @@ def _dsv41_cache_bytes(cache: Any) -> dict[str, float]:
     return acc
 
 
+def _deep_array_census(root: Any, *, max_nodes: int = 4000, max_depth: int = 5) -> list[tuple[str, float]]:
+    """Every live array reachable from ``root``, as (path, GB), biggest first.
+
+    ``_dsv41_cache_bytes`` knows the buffers the cache *should* hold; this walks
+    whatever is actually reachable (attributes, lists, tuples, dicts, nested
+    modules) so a buffer nobody documented still shows up. Bounded and
+    read-only: depth/node caps, cycles skipped, and any exception aborts the
+    walk rather than the turn. Used to attribute the tens of GB a deep-context
+    turn retains beyond the KV cache.
+    """
+    out: list[tuple[str, float]] = []
+    seen: set[int] = set()
+
+    def size_of(obj: Any) -> float | None:
+        try:
+            n = obj.nbytes
+        except Exception:
+            return None
+        try:
+            return float(n) / 1e9
+        except Exception:
+            return None
+
+    def walk(obj: Any, path: str, depth: int) -> None:
+        if depth > max_depth or len(seen) > max_nodes:
+            return
+        gb = size_of(obj)
+        if gb is not None:
+            out.append((path or "?", gb))
+            return
+        if id(obj) in seen:
+            return
+        seen.add(id(obj))
+        if isinstance(obj, dict):
+            items = list(obj.items())[:64]
+        elif isinstance(obj, (list, tuple)):
+            items = list(enumerate(obj))[:64]
+        else:
+            try:
+                items = list(vars(obj).items())[:64]
+            except Exception:
+                return
+        for k, v in items:
+            walk(v, f"{path}.{k}" if path else str(k), depth + 1)
+
+    try:
+        walk(root, "", 0)
+    except Exception:
+        return []
+    out.sort(key=lambda kv: -kv[1])
+    return out
+
+
 def _read_int_env(name: str, default: int) -> int:
     """Read an integer knob, warning (never raising) on a malformed value.
 
@@ -2175,6 +2228,11 @@ class Dsv41Engine(Engine):
                         f"active={active:.2f}GB peak={peak:.2f}GB"
                         f"{' | ' + parts if parts else ''}"
                     )
+                    for _path, _gb in _deep_array_census(
+                        session.cache.cache  # pyright: ignore[reportAny]
+                    )[:8]:
+                        if _gb >= 0.05:
+                            logger.info(f"[MEMPROF deep] {_gb:6.2f}GB  {_path}")
                 except Exception:
                     pass
             # ── NO-REPEAT N-GRAM TELEMETRY ──────────────────────────────────
