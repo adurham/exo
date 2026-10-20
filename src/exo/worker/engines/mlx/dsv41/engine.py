@@ -2065,6 +2065,20 @@ class Dsv41Engine(Engine):
                 pass
         rounds_done = 0
         _window_ms = 0.0
+        if os.environ.get("EXO_DSV41_CACHE_PROFILE"):
+            # Where does the deep-context footprint appear? This line brackets
+            # prefill: whatever it reads now is what the prefill RETAINS.
+            try:
+                import mlx.core as _mx0
+
+                logger.info(
+                    f"[MEMPROF] decode start (prefill retained): "
+                    f"active={_mx0.get_active_memory() / 1e9:.2f}GB "
+                    f"cache={_mx0.get_cache_memory() / 1e9:.2f}GB "
+                    f"peak={_mx0.get_peak_memory() / 1e9:.2f}GB"
+                )
+            except Exception:
+                pass
         policy = (
             _spec_policy(self.gamma)
             if (head is not None and self.adaptive_gamma)
@@ -2223,6 +2237,21 @@ class Dsv41Engine(Engine):
                     )
                     active = _mx.get_active_memory() / 1e9
                     peak = _mx.get_peak_memory() / 1e9
+                    # Reclaimable-vs-live test: if a gc + allocator clear drops
+                    # active memory, the depth footprint was unreferenced garbage
+                    # (a dropped reference is a real code bug), not live state.
+                    try:
+                        import gc as _gc
+
+                        _gc.collect()
+                        _mx.clear_cache()
+                        after = _mx.get_active_memory() / 1e9
+                        logger.info(
+                            f"[MEMPROF] after gc+clear_cache: active={after:.2f}GB "
+                            f"(was {active:.2f}GB)"
+                        )
+                    except Exception:
+                        pass
                     logger.info(
                         f"[MEMPROF] dsv41 turn end (committed={n}): "
                         f"active={active:.2f}GB peak={peak:.2f}GB"
