@@ -2081,11 +2081,20 @@ class Dsv41Engine(Engine):
                     rounds_done += 1
                     _window_ms += float(_round_ms)
                     if rounds_done % _span_every == 0:
+                        try:
+                            import mlx.core as _mx
+
+                            _mem = (
+                                f" active={_mx.get_active_memory() / 1e9:.2f}GB"
+                                f" peak={_mx.get_peak_memory() / 1e9:.2f}GB"
+                            )
+                        except Exception:
+                            _mem = ""
                         logger.info(
                             f"[PROFILER decode] rounds={rounds_done} "
                             f"window_ms={_window_ms:.1f} "
                             f"avg_round_ms={_window_ms / _span_every:.2f} "
-                            f"committed={n}"
+                            f"committed={n}{_mem}"
                         )
                         _window_ms = 0.0
                         try:
