@@ -112,6 +112,10 @@ BIG_SPECS: list[dict[str, Any]] = [
          stream=True, thinking=False, corpus=True),
     dict(name="depth_d300k.json", target=300_003, max_tokens=200,
          stream=True, thinking=False, corpus=True),
+    # Owner validation target (2026-10-20): Sept must be good to 500K before
+    # any further 1017 work.
+    dict(name="depth_d500k.json", target=500_003, max_tokens=200,
+         stream=True, thinking=False, corpus=True),
 ]
 
 #: Small bodies. guard_banana's body is quoted verbatim in evidence-live.md, so
