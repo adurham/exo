@@ -1945,6 +1945,26 @@ class Dsv41Engine(Engine):
         loop emits ONE INFO telemetry line at turn end (``format_ban_line``).
         """
         head = self.loaded.head if self.speculative else None
+        # ── DECODE-SCOPED SPAN PROFILING (EXO_PROFILER=spans) ──────────────────
+        # The model-side span hook is reset/dumped around PREFILL only
+        # (generate.py prefill), so a decode-time regression has no
+        # attribution at all: the prefill breakdown can look healthy while
+        # decode crawls. When the hook is registered, dump (+reset) every
+        # EXO_PROFILER_DECODE_EVERY rounds; each dump is the sub-span breakdown
+        # (attn.indexer / attn.sdpa / attn.o_proj / moe.*) for that window, and
+        # the line before it pins the window's own wall time. When the hook is
+        # absent this costs one local compare per round and logs nothing.
+        _span_hook: Any = None
+        if "spans" in os.environ.get("EXO_PROFILER", "").lower():
+            try:
+                from mlx_lm import profiler as _profiler
+
+                _span_hook = _profiler.get()
+            except Exception:
+                _span_hook = None
+        _span_every = max(1, _read_int_env("EXO_PROFILER_DECODE_EVERY", 32))
+        rounds_done = 0
+        _window_ms = 0.0
         policy = (
             _spec_policy(self.gamma)
             if (head is not None and self.adaptive_gamma)
@@ -2006,6 +2026,25 @@ class Dsv41Engine(Engine):
                         "(reasoning-budget limiter invariant violated)"
                     )
                 n += len(batch)
+                # Decode-scoped span window (see _span_hook above). `_round_ms` is
+                # _one_round's own wall time for exactly these committed rows, so
+                # the window total is directly comparable to the client's decode
+                # window and the dump below splits it into model sub-spans.
+                if _span_hook is not None:
+                    rounds_done += 1
+                    _window_ms += float(_round_ms)
+                    if rounds_done % _span_every == 0:
+                        logger.info(
+                            f"[PROFILER decode] rounds={rounds_done} "
+                            f"window_ms={_window_ms:.1f} "
+                            f"avg_round_ms={_window_ms / _span_every:.2f} "
+                            f"committed={n}"
+                        )
+                        _window_ms = 0.0
+                        try:
+                            _span_hook.dump(reset=True)
+                        except Exception:
+                            pass
                 token = batch[-1]
                 # Keep the ban's history in step with the cache: this round committed
                 # every id in ``batch`` (its rows are in the cache), so the NEXT round
