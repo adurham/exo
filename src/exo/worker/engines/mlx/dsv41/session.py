@@ -717,7 +717,32 @@ class Conversation:
         ids = _ids_of(prompt_ids)
         if ids.shape[0] == 0:
             raise ValueError("session turn: empty prompt")
-        taps: list = []
+        # Collecting the whole turn's per-chunk tap dicts is O(context): at 300K
+        # it is the difference between ~115 GB and ~132 GB live right after the
+        # prefill. The per-chunk callback (``_on_chunk_taps``) already feeds each
+        # chunk into the draft window before it lands, and the batch feed below
+        # is explicitly the fallback for a driver that has no callback -- so the
+        # list is only needed when the callback is absent. EXO_DSV41_PREFILL_TAPS_LIST=0
+        # forces the lean path for an attribution run.
+        _want_taps_list = self.head is not None and (
+            _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", 1) != 0
+        )
+
+        class _TapSink(list):
+            """A list that keeps only the last chunk's taps.
+
+            ``want_taps`` on the mlx side is ``taps_out is not None``, so this
+            object must stay non-None for the per-chunk taps to be COMPUTED and
+            handed to ``taps_cb`` (that is what feeds the draft window). It just
+            does not retain the whole turn's dicts: O(context) of hidden states
+            the caller never reads again.
+            """
+
+            def append(self, item: Any) -> None:
+                self.clear()
+                super().append(item)
+
+        taps: list = [] if _want_taps_list else _TapSink()
         t0 = time.perf_counter()
         # The end-anchored margin rung's reference and its once-per-call latch;
         # cleared in the finally so a failed append cannot leave them stale.
@@ -737,7 +762,7 @@ class Conversation:
                 ids,
                 argmax=False,
                 return_taps=False,
-                taps_out=taps,
+                taps_out=taps if _want_taps_list else None,
                 chunk_plan=chunk_plan,
                 checkpoint=False,
             )
