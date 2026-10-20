@@ -2086,6 +2086,7 @@ class Dsv41Engine(Engine):
 
                             _mem = (
                                 f" active={_mx.get_active_memory() / 1e9:.2f}GB"
+                                f" cache={_mx.get_cache_memory() / 1e9:.2f}GB"
                                 f" peak={_mx.get_peak_memory() / 1e9:.2f}GB"
                             )
                         except Exception:
