@@ -291,6 +291,44 @@ MAX_OUTPUT_TOKENS_CEILING_ENV = "EXO_DSV41_MAX_OUTPUT_TOKENS_CEILING"
 MAX_OUTPUT_TOKENS_CEILING = 32768
 
 
+def _dsv41_cache_bytes(cache: Any) -> dict[str, float]:
+    """Live bytes held by a DSv4.1 ``ModelCache``, grouped by buffer kind.
+
+    The mlx path's walker (``generator.generate._profile_cache_bytes``) matches
+    a different cache family (``keys``/``values``/``_pool_storage``), so it
+    reports "no cache arrays found" on this engine's cache. DSv4.1's state is
+    one ``LayerCache`` per layer — ``win_kv`` (every layer), ``comp_kv`` and
+    ``index_k`` (kv/index sources only) — plus the model-level ``engram_ids``
+    int64 history and the draft head's own caches. Read-only; never raises.
+    Returns {kind: MB}.
+    """
+    acc: dict[str, float] = {}
+
+    def add(kind: str, obj: Any) -> None:
+        try:
+            n = obj.nbytes  # mx.array and np.ndarray both expose nbytes
+        except Exception:
+            return
+        acc[kind] = acc.get(kind, 0.0) + n / 1024**2
+
+    def walk_layers(layers: Any) -> None:
+        for lc in layers or ():
+            add("win_kv", getattr(lc, "win_kv", None))
+            add("comp_kv", getattr(lc, "comp_kv", None))
+            add("index_k", getattr(lc, "index_k", None))
+            cs = getattr(lc, "comp_state", None)
+            if cs is not None:
+                add("comp_state", getattr(cs, "kv_state", None))
+                add("comp_state", getattr(cs, "score_state", None))
+
+    try:
+        walk_layers(getattr(cache, "layers", None))
+        add("engram_ids", getattr(cache, "engram_ids", None))
+    except Exception:
+        pass
+    return acc
+
+
 def _read_int_env(name: str, default: int) -> int:
     """Read an integer knob, warning (never raising) on a malformed value.
 
@@ -2102,13 +2140,21 @@ class Dsv41Engine(Engine):
             # Unset => no work and no line.
             if os.environ.get("EXO_DSV41_CACHE_PROFILE"):
                 try:
-                    from exo.worker.engines.mlx.generator.generate import (
-                        _log_cache_profile,
-                    )
+                    import mlx.core as _mx
 
-                    _log_cache_profile(
-                        f"dsv41 turn end (committed={n})",
-                        session.cache.cache,  # pyright: ignore[reportAny]
+                    parts = ", ".join(
+                        f"{k}={v / 1024:.2f}GB"
+                        for k, v in sorted(
+                            _dsv41_cache_bytes(session.cache.cache).items(),  # pyright: ignore[reportAny]
+                            key=lambda kv: -kv[1],
+                        )
+                    )
+                    active = _mx.get_active_memory() / 1e9
+                    peak = _mx.get_peak_memory() / 1e9
+                    logger.info(
+                        f"[MEMPROF] dsv41 turn end (committed={n}): "
+                        f"active={active:.2f}GB peak={peak:.2f}GB"
+                        f"{' | ' + parts if parts else ''}"
                     )
                 except Exception:
                     pass
