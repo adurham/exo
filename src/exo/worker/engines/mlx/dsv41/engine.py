@@ -1336,6 +1336,27 @@ class Dsv41Engine(Engine):
         # Wall-clock origin for this request's observability lines (time to first
         # committed token, the ~10 s throughput cadence, and the turn summary).
         request_started = time.perf_counter()
+        # Headroom probe (EXO_DSV41_BALLAST_GB): hold N GB of live MX memory for
+        # the life of this engine process, so a row runs against a smaller
+        # wireable budget. This is the one-variable test for "is the decode cost
+        # at this context memory-headroom or context-compute": same body, same
+        # context, different free headroom. Allocated once and kept referenced
+        # on self; unset => no allocation, no behaviour change.
+        _ballast_gb = _read_float_env("EXO_DSV41_BALLAST_GB", 0.0)
+        if _ballast_gb > 0 and getattr(self, "_ballast", None) is None:
+            try:
+                import mlx.core as _mxb
+
+                _n = int(_ballast_gb * 1e9) // 4
+                _ballast = _mxb.zeros((_n,), dtype=_mxb.float32)
+                _mxb.eval(_ballast)
+                self._ballast = _ballast  # hold it, do not let it be freed
+                logger.info(
+                    f"[DSV41] headroom probe: holding {_ballast_gb:.1f} GB ballast "
+                    f"(active now {_mxb.get_active_memory() / 1e9:.2f} GB)"
+                )
+            except Exception as e:
+                logger.warning(f"[DSV41] headroom probe ballast failed: {e}")
         model = self.loaded.model
         tokenizer = self.loaded.tokenizer
         vision = self.vision_processor
