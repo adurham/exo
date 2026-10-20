@@ -2093,6 +2093,25 @@ class Dsv41Engine(Engine):
                 if session.eos_id in batch:
                     return
         finally:
+            # ── CACHE-MEMORY ATTRIBUTION (EXO_DSV41_CACHE_PROFILE=1) ────────
+            # "Where do the GB go at depth" has no readout on the DSv4.1 path:
+            # mx peak memory names a single number, and the cache that produces
+            # it (window ring / compressed KV / index keys / pooled state) is a
+            # private per-layer structure. One INFO line per turn, grouped by
+            # owning cache class, using the same walker the mlx path uses.
+            # Unset => no work and no line.
+            if os.environ.get("EXO_DSV41_CACHE_PROFILE"):
+                try:
+                    from exo.worker.engines.mlx.generator.generate import (
+                        _log_cache_profile,
+                    )
+
+                    _log_cache_profile(
+                        f"dsv41 turn end (committed={n})",
+                        session.cache.cache,  # pyright: ignore[reportAny]
+                    )
+                except Exception:
+                    pass
             # ── NO-REPEAT N-GRAM TELEMETRY ──────────────────────────────────
             # ONE INFO line per turn, ONLY when the knob is on (the disabled path
             # allocates no counters and logs nothing -- byte-identical behaviour).
