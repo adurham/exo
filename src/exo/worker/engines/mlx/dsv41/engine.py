@@ -2001,6 +2001,15 @@ class Dsv41Engine(Engine):
             except Exception:
                 _span_hook = None
         _span_every = max(1, _read_int_env("EXO_PROFILER_DECODE_EVERY", 32))
+        if _span_hook is not None:
+            # Discard whatever prefill left in the accumulator so the FIRST
+            # decode window is decode-only. Without this the turn's first dump
+            # still carries the whole prefill (minutes), which reads as a giant
+            # "decode" cost and buries the very shape being measured.
+            try:
+                _span_hook.stats.snapshot_and_reset()
+            except Exception:
+                pass
         rounds_done = 0
         _window_ms = 0.0
         policy = (
