@@ -717,24 +717,17 @@ class Conversation:
         ids = _ids_of(prompt_ids)
         if ids.shape[0] == 0:
             raise ValueError("session turn: empty prompt")
-        # Collecting the whole turn's per-chunk tap dicts is O(context): at 300K
-        # it is the difference between ~110 GB and ~124 GB live right after the
-        # prefill, i.e. whether the decode sits above or below the ~126 GB
-        # wireable limit (measured: 20.3 vs 13.7 tok/s at 300K). The per-chunk
-        # callback (``_on_chunk_taps``) already feeds each chunk into the draft
-        # window before it lands, and the batch feed below is explicitly the
-        # fallback for a driver that has no callback -- so the list is only
-        # needed when the callback is absent. Deep prompts pay for it in
-        # headroom and lose more than the acceptance the list buys, so the list
-        # is dropped above EXO_DSV41_TAPS_LIST_MAX_TOKENS (default 128K) and can
-        # be forced either way with EXO_DSV41_PREFILL_TAPS_LIST.
-        _prompt_tokens = int(ids.shape[0])
-        _force_list = _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", -1)
-        _list_max = _read_int_env("EXO_DSV41_TAPS_LIST_MAX_TOKENS", 131072)
-        _want_taps_list = self.head is not None and (
-            _force_list > 0
-            or (_force_list < 0 and _prompt_tokens <= max(_list_max, 0))
-        )
+        # Collecting the whole turn's per-chunk tap dicts is O(context) (~14 GB at
+        # 300K) and dropping it does buy real headroom -- but the batch feed below
+        # is NOT merely a fallback: with the list dropped, a turn that has to
+        # EXTEND a resident deep session advances the body cache while the DSpark
+        # draft window stays behind, and the engine refuses the turn with
+        # "the draft window holds <N> rows but the cache is at <M>: they must
+        # advance together" (measured at 300K after a 100K session was resident).
+        # So the list stays ON by default; EXO_DSV41_PREFILL_TAPS_LIST=0 exists
+        # only for single-turn attribution runs and must not be used in service.
+        _force_list = _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", 1)
+        _want_taps_list = self.head is not None and _force_list > 0
 
         class _TapSink(list):
             """A list that keeps only the last chunk's taps.
