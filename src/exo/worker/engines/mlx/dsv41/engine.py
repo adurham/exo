@@ -2108,6 +2108,18 @@ class Dsv41Engine(Engine):
                 pass
         rounds_done = 0
         _window_ms = 0.0
+        # GPU-time bracketing (cheap, always-on when a window is logged): the
+        # difference between a fast and a slow turn at identical shapes can be
+        # real GPU work or a stall, and only gpu_time_ns separates them —
+        # gpu_ms ~= window_ms means the GPU is busy, gpu_ms << window_ms means
+        # the round is waiting (allocator/sync/queue), not computing.
+        _gpu0_ns = 0
+        try:
+            import mlx.core as _mxg
+
+            _gpu0_ns = int(_mxg.metal.gpu_time_ns())
+        except Exception:
+            pass
         if os.environ.get("EXO_DSV41_CACHE_PROFILE"):
             # Where does the deep-context footprint appear? This line brackets
             # prefill: whatever it reads now is what the prefill RETAINS.
@@ -2201,11 +2213,23 @@ class Dsv41Engine(Engine):
                             )
                         except Exception:
                             _mem = ""
+                        _gpu_ms = ""
+                        try:
+                            import mlx.core as _mxg2
+
+                            _g1_ns = int(_mxg2.metal.gpu_time_ns())
+                            _gpu_ms = (
+                                f" gpu_ms={(_g1_ns - _gpu0_ns) / 1e6:.1f}"
+                                f" gpu_share={100.0 * (_g1_ns - _gpu0_ns) / 1e6 / max(_window_ms, 1e-6):.0f}%"
+                            )
+                            _gpu0_ns = _g1_ns
+                        except Exception:
+                            pass
                         logger.info(
                             f"[PROFILER decode] rounds={rounds_done} "
                             f"window_ms={_window_ms:.1f} "
                             f"avg_round_ms={_window_ms / _span_every:.2f} "
-                            f"committed={n}{_mem}"
+                            f"committed={n}{_mem}{_gpu_ms}"
                         )
                         _window_ms = 0.0
                         try:
