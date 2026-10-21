@@ -2125,6 +2125,25 @@ class Dsv41Engine(Engine):
         except Exception:
             pass
         if os.environ.get("EXO_DSV41_CACHE_PROFILE"):
+            # Clock canary: a fixed-shape matmul timed at the decode seam. If it
+            # is constant across fast and slow turns, GPU power state is not what
+            # differs between them, and the argument can be closed for good.
+            try:
+                import mlx.core as _mxc
+
+                _ca = _mxc.random.normal((2048, 2048), dtype=_mxc.float16)
+                _cb = _mxc.random.normal((2048, 2048), dtype=_mxc.float16)
+                _mxc.eval(_ca @ _cb)
+                _mxc.synchronize()
+                _ct0 = time.perf_counter()
+                for _ in range(20):
+                    _mxc.eval(_ca @ _cb)
+                _mxc.synchronize()
+                logger.info(
+                    f"[MEMPROF] clock canary: {(time.perf_counter() - _ct0) * 1000 / 20:.2f} ms/matmul"
+                )
+            except Exception:
+                pass
             # Where does the deep-context footprint appear? This line brackets
             # prefill: whatever it reads now is what the prefill RETAINS.
             try:
@@ -2328,9 +2347,12 @@ class Dsv41Engine(Engine):
                         f"active={active:.2f}GB peak={peak:.2f}GB"
                         f"{' | ' + parts if parts else ''}"
                     )
+                    # Walk the whole Conversation, not just the ModelCache: the
+                    # DSpark draft state and the per-checkpoint draft snapshots
+                    # live outside it and are exactly where a few GB can hide.
                     for _path, _gb in _deep_array_census(
-                        session.cache.cache  # pyright: ignore[reportAny]
-                    )[:8]:
+                        session  # pyright: ignore[reportAny]
+                    )[:10]:
                         if _gb >= 0.05:
                             logger.info(f"[MEMPROF deep] {_gb:6.2f}GB  {_path}")
                 except Exception:
