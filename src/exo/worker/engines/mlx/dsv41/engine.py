@@ -1336,6 +1336,18 @@ class Dsv41Engine(Engine):
         # Wall-clock origin for this request's observability lines (time to first
         # committed token, the ~10 s throughput cadence, and the turn summary).
         request_started = time.perf_counter()
+        # Per-turn peak, not process lifetime: the dsv41 path never reset the
+        # allocator high-water mark (only the mlx path did, at
+        # generate.mlx_generate), so every turn reported the biggest peak the
+        # process had ever seen and a follow-up turn looked as expensive as a
+        # cold one. Reset here so generation_stats.peak_memory_usage describes
+        # THIS turn.
+        try:
+            import mlx.core as _mxr
+
+            _mxr.reset_peak_memory()
+        except Exception:
+            pass
         # Headroom probe (EXO_DSV41_BALLAST_GB): hold N GB of live MX memory for
         # the life of this engine process, so a row runs against a smaller
         # wireable budget. This is the one-variable test for "is the decode cost
