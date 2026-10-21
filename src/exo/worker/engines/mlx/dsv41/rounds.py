@@ -60,6 +60,8 @@ from exo.worker.engines.mlx.dsv41.no_repeat import (
 )
 from exo.worker.runner.bootstrap import logger
 
+from mlx_lm.profiler import span
+
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids a circular import)
     from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
     from exo.worker.engines.mlx.dsv41.reasoning_budget import (
@@ -608,15 +610,17 @@ def _one_round(
     # Speculative verify feeds the anchor + EVERY drafted row in ONE forward
     # (1 + gamma rows) before the rollback trims the rejected suffix, so grow
     # for that whole worst case here, at the eval-clean boundary.
-    _ensure_capacity_for_round(cache, 1 + gamma)
+    with span("round.cache_grow"):
+        _ensure_capacity_for_round(cache, 1 + gamma)
     position = int(cache.offset)
-    drafted = head.draft(
-        anchor.reshape(-1),  # DSparkHead.draft takes [b] anchor ids
-        getattr(model, "embed", None),
-        getattr(model, "head", None),
-        draft_state,
-        width=gamma,
-    )
+    with span("round.draft"):
+        drafted = head.draft(
+            anchor.reshape(-1),  # DSparkHead.draft takes [b] anchor ids
+            getattr(model, "embed", None),
+            getattr(model, "head", None),
+            draft_state,
+            width=gamma,
+        )
     # The real DSparkHead.draft returns (tokens, per-position confidence).
     if isinstance(drafted, tuple):
         drafted = drafted[0]
@@ -627,7 +631,8 @@ def _one_round(
     # 1 + gamma: the verify forward feeds the anchor plus EVERY drafted row, and
     # the snapshot must cover the ring slots of all of them or a rejection cannot
     # put the overwritten slots back (spec.snap/rollback).
-    snapshot = spec.snap(cache, position, 1 + gamma)
+    with span("round.snap"):
+        snapshot = spec.snap(cache, position, 1 + gamma)
     # ── NO-REPEAT N-GRAM: ask for the RAW rows when the ban is on ───────────
     # The mask has to land BETWEEN the head and the argmax, so the ban path
     # requests logits (argmax=False) instead of ids. That returns the full vocab
@@ -637,19 +642,21 @@ def _one_round(
     # (1 + gamma) rows of one vocab row, only while the knob is enabled.
     ban_policy = ban if (ban is not None and ban.enabled) else None
     sampling_on = sampling is not None and not sampling.greedy
-    if ban_policy is not None or sampling_on:
-        # Both the escape and sampling need the FULL vocab rows (argmax=False):
-        # the mask/penalty has to land before the argmax or the distribution, and
-        # the full row is what makes the two TP ranks agree with no collective.
-        logits, taps = model(verify_in, cache, return_taps=True, argmax=False)
-        lp = None
-    elif logprobs:
-        logits, taps, lp = model(verify_in, cache, return_taps=True, argmax=True,
-                                 logprobs=logprobs)
-    else:
-        logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
-        lp = None
-    mx.eval(logits)
+    with span("round.verify"):
+        if ban_policy is not None or sampling_on:
+            # Both the escape and sampling need the FULL vocab rows (argmax=False):
+            # the mask/penalty has to land before the argmax or the distribution, and
+            # the full row is what makes the two TP ranks agree with no collective.
+            logits, taps = model(verify_in, cache, return_taps=True, argmax=False)
+            lp = None
+        elif logprobs:
+            logits, taps, lp = model(verify_in, cache, return_taps=True, argmax=True,
+                                     logprobs=logprobs)
+        else:
+            logits, taps = model(verify_in, cache, return_taps=True, argmax=True)
+            lp = None
+        with span("round.eval"):
+            mx.eval(logits)
     stashes = spec.stashes(cache)
     draft = [int(v) for v in drafted[0]]
     masked_rows: mx.array | None = None
@@ -761,8 +768,10 @@ def _one_round(
                 row = logits[0, i]
             _row_logprobs(row, logprobs, lp_out)
     committed_position = position + len(committed)
-    spec.rollback(cache, snapshot, committed_position, stashes)
-    head.append_ctx(tapcat(taps)[:, : len(committed)], draft_state)
+    with span("round.rollback"):
+        spec.rollback(cache, snapshot, committed_position, stashes)
+    with span("round.draft_append"):
+        head.append_ctx(tapcat(taps)[:, : len(committed)], draft_state)
     return (
         committed,
         (time.perf_counter() - started) * 1e3,
