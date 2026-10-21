@@ -1348,11 +1348,21 @@ class Dsv41Engine(Engine):
                 import mlx.core as _mxb
 
                 _n = int(_ballast_gb * 1e9) // 4
-                _ballast = _mxb.zeros((_n,), dtype=_mxb.float32)
-                _mxb.eval(_ballast)
-                self._ballast = _ballast  # hold it, do not let it be freed
+                # MLX refuses a single 1-D array whose element count exceeds
+                # INT32_MAX (a 18 GB float32 ballast is 4.5e9 elements), so hold
+                # it as a few <=4 GB pieces.
+                _piece = 1_000_000_000
+                _parts = []
+                _left = _n
+                while _left > 0:
+                    _take = min(_piece, _left)
+                    _parts.append(_mxb.zeros((_take,), dtype=_mxb.float32))
+                    _left -= _take
+                _mxb.eval(_parts)
+                self._ballast = _parts  # hold them, do not let them be freed
                 logger.info(
                     f"[DSV41] headroom probe: holding {_ballast_gb:.1f} GB ballast "
+                    f"in {len(_parts)} piece(s) "
                     f"(active now {_mxb.get_active_memory() / 1e9:.2f} GB)"
                 )
             except Exception as e:
