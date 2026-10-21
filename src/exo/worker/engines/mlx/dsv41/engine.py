@@ -965,7 +965,11 @@ class Dsv41Engine(Engine):
         finally:
             # Return the freed CPU staging copies to the OS between requests, as
             # the runner's own idle reclaim does; never inside the decode loop.
-            mx.clear_cache()
+            # EXO_DSV41_IDLE_CLEAR_CACHE=0 keeps the Metal pool populated across
+            # turns -- the test for whether an empty pool is what makes a
+            # no-new-rows turn decode ~3x slower than a delta turn.
+            if _read_int_env("EXO_DSV41_IDLE_CLEAR_CACHE", 1) != 0:
+                mx.clear_cache()
 
     def step(
         self,
