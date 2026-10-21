@@ -718,15 +718,17 @@ class Conversation:
         if ids.shape[0] == 0:
             raise ValueError("session turn: empty prompt")
         # Collecting the whole turn's per-chunk tap dicts is O(context) (~14 GB at
-        # 300K) and dropping it does buy real headroom -- but the batch feed below
-        # is NOT merely a fallback: with the list dropped, a turn that has to
-        # EXTEND a resident deep session advances the body cache while the DSpark
-        # draft window stays behind, and the engine refuses the turn with
-        # "the draft window holds <N> rows but the cache is at <M>: they must
-        # advance together" (measured at 300K after a 100K session was resident).
-        # So the list stays ON by default; EXO_DSV41_PREFILL_TAPS_LIST=0 exists
-        # only for single-turn attribution runs and must not be used in service.
-        _force_list = _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", 1)
+        # 300K) and is not needed: the per-chunk callback feeds the draft window
+        # as each chunk lands. It used to be load-bearing because dropping it
+        # ALSO passed taps_out=None, which made want_taps false on the mlx side,
+        # so taps were never computed, the callback never fired, and a turn
+        # extending a resident session died with "the draft window holds <N> rows
+        # but the cache is at <M>". With the collector always passed and a
+        # discard sink in place of the list, retention is gone and the feed is
+        # intact -- measured at 300K: 23.86 vs 13.5 tok/s, peak 122.9 vs 132.4 GB,
+        # with 300K deltas reusing 299,008 tokens in 13.2 s. Default is now the
+        # sink; EXO_DSV41_PREFILL_TAPS_LIST=1 restores the list for attribution.
+        _force_list = _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", 0)
         _want_taps_list = self.head is not None and _force_list > 0
 
         class _TapSink(list):
