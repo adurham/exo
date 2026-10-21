@@ -763,7 +763,14 @@ class Conversation:
                 ids,
                 argmax=False,
                 return_taps=False,
-                taps_out=taps if _want_taps_list else None,
+                # ALWAYS pass the collector: ``want_taps`` on the mlx side is
+                # ``taps_out is not None``, so passing None here does not merely
+                # stop the retention -- it stops the taps being COMPUTED, which
+                # stops ``taps_cb`` firing per chunk, which leaves the DSpark
+                # draft window frozen while the body cache advances. That is the
+                # "draft window holds N rows but the cache is at M" failure.
+                # ``taps`` is either the real list or the discard sink.
+                taps_out=taps,
                 chunk_plan=chunk_plan,
                 checkpoint=False,
             )
