@@ -718,14 +718,22 @@ class Conversation:
         if ids.shape[0] == 0:
             raise ValueError("session turn: empty prompt")
         # Collecting the whole turn's per-chunk tap dicts is O(context): at 300K
-        # it is the difference between ~115 GB and ~132 GB live right after the
-        # prefill. The per-chunk callback (``_on_chunk_taps``) already feeds each
-        # chunk into the draft window before it lands, and the batch feed below
-        # is explicitly the fallback for a driver that has no callback -- so the
-        # list is only needed when the callback is absent. EXO_DSV41_PREFILL_TAPS_LIST=0
-        # forces the lean path for an attribution run.
+        # it is the difference between ~110 GB and ~124 GB live right after the
+        # prefill, i.e. whether the decode sits above or below the ~126 GB
+        # wireable limit (measured: 20.3 vs 13.7 tok/s at 300K). The per-chunk
+        # callback (``_on_chunk_taps``) already feeds each chunk into the draft
+        # window before it lands, and the batch feed below is explicitly the
+        # fallback for a driver that has no callback -- so the list is only
+        # needed when the callback is absent. Deep prompts pay for it in
+        # headroom and lose more than the acceptance the list buys, so the list
+        # is dropped above EXO_DSV41_TAPS_LIST_MAX_TOKENS (default 128K) and can
+        # be forced either way with EXO_DSV41_PREFILL_TAPS_LIST.
+        _prompt_tokens = int(ids.shape[0])
+        _force_list = _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", -1)
+        _list_max = _read_int_env("EXO_DSV41_TAPS_LIST_MAX_TOKENS", 131072)
         _want_taps_list = self.head is not None and (
-            _read_int_env("EXO_DSV41_PREFILL_TAPS_LIST", 1) != 0
+            _force_list > 0
+            or (_force_list < 0 and _prompt_tokens <= max(_list_max, 0))
         )
 
         class _TapSink(list):
