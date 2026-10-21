@@ -853,6 +853,24 @@ class Conversation:
         self._feed_chunk_taps(chunk_taps)
         self._margin_rung()
         self.maybe_checkpoint()
+        # Per-chunk memory timeline (EXO_DSV41_CACHE_PROFILE=1): the chunk end is
+        # the one eval-clean boundary during prefill, so a peak reset here makes
+        # peak_memory_usage describe THIS chunk instead of the run. Answers the
+        # question a turn-level peak cannot: is the transient chunk-width scratch
+        # (scales with step size) or fixed per-chunk machinery (does not)?
+        if os.environ.get("EXO_DSV41_CACHE_PROFILE"):
+            try:
+                import mlx.core as _mxp
+
+                self._chunk_idx = getattr(self, "_chunk_idx", 0) + 1
+                logger.info(
+                    f"[MEMPROF chunk] n={self._chunk_idx} offset={self.offset} "
+                    f"active={_mxp.get_active_memory() / 1e9:.2f}GB "
+                    f"peak={_mxp.get_peak_memory() / 1e9:.2f}GB"
+                )
+                _mxp.reset_peak_memory()
+            except Exception:
+                pass
 
     def _margin_rung(self) -> None:
         """Force ONE checkpoint within ``margin`` rows of the prefill's end.
