@@ -86,6 +86,7 @@ from exo.worker.disaggregated.server import PrefillRequest
 from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
+from exo.worker.engines.mlx.dsv41 import collective_wait
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
@@ -107,7 +108,6 @@ from exo.worker.engines.mlx.dsv41.errors import (
 )
 from exo.worker.engines.mlx.dsv41.fingerprint import compute_fingerprint
 from exo.worker.engines.mlx.dsv41.load import Dsv41Loaded
-from exo.worker.engines.mlx.dsv41.sampling import Sampling, resolve_sampling
 from exo.worker.engines.mlx.dsv41.no_repeat import (
     BanTurnStats,
     NoRepeatNgram,
@@ -131,6 +131,7 @@ from exo.worker.engines.mlx.dsv41.rounds import (
     _stop_index,
     _stop_sequences,
 )
+from exo.worker.engines.mlx.dsv41.sampling import Sampling, resolve_sampling
 from exo.worker.engines.mlx.dsv41.session import (
     Dsv41Sessions,
     TurnOutcome,
@@ -189,7 +190,7 @@ def _maybe_install_next18_capture() -> None:
     if not path:
         return                                    # production: inert, zero cost
     try:
-        import next18_capture as cap              # operator-staged on PYTHONPATH
+        import next18_capture as cap  # operator-staged on PYTHONPATH
     except Exception as e:  # noqa: BLE001 - capture must never break serving
         logger.warning(
             f"[DSV41] DSV41_NEXT18_CAPTURE={path} set but next18_capture is not "
@@ -794,6 +795,17 @@ class Dsv41Engine(Engine):
         # Real-tensor capture (R1 ship precondition A2): install the next18 hook
         # when the operator opted in. No-op with DSV41_NEXT18_CAPTURE unset.
         _maybe_install_next18_capture()
+        # Collective-wait instrument (EXO_DSV41_ALLSUM_WAIT=1, default OFF). The
+        # TP all_sum is a barrier, so a stall on either rank produces the same
+        # round time on both logs; timing each rank's host-side wait at the
+        # collective is the only localiser. One install per process, no-op and
+        # byte-identical when the gate is off (dsv41/collective_wait.py).
+        if collective_wait.install():
+            logger.info(
+                "[DSV41] all_sum wait timing armed (%s=1); decode rounds now "
+                "host-sync every collective, so round times are instrument-grade",
+                collective_wait.ENV,
+            )
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
             logger.warning(
@@ -2083,6 +2095,9 @@ class Dsv41Engine(Engine):
         loop emits ONE INFO telemetry line at turn end (``format_ban_line``).
         """
         head = self.loaded.head if self.speculative else None
+        # A turn's instrument round numbering starts at 1 (no-op unless the
+        # all_sum wait instrument is installed).
+        collective_wait.reset_rounds()
         # ── DECODE-SCOPED SPAN PROFILING (EXO_PROFILER=spans) ──────────────────
         # The model-side span hook is reset/dumped around PREFILL only
         # (generate.py prefill), so a decode-time regression has no

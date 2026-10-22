@@ -34,6 +34,7 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 import mlx.core as mx
+from mlx_lm.profiler import span
 
 from exo.api.types import (
     CompletionTokensDetails,
@@ -46,22 +47,21 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.tasks import TaskId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
+from exo.worker.engines.mlx.dsv41 import collective_wait
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
-from exo.worker.engines.mlx.dsv41.sampling import (
-    Sampling,
-    sample_one,
-    sample_prefix,
-    sampled_logprobs,
-)
 from exo.worker.engines.mlx.dsv41.no_repeat import (
     NEG_INF,
     BanTurnStats,
     NoRepeatNgram,
     argmax_after_ban_detailed,
 )
+from exo.worker.engines.mlx.dsv41.sampling import (
+    Sampling,
+    sample_one,
+    sample_prefix,
+    sampled_logprobs,
+)
 from exo.worker.runner.bootstrap import logger
-
-from mlx_lm.profiler import span
 
 #: Monotonic round counter for the per-round memory series (EXO_DSV41_ROUND_MEM=1).
 _ROUND_SEQ = 0
@@ -523,6 +523,10 @@ def _one_round(
     pre-ban round.
     """
     started = time.perf_counter()
+    # Per-round all_sum wait window (EXO_DSV41_ALLSUM_WAIT=1): opens here so
+    # every collective this round takes is host-timed; emit_round closes it.
+    # No-op unless the instrument is installed.
+    collective_wait.begin_round()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
 
     if force_think_end is not None:
@@ -794,6 +798,15 @@ def _one_round(
             )
         except Exception:
             pass
+    # Per-round CROSS-RANK BARRIER series (EXO_DSV41_ALLSUM_WAIT=1): every rank
+    # logs every round, so the rank that arrives at the TP all_sum early shows
+    # the wait and the late one shows ~0 — the per-rank localisation a lockstep
+    # round time cannot give (all_sum is a barrier). None when not installed.
+    wait_line = collective_wait.emit_round(
+        collective_wait.rank_of(engine), _round_ms, len(committed)
+    )
+    if wait_line is not None:
+        logger.info(wait_line)
     return (
         committed,
         _round_ms,
