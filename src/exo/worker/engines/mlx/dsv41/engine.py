@@ -2105,6 +2105,24 @@ class Dsv41Engine(Engine):
         if session is not None and kv_touch.enabled():
             _touched, _touch_s = kv_touch.touch(session.cache.cache)
             logger.info(f"[KVTOUCH] arrays={_touched} secs={_touch_s:.2f}")
+        # Metal residency re-walk (EXO_DSV41_REWIRE_AT_DECODE=1): MLX's residency
+        # sets place an allocation only while it fits the wired budget AT INSERT
+        # TIME (mlx/backend/metal/resident.cpp, kNoSet), and nothing re-walks after
+        # a capacity growth frees the old buffer. A deep prefill's doublings can
+        # therefore leave the final cache buffers unwired for the life of the
+        # session. set_wired_limit() with a DIFFERENT value calls resize(), which
+        # re-walks and wires everything that fits. Off => untouched.
+        if os.environ.get("EXO_DSV41_REWIRE_AT_DECODE"):
+            try:
+                _base = int(mx.device_info()["max_recommended_working_set_size"])
+                _want = _base + 64 * 1024 * 1024  # any change from the load-time value
+                mx.set_wired_limit(_want)
+                logger.info(
+                    f"[REWIRE] wired limit {_base / 1e9:.2f} -> {_want / 1e9:.2f} GB "
+                    "(residency sets re-walked)"
+                )
+            except Exception as _exc:  # pragma: no cover - diagnostic only
+                logger.warning(f"[REWIRE] failed: {_exc!r}")
         # ── DECODE-SCOPED SPAN PROFILING (EXO_PROFILER=spans) ──────────────────
         # The model-side span hook is reset/dumped around PREFILL only
         # (generate.py prefill), so a decode-time regression has no
