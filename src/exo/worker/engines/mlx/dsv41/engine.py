@@ -2115,11 +2115,17 @@ class Dsv41Engine(Engine):
         if os.environ.get("EXO_DSV41_REWIRE_AT_DECODE"):
             try:
                 _base = int(mx.device_info()["max_recommended_working_set_size"])
-                _want = _base + 64 * 1024 * 1024  # any change from the load-time value
-                mx.set_wired_limit(_want)
+                # MLX refuses a limit ABOVE the recommended maximum (so the
+                # load-time value, exactly that maximum, cannot be re-sent) and
+                # resize() early-returns on an unchanged value. Step DOWN one GiB
+                # and straight back UP: the up-step is a budget GROWTH, which is
+                # the branch that re-walks buf_to_set_ and wires every late
+                # allocation that fits.
+                mx.set_wired_limit(_base - (1 << 30))
+                mx.set_wired_limit(_base)
                 logger.info(
-                    f"[REWIRE] wired limit {_base / 1e9:.2f} -> {_want / 1e9:.2f} GB "
-                    "(residency sets re-walked)"
+                    f"[REWIRE] residency sets re-walked at {_base / 1e9:.2f} GB "
+                    "(down 1 GiB, back up) before round 1"
                 )
             except Exception as _exc:  # pragma: no cover - diagnostic only
                 logger.warning(f"[REWIRE] failed: {_exc!r}")
