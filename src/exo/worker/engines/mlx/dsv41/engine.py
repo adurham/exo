@@ -2142,6 +2142,17 @@ class Dsv41Engine(Engine):
                 logger.info(
                     f"[MEMPROF] clock canary: {(time.perf_counter() - _ct0) * 1000 / 20:.2f} ms/matmul"
                 )
+                # Launch-latency canary: a no-op round trip through the GPU.
+                # Compute-bound matmul timing says nothing about per-sync
+                # latency; if THIS moves between fast and slow turns, the round
+                # is paying bubbles x hundreds of sync points.
+                _lt0 = time.perf_counter()
+                for _ in range(50):
+                    _mxc.eval(_mxc.zeros(1))
+                _mxc.synchronize()
+                logger.info(
+                    f"[MEMPROF] launch canary: {(time.perf_counter() - _lt0) * 1000 / 50:.3f} ms/op"
+                )
             except Exception:
                 pass
             # Where does the deep-context footprint appear? This line brackets
