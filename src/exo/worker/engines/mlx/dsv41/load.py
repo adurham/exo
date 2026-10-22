@@ -121,6 +121,50 @@ def read_args(model_path: Path) -> Any:
     return ModelArgs.from_dict(config)
 
 
+def pack_kind(model_path: Path) -> str:
+    """``"oq"`` or ``"exl3"``, decided by the checkpoint's own config.json.
+
+    The published native-MLX packs (``*-oQ*``) describe their per-module
+    mixed-precision layout in an ``omlx_deepseek_v41`` block and store standard
+    MLX quantized tensors; exllamav3 packs store trellis groups instead. The
+    model card is deliberately NOT consulted -- no new ``engine`` value, the
+    same ``dsv41`` card loads either format.
+    """
+    try:
+        with open(model_path / "config.json") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return "exl3"
+    return "oq" if "omlx_deepseek_v41" in config else "exl3"
+
+
+def _build_module(model_path: Path) -> Any:
+    """The builder for this checkpoint: ``oq_build`` or ``exl3_build``.
+
+    Both expose ``build_model``/``build_block``/``build_mtp`` with the same
+    signatures and return the same ``Model`` tree, so everything downstream of
+    the build is format-agnostic.
+    """
+    if pack_kind(model_path) == "oq":
+        from mlx_lm.models.deepseek_v41 import oq_build
+
+        return oq_build
+    from mlx_lm.models.deepseek_v41 import exl3_build
+
+    return exl3_build
+
+
+def _checkpoint(model_path: Path) -> Any:
+    """Open the checkpoint's index reader for this pack format."""
+    if pack_kind(model_path) == "oq":
+        from mlx_lm.models.deepseek_v41.oq_build import OqCheckpoint
+
+        return OqCheckpoint(str(model_path))
+    from mlx_lm.models.exl3.loader import Exl3Checkpoint
+
+    return Exl3Checkpoint(str(model_path))
+
+
 def load_dsv41(
     shard_metadata: ShardMetadata,
     model_card: ModelCard,
@@ -128,9 +172,12 @@ def load_dsv41(
     group: mx.distributed.Group | None,
     model_path: Path | None = None,
 ) -> Generator[ModelLoadingResponse, None, Dsv41Loaded]:
-    """Load the DSv4.1 body, reporting per-layer progress to the supervisor."""
-    from mlx_lm.models.deepseek_v41 import exl3_build
+    """Load the DSv4.1 body, reporting per-layer progress to the supervisor.
 
+    The build path is chosen from the checkpoint itself: an ``*-oQ*`` pack with
+    an ``omlx_deepseek_v41`` config block goes through ``oq_build`` (native MLX
+    tensors, per-module modes), everything else through ``exl3_build``.
+    """
     rank, world = tp_geometry(shard_metadata)
     path = model_path or build_model_path(model_card.model_id)
     args = read_args(path)
@@ -147,13 +194,14 @@ def load_dsv41(
 
     set_wired_limit_for_model(model_card.storage_size)
     started = time.perf_counter()
+    kind = pack_kind(path)
     logger.info(
-        f"[DSV41] loading EXL3 checkpoint {path} "
+        f"[DSV41] loading {kind} checkpoint {path} "
         f"(rank {rank}/{world}, wired limit raised for "
         f"{model_card.storage_size.in_gb:.1f} GB)"
     )
     native_dir = _resolve_engram_dir(path, args, requested)
-    model, report = exl3_build.build_model(
+    model, report = _build_module(path).build_model(
         str(path),
         native_dir=None if native_dir is None else str(native_dir),
         layers=requested,
@@ -178,6 +226,7 @@ def load_dsv41(
 
     load_seconds = time.perf_counter() - started
     notes = [
+        f"pack={kind}",
         f"built={len(built)}/{int(getattr(args, 'n_layers', total))} layers",
         f"rank={rank}/{world}",
         f"mtp_layers_skipped={report.get('n_mtp_layers_skipped')}",
@@ -214,18 +263,15 @@ def build_draft_head(
     greedy decode works without it, so a failed draft build degrades to plain
     decoding rather than failing the load.
     """
-    from mlx_lm.models.deepseek_v41 import exl3_build
-    from mlx_lm.models.exl3.loader import Exl3Checkpoint
-
     if not loaded.full_stack:
         logger.info("[DSV41] layer-subset build: skipping the DSpark draft head")
         return None
     try:
-        ck = Exl3Checkpoint(str(loaded.model_path))
+        ck = _checkpoint(loaded.model_path)
         if not any(k.startswith("mtp.") for k in ck.index):
             logger.info("[DSV41] checkpoint has no mtp.* groups: no draft head")
             return None
-        head = exl3_build.build_mtp(
+        head = _build_module(loaded.model_path).build_mtp(
             ck, loaded.args, rank=loaded.rank, world=loaded.world, group=group
         )
     except Exception as e:  # noqa: BLE001 -- optional acceleration path
@@ -248,8 +294,9 @@ def _resolve_engram_dir(
 ) -> Path | None:
     """Native release dir for the engram tables, when the build has engram layers.
 
-    The EXL3 checkpoint has no engram tables; ``build_block`` reads them
-    row-on-demand from the native release and raises without it.
+    An EXL3 pack carries no engram tables at all; an ``*oQ*`` pack *indexes*
+    them, but they live in two 94 GiB shards, so both builds read rows
+    row-on-demand from the native release and raise without it.
     """
     engram_layers = set(getattr(args, "engram_layer_ids", ()) or ())
     if requested is not None:
