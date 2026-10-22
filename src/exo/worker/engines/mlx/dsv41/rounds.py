@@ -66,6 +66,18 @@ from exo.worker.runner.bootstrap import logger
 #: Monotonic round counter for the per-round memory series (EXO_DSV41_ROUND_MEM=1).
 _ROUND_SEQ = 0
 
+#: Monotonic decode-round counter for EXO_DSV41_DECODE_CLEAR_CACHE.
+_DECODE_ROUND_SEQ = 0
+
+
+def _decode_clear_cache_every() -> int:
+    """Rounds between decode-side ``mx.clear_cache()`` calls (0 = never)."""
+    raw = os.environ.get("EXO_DSV41_DECODE_CLEAR_CACHE", "")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids a circular import)
     from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
     from exo.worker.engines.mlx.dsv41.reasoning_budget import (
@@ -526,6 +538,8 @@ def _one_round(
     # Per-round all_sum wait window (EXO_DSV41_ALLSUM_WAIT=1): opens here so
     # every collective this round takes is host-timed; emit_round closes it.
     # No-op unless the instrument is installed.
+    global _DECODE_ROUND_SEQ
+    _DECODE_ROUND_SEQ += 1
     collective_wait.begin_round()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
 
@@ -807,6 +821,14 @@ def _one_round(
     )
     if wait_line is not None:
         logger.info(wait_line)
+    # Decode-side cache release (EXO_DSV41_DECODE_CLEAR_CACHE=<n>, default off):
+    # free the MLX allocator's cached-but-unused buffers every n rounds. At depth
+    # the engine otherwise carries a multi-GB free pool through the whole turn;
+    # macOS compresses those pages under the wired cap and the decode then pays
+    # decompression bursts every few seconds (docs 8r/8r.1). Off => untouched.
+    _cc_every = _decode_clear_cache_every()
+    if _cc_every and _DECODE_ROUND_SEQ % _cc_every == 0:
+        mx.clear_cache()
     return (
         committed,
         _round_ms,
