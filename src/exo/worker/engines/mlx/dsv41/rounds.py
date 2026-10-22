@@ -28,6 +28,7 @@ documented chunk-shape effect of the body, never through an unverified draft.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
@@ -61,6 +62,9 @@ from exo.worker.engines.mlx.dsv41.no_repeat import (
 from exo.worker.runner.bootstrap import logger
 
 from mlx_lm.profiler import span
+
+#: Monotonic round counter for the per-round memory series (EXO_DSV41_ROUND_MEM=1).
+_ROUND_SEQ = 0
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids a circular import)
     from exo.worker.engines.mlx.dsv41.engine import Dsv41Engine
@@ -772,9 +776,27 @@ def _one_round(
         spec.rollback(cache, snapshot, committed_position, stashes)
     with span("round.draft_append"):
         head.append_ctx(tapcat(taps)[:, : len(committed)], draft_state)
+    _round_ms = (time.perf_counter() - started) * 1e3
+    # Per-ROUND memory series (EXO_DSV41_ROUND_MEM=1): one line per round so round
+    # time can be correlated against allocator state instead of against run-level
+    # averages. A true two-state system shows a step here; a continuous allocator
+    # regime under the wired limit shows drift.
+    if os.environ.get("EXO_DSV41_ROUND_MEM"):
+        global _ROUND_SEQ
+        _ROUND_SEQ += 1
+        try:
+            logger.info(
+                f"[ROUNDMEM] n={_ROUND_SEQ} ms={_round_ms:.1f} "
+                f"active={mx.get_active_memory() / 1e9:.2f} "
+                f"cache={mx.get_cache_memory() / 1e9:.2f} "
+                f"peak={mx.get_peak_memory() / 1e9:.2f} "
+                f"committed={len(committed)} accepted={accepted}"
+            )
+        except Exception:
+            pass
     return (
         committed,
-        (time.perf_counter() - started) * 1e3,
+        _round_ms,
         accepted,
         gamma,
     )
