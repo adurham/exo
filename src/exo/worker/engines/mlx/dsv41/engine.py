@@ -86,7 +86,7 @@ from exo.worker.disaggregated.server import PrefillRequest
 from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
-from exo.worker.engines.mlx.dsv41 import collective_wait
+from exo.worker.engines.mlx.dsv41 import collective_wait, kv_touch
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
@@ -2098,6 +2098,13 @@ class Dsv41Engine(Engine):
         # A turn's instrument round numbering starts at 1 (no-op unless the
         # all_sum wait instrument is installed).
         collective_wait.reset_rounds()
+        # Warm the composite cache before the first round (EXO_DSV41_PREFILL_KV_TOUCH=1):
+        # a deep cold prefill can leave the session's own pages compressed, and the
+        # decode then pays decompression bursts every round (docs 8r/8r.1). Read
+        # every page once here, up front. Read-only, and a no-op when the gate is off.
+        if session is not None and kv_touch.enabled():
+            _touched, _touch_s = kv_touch.touch(session.cache.cache)
+            logger.info(f"[KVTOUCH] arrays={_touched} secs={_touch_s:.2f}")
         # ── DECODE-SCOPED SPAN PROFILING (EXO_PROFILER=spans) ──────────────────
         # The model-side span hook is reset/dumped around PREFILL only
         # (generate.py prefill), so a decode-time regression has no
