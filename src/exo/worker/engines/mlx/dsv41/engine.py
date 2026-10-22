@@ -802,9 +802,9 @@ class Dsv41Engine(Engine):
         # byte-identical when the gate is off (dsv41/collective_wait.py).
         if collective_wait.install():
             logger.info(
-                "[DSV41] all_sum wait timing armed (%s=1); decode rounds now "
-                "host-sync every collective, so round times are instrument-grade",
-                collective_wait.ENV,
+                "[DSV41] all_sum wait timing armed (EXO_DSV41_ALLSUM_WAIT=1); "
+                "decode rounds now host-sync every collective, so round times "
+                "are instrument-grade only"
             )
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
