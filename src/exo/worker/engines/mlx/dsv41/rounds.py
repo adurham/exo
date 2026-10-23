@@ -47,7 +47,7 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.tasks import TaskId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
-from exo.worker.engines.mlx.dsv41 import collective_wait, sync_cadence
+from exo.worker.engines.mlx.dsv41 import collective_wait, opsbuf, sync_cadence
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.engines.mlx.dsv41.no_repeat import (
     NEG_INF,
@@ -545,6 +545,13 @@ def _one_round(
     # cadence is re-read per round, so the levers file can change K between turns
     # on one boot. No-op (and no counter) when the wrapper is not installed.
     sync_cadence.begin_round()
+    # Command-buffer batching threshold (max_ops_per_buffer in the levers file,
+    # default off): re-read per round so one cold session can A/B 200/50/8/1
+    # against the same cache -- cross-boot variance in this state is larger than
+    # some of the gaps being ranked (8r.13).
+    _opsbuf_line = opsbuf.begin_round()
+    if _opsbuf_line is not None:
+        logger.info(_opsbuf_line)
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
 
     if force_think_end is not None:
