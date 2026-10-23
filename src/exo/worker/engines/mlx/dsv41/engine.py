@@ -86,7 +86,7 @@ from exo.worker.disaggregated.server import PrefillRequest
 from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
-from exo.worker.engines.mlx.dsv41 import collective_wait, kv_touch
+from exo.worker.engines.mlx.dsv41 import collective_wait, kv_remat, kv_touch
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
@@ -2105,6 +2105,15 @@ class Dsv41Engine(Engine):
         if session is not None and kv_touch.enabled():
             _touched, _touch_s = kv_touch.touch(session.cache.cache)
             logger.info(f"[KVTOUCH] arrays={_touched} secs={_touch_s:.2f}")
+        # Buffer-state test (EXO_DSV41_KV_REMAT=all|kv|index, default off): copy the
+        # selected cache buffers into fresh allocations before the first round. A
+        # buffer-state effect (view/over-allocation/chunk-concatenation left by the
+        # prefill) does not survive the copy; a distribution-dependent one does.
+        if session is not None and kv_remat.mode():
+            _n, _secs = kv_remat.remat(session.cache.cache)
+            logger.info(
+                f"[KVREMAT] mode={kv_remat.mode()} arrays={_n} secs={_secs:.2f}"
+            )
         # Metal residency re-walk (EXO_DSV41_REWIRE_AT_DECODE=1): MLX's residency
         # sets place an allocation only while it fits the wired budget AT INSERT
         # TIME (mlx/backend/metal/resident.cpp, kNoSet), and nothing re-walks after

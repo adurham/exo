@@ -177,6 +177,7 @@ KV_NEUTRAL: frozenset[str] = frozenset(
         "exo.worker.engines.mlx.dsv41.coord",  # §G4 cross-rank park/restore decisions; int control rows, no KV bytes
         "exo.worker.engines.mlx.dsv41.collective_wait",  # diagnostic: times the host-side wait of each collective (default OFF); wraps a collective, produces no state
         "exo.worker.engines.mlx.dsv41.kv_touch",  # diagnostic: read-only strided read of the cache (default OFF); writes nothing
+        "exo.worker.engines.mlx.dsv41.kv_remat",  # diagnostic: copies cache buffers into fresh allocations at decode start (default OFF); values identical
         "exo.worker.engines.mlx.dsv41.shutdown",  # §G3 signal state + shutdown budget + orchestration; no cache, no KV bytes
         "exo.worker.engines.mlx.dsv41.vision",  # engine-side ViT adapter; image convos forced cold, never parked
         "exo.worker.engines.mlx.dsv41.fingerprint",  # this module: hashes sources, touches no tensors/KV
