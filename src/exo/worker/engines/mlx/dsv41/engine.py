@@ -2110,7 +2110,9 @@ class Dsv41Engine(Engine):
         # buffer-state effect (view/over-allocation/chunk-concatenation left by the
         # prefill) does not survive the copy; a distribution-dependent one does.
         if session is not None and kv_remat.mode():
-            _n, _secs = kv_remat.remat(session.cache.cache)
+            _n, _secs = kv_remat.remat(
+                session.cache.cache, extra=session.draft_state
+            )
             logger.info(
                 f"[KVREMAT] mode={kv_remat.mode()} arrays={_n} secs={_secs:.2f}"
             )

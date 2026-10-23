@@ -39,6 +39,19 @@ def mode() -> str:
     return raw
 
 
+def _holders(obj: Any) -> list[Any]:
+    """The object itself plus one level of nested containers/attributes."""
+    out: list[Any] = []
+    if hasattr(obj, "__dict__"):
+        out.append(obj)
+    for v in (vars(obj).values() if hasattr(obj, "__dict__") else ()):
+        if hasattr(v, "__dict__"):
+            out.append(v)
+        elif isinstance(v, (list, tuple)):
+            out.extend(x for x in v if hasattr(x, "__dict__"))
+    return out
+
+
 def _wanted(name: str, mode_name: str) -> bool:
     if mode_name == "all":
         return True
@@ -64,7 +77,7 @@ def _copy_into(holder: Any, attr: str, mode_name: str) -> tuple[int, int]:
     return (1, int(fresh.nbytes))
 
 
-def remat(cache: Any, mode_name: str | None = None) -> tuple[int, float]:
+def remat(cache: Any, mode_name: str | None = None, extra: Any = None) -> tuple[int, float]:
     """Copy the selected cache buffers into fresh allocations.
 
     Returns ``(arrays_copied, seconds)``. Read-only with respect to VALUES: the
@@ -86,6 +99,15 @@ def remat(cache: Any, mode_name: str | None = None) -> tuple[int, float]:
         if state is not None:
             for attr in ("kv_state", "score_state"):
                 n, b = _copy_into(state, attr, name)
+                copied += n
+                total_bytes += b
+    # The DSpark draft window is per-session state the body cache does not hold:
+    # copy its arrays too (``extra``), since re-materialising only the body was
+    # not enough to move the slow state.
+    if extra is not None:
+        for holder in _holders(extra):
+            for attr in list(vars(holder).keys()):
+                n, b = _copy_into(holder, attr, "all" if name == "all" else name)
                 copied += n
                 total_bytes += b
     engram = getattr(cache, "engram_ids", None)
