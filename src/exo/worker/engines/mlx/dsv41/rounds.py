@@ -47,7 +47,7 @@ from exo.shared.types.memory import Memory
 from exo.shared.types.tasks import TaskId
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
-from exo.worker.engines.mlx.dsv41 import collective_wait
+from exo.worker.engines.mlx.dsv41 import collective_wait, sync_cadence
 from exo.worker.engines.mlx.dsv41.errors import Dsv41UnsupportedFeature
 from exo.worker.engines.mlx.dsv41.no_repeat import (
     NEG_INF,
@@ -541,6 +541,10 @@ def _one_round(
     global _DECODE_ROUND_SEQ
     _DECODE_ROUND_SEQ += 1
     collective_wait.begin_round()
+    # Decode-scoped pipeline-depth bound (DSV41_SYNC_EVERY_N, default off): the
+    # cadence is re-read per round, so the levers file can change K between turns
+    # on one boot. No-op (and no counter) when the wrapper is not installed.
+    sync_cadence.begin_round()
     anchor = mx.array([token], dtype=mx.int32).reshape(1, 1)
 
     if force_think_end is not None:
@@ -823,6 +827,14 @@ def _one_round(
     )
     if wait_line is not None:
         logger.info(wait_line)
+    # Pipeline-depth bound line (DSV41_SYNC_EVERY_N): one line per round, per
+    # rank, carrying the cadence actually used, the collectives issued and how
+    # many were host-synced, so a sweep's rows prove the lever fired at that K.
+    cad_line = sync_cadence.emit_round(
+        sync_cadence.rank_of(engine), _round_ms, len(committed)
+    )
+    if cad_line is not None:
+        logger.info(cad_line)
     # Decode-side cache release (EXO_DSV41_DECODE_CLEAR_CACHE=<n>, default off):
     # free the MLX allocator's cached-but-unused buffers every n rounds. At depth
     # the engine otherwise carries a multi-GB free pool through the whole turn;

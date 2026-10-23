@@ -113,7 +113,7 @@ def test_install_times_the_host_wait_and_emit_round_resets(
     assert line.startswith("[ALLSUMWAIT] n=1 rank=1 calls=2 ")
     assert "sum_ms=20.0 " in line
     assert "max_ms=10.0 " in line
-    assert line.endswith("ms=612.3 committed=3")
+    assert line.endswith("ms=612.3 committed=3 every=1 skipped=0")
     assert cw.stats() == (0, 0.0, 0.0), "emit_round starts a fresh round"
     assert module.all_sum("x", group="g") == "result"
     assert evaluated == ["result", "result"], "the closed window stops the timing"
@@ -131,7 +131,8 @@ def test_the_line_format_is_stable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     line = cw.emit_round(1, 612.3, 3)
     assert line == (
-        "[ALLSUMWAIT] n=1 rank=1 calls=0 sum_ms=0.0 max_ms=0.0 ms=612.3 committed=3"
+        "[ALLSUMWAIT] n=1 rank=1 calls=0 sum_ms=0.0 max_ms=0.0 ms=612.3 "
+        "committed=3 every=1 skipped=0"
     )
     cw.uninstall()
 
@@ -184,3 +185,52 @@ def test_rank_of_survives_a_stand_in_engine() -> None:
     assert cw.rank_of(SimpleNamespace(device_rank=1)) == 1
     assert cw.rank_of(SimpleNamespace(device_rank=None)) == -1
     assert cw.rank_of(SimpleNamespace()) == -1
+
+
+def test_the_cadence_defaults_to_every_collective(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset, junk, 0 and negatives all mean "sync every collective"."""
+    cw.uninstall()
+    monkeypatch.setenv(cw.ENV, "1")
+    for raw in (None, "", "1", "0", "-3", "banana"):
+        if raw is None:
+            monkeypatch.delenv(cw.ENV_EVERY, raising=False)
+        else:
+            monkeypatch.setenv(cw.ENV_EVERY, raw)
+        cw.uninstall()
+        module, _calls = _fake_module("r")
+        assert cw.install(module) is True
+        assert cw.every() == 1
+    cw.uninstall()
+
+
+def test_the_cadence_syncs_the_first_then_every_kth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EVERY=3: collectives 1, 4, 7 are host-synced; the other four are not."""
+    cw.uninstall()
+    monkeypatch.setenv(cw.ENV, "1")
+    monkeypatch.setenv(cw.ENV_EVERY, "3")
+    evaluated: list[Any] = []
+    monkeypatch.setattr(cw.mx, "eval", lambda y: evaluated.append(y))
+    module, calls = _fake_module("result")
+
+    assert cw.install(module) is True
+    assert cw.every() == 3
+    monkeypatch.setattr(cw, "time", _Clock([0.0] * 32))
+    cw.begin_round()
+    for _ in range(7):
+        assert module.all_sum("x", group="g") == "result"
+
+    assert len(calls) == 7, "every collective is still issued"
+    assert len(evaluated) == 3, "only 1st, 4th and 7th are host-synced"
+    assert cw.skipped() == 4
+
+    line = cw.emit_round(0, 100.0, 2)
+    assert line is not None
+    assert line.endswith("every=3 skipped=4")
+    assert cw.skipped() == 0, "a new round starts with no skips"
+
+    cw.uninstall()
+    assert cw.every() == 1

@@ -86,7 +86,7 @@ from exo.worker.disaggregated.server import PrefillRequest
 from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
-from exo.worker.engines.mlx.dsv41 import collective_wait, kv_remat, kv_touch
+from exo.worker.engines.mlx.dsv41 import collective_wait, kv_remat, kv_touch, sync_cadence
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
@@ -802,9 +802,12 @@ class Dsv41Engine(Engine):
         # byte-identical when the gate is off (dsv41/collective_wait.py).
         if collective_wait.install():
             logger.info(
-                "[DSV41] all_sum wait timing armed (EXO_DSV41_ALLSUM_WAIT=1); "
-                "decode rounds now host-sync every collective, so round times "
-                "are instrument-grade only"
+                "[DSV41] all_sum wait timing armed (EXO_DSV41_ALLSUM_WAIT=1, "
+                "every=%d); decode rounds now host-sync %s collective(s), so "
+                "round times are instrument-grade only",
+                collective_wait.every(),
+                "every" if collective_wait.every() == 1
+                else f"every {collective_wait.every()}th",
             )
         self._agreement = RankAgreement(get_coord_group(self.group))
         if self.loaded.head is None and self.speculative:
@@ -2098,6 +2101,7 @@ class Dsv41Engine(Engine):
         # A turn's instrument round numbering starts at 1 (no-op unless the
         # all_sum wait instrument is installed).
         collective_wait.reset_rounds()
+        sync_cadence.reset_rounds()
         # Warm the composite cache before the first round (EXO_DSV41_PREFILL_KV_TOUCH=1):
         # a deep cold prefill can leave the session's own pages compressed, and the
         # decode then pays decompression bursts every round (docs 8r/8r.1). Read
@@ -2116,6 +2120,13 @@ class Dsv41Engine(Engine):
             logger.info(
                 f"[KVREMAT] mode={kv_remat.mode()} arrays={_n} secs={_secs:.2f}"
             )
+        # Pipeline-depth bound (DSV41_SYNC_EVERY_N, default off): host-sync every
+        # Kth TP collective inside a decode round. Installed once per engine; the
+        # cadence itself is re-read at every round start, so the levers file can
+        # change K between turns on one boot (one cold 350K data point otherwise
+        # costs a 28-minute prefill). Prefill windows stay closed => asynchronous.
+        if sync_cadence.enabled() and sync_cadence.install():
+            logger.info(f"[SYNCCAD] installed k={sync_cadence.current_k()}")
         # Metal residency re-walk (EXO_DSV41_REWIRE_AT_DECODE=1): MLX's residency
         # sets place an allocation only while it fits the wired budget AT INSERT
         # TIME (mlx/backend/metal/resident.cpp, kNoSet), and nothing re-walks after

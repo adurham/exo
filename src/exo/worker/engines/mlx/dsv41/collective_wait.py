@@ -8,6 +8,15 @@ per-round wall time cannot localise it. Timing the host-side completion of each
 collective can: the rank that arrives at the barrier early WAITS (large ms), the
 rank that arrives late waits ~0. Per round, per rank.
 
+CADENCE (``EXO_DSV41_ALLSUM_WAIT_EVERY=K``, default 1 = every collective).
+The open question is whether the slow state's cost is paid PER cross-stream
+event wait (one per collective whose result is encoded behind a JACCL CPU-stream
+event inside a Metal command buffer) or once per pipeline-depth excursion. K
+separates the two: a per-wait cost shrinks ~1/K, a depth-bounded cost saturates
+as soon as the queue is bounded at all. K also doubles as the shippable
+candidate -- K>1 buys the recovery back at a fraction of the 1K cost -- so the
+emitted line reports the cadence it actually ran at.
+
 MEASUREMENT WINDOW. Only DECODE rounds are instrumented: ``_one_round`` opens the
 window (``begin_round``) and ``emit_round`` closes it, so the prefill -- where
 collectives are far more frequent -- runs exactly as it does uninstrumented and
@@ -45,15 +54,22 @@ import mlx.core as mx
 #: Env gate. Unset/empty/"0" => nothing is installed (default OFF).
 ENV = "EXO_DSV41_ALLSUM_WAIT"
 
+#: Host-sync cadence: 1 (default) syncs every collective of the round, K>1 syncs
+#: the first and then every Kth, leaving the others asynchronous.
+ENV_EVERY = "EXO_DSV41_ALLSUM_WAIT_EVERY"
+
 #: The model-side collective signature: ``all_sum(x, group=None) -> mx.array``.
 _Collective = Callable[..., mx.array]
 
 _calls = 0
+_skipped = 0
 _sum_ms = 0.0
 _max_ms = 0.0
 _round_seq = 0
 _installed = False
 _active = False
+_every = 1
+_cadence = 0
 _target: Any = None
 _original: _Collective | None = None
 
@@ -61,6 +77,20 @@ _original: _Collective | None = None
 def enabled() -> bool:
     """True when the instrument is switched on by the environment."""
     return os.environ.get(ENV, "") not in ("", "0")
+
+
+def every() -> int:
+    """The host-sync cadence in force (1 = every collective)."""
+    return _every
+
+
+def _parse_every(raw: str | None) -> int:
+    """``EXO_DSV41_ALLSUM_WAIT_EVERY`` -> cadence; junk/0/negative mean 1."""
+    try:
+        k = int((raw or "").strip() or "1")
+    except ValueError:
+        return 1
+    return k if k > 1 else 1
 
 
 def install(module: Any | None = None) -> bool:
@@ -71,11 +101,12 @@ def install(module: Any | None = None) -> bool:
     supply a stand-in for ``mlx_lm.models.deepseek_v41.collective``; production
     callers pass nothing. Idempotent: a second call is a no-op.
     """
-    global _installed, _original, _target
+    global _installed, _original, _target, _every
     if _installed:
         return True
     if not enabled():
         return False
+    _every = _parse_every(os.environ.get(ENV_EVERY))
     resolved: Any = module
     if resolved is None:
         from mlx_lm.models.deepseek_v41 import collective as _coll
@@ -93,13 +124,20 @@ def _timed(original: _Collective) -> _Collective:
     """Wrap one collective so its completion is timed on the host.
 
     Outside an open round this is a pass-through: the prefill's collectives stay
-    asynchronous exactly as they are uninstrumented.
+    asynchronous exactly as they are uninstrumented. Inside a round every
+    ``_every``-th collective is host-synced (the first one always is, so a round
+    that only ever issues one still reports a wait).
     """
 
     def all_sum(x: mx.array, group: Any = None) -> mx.array:
+        global _cadence
         started = time.perf_counter()
         y = original(x, group=group)
         if not _active:
+            return y
+        _cadence += 1
+        if _every > 1 and (_cadence - 1) % _every:
+            _skip()
             return y
         mx.eval(y)
         _add((time.perf_counter() - started) * 1e3)
@@ -116,10 +154,16 @@ def _add(ms: float) -> None:
         _max_ms = ms
 
 
+def _skip() -> None:
+    global _skipped
+    _skipped += 1
+
+
 def reset() -> None:
     """Clear the accumulator (start of a round)."""
-    global _calls, _sum_ms, _max_ms
+    global _calls, _sum_ms, _max_ms, _skipped
     _calls = 0
+    _skipped = 0
     _sum_ms = 0.0
     _max_ms = 0.0
 
@@ -131,17 +175,24 @@ def stats() -> tuple[int, float, float]:
 
 def reset_rounds() -> None:
     """Reset the per-turn round counter and close any stale round window."""
-    global _round_seq, _active
+    global _round_seq, _active, _cadence
     _round_seq = 0
     _active = False
+    _cadence = 0
     reset()
 
 
 def begin_round() -> None:
     """Open a decode round's measurement window (no-op unless installed)."""
-    global _active
+    global _active, _cadence
     reset()
+    _cadence = 0
     _active = _installed
+
+
+def skipped() -> int:
+    """Collectives left asynchronous in the current round (cadence ``> 1``)."""
+    return _skipped
 
 
 def rank_of(engine: Any) -> int:
@@ -162,21 +213,25 @@ def emit_round(rank: int, round_ms: float, committed: int) -> str | None:
     _active = False
     _round_seq += 1
     calls, sum_ms, max_ms = stats()
+    skipped_n = _skipped
     reset()
     return (
         f"[ALLSUMWAIT] n={_round_seq} rank={rank} calls={calls} "
         f"sum_ms={sum_ms:.1f} max_ms={max_ms:.1f} "
-        f"ms={round_ms:.1f} committed={committed}"
+        f"ms={round_ms:.1f} committed={committed} "
+        f"every={_every} skipped={skipped_n}"
     )
 
 
 def uninstall() -> None:
     """Restore the original collective (tests / teardown)."""
-    global _installed, _original, _target
+    global _installed, _original, _target, _every, _cadence
     if _installed and _target is not None and _original is not None:
         _target.all_sum = _original
     _installed = False
     _target = None
     _original = None
+    _every = 1
+    _cadence = 0
     reset()
     reset_rounds()

@@ -590,6 +590,14 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
   # Set to 1 to revert to per-layer fences (slower but maximally stable).
   # Set to 8 to recover c=1 ceiling at the cost of c=2 bistability.
   # Set to 43 only when running gamma=1 (where the chain depth is harmless).
+  # DEAD IN THE DSv4.1 DECODE PATH (verified 2026-10-22): the value is
+  # threaded to the runners, but nothing reads it there. The v41 package has
+  # no per-layer decode fence at all (model.py fenced multi-row PREFILL only,
+  # and moe/attention reach the collective through deepseek_v41.collective),
+  # and deepseek_v4.py's own assignment was never used to gate anything after
+  # OPT-7 was reverted. Setting it to 1 therefore changes nothing -- which is
+  # why the 8r.9 "fence every layer" A/B measured identical numbers. Keep it
+  # exported (v4-era benches still read it), but never take a run on it.
   : "${EXO_DSV4_FENCE_EVERY_N_LAYERS:=4}"
   # Metal command buffer size limit. M4 Max defaults to 50MB, but the
   # DSv4 43-layer B=2 batched prefill forward produces >50MB of intermediate
@@ -2088,10 +2096,13 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV41_IDLE_CLEAR_CACHE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_IDLE_CLEAR_CACHE=$EXO_DSV41_IDLE_CLEAR_CACHE"
   [ -n "${EXO_DSV41_ROUND_MEM:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_ROUND_MEM=$EXO_DSV41_ROUND_MEM"
   [ -n "${EXO_DSV41_ALLSUM_WAIT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_ALLSUM_WAIT=$EXO_DSV41_ALLSUM_WAIT"
+  [ -n "${EXO_DSV41_ALLSUM_WAIT_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_ALLSUM_WAIT_EVERY=$EXO_DSV41_ALLSUM_WAIT_EVERY"
   [ -n "${EXO_DSV41_DECODE_CLEAR_CACHE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_DECODE_CLEAR_CACHE=$EXO_DSV41_DECODE_CLEAR_CACHE"
   [ -n "${EXO_DSV41_PREFILL_KV_TOUCH:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_PREFILL_KV_TOUCH=$EXO_DSV41_PREFILL_KV_TOUCH"
   [ -n "${EXO_DSV41_REWIRE_AT_DECODE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_REWIRE_AT_DECODE=$EXO_DSV41_REWIRE_AT_DECODE"
   [ -n "${EXO_DSV41_KV_REMAT:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_KV_REMAT=$EXO_DSV41_KV_REMAT"
+  [ -n "${DSV41_SYNC_EVERY_N:-}" ] && EXO_ENV="$EXO_ENV DSV41_SYNC_EVERY_N=$DSV41_SYNC_EVERY_N"
+  [ -n "${EXO_DSV41_LEVERS_FILE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV41_LEVERS_FILE=$EXO_DSV41_LEVERS_FILE"
   [ -n "$EXO_DSV4_SECTION_TIME" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SECTION_TIME=$EXO_DSV4_SECTION_TIME"
   [ -n "$EXO_DSV4_SECTION_TIME_LOG_EVERY" ] && EXO_ENV="$EXO_ENV EXO_DSV4_SECTION_TIME_LOG_EVERY=$EXO_DSV4_SECTION_TIME_LOG_EVERY"
   [ -n "$EXO_DSV4_PREFILL_ARGPARTITION" ] && EXO_ENV="$EXO_ENV EXO_DSV4_PREFILL_ARGPARTITION=$EXO_DSV4_PREFILL_ARGPARTITION"
@@ -2168,7 +2179,7 @@ for NODE in "${NODES[@]}"; do
   [ -n "${EXO_DSV4_QA_KV_FUSED:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_QA_KV_FUSED=$EXO_DSV4_QA_KV_FUSED"
   [ -n "${EXO_DSV4_COMPILE_FFN:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_FFN=$EXO_DSV4_COMPILE_FFN"
   [ -n "${EXO_DSV4_COMPILE_LAYER:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_COMPILE_LAYER=$EXO_DSV4_COMPILE_LAYER"
-  [ -n "${EXO_DSV4_FENCE_EVERY_N_LAYERS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_EVERY_N_LAYERS=$EXO_DSV4_FENCE_EVERY_N_LAYERS"
+  [ -n "${EXO_DSV4_FENCE_EVERY_N_LAYERS:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_FENCE_EVERY_N_LAYERS=$EXO_DSV4_FENCE_EVERY_N_LAYERS"  # no reader in the v41 decode path (see the default's note)
   [ -n "${EXO_DSV4_ALLSUM_PROBE:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE=$EXO_DSV4_ALLSUM_PROBE"
   [ -n "${EXO_DSV4_ALLSUM_PROBE_LOG_EVERY:-}" ] && EXO_ENV="$EXO_ENV EXO_DSV4_ALLSUM_PROBE_LOG_EVERY=$EXO_DSV4_ALLSUM_PROBE_LOG_EVERY"
   # Decode fence overlap (2026-07-02): non-blocking per-layer fence
