@@ -606,7 +606,22 @@ if [ "${DSV4_ENABLED}" = "1" ]; then
   # Setting 200MB lets the full B=2 forward fit in one command buffer,
   # eliminating the stalls. Measured: B=2 aggregate 317 t/s (was 144 t/s).
   : "${MLX_MAX_MB_PER_BUFFER:=200}"
-  : "${MLX_MAX_OPS_PER_BUFFER:=200}"
+  # Ops per Metal command buffer. Was 200 (a pre-2026-10 override; the upstream
+  # arch default for an M-series GPU is 40-50). Lowered to 50 on 2026-10-23
+  # because at deep context the 200-op batching is what makes the slow-decode
+  # state expensive: the GPU reaches the CPU-stream collective's wait with more
+  # of the same buffer already queued behind it.
+  #   - 350K cold prefill: 4.66-5.04 tok/s at 200 -> 6.6-6.9 at 50 (+41-48%),
+  #     reproduced both across boots and within one cold session (200 -> 50 ->
+  #     8 -> 1 -> 50 -> 200 = 4.70 / 6.61 / 3.17 / 8.48 / 6.94 / 4.78).
+  #   - 1K: 41.4-42.7 at 50 vs 41.1-41.3 production (parity).
+  #   - 100K within-session guard: 29.46/29.68 at 50 vs 29.39/29.70 at 200.
+  #   - Prefill TTFT unaffected (1658 s at 50 vs 1650-1663 s at 200).
+  # NOT a monotone knob: 8 is worse than 200 (-33% at 350K, -6.5% at 100K), and
+  # 1 is best at 350K (+80%) but halves 1K. Do not "optimise" this value by
+  # interpolating; re-measure within one session if it is ever changed.
+  # See docs/dsv41-1017-vs-sept-ab-2026-10-20.md 8r.12-8r.15.
+  : "${MLX_MAX_OPS_PER_BUFFER:=50}"
   # MTP self-spec gate. DEFAULT FLIPPED TO OFF 2026-07-26 alongside
   # EXO_SPECULATIVE above -- with speculation itself off by default,
   # there is no reason to spend load time/memory attaching heads that
