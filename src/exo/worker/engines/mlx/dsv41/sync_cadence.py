@@ -50,14 +50,24 @@ ENV_FILE = "EXO_DSV41_LEVERS_FILE"
 #: Key this lever reads from the levers file.
 KEY = "sync_every_n"
 
+#: Which side of the collective is drained: "out" (default) or "in".
+KEY_WHAT = "sync_what"
+
+#: Env fallback for the drain side.
+ENV_WHAT = "DSV41_SYNC_WHAT"
+
 _installed = False
 _target: Any = None
 _original: Callable[..., mx.array] | None = None
 _active = False
 _k = 0
+_what = "out"
 _calls = 0
 _synced = 0
+_drained = 0
 _round_seq = 0
+_file_cache: dict | None = None
+_file_cache_round = -1
 
 
 def _env_k() -> int:
@@ -96,6 +106,51 @@ def current_k() -> int:
     return _env_k() if from_file is None else from_file
 
 
+def current_what() -> str:
+    """Which side of the collective the host drains: ``out`` (default) or ``in``.
+
+    ``out`` evaluates the collective's RESULT: the GPU-side wait on the CPU
+    stream is removed for that collective. ``in`` evaluates its INPUT instead:
+    the producer chain is drained, but the consumer still waits on the CPU
+    stream inside its command buffer. The pair separates "the in-buffer wait
+    costs this" from "the host simply not stopping costs this" -- without that
+    control, an ``out``-only recovery is ambiguous.
+    """
+    raw = _file_what()
+    if raw is not None:
+        return raw
+    return _env_what()
+
+
+def _env_what() -> str:
+    return "in" if os.environ.get(ENV_WHAT, "").strip().lower() == "in" else "out"
+
+
+def _file_what() -> str | None:
+    data = _file_data()
+    if data is None or KEY_WHAT not in data:
+        return None
+    val = str(data.get(KEY_WHAT, "")).strip().lower()
+    return val if val in ("in", "out") else None
+
+
+def _file_data() -> dict | None:
+    """The parsed levers file, or None. Read at most once per round."""
+    global _file_cache, _file_cache_round
+    if _file_cache_round == _round_seq and _file_cache is not None:
+        return _file_cache
+    path = os.environ.get(ENV_FILE, "").strip()
+    if not path:
+        return None
+    try:
+        data = json.loads(Path(path).read_text())
+    except Exception:
+        data = None
+    _file_cache = data if isinstance(data, dict) else None
+    _file_cache_round = _round_seq
+    return _file_cache
+
+
 def enabled() -> bool:
     """True when the lever is switched on by the env or the levers file."""
     return current_k() > 0
@@ -108,7 +163,7 @@ def install(module: Any | None = None) -> bool:
     Idempotent. ``module`` exists so a test can supply a stand-in for
     ``mlx_lm.models.deepseek_v41.collective``; production callers pass nothing.
     """
-    global _installed, _target, _original, _k
+    global _installed, _target, _original, _k, _what
     if _installed:
         return True
     k = current_k()
@@ -124,23 +179,28 @@ def install(module: Any | None = None) -> bool:
     _original = original
     _target = resolved
     _k = k
+    _what = current_what()
     _installed = True
     return True
 
 
 def _wrapped(original: Callable[..., mx.array]) -> Callable[..., mx.array]:
-    """Wrap one collective so every Kth call is host-synced inside a round."""
+    """Wrap one collective so every Kth call is host-drained inside a round."""
 
     def all_sum(x: mx.array, group: Any = None) -> mx.array:
-        global _calls, _synced
+        global _calls, _synced, _drained
+        due = False
+        if _active and _k > 0:
+            _calls += 1
+            due = (_calls % _k) == 0
+            if due and _what == "in":
+                # Drain the producers, leave the consumer's wait in place.
+                mx.eval(x)
+                _drained += 1
         y = original(x, group=group)
-        if not _active or _k <= 0:
-            return y
-        _calls += 1
-        if _calls % _k:
-            return y
-        mx.eval(y)
-        _synced += 1
+        if due and _what != "in":
+            mx.eval(y)
+            _synced += 1
         return y
 
     return all_sum
@@ -148,19 +208,23 @@ def _wrapped(original: Callable[..., mx.array]) -> Callable[..., mx.array]:
 
 def reset_rounds() -> None:
     """Reset the round counter and close any stale round window."""
-    global _round_seq, _active, _calls, _synced
+    global _round_seq, _active, _calls, _synced, _drained, _file_cache_round
     _round_seq = 0
     _active = False
     _calls = 0
     _synced = 0
+    _drained = 0
+    _file_cache_round = -1
 
 
 def begin_round() -> None:
     """Open a decode round: re-read the cadence and count collectives."""
-    global _active, _k, _calls, _synced
+    global _active, _k, _what, _calls, _synced, _drained
     _calls = 0
     _synced = 0
+    _drained = 0
     _k = current_k() if _installed else 0
+    _what = current_what() if _installed else "out"
     _active = _installed and _k > 0
 
 
@@ -172,8 +236,8 @@ def emit_round(rank: int, round_ms: float, committed: int) -> str | None:
     _active = False
     _round_seq += 1
     return (
-        f"[SYNCCAD] n={_round_seq} rank={rank} k={_k} calls={_calls} "
-        f"synced={_synced} ms={round_ms:.1f} committed={committed}"
+        f"[SYNCCAD] n={_round_seq} rank={rank} k={_k} what={_what} calls={_calls} "
+        f"synced={_synced} drained={_drained} ms={round_ms:.1f} committed={committed}"
     )
 
 

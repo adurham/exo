@@ -139,3 +139,36 @@ def test_uninstall_restores_the_original(monkeypatch: pytest.MonkeyPatch) -> Non
     sync_cadence.uninstall()
     assert mod.all_sum is original
     assert sync_cadence.emit_round(0, 1.0, 1) is None
+
+
+def test_sync_what_in_drains_the_input_and_leaves_the_result_alone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """The control that separates the in-buffer wait from host build-ahead.
+
+    ``sync_what=in`` must evaluate the collective's INPUT (the producer chain)
+    and must NOT evaluate the collective's result -- that is the whole point:
+    the GPU-side wait on the CPU stream stays in place, so a recovery under
+    this setting cannot be attributed to removing that wait.
+    """
+    monkeypatch.setenv(sync_cadence.ENV, "1")
+    path = tmp_path / "levers.json"
+    path.write_text(json.dumps({"sync_every_n": 1, "sync_what": "in"}))
+    monkeypatch.setenv(sync_cadence.ENV_FILE, str(path))
+
+    evaluated: list[Any] = []
+    monkeypatch.setattr(mx, "eval", lambda *a, **k: evaluated.append(a[0]))
+    mod, calls = _fake_module()
+    assert sync_cadence.install(mod) is True
+    assert sync_cadence.current_what() == "in"
+
+    a, b = mx.array([1.0]), mx.array([2.0])
+    sync_cadence.begin_round()
+    mod.all_sum(a)
+    mod.all_sum(b)
+    assert len(calls) == 2, "the collective is still issued every time"
+    assert len(evaluated) == 2
+    assert evaluated[0] is a and evaluated[1] is b, "the INPUT is what was drained"
+    line = sync_cadence.emit_round(0, 590.0, 1)
+    assert line is not None
+    assert "what=in" in line and "drained=2" in line and "synced=0" in line
