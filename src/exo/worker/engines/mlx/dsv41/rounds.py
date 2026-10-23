@@ -805,6 +805,8 @@ def _one_round(
         try:
             logger.info(
                 f"[ROUNDMEM] n={_ROUND_SEQ} ms={_round_ms:.1f} "
+                f"off={getattr(cache, 'offset', -1)} "
+                f"cap={getattr(cache, 'capacity', -1)} "
                 f"active={mx.get_active_memory() / 1e9:.2f} "
                 f"cache={mx.get_cache_memory() / 1e9:.2f} "
                 f"peak={mx.get_peak_memory() / 1e9:.2f} "
