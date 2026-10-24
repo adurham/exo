@@ -86,7 +86,13 @@ from exo.worker.disaggregated.server import PrefillRequest
 from exo.worker.engines.base import Engine
 from exo.worker.engines.mlx.cache import encode_prompt
 from exo.worker.engines.mlx.constants import MAX_TOKENS
-from exo.worker.engines.mlx.dsv41 import collective_wait, kv_remat, kv_touch, sync_cadence
+from exo.worker.engines.mlx.dsv41 import (
+    collective_wait,
+    kv_remat,
+    kv_touch,
+    opsbuf,
+    sync_cadence,
+)
 from exo.worker.engines.mlx.dsv41.agreement import RankAgreement
 from exo.worker.engines.mlx.dsv41.coord import ParkCoordinator
 from exo.worker.engines.mlx.dsv41.degeneration import (
@@ -1492,6 +1498,15 @@ class Dsv41Engine(Engine):
             self._conversation_key(params),
             reuse=embeddings is None,
         )
+        # Cold-turn threshold policy (EXO_DSV41_OPS_POLICY, default off): a long
+        # cold prefill is what creates the slow decode state, so that -- not
+        # context length -- is the key. No-op unless enabled.
+        _ops_line = opsbuf.apply_for_turn(
+            cached_tokens=int(getattr(session, "offset", 0) or 0),
+            prompt_len=prompt_len,
+        )
+        if _ops_line is not None:
+            logger.info(_ops_line)
         if self._active is not None:
             self._active.prefill_total = prompt_len
         try:

@@ -93,3 +93,49 @@ def test_missing_binding_degrades_to_a_warning(
     line = opsbuf.begin_round()
     assert line is not None and "no set_max_ops_per_buffer" in line
     assert opsbuf.applied() is None
+
+
+def test_policy_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(opsbuf, "_setter", lambda: calls.append)
+    assert opsbuf.apply_for_turn(cached_tokens=0, prompt_len=400_000) is None
+    assert calls == []
+
+
+def test_policy_keys_on_cold_and_deep_not_on_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cold+deep -> T_COLD; a deep DELTA-grown turn must stay at T_WARM."""
+    calls: list[int] = []
+    monkeypatch.setattr(opsbuf, "_setter", lambda: calls.append)
+    monkeypatch.setenv(opsbuf.ENV_POLICY, "1")
+    monkeypatch.delenv(opsbuf.ENV_FILE, raising=False)
+
+    # cold + deep
+    line = opsbuf.apply_for_turn(cached_tokens=0, prompt_len=400_000)
+    assert line is not None and "max_ops_per_buffer=1" in line
+    assert calls == [1]
+
+    # deep but grown by deltas: NOT cold -> warm value
+    line = opsbuf.apply_for_turn(cached_tokens=350_000, prompt_len=360_000)
+    assert line is not None and "max_ops_per_buffer=50" in line
+    assert calls == [1, 50]
+
+    # short cold turn: warm value, already in force -> no call, no line
+    assert opsbuf.apply_for_turn(cached_tokens=0, prompt_len=1_000) is None
+    assert calls == [1, 50]
+
+    # unchanged value -> no call, no line
+    assert opsbuf.apply_for_turn(cached_tokens=0, prompt_len=1_000) is None
+    assert calls == [1, 50]
+
+
+def test_the_levers_file_still_wins_over_the_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    calls: list[int] = []
+    monkeypatch.setattr(opsbuf, "_setter", lambda: calls.append)
+    monkeypatch.setenv(opsbuf.ENV_POLICY, "1")
+    monkeypatch.setenv(opsbuf.ENV_FILE, _levers(tmp_path, {"max_ops_per_buffer": 8}))
+    assert opsbuf.apply_for_turn(cached_tokens=0, prompt_len=400_000) is None
+    assert calls == [], "a diagnostic override owns the value"

@@ -105,3 +105,63 @@ def reset_rounds() -> None:
     global _round_seq, _cache_round
     _round_seq = 0
     _cache_round = -1
+
+
+# ---------------------------------------------------------------------------
+# Cold-turn policy (Fable's 8r.18 proposal).
+#
+# The lever is regime-dependent in opposite directions: T=1 is worth +80% on a
+# cold deep turn and costs ~50% at 1K. Context length is the WRONG key -- a
+# delta-grown 350K session is fast and would eat the 1K-style penalty -- while
+# the slow state is created by a long cold prefill. So the key is "this turn had
+# to prefill from scratch AND the prompt is deep":
+#
+#     cold (nothing cached) AND prompt_len >= EXO_DSV41_OPS_COLD_MIN -> T_COLD
+#     otherwise                                                     -> T_WARM
+#
+# Default OFF (EXO_DSV41_OPS_POLICY=1 enables): the mechanism is not understood
+# well enough to change default behaviour without a review, and a per-session
+# setting is only sound while a decode step is single-tenant. The levers file
+# still wins over the policy so a diagnostic run can force any value.
+ENV_POLICY = "EXO_DSV41_OPS_POLICY"
+ENV_COLD_MIN = "EXO_DSV41_OPS_COLD_MIN"
+ENV_T_COLD = "EXO_DSV41_OPS_T_COLD"
+ENV_T_WARM = "EXO_DSV41_OPS_T_WARM"
+
+
+def policy_enabled() -> bool:
+    return os.environ.get(ENV_POLICY, "0").strip() not in ("", "0")
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
+
+
+def apply_for_turn(cached_tokens: int, prompt_len: int) -> str | None:
+    """Pick the threshold for this request; returns a log line when it changes.
+
+    No-op unless the policy is enabled and the levers file is not overriding.
+    """
+    global _applied
+    if not policy_enabled():
+        return None
+    data = _file_data()
+    if data is not None and KEY in data:
+        return None  # a diagnostic run owns the value
+    cold_min = _int_env(ENV_COLD_MIN, 200_000)
+    target = _int_env(ENV_T_COLD, 1) if (cached_tokens <= 0 and prompt_len >= cold_min) else _int_env(ENV_T_WARM, 50)
+    setter = _setter()
+    if setter is None:
+        return "[OPSBUF] policy requested but this mlx has no set_max_ops_per_buffer"
+    if target == _applied:
+        return None
+    setter(target)
+    _applied = target
+    return (
+        f"[OPSBUF] policy cached={cached_tokens} prompt={prompt_len} "
+        f"cold_min={cold_min} -> max_ops_per_buffer={target}"
+    )
