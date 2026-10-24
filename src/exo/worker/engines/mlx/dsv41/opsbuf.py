@@ -141,7 +141,17 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def apply_for_turn(cached_tokens: int, prompt_len: int) -> str | None:
+#: Conversations whose cache was created cold at depth. The slow state is a
+#: property of the SESSION (it persists for its life), so once a conversation has
+#: been cold-filled at depth it keeps the cold threshold for every later turn --
+#: keying only on "this turn was cold" would hand the resends straight back to the
+#: slow state.
+_cold_deep: set[str] = set()
+
+
+def apply_for_turn(
+    cached_tokens: int, prompt_len: int, key: str | None = None
+) -> str | None:
     """Pick the threshold for this request; returns a log line when it changes.
 
     No-op unless the policy is enabled and the levers file is not overriding.
@@ -153,7 +163,11 @@ def apply_for_turn(cached_tokens: int, prompt_len: int) -> str | None:
     if data is not None and KEY in data:
         return None  # a diagnostic run owns the value
     cold_min = _int_env(ENV_COLD_MIN, 200_000)
-    target = _int_env(ENV_T_COLD, 1) if (cached_tokens <= 0 and prompt_len >= cold_min) else _int_env(ENV_T_WARM, 50)
+    if cached_tokens <= 0 and prompt_len >= cold_min and key is not None:
+        _cold_deep.add(key)
+    sticky = key is not None and key in _cold_deep
+    cold_now = cached_tokens <= 0 and prompt_len >= cold_min
+    target = _int_env(ENV_T_COLD, 1) if (cold_now or sticky) else _int_env(ENV_T_WARM, 50)
     setter = _setter()
     if setter is None:
         return "[OPSBUF] policy requested but this mlx has no set_max_ops_per_buffer"
@@ -163,5 +177,6 @@ def apply_for_turn(cached_tokens: int, prompt_len: int) -> str | None:
     _applied = target
     return (
         f"[OPSBUF] policy cached={cached_tokens} prompt={prompt_len} "
-        f"cold_min={cold_min} -> max_ops_per_buffer={target}"
+        f"cold_min={cold_min} cold_deep={'yes' if sticky else 'no'} "
+        f"-> max_ops_per_buffer={target}"
     )

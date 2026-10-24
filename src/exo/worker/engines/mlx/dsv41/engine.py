@@ -1504,6 +1504,7 @@ class Dsv41Engine(Engine):
         _ops_line = opsbuf.apply_for_turn(
             cached_tokens=int(getattr(session, "offset", 0) or 0),
             prompt_len=prompt_len,
+            key=self._conversation_key(params),
         )
         if _ops_line is not None:
             logger.info(_ops_line)

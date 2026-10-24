@@ -139,3 +139,23 @@ def test_the_levers_file_still_wins_over_the_policy(
     monkeypatch.setenv(opsbuf.ENV_FILE, _levers(tmp_path, {"max_ops_per_buffer": 8}))
     assert opsbuf.apply_for_turn(cached_tokens=0, prompt_len=400_000) is None
     assert calls == [], "a diagnostic override owns the value"
+
+
+def test_a_cold_deep_conversation_stays_on_the_cold_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The slow state is a session property: resends must not fall back to T_WARM."""
+    calls: list[int] = []
+    monkeypatch.setattr(opsbuf, "_setter", lambda: calls.append)
+    monkeypatch.setenv(opsbuf.ENV_POLICY, "1")
+    monkeypatch.delenv(opsbuf.ENV_FILE, raising=False)
+
+    assert opsbuf.apply_for_turn(0, 400_000, key="conv-a") is not None
+    assert calls == [1]
+    # same conversation, now cached: still cold-deep -> no call, still T=1
+    assert opsbuf.apply_for_turn(350_000, 360_000, key="conv-a") is None
+    assert calls == [1]
+    # a different, warm conversation goes back to the warm threshold
+    line = opsbuf.apply_for_turn(5_000, 6_000, key="conv-b")
+    assert line is not None and "max_ops_per_buffer=50" in line
+    assert calls == [1, 50]
