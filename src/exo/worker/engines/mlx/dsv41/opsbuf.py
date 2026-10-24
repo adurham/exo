@@ -141,20 +141,26 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-#: Conversations whose cache was created cold at depth. The slow state is a
-#: property of the SESSION (it persists for its life), so once a conversation has
-#: been cold-filled at depth it keeps the cold threshold for every later turn --
-#: keying only on "this turn was cold" would hand the resends straight back to the
-#: slow state.
-_cold_deep: set[str] = set()
+#: A conversation whose cache was created by a long cold prefill stays in the
+#: slow state for its life, so the decision is made once, at the cold request,
+#: and remembered on the engine's Conversation object (the engine owns that
+#: lifetime). Keying on a client id is not possible here: the harness sends no
+#: correlation_id, so every request would look like a new conversation and every
+#: resend would fall back to the warm threshold.
+def cold_min() -> int:
+    return _int_env(ENV_COLD_MIN, 200_000)
 
 
-def apply_for_turn(
-    cached_tokens: int, prompt_len: int, key: str | None = None
-) -> str | None:
+def is_cold_deep(cached_tokens: int, prompt_len: int) -> bool:
+    """True when THIS request is the cold, deep one that starts the slow state."""
+    return cached_tokens <= 0 and prompt_len >= cold_min()
+
+
+def apply_for_turn(cold_deep: bool) -> str | None:
     """Pick the threshold for this request; returns a log line when it changes.
 
-    No-op unless the policy is enabled and the levers file is not overriding.
+    ``cold_deep`` is the caller's session flag (see is_cold_deep). No-op unless
+    the policy is enabled and the levers file is not overriding it.
     """
     global _applied
     if not policy_enabled():
@@ -162,12 +168,7 @@ def apply_for_turn(
     data = _file_data()
     if data is not None and KEY in data:
         return None  # a diagnostic run owns the value
-    cold_min = _int_env(ENV_COLD_MIN, 200_000)
-    if cached_tokens <= 0 and prompt_len >= cold_min and key is not None:
-        _cold_deep.add(key)
-    sticky = key is not None and key in _cold_deep
-    cold_now = cached_tokens <= 0 and prompt_len >= cold_min
-    target = _int_env(ENV_T_COLD, 1) if (cold_now or sticky) else _int_env(ENV_T_WARM, 50)
+    target = _int_env(ENV_T_COLD, 1) if cold_deep else _int_env(ENV_T_WARM, 50)
     setter = _setter()
     if setter is None:
         return "[OPSBUF] policy requested but this mlx has no set_max_ops_per_buffer"
@@ -176,7 +177,6 @@ def apply_for_turn(
     setter(target)
     _applied = target
     return (
-        f"[OPSBUF] policy cached={cached_tokens} prompt={prompt_len} "
-        f"cold_min={cold_min} cold_deep={'yes' if sticky else 'no'} "
-        f"-> max_ops_per_buffer={target}"
+        f"[OPSBUF] policy cold_deep={'yes' if cold_deep else 'no'} "
+        f"cold_min={cold_min()} -> max_ops_per_buffer={target}"
     )

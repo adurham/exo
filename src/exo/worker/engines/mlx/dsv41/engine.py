@@ -1501,10 +1501,16 @@ class Dsv41Engine(Engine):
         # Cold-turn threshold policy (EXO_DSV41_OPS_POLICY, default off): a long
         # cold prefill is what creates the slow decode state, so that -- not
         # context length -- is the key. No-op unless enabled.
+        _ops_cached = int(getattr(session, "offset", 0) or 0)
+        if opsbuf.is_cold_deep(_ops_cached, prompt_len):
+            # Remember it on the conversation, which the engine keeps for the
+            # session's life: the slow state does not go away on the next turn.
+            try:
+                session._ops_cold_deep = True  # pyright: ignore[reportAttributeAccessIssue]
+            except Exception:
+                pass
         _ops_line = opsbuf.apply_for_turn(
-            cached_tokens=int(getattr(session, "offset", 0) or 0),
-            prompt_len=prompt_len,
-            key=self._conversation_key(params),
+            bool(getattr(session, "_ops_cold_deep", False))
         )
         if _ops_line is not None:
             logger.info(_ops_line)
