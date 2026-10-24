@@ -1502,16 +1502,16 @@ class Dsv41Engine(Engine):
         # cold prefill is what creates the slow decode state, so that -- not
         # context length -- is the key. No-op unless enabled.
         _ops_cached = int(getattr(session, "offset", 0) or 0)
-        if opsbuf.is_cold_deep(_ops_cached, prompt_len):
-            # Remember it on the conversation, which the engine keeps for the
-            # session's life: the slow state does not go away on the next turn.
+        _ops_cold_now = opsbuf.is_cold_deep(_ops_cached, prompt_len)
+        # The flag describes PREVIOUS turns: the cold turn itself runs warm (it
+        # is faster that way), and every later turn of the conversation runs cold.
+        _ops_sticky = bool(getattr(session, "_ops_cold_deep", False))
+        if _ops_cold_now:
             try:
                 session._ops_cold_deep = True  # pyright: ignore[reportAttributeAccessIssue]
             except Exception:
                 pass
-        _ops_line = opsbuf.apply_for_turn(
-            bool(getattr(session, "_ops_cold_deep", False))
-        )
+        _ops_line = opsbuf.apply_for_turn(_ops_sticky, _ops_cold_now)
         if _ops_line is not None:
             logger.info(_ops_line)
         if self._active is not None:

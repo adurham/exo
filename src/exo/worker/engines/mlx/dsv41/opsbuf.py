@@ -156,11 +156,19 @@ def is_cold_deep(cached_tokens: int, prompt_len: int) -> bool:
     return cached_tokens <= 0 and prompt_len >= cold_min()
 
 
-def apply_for_turn(cold_deep: bool) -> str | None:
+def apply_for_turn(sticky: bool, cold_now: bool = False) -> str | None:
     """Pick the threshold for this request; returns a log line when it changes.
 
-    ``cold_deep`` is the caller's session flag (see is_cold_deep). No-op unless
-    the policy is enabled and the levers file is not overriding it.
+    The two regimes want opposite settings, measured in 8r.20 on one cold session:
+
+      * the COLD turn itself (28-minute prefill, first decode) is FASTER at
+        T_WARM: 4.7-5.0 tok/s at T=50 vs 3.3 at T=1;
+      * every LATER turn of that same deep conversation is much faster at
+        T_COLD: 8.5-11.2 tok/s vs 6.6-7.1 at T=50 (three independent sessions).
+
+    So the cold turn runs warm and switches the conversation to cold for the
+    rest of its life -- not the other way round. No-op unless the policy is
+    enabled and the levers file is not overriding it.
     """
     global _applied
     if not policy_enabled():
@@ -168,7 +176,8 @@ def apply_for_turn(cold_deep: bool) -> str | None:
     data = _file_data()
     if data is not None and KEY in data:
         return None  # a diagnostic run owns the value
-    target = _int_env(ENV_T_COLD, 1) if cold_deep else _int_env(ENV_T_WARM, 50)
+    use_cold = bool(sticky) and not cold_now
+    target = _int_env(ENV_T_COLD, 1) if use_cold else _int_env(ENV_T_WARM, 50)
     setter = _setter()
     if setter is None:
         return "[OPSBUF] policy requested but this mlx has no set_max_ops_per_buffer"
@@ -177,6 +186,7 @@ def apply_for_turn(cold_deep: bool) -> str | None:
     setter(target)
     _applied = target
     return (
-        f"[OPSBUF] policy cold_deep={'yes' if cold_deep else 'no'} "
-        f"cold_min={cold_min()} -> max_ops_per_buffer={target}"
+        f"[OPSBUF] policy cold_now={'yes' if cold_now else 'no'} "
+        f"sticky={'yes' if sticky else 'no'} cold_min={cold_min()} "
+        f"-> max_ops_per_buffer={target}"
     )

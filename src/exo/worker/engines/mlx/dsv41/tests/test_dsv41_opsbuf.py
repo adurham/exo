@@ -102,27 +102,36 @@ def test_policy_is_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == []
 
 
-def test_policy_keys_on_cold_and_deep_not_on_length(
+def test_policy_runs_the_cold_turn_warm_and_later_turns_cold(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The session flag, not context length, selects the cold threshold."""
+    """8r.20: cold turn 4.7-5.0 at T=50 vs 3.3 at T=1; later turns 8.5-11.2 at T=1."""
     calls: list[int] = []
     monkeypatch.setattr(opsbuf, "_setter", lambda: calls.append)
     monkeypatch.setenv(opsbuf.ENV_POLICY, "1")
     monkeypatch.delenv(opsbuf.ENV_FILE, raising=False)
 
     assert opsbuf.is_cold_deep(0, 400_000) is True
-    assert opsbuf.is_cold_deep(350_000, 360_000) is False  # grown by deltas
-    assert opsbuf.is_cold_deep(0, 1_000) is False          # short
+    assert opsbuf.is_cold_deep(350_000, 360_000) is False
+    assert opsbuf.is_cold_deep(0, 1_000) is False
 
-    line = opsbuf.apply_for_turn(True)
-    assert line is not None and "max_ops_per_buffer=1" in line
-    assert calls == [1]
-    line = opsbuf.apply_for_turn(False)
+    # the cold turn itself: warm threshold
+    line = opsbuf.apply_for_turn(sticky=False, cold_now=True)
     assert line is not None and "max_ops_per_buffer=50" in line
-    assert calls == [1, 50]
-    assert opsbuf.apply_for_turn(False) is None
-    assert calls == [1, 50]
+    assert calls == [50]
+
+    # a later turn of that conversation: cold threshold
+    line = opsbuf.apply_for_turn(sticky=True, cold_now=False)
+    assert line is not None and "max_ops_per_buffer=1" in line
+    assert calls == [50, 1]
+
+    # and it stays there
+    assert opsbuf.apply_for_turn(sticky=True, cold_now=False) is None
+    assert calls == [50, 1]
+
+    # an unrelated short conversation goes back to warm
+    line = opsbuf.apply_for_turn(sticky=False, cold_now=False)
+    assert line is not None and calls == [50, 1, 50]
 
 
 def test_the_levers_file_still_wins_over_the_policy(
